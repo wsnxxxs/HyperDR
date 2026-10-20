@@ -1,8 +1,6 @@
 #include "hyperdr/image/frame.hpp"
 
 #include "hyperdr/foundation/file_io.hpp"
-#include "hyperdr/foundation/parallel.hpp"
-#include "hyperdr/image/transfer.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -170,15 +168,6 @@ std::uint64_t even_pixels(float value, double reference) {
 std::uint32_t checked_dimension(std::uint64_t value) {
   if (value > std::numeric_limits<std::uint32_t>::max()) reject("canvas is too large");
   return static_cast<std::uint32_t>(value);
-}
-
-// Share of a pixel centred at `t` covered by [low, high) after a Gaussian blur
-// with standard deviation `sigma`. Separable, so a blurred rectangle's
-// coverage is the product of one call per axis.
-float blurred_coverage(double t, double low, double high, double sigma) {
-  if (sigma <= 0.0) return t >= low && t < high ? 1.0F : 0.0F;
-  const double scale = 1.0 / (sigma * std::sqrt(2.0));
-  return static_cast<float>(0.5 * (std::erf((t - low) * scale) - std::erf((t - high) * scale)));
 }
 
 }  // namespace
@@ -383,91 +372,4 @@ std::string frame_layout_json(const FrameLayout& layout) {
   return writer.end_object().take();
 }
 
-FloatImage frame_image(const FloatImage& photo, const FrameSpec& spec,
-                       const FrameLayout& layout, const FrameOverlay* overlay) {
-  photo.require_consistent("framed photo");
-  if (photo.channels != 3 || photo.width != layout.photo.width || photo.height != layout.photo.height)
-    reject("layout was computed for another photo size");
-  if (layout.photo.x + static_cast<std::uint64_t>(layout.photo.width) > layout.width ||
-      layout.photo.y + static_cast<std::uint64_t>(layout.photo.height) > layout.height)
-    reject("photo lies outside the canvas");
-  const FrameRect band = layout.caption;
-  const bool overlaid = overlay != nullptr && !overlay->rgba.empty();
-  if (overlaid) {
-    if (overlay->width != band.width || overlay->height != band.height) {
-      reject("overlay is " + std::to_string(overlay->width) + "x" + std::to_string(overlay->height) +
-             " but the caption band is " + std::to_string(band.width) + "x" + std::to_string(band.height));
-    }
-    if (overlay->rgba.size() != static_cast<std::size_t>(overlay->width) * overlay->height * 4)
-      reject("overlay pixel buffer does not match its size");
-  }
-
-  const std::array<float, 3> paper{srgb_eotf(spec.background[0]), srgb_eotf(spec.background[1]),
-                                   srgb_eotf(spec.background[2])};
-  const bool shadowed = spec.shadow_opacity > 0.0F;
-  std::vector<float> shadow_x, shadow_y;
-  if (shadowed) {
-    const double sigma = static_cast<double>(spec.shadow_blur) * layout.reference_edge;
-    const double offset = static_cast<double>(spec.shadow_offset) * layout.reference_edge;
-    const double x0 = layout.photo.x, x1 = x0 + layout.photo.width;
-    const double y0 = layout.photo.y + offset, y1 = y0 + layout.photo.height;
-    shadow_x.resize(layout.width);
-    shadow_y.resize(layout.height);
-    for (std::uint32_t x = 0; x < layout.width; ++x) shadow_x[x] = blurred_coverage(x + 0.5, x0, x1, sigma);
-    for (std::uint32_t y = 0; y < layout.height; ++y) shadow_y[y] = blurred_coverage(y + 0.5, y0, y1, sigma);
-  }
-
-  FloatImage canvas(layout.width, layout.height, 3);
-  parallel_for_rows(layout.height, [&](std::uint32_t y) {
-    float* row = canvas.pixels.data() + static_cast<std::size_t>(y) * layout.width * 3;
-    const bool in_band = y >= band.y && y - band.y < band.height;
-    const float* ink = overlaid && in_band
-        ? overlay->rgba.data() + static_cast<std::size_t>(y - band.y) * overlay->width * 4 : nullptr;
-    const auto mat = [&](std::uint32_t from, std::uint32_t to) {
-      for (std::uint32_t x = from; x < to; ++x) {
-        float* pixel = row + static_cast<std::size_t>(x) * 3;
-        // Darkening is multiplicative in light; a fully clear pixel keeps the
-        // exact paper value rather than a round trip through the transfer.
-        const float keep = shadowed ? 1.0F - spec.shadow_opacity * shadow_x[x] * shadow_y[y] : 1.0F;
-        for (int c = 0; c < 3; ++c) pixel[c] = paper[c] * keep;
-        if (ink == nullptr) continue;
-        const float* source = ink + static_cast<std::size_t>(x) * 4;
-        const float alpha = std::clamp(source[3], 0.0F, 1.0F);
-        if (!(alpha > 0.0F)) continue;
-        // Core Graphics composites text in the encoded space; so does this.
-        for (int c = 0; c < 3; ++c) {
-          const float below = keep == 1.0F ? spec.background[c] : srgb_oetf(pixel[c]);
-          const float colour = std::clamp(source[c], 0.0F, 1.0F);
-          pixel[c] = srgb_eotf(alpha * colour + (1.0F - alpha) * below);
-        }
-      }
-    };
-    const bool photo_row = y >= layout.photo.y && y - layout.photo.y < layout.photo.height;
-    if (!photo_row) {
-      mat(0, layout.width);
-      return;
-    }
-    mat(0, layout.photo.x);
-    const float* source = photo.pixels.data() +
-        static_cast<std::size_t>(y - layout.photo.y) * photo.width * 3;
-    std::memcpy(row + static_cast<std::size_t>(layout.photo.x) * 3, source,
-                static_cast<std::size_t>(photo.width) * 3 * sizeof(float));
-    mat(layout.photo.x + layout.photo.width, layout.width);
-  });
-  return canvas;
-}
-
-BytePlane frame_mask(std::span<const std::uint8_t> mask,
-                                     const FrameLayout& layout, std::uint8_t frame_value) {
-  if (mask.empty()) return {};
-  if (mask.size() != static_cast<std::size_t>(layout.photo.width) * layout.photo.height)
-    reject("mask does not match the photo size");
-  BytePlane framed(static_cast<std::size_t>(layout.width) * layout.height, frame_value);
-  for (std::uint32_t y = 0; y < layout.photo.height; ++y) {
-    std::memcpy(framed.data() + static_cast<std::size_t>(layout.photo.y + y) * layout.width + layout.photo.x,
-                mask.data() + static_cast<std::size_t>(y) * layout.photo.width, layout.photo.width);
-  }
-  return framed;
-}
-
-}  // namespace hyperdr
+} // namespace hyperdr

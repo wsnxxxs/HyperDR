@@ -41,7 +41,6 @@ NOTICE_NAMES = {
     "liblzma": "liblzma",
     "libpng": "libpng",
     "libyuv": "libyuv",
-    "ncnn": "ncnn",
     "tiff": "libtiff",
     "zlib": "zlib",
 }
@@ -146,7 +145,7 @@ def main():
     for pattern in (r"\bx265\b", r"\bx264\b", r"\b(?:postproc|avfilter)\b"):
         if re.search(pattern, linked, re.I):
             failures.append(f"forbidden GPL codec in CMake link graph: {pattern}")
-    binaries = [args.build / "HyperDR", args.build / "libhyperdr.dylib"]
+    binaries = [args.build / "libhyperdr.dylib"]
     for binary in binaries:
         deps = subprocess.check_output(["otool", "-L", str(binary)], text=True)
         if re.search(r"libraw", deps, re.I):

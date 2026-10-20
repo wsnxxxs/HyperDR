@@ -43,17 +43,8 @@ def native(build_dir: Path, config: str) -> None:
     run("cmake", "--build", str(build_dir), "--config", config, "--parallel")
     run("ctest", "--test-dir", str(build_dir), "-C", config,
         "--output-on-failure", "--no-tests=error")
-    # CMake's module layout, plus the older root output layout in local builds.
-    name = "HyperDR.exe" if os.name == "nt" else "HyperDR"
-    candidates = [build_dir / folder / name for folder in (
-        f"modules/app/{config}", "modules/app", config, "",
-    )]
-    executable = next((path for path in candidates if path.is_file()), None)
-    if executable is None:
-        raise RuntimeError(f"No {name} in {build_dir} for {config}")
-    env = dict(os.environ, HYPERDR_EXECUTABLE=str(executable))
+    env = dict(os.environ, HYPERDR_LIBRARY=str(build_dir / "libhyperdr.dylib"))
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests/native", env=env)
-    json.loads((ROOT / "schema/report.json").read_text(encoding="utf-8"))
 
 
 def ensure_metal_toolchain(env: dict[str, str]) -> None:

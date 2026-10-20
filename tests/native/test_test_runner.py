@@ -103,7 +103,7 @@ class IOSEnginePreparationTest(unittest.TestCase):
     def test_stale_inputs_and_missing_stamp_rebuild_existing_slices(self):
         for changed in ("missing-stamp", "modules/image/new.cpp", "cmake/new.cmake",
                         "vcpkg.json", "scripts/build_xcframework.sh",
-                        "HyperDR_Model/models/research-cnn-v1.ncnn.bin"):
+                        "modules/codec/src/heif_encoder.cpp"):
             with self.subTest(changed=changed):
                 self.write_artifact()
                 if changed == "missing-stamp":
@@ -138,7 +138,7 @@ class IOSEnginePreparationTest(unittest.TestCase):
         source.unlink()
         self.assertNotEqual(before, runner.engine_fingerprint(self.root))
 
-    def test_only_embedded_model_bin_change_invalidates_the_fingerprint(self):
+    def test_model_assets_do_not_invalidate_the_native_writer_fingerprint(self):
         models = self.root / "HyperDR_Model/models"
         models.mkdir(parents=True)
         weights = models / "research-cnn-v1.ncnn.bin"
@@ -146,8 +146,8 @@ class IOSEnginePreparationTest(unittest.TestCase):
         before = runner.engine_fingerprint(self.root)
         weights.write_bytes(b"new weights")
         after = runner.engine_fingerprint(self.root)
-        self.assertNotEqual(before, after)
-        # These are not inputs to the native embedded-model build.
+        self.assertEqual(before, after)
+        # Model assets belong to Swift/Core ML, not the native writer.
         (models / "training-checkpoint.pt").write_bytes(b"training")
         swift_weights = models / "research-cnn-v1.mlpackage/Data/com.apple.CoreML/weights/weight.bin"
         swift_weights.parent.mkdir(parents=True)

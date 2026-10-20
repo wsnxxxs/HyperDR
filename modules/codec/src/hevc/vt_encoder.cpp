@@ -236,10 +236,6 @@ void configure(VTCompressionSessionRef session, const EncodeParams& params) {
                "set keyframe interval");
   const auto quality = cf_float(vt_quality(params.quality, params.main10, params.quality_role, params.color.transfer));
   set_property(session, kVTCompressionPropertyKey_Quality, quality.get(), "set HEVC quality");
-  if (params.prefer_speed) {
-    set_property(session, kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
-                 kCFBooleanTrue, "prefer encoding speed");
-  }
   if (const auto value = cv_primaries(params.color.primaries)) {
     set_property(session, kVTCompressionPropertyKey_ColorPrimaries, value, "set colour primaries");
   }

@@ -12,7 +12,6 @@
 
 namespace hyperdr {
 
-enum class HevcPreset { Slow, Medium };
 
 enum class OutputEncoding {
   // Display P3 SDR base plus an ISO 21496-1 gain map, in HEIF. The

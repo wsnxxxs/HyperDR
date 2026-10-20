@@ -14,16 +14,5 @@
     "libpng",
     "tiff",
     "lcms"
-  ],
-  "default-features": [
-    "native-model"
-  ],
-  "features": {
-    "native-model": {
-      "description": "Embedded ncnn model runtime for the macOS build. The iOS slices do not link it (P7 moves inference to Core ML, P7-4 deletes ncnn), so their configure presets turn default features off.",
-      "dependencies": [
-        "ncnn"
-      ]
-    }
-  }
+  ]
 }

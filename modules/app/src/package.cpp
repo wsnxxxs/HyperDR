@@ -1,6 +1,5 @@
 #include "hyperdr/app/package.hpp"
 
-#include "hyperdr/app/settings.hpp"
 #include "hyperdr/codec/avif_grid.hpp"
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -35,6 +34,12 @@
 #include <unistd.h>
 
 namespace hyperdr {
+namespace {
+void validate_encoding_headroom(HdrEncoding encoding, float stops) {
+  if (is_hlg_encoding(encoding) && (!std::isfinite(stops) || stops > kHlgHeadroomStops + 1e-5F))
+    throw std::invalid_argument("HLG rendered headroom cannot exceed 2.3 stops at 203-nit diffuse white");
+}
+}
 namespace {
 
 // A framed map's mat is written as exactly zero gain; this is the residue a
@@ -585,7 +590,7 @@ std::string package_image(const PackageRequest& request) {
       // so a framed mat's zero code cannot be moved by quantizing it.
       images.presentation_frame = request.presentation_frame;
       bytes = encoding == OutputEncoding::Adaptive
-                  ? encode_adaptive_heic(images, photo, request.quality, request.depth, request.hevc_preset)
+                  ? encode_adaptive_heic(images, photo, request.quality, request.depth)
                   : encode_gain_map_jpeg(std::move(images), photo, request.quality);
       break;
     }
@@ -602,7 +607,7 @@ std::string package_image(const PackageRequest& request) {
       renditions.stats.headroom_stops = gain->alternate_headroom;
       bytes = is_avif_encoding(encoding)
                   ? encode_avif(renditions, photo, request.quality, encoding)
-                  : encode_hdr_heic(renditions, photo, request.quality, encoding, request.hevc_preset);
+                  : encode_hdr_heic(renditions, photo, request.quality, encoding);
       break;
     }
   }
@@ -722,7 +727,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
     default: {
-      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.hevc_preset,request.presentation_frame);
+      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame);
       write_binary_file_atomic(staged.path,bytes,true);break;
     }
   }

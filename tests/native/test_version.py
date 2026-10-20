@@ -16,7 +16,6 @@ class VersionConsistencyTests(unittest.TestCase):
             ROOT / "modules/foundation/include/hyperdr/foundation/version.hpp"
         ).read_text(encoding="utf-8")
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        schema = json.loads((ROOT / "schema/settings.json").read_text(encoding="utf-8"))
         manifest = json.loads((ROOT / "vcpkg.json").read_text(encoding="utf-8-sig"))
 
         cmake_version = re.search(r"project\(HyperDR VERSION ([0-9.]+)", cmake).group(1)
@@ -27,7 +26,6 @@ class VersionConsistencyTests(unittest.TestCase):
             cmake_version,
             header_version,
             released_version,
-            schema["tool"],
             manifest["version-string"],
         }
         self.assertEqual(len(versions), 1, "release version sources disagree: %r" % versions)

@@ -48,7 +48,7 @@ class ExportDimensionLimit : public std::runtime_error {
 // item. `depth` selects the base image's bit depth; the gain map is always 8-bit.
 [[nodiscard]] std::vector<std::uint8_t> encode_adaptive_heic(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    int depth, HevcPreset preset = HevcPreset::Slow);
+    int depth);
 
 // SDR Display P3 primary plus an ISO 21496-1 gain map. No XMP metadata.
 [[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
@@ -66,8 +66,7 @@ void verify_sdr_jpeg(std::span<const std::uint8_t> bytes);
     ColorGamut gamut = ColorGamut::kDisplayP3);
 void verify_sdr_tiff(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
-    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
-    HevcPreset preset = HevcPreset::Slow);
+    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
 // Canvases libaom cannot hold as one frame are written as a grid of cells (see
 // avif_grid.hpp); `layout` overrides that choice, for tests.
 [[nodiscard]] std::vector<std::uint8_t> encode_avif(
@@ -156,7 +155,7 @@ void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& code
     const std::filesystem::path&);
 [[nodiscard]] std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,
     const EncodingRows& codes, const GainMapMetadata&, float headroom,
-    const PhotoMetadata&, OutputEncoding, int quality, int depth, HevcPreset, bool frame = false);
+    const PhotoMetadata&, OutputEncoding, int quality, int depth, bool frame = false);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

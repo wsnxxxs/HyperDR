@@ -361,50 +361,14 @@ void check_content_peak() {
 }
 }  // namespace
 
-hyperdr::FrameOverlay overlay_of(const Fixture& f) {
-  const auto path = hyperdr::test::temporary_directory() / "hyperdr-frame-overlay-test.png";
-  hyperdr::write_binary_file_atomic(path, encode(f), true);
-  try {
-    auto result = hyperdr::decode_frame_overlay(path);
-    std::filesystem::remove(path);
-    return result;
-  } catch (...) {
-    std::filesystem::remove(path);
-    throw;
-  }
-}
+
 // A caption overlay is read as drawn: straight alpha, no colour conversion,
 // no compositing against black, and full alpha for an opaque file.
-void check_frame_overlay() {
-  Fixture f;
-  f.width = 2;
-  f.alpha = f.srgb = true;
-  f.pixels = {255, 0, 0, 0, 10, 20, 30, 128};
-  const auto overlay = overlay_of(f);
-  require(overlay.width == 2 && overlay.height == 1 && overlay.rgba.size() == 8, "frame overlay size");
-  near(overlay.rgba[0], 1, "transparent overlay colour must stay unassociated");
-  near(overlay.rgba[3], 0, "overlay alpha");
-  near(overlay.rgba[4], 10.0F / 255, "overlay colour must not be converted");
-  near(overlay.rgba[7], 128.0F / 255, "partial overlay alpha");
 
-  Fixture opaque;
-  opaque.pixels = {1, 2, 3};
-  near(overlay_of(opaque).rgba[3], 1, "an opaque overlay gains full alpha");
-
-  Fixture gray;
-  gray.gray = gray.alpha = true;
-  gray.bits = 16;
-  gray.pixels = {0x12, 0x34, 0xFF, 0xFF};
-  const auto wide = overlay_of(gray);
-  near(wide.rgba[0], 4660.0F / 65535, "16-bit gray overlay sample");
-  near(wide.rgba[2], 4660.0F / 65535, "gray overlay expands to RGB");
-  near(wide.rgba[3], 1, "16-bit overlay alpha");
-}
 int main() try {
   int failures = 0;
   for (auto test : {check_gamma, check_srgb, check_chrm, check_hdr_priority, check_narrow_range, check_preview,
-                    check_decode_errors, check_block_boundaries, check_alpha, check_content_peak,
-                    check_frame_overlay}) {
+                    check_decode_errors, check_block_boundaries, check_alpha, check_content_peak}) {
     try { test(); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; ++failures; }
   }

@@ -34,7 +34,6 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(HyperDRCompiler)
 include(HyperDRTesting)
-include(HyperDRModel)
 
 find_package(Threads REQUIRED)
 
@@ -43,7 +42,6 @@ check_ipo_supported(RESULT HYPERDR_IPO_SUPPORTED OUTPUT HYPERDR_IPO_ERROR LANGUA
 
 include(CTest)
 
-hyperdr_configure_model()
 include(HyperDRBuildIdentity)
 
 add_subdirectory(modules/foundation)
@@ -55,31 +53,6 @@ add_subdirectory(modules/codec)
 target_compile_definitions(hyperdr_codec PRIVATE HYPERDR_BUILD_ID="${HYPERDR_BUILD_ID}")
 add_subdirectory(modules/app)
 add_subdirectory(modules/capi)
-
-# --- install and package ----------------------------------------------------
-
-if(TARGET HyperDR)
-  install(TARGETS HyperDR RUNTIME DESTINATION bin COMPONENT Runtime)
-endif()
-
-hyperdr_install_model_assets()
-# PyTorch checkpoints, optimizer state, virtual environments and private
-# training data are intentionally not installed. The inference-only ONNX and
-# ncnn files remain offline build assets; the release executable contains the
-# fixed ncnn models as aligned byte arrays.
-# The settings vocabulary and report schema ship with the CLI.
-install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
-install(FILES LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md DESTINATION . COMPONENT Runtime)
-install(FILES packaging/INSTALL.md DESTINATION . RENAME INSTALL.md COMPONENT Runtime)
-
-set(CPACK_PACKAGE_NAME "HyperDR")
-set(CPACK_PACKAGE_VENDOR "Renhe Wang")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(HYPERDR_PACKAGE_PLATFORM macos-${CMAKE_SYSTEM_PROCESSOR})
-set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-${HYPERDR_PACKAGE_PLATFORM}")
-set(CPACK_GENERATOR "ZIP")
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
-include(CPack)
 
 option(HYPERDR_BUILD_FUZZERS "Build opt-in LLVM parser fuzz targets" OFF)
 if(HYPERDR_BUILD_FUZZERS)

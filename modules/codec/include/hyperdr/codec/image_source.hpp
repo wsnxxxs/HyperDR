@@ -257,13 +257,6 @@ struct DecodedImage {
 [[nodiscard]] DecodedImage decode_image(const std::filesystem::path& path,
                                         const RawDecodeOptions& options = {});
 
-// A presentation frame's caption overlay: a PNG drawn in Display P3, read as
-// straight-alpha RGBA at its own size, with no colour conversion or resampling
-// (the frame composites it exactly as the app drew it).
-[[nodiscard]] FrameOverlay decode_frame_overlay(const std::filesystem::path& path);
-// Decode the exact bytes captured for a conversion's content fingerprint.
-[[nodiscard]] FrameOverlay decode_frame_overlay(const std::vector<std::uint8_t>& bytes);
-
 // Ultra HDR JPEG/R input: applies the embedded gain map and returns the linear
 // HDR rendition instead of the SDR primary image.
 [[nodiscard]] bool is_ultrahdr_jpeg_file(const std::filesystem::path& path);
@@ -273,27 +266,5 @@ struct DecodedImage {
 // authoritative because AVIF and HEIF share the same container family.
 [[nodiscard]] bool is_avif_file(const std::filesystem::path& path);
 [[nodiscard]] DecodedImage decode_avif(const std::filesystem::path& path);
-
-struct PreviewJpeg {
-  std::vector<std::uint8_t> bytes;
-  // Transport divisor for display-referred HDR inputs. Scene-referred RAW
-  // remains unscaled and carries its photographic exposure separately.
-  float scale{1.0F};
-  float exposure_ev{0.0F};
-};
-
-// A bounded 8-bit compatibility thumbnail. The browser panel uses the native
-// float `preview-frame` command instead; this remains a public CLI utility.
-//
-// The conversion and thumbnail share RAW development settings. The caller
-// chooses a preview scale with `options.preview_max_edge`.
-// `apply_scene_exposure` is reserved for model inputs: it turns a RAW's
-// scene-linear values into the exposure-normalized SDR domain expected by the
-// external gain model. Browser previews keep it false and apply the returned
-// exposure anchor in their linear renderer instead.
-[[nodiscard]] PreviewJpeg encode_preview_jpeg(
-    const std::filesystem::path& path, std::uint32_t max_edge = 2048,
-    int quality = 85, const RawDecodeOptions& options = {},
-    bool apply_scene_exposure = false);
 
 }  // namespace hyperdr

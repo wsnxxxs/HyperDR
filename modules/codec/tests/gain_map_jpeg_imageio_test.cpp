@@ -6,7 +6,7 @@
 #include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/cancel.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include <ImageIO/ImageIO.h>
 #include <atomic>
 #include <chrono>

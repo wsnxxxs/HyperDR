@@ -82,24 +82,24 @@ codec::hevc::EncodedSequence encode_picture(const codec::hevc::TileGrid& grid,
     tile=std::move(batch[index%workers]);
   },params);
 }
-codec::hevc::EncodedSequence encode_base(const FloatImage& image,int depth,int quality,HevcPreset preset){
+codec::hevc::EncodedSequence encode_base(const FloatImage& image,int depth,int quality){
   using namespace codec::hevc;
   if(depth!=8 && depth!=10)throw std::invalid_argument("base depth must be 8 or 10");
   const auto grid=tile_grid(image.width,image.height);
-  const EncodeParams params{quality,depth==10,preset==HevcPreset::Medium,{12,13,1}};
+  const EncodeParams params{quality,depth==10,{12,13,1}};
   return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
     rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
       for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c)row[i*3+c]=srgb_oetf(image.at(x+i,y,c));
     },1,false,tile);
   });
 }
-codec::hevc::EncodedSequence encode_gain(const FloatImage& image,int quality,HevcPreset preset,bool frame){
+codec::hevc::EncodedSequence encode_gain(const FloatImage& image,int quality,bool frame){
   using namespace codec::hevc;
   // apple_strict rejects multichannel metadata before any encoding. Never
   // silently discard authored channels at this lower boundary either.
   if(image.channels!=1)throw std::invalid_argument("Adaptive HEIC requires a single-channel gain map");
   const auto grid=tile_grid(image.width,image.height);
-  const EncodeParams params{quality,false,preset==HevcPreset::Medium,{2,2,1},
+  const EncodeParams params{quality,false,{2,2,1},
       frame?QualityRole::FramedGain:QualityRole::Gain};
   return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
     luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
@@ -125,10 +125,10 @@ HeifContentLight content_light(const FloatImage& hdr){
 } // namespace
 
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
-    const PhotoMetadata& metadata,int quality,int depth,HevcPreset preset){
+    const PhotoMetadata& metadata,int quality,int depth){
   validate_gain_map_metadata(images.metadata,GainMapWriterProfile::apple_strict);
-  auto base=encode_base(images.base_linear,depth,quality,preset);
-  auto gain=encode_gain(images.gain_map,quality,preset,images.presentation_frame);
+  auto base=encode_base(images.base_linear,depth,quality);
+  auto gain=encode_gain(images.gain_map,quality,images.presentation_frame);
   const auto icc=codec::display_p3_profile();
   HeifEncodedImage b{base,images.base_linear.width,images.base_linear.height,{},std::nullopt,icc};
   HeifEncodedImage g{gain,images.gain_map.width,images.gain_map.height,{2,2,1,true},std::nullopt,{}};
@@ -137,13 +137,13 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   return write_heif(b,&g,options);
 }
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
-    const PhotoMetadata& metadata,int quality,HdrEncoding encoding,HevcPreset preset){
+    const PhotoMetadata& metadata,int quality,HdrEncoding encoding){
   using namespace codec::hevc;
   if(encoding!=HdrEncoding::Pq && encoding!=HdrEncoding::Hlg)
     throw std::invalid_argument("encode_hdr_heic requires PQ or HLG");
   const auto& hdr=images.hdr;const auto grid=tile_grid(hdr.width,hdr.height);
   const int transfer=encoding==HdrEncoding::Pq?16:18;
-  const EncodeParams params{quality,true,preset==HevcPreset::Medium,{9,transfer,9}};
+  const EncodeParams params{quality,true,{9,transfer,9}};
   auto coded=encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
     rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
       for(unsigned i=0;i<count;++i){
@@ -162,7 +162,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
 
 std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const EncodingRows& codes,
     const GainMapMetadata& metadata,float headroom,const PhotoMetadata& photo,
-    OutputEncoding encoding,int quality,int depth,HevcPreset preset,bool frame) {
+    OutputEncoding encoding,int quality,int depth,bool frame) {
   using namespace codec::hevc;
   const auto grid=tile_grid(base.width,base.height);
   auto picture=[&](const EncodingRows& rows,const EncodeParams& parameters,bool luma,bool hdr) {
@@ -196,12 +196,11 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
       }
     },parameters);
   };
-  const bool speed=preset==HevcPreset::Medium;
   HeifWriteOptions options;options.exif=make_minimal_exif(photo);
   if(encoding==OutputEncoding::Adaptive) {
     validate_gain_map_metadata(metadata,GainMapWriterProfile::apple_strict);
-    auto b=picture(base,{quality,depth==10,speed,{12,13,1}},false,false);
-    auto g=picture(codes,{quality,false,speed,{2,2,1},frame?QualityRole::FramedGain:QualityRole::Gain},true,false);
+    auto b=picture(base,{quality,depth==10,{12,13,1}},false,false);
+    auto g=picture(codes,{quality,false,{2,2,1},frame?QualityRole::FramedGain:QualityRole::Gain},true,false);
     const auto icc=codec::display_p3_profile();
     HeifEncodedImage primary{b,base.width,base.height,{},std::nullopt,icc};
     HeifEncodedImage gain{g,base.width,base.height,{2,2,1,true},std::nullopt,{}};
@@ -227,7 +226,7 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
   const auto clamp=[](double nits){return std::uint16_t(std::clamp(std::ceil(nits),0.,10000.));};
   const HeifContentLight light{clamp(peak*kReferenceWhiteNits),clamp(sum*kReferenceWhiteNits/(double(base.width)*base.height))};
   const int transfer=encoding==OutputEncoding::Pq?16:18;
-  auto coded=picture(hdr,{quality,true,speed,{9,transfer,9}},false,true);
+  auto coded=picture(hdr,{quality,true,{9,transfer,9}},false,true);
   HeifEncodedImage primary{coded,base.width,base.height,{9,static_cast<std::uint16_t>(transfer),9,true},light,{}};
   options.xmp=make_xmp(photo,headroom,false);
   return write_heif(primary,nullptr,options);

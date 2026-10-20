@@ -17,28 +17,6 @@ namespace hyperdr {
 
 struct FloatImage;
 
-// The rendering mode is deliberately separate from the ISO gain-map metadata.
-// Only the perceptual HDR pipeline remains. The enum stays because `look` is
-// still recorded in the report and accepted by the CLI and the settings schema,
-// so a second renderer can be added later without reintroducing the concept.
-enum class LookMode {
-  kPhotographic,
-};
-
-// The strongest expansion the given look can represent, before any content
-// dependent selection narrows it. Photographic imposes no ceiling of its own,
-// so this is the configured headroom-max; the parameter is kept so a future
-// look with a fixed ceiling has somewhere to state it.
-[[nodiscard]] constexpr float look_headroom_ceiling_stops(LookMode,
-                                                          float configured) {
-  return configured;
-}
-
-[[nodiscard]] const char* look_mode_name(LookMode mode);
-// Returns nullopt rather than a default, so an unrecognised name is the
-// caller's error to report rather than a silent fallback to photographic.
-[[nodiscard]] std::optional<LookMode> look_mode_from_name(std::string_view name);
-
 // Which domain a decoded image's float samples live in.
 //
 // The renderer cannot decide what its tone curve means without this. It used to
@@ -120,35 +98,4 @@ struct CaptureMetadata {
   std::optional<float> focal_length_35mm;
 };
 
-struct LookOptions {
-  LookMode mode{LookMode::kPhotographic};
-  // The defaults are the one set of values every entry point shares (CLI, C ABI,
-  // the panel adapter, the app): neutral appearance, and the HDR parameters
-  // measured in docs/research/d1-defaults.md.
-  float contrast{1.0F};
-  float vibrance{0.0F};
-  float headroom_max_stops{3.0F};
-  // Explicit photographic style: controls diffuse gain, headroom bias,
-  // base clarity and highlight colour. The panel pins this to zero;
-  // gain_strength alone controls the intensity of its HDR alternate.
-  float pop{0.0F};
-
-  // Tone-region controls. `shoulder_start` is the linear SDR-output level where
-  // HDR-only expansion begins. `diffuse_gain_floor` controls how much of the
-  // qualifying bright region participates before local/specular weighting.
-  // Shadows remain excluded by the shoulder invariant and noise guard.
-  float toe_end{0.08F};
-  float toe_output_ratio{2.0F / 3.0F};
-  // Begin the HDR-only transition in the upper-middle display range. The old
-  // 0.72 knee confined useful gain to a tiny fraction of real photographs, and
-  // the D1 measurements found 0.25 clips the least highlight and uses the most gain.
-  float shoulder_start{0.25F};
-  float positive_exposure_limit_ev{1.5F};
-  float diffuse_gain_floor{0.6F};
-};
-
-// Rejects out-of-range creative controls before anything is decoded or
-// allocated.
-void validate_look_options(const LookOptions& options);
-
-}  // namespace hyperdr
+} // namespace hyperdr

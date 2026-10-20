@@ -246,11 +246,11 @@ static void imageio(const Scene &s, const std::string &format, int depth, int q,
 }
 static std::vector<std::uint8_t> native(const Scene &s,
                                         const std::string &format, int depth,
-                                        int q, bool speed, bool dither) {
+                                        int q, bool dither) {
   const auto grid = h::tile_grid(s.base.width, s.base.height);
   const bool hdr = format == "pq" || format == "hlg";
   h::EncodeParams params{
-      q, depth == 10, speed,
+      q, depth == 10,
       hdr ? h::ColorDescription{9, format == "pq" ? 16 : 18, 9}
           : h::ColorDescription{12, 13, 1}};
   auto base = h::encode(
@@ -290,7 +290,7 @@ static std::vector<std::uint8_t> native(const Scene &s,
           : std::span<const std::uint8_t>{icc}};
   if (format != "adaptive")
     return write_heif(primary);
-  params = {95, false, speed, {2, 2, 1}};
+  params = {95, false, {2, 2, 1}};
   auto gain = h::encode(
       grid.count(),
       [&](std::size_t i, h::YuvTile &tile) {
@@ -370,7 +370,7 @@ static void run(int argc, char **argv) {
   auto start = std::chrono::steady_clock::now();
   if (writer == "imageio" || writer == "imageio-auto")
     imageio(s, format, depth, q, file, writer == "imageio");
-  else if (writer == "package" || writer == "fast") {
+  else if (writer == "package") {
     PackagePlane b{
         s.base.pixels.data(), 0, s.base.pixels.size() * 4, s.base.width,
         s.base.height,        3};
@@ -389,7 +389,6 @@ static void run(int argc, char **argv) {
     r.depth = format == "adaptive" ? depth : 8;
     r.verify = false;
     r.overwrite = true;
-    r.hevc_preset = writer == "fast" ? HevcPreset::Medium : HevcPreset::Slow;
     r.presentation_frame = s.frame;
     if (s.frame)
       r.frame_photo = FrameRect{32, 32, s.base.width - 64, s.base.height - 64};
@@ -397,7 +396,6 @@ static void run(int argc, char **argv) {
   } else
     write_binary_file_atomic(file,
                              native(s, format, depth, q,
-                                    writer == "native-fast",
                                     writer != "native-nearest"),
                              true);
   const auto seconds =

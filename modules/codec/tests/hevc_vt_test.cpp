@@ -7,7 +7,7 @@
 #include "hevc/hevc.hpp"
 #include "hevc_probe_policy.hpp"
 #include "hevc/testing.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/image/transfer.hpp"
 
 #include "hyperdr/foundation/cancel.hpp"
@@ -297,9 +297,6 @@ void test_sequence(int depth) {
                                                                                : "different")
             << "\n";
 
-  hevc::EncodeParams fast = params;
-  fast.prefer_speed = true;
-  require(hevc::encode(tiles, fast).samples.size() == 4, name + ": speed preference encodes");
 }
 
 void test_cancelled_first_probe(const std::filesystem::path& directory) {
@@ -517,12 +514,12 @@ void test_unspecified_pixels() {
     photo.hdr.at(x,y,0)=level;photo.hdr.at(x,y,1)=level*(.5F+.4F*float(y%31)/30.F);photo.hdr.at(x,y,2)=level*.3F;
   }
   photo.sdr=photo.hdr;photo.hdr_is_source=true;photo.stats.headroom_stops=3;
-  const auto rendered=hyperdr::gain_map_from_renditions(std::move(photo),hyperdr::GainMapWriterProfile::apple_strict);
-  for(const int base_depth:{8,10})for(const bool fast:{false,true})for(const bool gain:{false,true}){
+  const auto rendered=hyperdr::test::encoded_pair(std::move(photo),true);
+  for(const int base_depth:{8,10})for(const bool gain:{false,true}){
     const int depth=gain?8:base_depth;
     const auto& image=gain?rendered.gain_map:rendered.base_linear;
     const auto grid=hevc::tile_grid(image.width,image.height);
-    hevc::EncodeParams params{gain?95:82,depth==10,fast,gain?hevc::ColorDescription{2,2,1}:hevc::ColorDescription{12,13,1}};
+    hevc::EncodeParams params{gain?95:82,depth==10,gain?hevc::ColorDescription{2,2,1}:hevc::ColorDescription{12,13,1}};
     auto audit=hevc::testing::encode_audited(grid.count(),[&](std::size_t index,hevc::YuvTile& tile){
       if(gain)hevc::luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
         for(unsigned i=0;i<count;++i)row[i]=image.at(x+i,y,0);
@@ -531,12 +528,12 @@ void test_unspecified_pixels() {
         for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c)row[i*3+c]=hyperdr::srgb_oetf(image.at(x+i,y,c));
       },1,true,tile);
     },params);
-    check_audit(audit,depth,"base_depth="+std::to_string(base_depth)+" role="+(gain?"gain":"base")+" preset="+(fast?"medium":"slow"));
+    check_audit(audit,depth,"base_depth="+std::to_string(base_depth)+" role="+(gain?"gain":"base"));
   }
-  for(const int transfer:{16,18})for(const bool fast:{false,true}){
+  for(const int transfer:{16,18}){
     constexpr unsigned width=2051,height=67;
     const auto grid=hevc::tile_grid(width,height);
-    hevc::EncodeParams params{82,true,fast,{9,transfer,9}};
+    hevc::EncodeParams params{82,true,{9,transfer,9}};
     auto audit=hevc::testing::encode_audited(grid.count(),[&](std::size_t index,hevc::YuvTile& tile){
       hevc::rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
         for(unsigned i=0;i<count;++i){
@@ -548,7 +545,7 @@ void test_unspecified_pixels() {
         }
       },9,true,tile);
     },params);
-    check_audit(audit,10,std::string(transfer==16?"PQ":"HLG")+" preset="+(fast?"medium":"slow"));
+    check_audit(audit,10,std::string(transfer==16?"PQ":"HLG"));
   }
 
 }

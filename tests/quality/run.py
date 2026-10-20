@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, default=ROOT / 'build')
-    parser.add_argument('--e5', action='store_true', help='also run the eight frozen E5 photo cases')
+    parser.add_argument('--e5', action='store_true', help='also run the package E5 synthetic photo-preservation cases')
     parser.add_argument('--report', type=Path, help='save numbers only, never image pixels or source metadata')
     args = parser.parse_args()
     build = args.build_dir.resolve()
@@ -43,15 +43,7 @@ def main():
             results.append(result)
             print(json.dumps(result), flush=True)
         if args.e5:
-            sys.path.insert(0, str(ROOT / 'tests/hevc'))
-            from check_imageio import export, png
-            from check_frame import check_frames
-            probe = directory / 'imageio_probe'
-            subprocess.run(['xcrun', 'swiftc', '-O', str(ROOT / 'tests/hevc/imageio_probe.swift'), '-o', str(probe)], check=True)
-            source = directory / 'source.png'
-            source.write_bytes(png(128, 128))
-            check_frames(build / 'HyperDR', build / 'heif_imageio_renditions', probe,
-                         directory, export, source, frozen_only=True)
+            subprocess.run([str(build / 'e5_package_quality')], check=True)
     if args.report:
         args.report.write_text(json.dumps(results, indent=2) + '\n')
 

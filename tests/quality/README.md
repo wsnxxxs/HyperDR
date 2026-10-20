@@ -3,15 +3,17 @@
 Build `quality_lab` explicitly (it is excluded from normal builds):
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --build build --target quality_lab HyperDR heif_imageio_renditions
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer taskpolicy -b python3 tests/quality/run.py --build-dir build --e5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --build build --target quality_lab e5_package_quality
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer taskpolicy -b python3.12 tests/quality/run.py --build-dir build --e5
 ```
 
 Use a private `TMPDIR` when another native suite runs concurrently. The runner
 uses synthetic gradients, saturated edges/skin tones and a mat. Candidate files
 are deleted with its temporary directory. `--report path.json` saves numbers.
-There is no CI job or hosted runner. The eight E5 photo cases reuse the existing
-frozen limits and independent ImageIO reader; `--e5` selects those cases only.
+There is no CI job or hosted runner. The package E5 cases generate finished float planes and compare framed output
+with the same unframed photograph. The .02-stop mean and 1% peak limits remain;
+package also checks zero-code alignment and bounded mat readback. The eight
+renderer-specific frozen baselines retired with that renderer (P7-4).
 
 The lab compares the **same linear P3 input** through ImageIO and our real
 package entry. Main8-only `native-nearest sdr` exercises the shared HEIC base

@@ -14,8 +14,6 @@ function(hyperdr_configure_target target)
   endif()
   target_compile_definitions(${target}
     PUBLIC HYPERDR_WITH_CODECS=$<IF:$<BOOL:${HYPERDR_WITH_CODECS}>,1,0>)
-  target_compile_definitions(${target}
-    PUBLIC HYPERDR_WITH_NCNN=$<IF:$<BOOL:${HYPERDR_WITH_NCNN}>,1,0>)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
   else()

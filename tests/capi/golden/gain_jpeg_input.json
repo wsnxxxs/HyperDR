@@ -1,9 +1,0 @@
-{
-  "reason": "D1: iso-rgb.jpg re-recorded because the auto headroom ceiling is now 3 stops: the source renders to about 3.7 stops, so its ISO alternate_headroom drops from 3.72 to 3.00 (contrast, vibrance, expansion start and area coverage do not change this output). Accepted for the old path; the render graph replaces it. E4c intentionally replaces ISO input with our JPEG/ISO reader and XMP-only input with ImageIO auxiliary translation; both share pixel-centred reconstruction and ICC-managed native-space gain application. The constant XMP fixture export SHA remains unchanged after the ImageIO switch.",
-  "cases": {
-    "iso-mono.jpg": "02c655db8980150d8362afc253688a9ea5daba4725ea4b00c5ba247aaeba7e89",
-    "iso-rgb.jpg": "6a7e46019dddc4f3111d244f6fa3e321fa31f07649da05504319048f44effbb3",
-    "xmp-and-iso.jpg": "2f51ef40c06a275c0e1695b2beca6c6b0664edc4a406fd556ad3af800208b26e",
-    "xmp-only.jpg": "2f51ef40c06a275c0e1695b2beca6c6b0664edc4a406fd556ad3af800208b26e"
-  }
-}

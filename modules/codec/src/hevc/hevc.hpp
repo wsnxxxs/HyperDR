@@ -81,7 +81,6 @@ enum class QualityRole { Color, Gain, FramedGain };
 struct EncodeParams {
   int quality{90};          // 0-100, mapped by `vt_quality`
   bool main10{false};       // tiles must then be 10-bit
-  bool prefer_speed{false}; // `hevc_preset = medium`
   ColorDescription color{};
   QualityRole quality_role{QualityRole::Color};
 };

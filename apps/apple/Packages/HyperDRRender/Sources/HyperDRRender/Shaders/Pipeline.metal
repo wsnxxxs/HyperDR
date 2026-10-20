@@ -67,11 +67,11 @@ float3 fit(float3 c, float upper) {
 kernel void sourceHDRSplit(texture2d<float, access::read> src [[texture(0)]],
                            texture2d<float, access::write> base [[texture(1)]],
                            texture2d<float, access::write> gain [[texture(2)]],
-                           constant float &headroom [[buffer(0)]],
+                           constant uint &unused [[buffer(0)]],
                            uint2 pos [[thread_position_in_grid]]) {
     if (pos.x >= base.get_width() || pos.y >= base.get_height()) return;
     float4 hdr = src.read(pos);
-    float g = clamp(log2(max(1.f, max(max(hdr.r, hdr.g), hdr.b))), 0.f, headroom);
+    float g = log2(max(1.f, max(max(hdr.r, hdr.g), hdr.b)));
     base.write(float4(fit(hdr.rgb * exp2(-g), 1.f), hdr.a), pos);
     gain.write(float4(g, 0, 0, 1), pos);
 }

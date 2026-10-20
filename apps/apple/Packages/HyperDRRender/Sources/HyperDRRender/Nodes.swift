@@ -7,11 +7,16 @@ import HyperDRRecipe
 /// by their halo. Coordinates are in output pixels, top-left origin.
 public protocol RenderNode: Sendable {
     static var parameters: [ParameterDeclaration] { get }
+    static var parameterIDs: [String] { get }
     /// Includes all values that affect this node's result.
     var cacheKey: String { get }
     var isIdentity: Bool { get }
     func inputRegion(for outputRegion: CGRect, imageSize: PixelSize) -> CGRect
     func encode(_ input: RenderPlanes, context: RenderNodeContext) throws -> RenderPlanes
+}
+
+public extension RenderNode {
+    static var parameterIDs: [String] { parameters.map(\.id) }
 }
 
 public struct IdentityNode: RenderNode {
@@ -24,23 +29,18 @@ public struct IdentityNode: RenderNode {
 }
 
 public struct SourceHDRSplitNode: RenderNode {
-    public static let parameters = [ParameterDeclaration(
-        id: "hdr.range", group: .hdr, kind: .floatOrAuto, range: 0.5...4, step: 0.1,
-        default: .auto, format: .stops, visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gain")]
-    /// Resolved output capacity in stops; automatic resolution currently defaults to 3.
-    /// P7-1 separates the HDR-only range operation from this source decomposition.
-    public let headroom: Float
-    public var cacheKey: String { "sourceHDRSplit/v1/\(headroom.bitPattern)" }
+    public static let parameters: [ParameterDeclaration] = []
+    public static let parameterIDs: [String] = []
+    public let cacheKey = "sourceHDRSplit/v2"
     public let isIdentity = false
-    public init(headroom: Float = 3) { self.headroom = headroom }
+    public init() {}
     public func inputRegion(for region: CGRect, imageSize: PixelSize) -> CGRect { region }
     public func encode(_ input: RenderPlanes, context: RenderNodeContext) throws -> RenderPlanes {
-        guard headroom.isFinite, (0...4).contains(headroom) else { throw RenderError.invalidSize }
         // An unedited authored pair and SDR input are already separated.
         if input.provenance == .authored || context.domain == .sdr { return input }
         let base = try context.texture(width: input.base.width, height: input.base.height)
         let gain = try context.texture(width: input.base.width, height: input.base.height, format: .r32Float)
-        var value = headroom
+        var value: UInt32 = 0
         try context.dispatch("sourceHDRSplit", width: base.width, height: base.height,
                              textures: [input.base, base, gain], value: &value)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: context.workingSpace,
@@ -82,7 +82,7 @@ public final class RenderNodeContext {
     /// For package kernels. New nodes may also encode their own Metal pipelines
     /// directly with device/commandBuffer, without changing the scheduler.
     func dispatch<T: BitwiseCopyable>(_ name: String, width: Int, height: Int,
-                     textures: [any MTLTexture], value: inout T) throws {
+                     textures: [any MTLTexture], buffers: [any MTLBuffer] = [], value: inout T) throws {
         let pipeline: any MTLComputePipelineState
         if let cached = pipelines[name] { pipeline = cached } else {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
@@ -92,9 +92,44 @@ public final class RenderNodeContext {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { throw RenderError.allocationFailed }
         encoder.setComputePipelineState(pipeline)
         for (index, texture) in textures.enumerated() { encoder.setTexture(texture, index: index) }
+        for (index, buffer) in buffers.enumerated() { encoder.setBuffer(buffer, offset: 0, index: index + 1) }
         encoder.setBytes(&value, length: MemoryLayout<T>.stride, index: 0)
         encoder.dispatchThreads(MTLSize(width: width, height: height, depth: 1),
                                 threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         encoder.endEncoding()
     }
 }
+
+public enum AdjustmentOperation: UInt32, CaseIterable, Sendable {
+    case exposure, contrast, highlights, shadows, blacks, warmth, tint, vibrance, saturation
+    public var parameterID: String {
+        ["tone.exposure", "tone.contrast", "tone.highlights", "tone.shadows", "tone.blacks",
+         "color.warmth", "color.tint", "color.vibrance", "color.saturation"][Int(rawValue)]
+    }
+}
+
+/// Pointwise light/color nodes. The full graph fuses this identical operator
+/// sequence; individual nodes remain available for scoped evaluation and tests.
+public struct AdjustmentNode: RenderNode {
+    public static let parameters: [ParameterDeclaration] = []
+    public static let parameterIDs = AdjustmentIDs.tone + AdjustmentIDs.color
+    public let operation: AdjustmentOperation
+    public let value: Float
+    public init(_ operation: AdjustmentOperation, value: Float) { self.operation = operation; self.value = value }
+    public var cacheKey: String { "adjust/v1/\(operation.rawValue)/\(value.bitPattern)" }
+    public var isIdentity: Bool { value == 0 }
+    public func inputRegion(for region: CGRect, imageSize: PixelSize) -> CGRect { region }
+    public func encode(_ input: RenderPlanes, context: RenderNodeContext) throws -> RenderPlanes {
+        guard value.isFinite, (operation == .exposure ? -4...4 : -100...100).contains(value) else { throw RenderError.invalidAdjustment }
+        if isIdentity { return input }
+        let output = try context.texture(width: input.base.width, height: input.base.height)
+        var parameters = PointUniform(operation: operation.rawValue, sdr: context.domain == .sdr ? 1 : 0,
+                                      value: value, unused: 0)
+        try context.dispatch("adjustPoint", width: output.width, height: output.height,
+                             textures: [input.base, output], value: &parameters)
+        return RenderPlanes(base: output, gain: input.gain, gainChannelCount: input.gainChannelCount,
+            encoding: input.encoding, baseColorSpace: input.baseColorSpace, provenance: input.provenance, region: input.region)
+    }
+}
+
+struct PointUniform { var operation: UInt32; var sdr: UInt32; var value: Float; var unused: Float }

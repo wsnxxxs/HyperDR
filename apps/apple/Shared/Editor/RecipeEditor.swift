@@ -589,7 +589,7 @@ import Observation
             return lut
         }
         let automatic = frame.flatMap { $0.request.recipe == recipe && $0.request.region == nil ? $0.automaticValues : nil }
-        return EditorExportCapture(source: source, recipe: recipe, modelID: wantsModel(recipe) ? modelID(recipe) : nil,
+        return EditorExportCapture(source: source, recipe: recipe,
                                    lut: lut, automaticValues: automatic ?? [:])
     }
 

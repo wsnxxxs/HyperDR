@@ -574,7 +574,11 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         await h.editor.settle()
         let capture = try h.editor.exportCapture()
         #expect(capture.recipe == h.editor.recipe)
-        #expect(capture.modelID == "research-cnn-v1")
+        // The model is the recipe's own selection, frozen with it; Kit
+        // resolves the full identity from it.
+        #expect(capture.recipe.hdrSource == .ai)
+        #expect(capture.recipe.conditionValue("hdr.model") == h.editor.recipe.conditionValue("hdr.model"))
+        #expect(capture.recipe.conditionValue("hdr.model")?.stringValue == "research-cnn-v1")
         #expect(capture.lut == lut)
         #expect(capture.peakStops == capture.automaticValues["hdr.range"] ?? 3)
     }

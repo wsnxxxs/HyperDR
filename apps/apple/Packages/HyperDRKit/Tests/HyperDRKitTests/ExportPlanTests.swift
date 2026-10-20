@@ -779,18 +779,22 @@ struct ExportPlanGapTests {
     }
 
     @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
-        let input = request(.custom(.init(encoding: .avifPq)))
-        let budget = 900_000_000
-        let refused = plan(input, available: budget)
-        #expect(!refused.memory.fits)
-        #expect(refused.blockers.first { $0.code == "export_memory_exceeded" }?.pixelSize == photo)
-        let edge = try #require(refused.memory.maxAdmissibleLongEdge)
-        var smaller = input
-        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge))
-        #expect(plan(smaller, available: budget).memory.fits)
-        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge + 1))
-        #expect(!plan(smaller, available: budget).memory.fits)
-        #expect(plan(input, available: 1).memory.maxAdmissibleLongEdge == nil)
+        for (encoding, sourceSize, budget) in [
+            (ExportEncoding.avifPq, photo, 900_000_000),
+            (.isoGainMapJPEG, ExportPixelSize(width: 12800, height: 8600), 3 << 30)
+        ] {
+            let input = request(.custom(.init(encoding: encoding)), source: source(.rawEDR, size: sourceSize))
+            let refused = plan(input, available: budget)
+            #expect(!refused.memory.fits)
+            #expect(refused.blockers.first { $0.code == "export_memory_exceeded" }?.pixelSize == sourceSize)
+            let edge = try #require(refused.memory.maxAdmissibleLongEdge)
+            var smaller = input
+            smaller.choice = .custom(.init(encoding: encoding, longEdge: edge))
+            #expect(plan(smaller, available: budget).memory.fits)
+            smaller.choice = .custom(.init(encoding: encoding, longEdge: edge + 1))
+            #expect(!plan(smaller, available: budget).memory.fits)
+            #expect(plan(input, available: 1).memory.maxAdmissibleLongEdge == nil)
+        }
     }
 
     @Test func planMessagesResolveInBothLanguages() {

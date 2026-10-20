@@ -29,7 +29,9 @@ For native area N, canvas width W and callback height R:
   JPEG adds 32W codec workspace. Stage peaks are compared, not summed.
 - Native/system verification keeps the same decoder/work allowance plus bounded
   row/tile and thumbnail workspace. `maxAdmissibleLongEdge` uses this same
-  estimator, including the invariant native decoder floor.
+  estimator, including the invariant native decoder floor. It binary-searches
+  only scalar memory estimates (at most about 14 candidates for a 12800 edge),
+  without constructing a full plan for each pixel of the rejected long edge.
 
 ## RAW budget table
 

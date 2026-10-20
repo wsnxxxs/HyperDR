@@ -9,13 +9,18 @@ import HyperDRRecipe
 public actor RenderEngine {
     public static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
     public let device: any MTLDevice
-    private let queue: any MTLCommandQueue
-    private let context: CIContext
-    private let library: any MTLLibrary
-    private let pipelines: [String: any MTLComputePipelineState]
+    let queue: any MTLCommandQueue
+    let context: CIContext
+    let library: any MTLLibrary
+    let pipelines: [String: any MTLComputePipelineState]
+    var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
+    var lutCache: (id: UUID, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: (key: SourceKey, source: RenderSource)?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?
     private var outputCache: (key: OutputKey, planes: RenderPlanes)?
+
+    func releaseNodeOutput() { outputCache = nil }
 
     private struct SourceKey: Equatable {
         let url: URL
@@ -38,12 +43,15 @@ public actor RenderEngine {
             .cacheIntermediates: false
         ])
         let url = Bundle.module.url(forResource: "Pipeline", withExtension: "metal", subdirectory: "Shaders")!
+        let adjustmentURL = Bundle.module.url(forResource: "Adjustments", withExtension: "metal", subdirectory: "Shaders")!
+        let shader = try String(contentsOf: url, encoding: .utf8) + "\n" + String(contentsOf: adjustmentURL, encoding: .utf8)
         let options = MTLCompileOptions()
         options.mathMode = .safe
-        let library = try device.makeLibrary(source: String(contentsOf: url, encoding: .utf8), options: options)
+        let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["sourceHDRSplit", "sampleSource", "zeroGain"] {
+        for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+                     "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -54,6 +62,9 @@ public actor RenderEngine {
         sourceCache = nil
         hdrCache = nil
         outputCache = nil
+        analysisCache = nil
+        lutCache = nil
+        authorCache = nil
         context.clearCaches()
     }
 
@@ -90,12 +101,12 @@ public actor RenderEngine {
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture)
     }
 
-    private func nodeContext(domain: InputDomain, buffer: any MTLCommandBuffer) -> RenderNodeContext {
+    func nodeContext(domain: InputDomain, buffer: any MTLCommandBuffer) -> RenderNodeContext {
         RenderNodeContext(domain: domain, device: device, commandBuffer: buffer,
                           workingSpace: Self.workingColorSpace, library: library, pipelines: pipelines)
     }
 
-    private func rasterize(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat = .rgba32Float) throws -> any MTLTexture {
+    func rasterize(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat = .rgba32Float) throws -> any MTLTexture {
         try Task.checkCancellation()
         let extent = image.extent.integral
         guard extent.width.isFinite, extent.height.isFinite,
@@ -120,14 +131,14 @@ public actor RenderEngine {
         return texture
     }
 
-    private func finish(_ buffer: any MTLCommandBuffer) throws {
+    func finish(_ buffer: any MTLCommandBuffer) throws {
         buffer.commit()
         buffer.waitUntilCompleted()
         try Task.checkCancellation()
         guard buffer.status == .completed else { throw RenderError.gpu(buffer.error?.localizedDescription ?? "GPU command failed") }
     }
 
-    private func validate(_ size: PixelSize) throws {
+    func validate(_ size: PixelSize) throws {
         guard size.width > 0, size.height > 0,
               size.width <= Int(UInt32.max), size.height <= Int(UInt32.max) else { throw RenderError.invalidSize }
     }
@@ -172,7 +183,7 @@ public actor RenderEngine {
 
     private struct Sampling { var width, height, x, y: UInt32 }
 
-    private func renderRegion(_ source: RenderSource, size: PixelSize, region: CGRect,
+    func renderRegion(_ source: RenderSource, size: PixelSize, region: CGRect,
                               nodes: [any RenderNode]) throws -> RenderPlanes {
         let edited = nodes.contains { !$0.isIdentity }
         let authored = source.domain == .dual && !edited

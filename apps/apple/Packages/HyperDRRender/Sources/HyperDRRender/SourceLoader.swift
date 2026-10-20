@@ -88,13 +88,22 @@ extension RenderEngine {
         filter.isGamutMappingEnabled = true
         filter.isDraftModeEnabled = false
         if filter.isContrastSupported { filter.contrastAmount = 0 }
-        if filter.isSharpnessSupported { filter.sharpnessAmount = 0 }
-        if filter.isDetailSupported { filter.detailAmount = 0 }
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
-        if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0 }
-        if filter.isColorNoiseReductionSupported { filter.colorNoiseReductionAmount = 0 }
-        if filter.isMoireReductionSupported { filter.moireReductionAmount = 0 }
-        if filter.isDespeckleSupported { filter.despeckleAmount = 0 }
+        let raw = options.raw
+        if let value = raw.temperature {
+            guard value.isFinite, (2000...50000).contains(value) else { throw RenderError.invalidAdjustment }
+            filter.neutralTemperature = value
+        }
+        if let value = raw.tint {
+            guard value.isFinite, (-150...150).contains(value) else { throw RenderError.invalidAdjustment }
+            filter.neutralTint = value
+        }
+        for value in [raw.luminanceNR, raw.colorNR, raw.sharpness].compactMap({ $0 }) {
+            guard value.isFinite, (0...1).contains(value) else { throw RenderError.invalidAdjustment }
+        }
+        if filter.isLuminanceNoiseReductionSupported, let value = raw.luminanceNR { filter.luminanceNoiseReductionAmount = value }
+        if filter.isColorNoiseReductionSupported, let value = raw.colorNR { filter.colorNoiseReductionAmount = value }
+        if filter.isSharpnessSupported, let value = raw.sharpness { filter.sharpnessAmount = value }
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
         try Task.checkCancellation()
         guard let image = filter.outputImage else { throw RenderError.cannotDecodeSource }
@@ -103,7 +112,11 @@ extension RenderEngine {
             extendedDynamicRange: filter.extendedDynamicRangeAmount,
             lensCorrectionSupported: filter.isLensCorrectionSupported,
             lensCorrectionApplied: filter.isLensCorrectionSupported && filter.isLensCorrectionEnabled,
-            decoderVersion: filter.decoderVersion.rawValue)
+            decoderVersion: filter.decoderVersion.rawValue,
+            temperature: filter.neutralTemperature, tint: filter.neutralTint,
+            luminanceNR: filter.luminanceNoiseReductionAmount, colorNR: filter.colorNoiseReductionAmount,
+            sharpness: filter.sharpnessAmount, supportsLuminanceNR: filter.isLuminanceNoiseReductionSupported,
+            supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported)
         // CIRAWFilter already applies the file's orientation.
         return OpenedSource(domain: .rawEDR, image: image, hdr: image,
                             baseSpace: workingColorSpace, gain: nil, raw: development)

@@ -8,6 +8,7 @@ public enum RenderError: Error, Sendable {
     case metalUnavailable, allocationFailed, invalidSize, invalidRegion
     case cannotOpenSource, cannotDecodeSource, missingGainMap, unsupportedGainColorSpace
     case gpu(String)
+    case invalidAdjustment, invalidLUT(String), aiNotAvailable
 }
 
 /// All textures and readback arrays use top-to-bottom rows, after source orientation.
@@ -78,10 +79,20 @@ public struct AuthoredGainMap: @unchecked Sendable {
 public enum GainEncoding: Sendable {
     case log2
     case authored(AuthoredGainMap)
+    case isoLog2(ISOLogGainMetadata)
+}
+
+/// Edited author pairs carry decoded log2 gains, retaining the author's offsets
+/// and gain working gamut. `source` keeps the complete original auxiliary metadata.
+public struct ISOLogGainMetadata: @unchecked Sendable {
+    public let source: AuthoredGainMap
+    public let workingColorSpace: CGColorSpace
+    public let baseOffset: SIMD3<Float>
+    public let alternateOffset: SIMD3<Float>
 }
 
 public enum PairProvenance: String, Sendable {
-    case identity, authored, split, resplit
+    case identity, authored, editedAuthored, split, resplit
 }
 
 /// RGB base is RGBA32Float (alpha remains alpha). Gain is R32Float or RGBA32Float;
@@ -137,6 +148,14 @@ public struct RAWDevelopment: Sendable {
     public let lensCorrectionSupported: Bool
     public let lensCorrectionApplied: Bool
     public let decoderVersion: String
+    public let temperature: Float
+    public let tint: Float
+    public let luminanceNR: Float
+    public let colorNR: Float
+    public let sharpness: Float
+    public let supportsLuminanceNR: Bool
+    public let supportsColorNR: Bool
+    public let supportsSharpness: Bool
 }
 
 public struct SourceOptions: Hashable, Sendable {
@@ -146,9 +165,11 @@ public struct SourceOptions: Hashable, Sendable {
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     public var kind: Kind
     public var lensCorrection: Bool
-    public init(kind: Kind = .automatic, lensCorrection: Bool = true) {
+    public var raw = RAWAdjustments()
+    public init(kind: Kind = .automatic, lensCorrection: Bool = true, raw: RAWAdjustments = RAWAdjustments()) {
         self.kind = kind
         self.lensCorrection = lensCorrection
+        self.raw = raw
     }
 }
 

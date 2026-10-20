@@ -121,7 +121,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let reconstructed = RenderEngine.readTexture(try await engine.reconstructedHDR(source).texture)
         #expect(reconstructed.max()! > 1)
         // An explicit HDR operation crosses the edit boundary and produces scalar zero-offset gain.
-        let edited = try await engine.render(source, nodes: [SourceHDRSplitNode(headroom: 2)])
+        let edited = try await engine.render(source, nodes: [AdjustmentNode(.exposure, value: 0.5)])
         #expect(edited.provenance == .resplit)
         #expect(edited.gainChannelCount == 1)
         if case .log2 = edited.encoding {} else { Issue.record("Edited pair was not resplit") }
@@ -149,6 +149,11 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         #expect(settings.baselineExposure == defaults.baselineExposure)
         #expect(settings.localToneMap == 0 && settings.extendedDynamicRange == 1)
         #expect(!settings.lensCorrectionApplied)
+        #expect(settings.sharpness == defaults.sharpnessAmount)
+        #expect(settings.luminanceNR == defaults.luminanceNoiseReductionAmount)
+        #expect(settings.colorNR == defaults.colorNoiseReductionAmount)
+        #expect(settings.temperature == defaults.neutralTemperature)
+        #expect(settings.tint == defaults.neutralTint)
         // Independent AE-2 G2 development, with the file defaults left intact.
         defaults.boostAmount = 1
         defaults.exposure = 0
@@ -156,13 +161,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         defaults.isGamutMappingEnabled = true
         defaults.isDraftModeEnabled = false
         if defaults.isContrastSupported { defaults.contrastAmount = 0 }
-        if defaults.isSharpnessSupported { defaults.sharpnessAmount = 0 }
-        if defaults.isDetailSupported { defaults.detailAmount = 0 }
         if defaults.isLocalToneMapSupported { defaults.localToneMapAmount = 0 }
-        if defaults.isLuminanceNoiseReductionSupported { defaults.luminanceNoiseReductionAmount = 0 }
-        if defaults.isColorNoiseReductionSupported { defaults.colorNoiseReductionAmount = 0 }
-        if defaults.isMoireReductionSupported { defaults.moireReductionAmount = 0 }
-        if defaults.isDespeckleSupported { defaults.despeckleAmount = 0 }
         if defaults.isLensCorrectionSupported { defaults.isLensCorrectionEnabled = false }
         let reference = try #require(defaults.outputImage)
         let x = source.size.width / 3, y = source.size.height / 3
@@ -178,6 +177,17 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
                 bounds: CGRect(x: x, y: source.size.height - 1 - y, width: 1, height: 1), format: .RGBAf, colorSpace: p3)
         }
         close(actual, expected, tolerance: 0.00005)
+        var raw = RAWAdjustments()
+        raw.temperature = settings.temperature + 200
+        raw.tint = settings.tint + 2
+        raw.luminanceNR = 0.4; raw.colorNR = 0.3; raw.sharpness = 0.2
+        let developed = try await engine.load(temporary, options: SourceOptions(lensCorrection: false, raw: raw))
+        let adjusted = try #require(developed.rawSettings)
+        #expect(developed.id != source.id)
+        #expect(adjusted.temperature == raw.temperature && adjusted.tint == raw.tint)
+        if adjusted.supportsLuminanceNR { #expect(adjusted.luminanceNR == 0.4) }
+        if adjusted.supportsColorNR { #expect(adjusted.colorNR == 0.3) }
+        if adjusted.supportsSharpness { #expect(adjusted.sharpness == 0.2) }
     }
 
     @Test func threeChannelOffsetsReferenceAndCancellation() async throws {

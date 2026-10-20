@@ -69,16 +69,14 @@ public enum DoubleReference {
         return clamp(weight * straight + (1 - weight) * best, upper: upper)
     }
 
-    // P7-0 AE-3 reference: capacity overflow still hard-limits here. P7-1 H3 adds
-    // an HDR-only soft shoulder without modifying the already selected SDR base.
-    public static func sourceHDRSplit(_ hdr: RGB, headroom: Double = 3) -> Split {
-        let gain = min(headroom, max(0, log2(max(1, hdr.x, hdr.y, hdr.z))))
+    // Source decomposition is independent of the downstream HDR capacity.
+    public static func sourceHDRSplit(_ hdr: RGB) -> Split {
+        let gain = log2(max(1, hdr.x, hdr.y, hdr.z))
         return Split(base: fitP3(hdr * exp2(-gain)), gain: gain)
     }
 
-    /// AE-3's common display controls, not the final P7-1 tone.contrast semantics.
-    /// The non-default contrast curve has a derivative discontinuity at white (T2).
-    /// Keep it matched to the prototype until CPU and GPU curves change together.
+    /// AE-3 native-c controls with the same C1 upper contrast segment as P7-1.
+    /// The editor's signed -100...100 contrast maps to c=0.6...1.6.
     public static func grade(_ source: RGB, exposure: Double = 0, contrast: Double = 1,
                              vibrance: Double = 0) -> RGB {
         var rgb = source * exp2(exposure)
@@ -87,7 +85,11 @@ public enum DoubleReference {
         guard y > 1e-6 else { return rgb }
         var target = y
         if contrast != 1 && y < 1 {
-            target = y <= 0.18 ? 0.18 * pow(y / 0.18, contrast) : 1 - 0.82 * pow((1 - y) / 0.82, contrast)
+            if y <= 0.18 { target = 0.18 * pow(y / 0.18, contrast) }
+            else {
+                let t = (y-0.18)/0.82
+                target = 0.18+0.82*(t+(contrast-1)*t*(1-t)*(1-t))
+            }
         }
         rgb *= target / y
         let chroma = rgb - RGB(repeating: target)

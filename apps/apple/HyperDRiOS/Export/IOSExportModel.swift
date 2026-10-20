@@ -30,6 +30,9 @@ nonisolated struct ExportStack: Sendable {
 ///   editor's decoding, as soon as the copy exists; its source revision is
 ///   captured then. Export does not wait for it to be enabled: a run waits for
 ///   that same task while it is preparing.
+/// - Export is closed while a photo is loading, and a photo cannot start
+///   loading while an export runs: the host drops the previous photo's copy
+///   and session as soon as the next one opens (R26-002).
 /// - Cancelling the run cancels the service's task. Cancelling the system
 ///   save sheet only cancels that delivery: the verified version stays, and
 ///   can be saved or shared again.
@@ -80,6 +83,9 @@ nonisolated struct ExportStack: Sendable {
 
     /// Whether the editor's photo has a session (open or still opening).
     private(set) var hasPhoto = false
+    /// The host is loading another photo (copying or decoding it). Set by the
+    /// host alongside its own spinner.
+    var loadingPhoto = false
     /// Why the photo's session could not be opened.
     private(set) var sessionFailure: String?
     @ObservationIgnored private var current: Opening?
@@ -117,11 +123,20 @@ nonisolated struct ExportStack: Sendable {
         return capture.peakStops > peak + 1e-9
     }
 
-    /// Whether the current choice can start: a photo, a destination that
-    /// exists on iOS now, and a plan without blockers. The session may still
-    /// be hashing; the run waits for it.
-    func canStart(_ plan: ExportPlan?) -> Bool {
-        guard hasPhoto, let plan, plan.isExecutable else { return false }
+    /// Whether an export can be opened or started: a photo, and no other
+    /// photo on its way in to replace it.
+    func isSettled(_ editor: RecipeEditor) -> Bool {
+        hasPhoto && !loadingPhoto && pending == nil && !editor.isOpening
+    }
+
+    /// Whether a new photo may start loading: not while an export runs.
+    var canOpenPhoto: Bool { !isRunning }
+
+    /// Whether the current choice can start: a settled photo, a destination
+    /// that exists on iOS now, and a plan without blockers. The session may
+    /// still be hashing; the run waits for it.
+    func canStart(_ plan: ExportPlan?, _ editor: RecipeEditor) -> Bool {
+        guard isSettled(editor), let plan, plan.isExecutable else { return false }
         return !(page == .destination && destination == .photos)
     }
 
@@ -190,11 +205,16 @@ nonisolated struct ExportStack: Sendable {
     /// Freezes the edit now; the run then waits for the photo's session
     /// (the one opened with the photo, never a second hash) while preparing.
     func start(_ editor: RecipeEditor) {
-        guard !isRunning, let opening = current else { return }
+        guard !isRunning, isSettled(editor), let opening = current else { return }
         editor.commitDrag()
         let capture: EditorExportCapture
         do { capture = try editor.exportCapture() } catch {
             phase = .failed(Self.failure(error))
+            return
+        }
+        // The edit and the session must be the same photo's.
+        guard capture.source.url.standardizedFileURL == opening.url.standardizedFileURL else {
+            phase = .failed(Failure(key: "ios.error.sourceChanged", detail: nil))
             return
         }
         let request = capture.planRequest(choice)

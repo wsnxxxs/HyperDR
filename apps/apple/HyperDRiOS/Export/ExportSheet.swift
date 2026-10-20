@@ -79,7 +79,7 @@ struct ExportSheet: View {
                 primaryLabel(plan).frame(maxWidth: .infinity).padding(.vertical, Space.s1)
             }
             .buttonStyle(.glassProminent)
-            .disabled(!model.canStart(plan))
+            .disabled(!model.canStart(plan, editor))
             .padding(Space.s4)
         }
     }

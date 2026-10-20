@@ -40,7 +40,7 @@ inline hyperdr::GainMapMetadata metadata(bool multichannel) {
 inline std::vector<std::string> names() {
   return {"single8", "single10-crop", "grid10-hlg", "adaptive8-grid", "adaptive10-crop"};
 }
-inline Bytes file(const std::string& name) {
+inline Bytes file(const std::string& name, const hyperdr::HeifByteSink& sink = {}) {
   using namespace hyperdr;
   const bool adaptive = name.starts_with("adaptive");
   const bool eight = name == "single8" || name == "adaptive8-grid";
@@ -65,6 +65,7 @@ inline Bytes file(const std::string& name) {
     options.exif = make_minimal_exif(capture);
     options.xmp = make_xmp(capture, 3, true);
   }
+  if (sink) { write_heif_to(sink, base, adaptive ? &gain : nullptr, options); return {}; }
   return write_heif(base, adaptive ? &gain : nullptr, options);
 }
 } // namespace writer_fixture

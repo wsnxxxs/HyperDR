@@ -50,6 +50,12 @@ class ExportDimensionLimit : public std::runtime_error {
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
     int depth);
 
+// Write directly to a caller-owned staging file; publication is the caller's job.
+void write_adaptive_heic(const GainMapResult&, const PhotoMetadata&, int quality,
+    int depth, const std::filesystem::path&);
+void write_hdr_heic(const PhotoRenditions&, const PhotoMetadata&, int quality,
+    HdrEncoding, const std::filesystem::path&);
+
 // SDR Display P3 primary plus an ISO 21496-1 gain map. No XMP metadata.
 [[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
@@ -153,9 +159,9 @@ void write_sdr_tiff_rows(const EncodingRows&, const PhotoMetadata&, ColorGamut,
 void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& codes,
     const GainMapMetadata&, const PhotoMetadata&, int quality, bool frame,
     const std::filesystem::path&);
-[[nodiscard]] std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,
+void write_heic_rows(const EncodingRows& base,
     const EncodingRows& codes, const GainMapMetadata&, float headroom,
-    const PhotoMetadata&, OutputEncoding, int quality, int depth, bool frame = false);
+    const PhotoMetadata&, OutputEncoding, int quality, int depth, bool frame, const std::filesystem::path&);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

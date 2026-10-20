@@ -796,6 +796,139 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "给 SDR 版本里是纯黑的区域加斜纹。也可在“显示”菜单里开关。" } }
       }
     },
+    "export.reason.alphaOnBlack" : {
+      "comment" : "Export plan notice: the photo has transparency, which the export fills.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Transparent areas will be filled with black." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "透明区域会铺黑色。" } }
+      }
+    },
+    "export.reason.ceiling %@" : {
+      "comment" : "Export plan notice: a destination holds the output's peak, in stops (\"+3\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This export goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+      }
+    },
+    "export.reason.ceilingFormat %@" : {
+      "comment" : "Export plan notice: the format holds the output's peak, in stops (\"+3\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This format goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这种格式最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+      }
+    },
+    "export.reason.hdrOff" : {
+      "comment" : "Export blocked: a BT.2100 format needs HDR on.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn HDR on to export this BT.2100 format." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启 HDR 后才能导出此 BT.2100 格式。" } }
+      }
+    },
+    "export.reason.hevcMain10Unavailable" : {
+      "comment" : "Export blocked: no 10-bit HEVC encoder on this device.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This device can't encode 10-bit HEVC, so this format can't be exported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这台设备不支持 10 位 HEVC 编码，不能导出这种格式。" } }
+      }
+    },
+    "export.reason.hevcProbeFailed" : {
+      "comment" : "Export blocked: the HEVC encoder check failed at launch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking the HEVC encoder failed, so this format can't be exported for now." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检测 HEVC 编码能力时出错，暂时不能导出这种格式。" } }
+      }
+    },
+    "export.reason.hevcUnavailable" : {
+      "comment" : "Export blocked: no HEVC encoder on this device.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This device can't encode HEVC, so this format can't be exported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这台设备无法进行 HEVC 编码，不能导出这种格式。" } }
+      }
+    },
+    "export.reason.memory %@ %@" : {
+      "comment" : "Export blocked: not enough memory; what the export needs and what is available (\"3.1 GB\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not enough memory: this export needs about %@, %@ is available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内存不够：这次导出约需 %@，可用 %@。" } }
+      }
+    },
+    "export.reason.notYetAvailable" : {
+      "comment" : "Short reason on an export option that cannot be chosen yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not available yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未开放" } }
+      }
+    },
+    "export.reason.photosAddOnly" : {
+      "comment" : "Photos saving: add-only permission cannot replace a photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add-only permission does not allow replacement." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅添加权限不允许替换照片。" } }
+      }
+    },
+    "export.reason.photosFileSource" : {
+      "comment" : "Photos saving: a photo opened from Files has no library photo to replace.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A photo opened from Files has no library photo to replace." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从文件打开的照片无法替换图库原图。" } }
+      }
+    },
+    "export.reason.photosFramed" : {
+      "comment" : "Photos saving: a framed export is saved as a new photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A framed export must be saved as a new photo." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "带边框的导出需存为新照片。" } }
+      }
+    },
+    "export.reason.photosLibraryAccess" : {
+      "comment" : "Photos saving: the permission does not cover this photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permission does not allow replacing this photo." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前权限不允许替换此照片。" } }
+      }
+    },
+    "export.reason.photosNotVerified" : {
+      "comment" : "Export blocked: saving to Photos is not open yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving to Photos is not available yet." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "存到“照片”尚未开放。" } }
+      }
+    },
+    "export.reason.photosPermission" : {
+      "comment" : "Export blocked: no permission to save to the photo library.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photo library permission is required." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要照片图库权限。" } }
+      }
+    },
+    "export.reason.sdrVersion" : {
+      "comment" : "Export plan notice: HDR is off, so a gain-map format writes its SDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR is off. An SDR version will be written." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR 已关闭，将写出 SDR 版本。" } }
+      }
+    },
+    "export.reason.socialAspect" : {
+      "comment" : "Export plan notice: the social destination may crop the photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Instagram may crop this photo to 4:5 or 1.91:1." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Instagram 会把这张照片裁成 4:5 或 1.91:1。" } }
+      }
+    },
+    "export.reason.unsupportedPair" : {
+      "comment" : "Export blocked: the photo's gain map cannot be written in this combination.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This output combination is not supported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持此输出组合。" } }
+      }
+    },
+    "export.reason.useLongEdge %@" : {
+      "comment" : "Action when memory blocks the export: set the largest long edge that fits, in pixels.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change to long edge %@ px" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "改为长边 %@ px" } }
+      }
+    },
     "group.color" : {
       "comment" : "Adjustment group title.",
       "localizations" : {

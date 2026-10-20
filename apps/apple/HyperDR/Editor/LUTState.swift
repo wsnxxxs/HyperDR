@@ -26,14 +26,18 @@ nonisolated struct EditorCapabilities: Sendable {
     var main8: Bool
     var main10: Bool
     var encoderReason: String?
+    /// The encoder facts Kit plans with (K6).
+    var exportFacts: ExportEncodingCapabilities {
+        ExportEncodingCapabilities(main8: main8, main10: main10,
+            probeFailed: encoderReason == "hevc_probe_failed",
+            unavailableEncodings: Set(Preferences.encodings.compactMap { id in
+                encodings[id]?.available == true ? nil : ExportEncoding(rawValue: id)
+            }))
+    }
     func availability(isHDR: Bool) -> [String: String?] {
         var result: [String: String?] = [:]
+        let facts = exportFacts
         for id in Preferences.encodings {
-            let facts = ExportEncodingCapabilities(main8: main8, main10: main10,
-                probeFailed: encoderReason == "hevc_probe_failed",
-                unavailableEncodings: Set(Preferences.encodings.compactMap { id in
-                    encodings[id]?.available == true ? nil : ExportEncoding(rawValue: id)
-                }))
             let reason = ExportEncoding(rawValue: id).flatMap {
                 ExportPlanner.availability(of: $0,
                     source: ExportSource(domain: isHDR ? .hdr : .sdr, pixelSize: .init(width: 1, height: 1)),

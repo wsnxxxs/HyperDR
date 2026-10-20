@@ -62,7 +62,6 @@ struct ExportDestinationPlanTests {
         #expect(plan.writerReason == .noComparison) // no pair to package
         #expect(plan.peakStops == nil)
         #expect(plan.gainMap == .sdr)
-        #expect(plan.summary.parts.count == 3) // no peak
     }
 
     @Test func webWritesAGainMapJPEGAt2560AndDropsTheLocation() {
@@ -77,7 +76,7 @@ struct ExportDestinationPlanTests {
         #expect(plan.peakStops == 3) // the destination narrows the edit's 4
         #expect(plan.handling == .file)
         #expect(plan.library == nil)
-        #expect(plan.notices.map(\.key) == ["dest.ceiling %@"])
+        #expect(plan.notices == [.ceiling(stops: ExportDestination.web.profile.ceilingStops, scope: .destination(.web))])
     }
 
     @Test func webWithHDRSwitchedOffWritesAP3JPEG() {
@@ -98,7 +97,7 @@ struct ExportDestinationPlanTests {
         #expect(plan.peakStops == 2)
         #expect(plan.handling == .share)
         #expect(!plan.keepLocation)
-        #expect(plan.notices.map(\.key) == ["dest.ceiling %@"])
+        #expect(plan.notices == [.ceiling(stops: ExportDestination.social.profile.ceilingStops, scope: .destination(.social))])
     }
 
     @Test func socialWithHDRSwitchedOffWritesSRGB() {
@@ -118,7 +117,7 @@ struct ExportDestinationPlanTests {
         #expect(plan(request(.destination(.social), peakStops: 1)).notices.isEmpty)
         let tall = ExportPixelSize(width: 3000, height: 6000)
         let plan = plan(request(.destination(.social), source: source(.sdr, size: tall), peakStops: 1))
-        #expect(plan.notices.map(\.key) == ["dest.social.aspect"])
+        #expect(plan.notices == [.socialAspect])
     }
 
     @Test func theDestinationTableMatchesTheDesign() {
@@ -376,7 +375,7 @@ struct ExportMemoryPlanTests {
         #expect(plan.memory.degradation == .refused)
         #expect(!plan.isExecutable)
         #expect(plan.blockers.map(\.code) == ["export_memory_exceeded"])
-        #expect(plan.blockers[0].message.key == "dest.memoryExceeded %@ %@")
+        #expect(plan.blockers[0].pixelSize == plan.size)
     }
 
     @Test func aFramedCanvasCostsMoreThanTheBarePhoto() {
@@ -562,7 +561,7 @@ struct ExportLibraryPlanTests {
         let plan = plan(request(.destination(.photos),
                                 library: ExportLibraryFacts(origin: .files, access: .addOnly, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == .newPhoto)
-        #expect(plan.library?.replace?.unavailableReasonKey == "dest.photos.replace.files")
+        #expect(plan.library?.replace?.unavailableReason == .fileSource)
         #expect(plan.library?.newPhoto?.isAvailable == true)
     }
 
@@ -571,20 +570,20 @@ struct ExportLibraryPlanTests {
                                 frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200)),
                                 library: ExportLibraryFacts(origin: .photoLibrary, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == .newPhoto)
-        #expect(plan.library?.replace?.unavailableReasonKey == "dest.photos.replace.framed")
+        #expect(plan.library?.replace?.unavailableReason == .framed)
     }
 
     @Test func limitedAccessNeedsTheWholeLibraryToReplace() {
         let limited = plan(request(.destination(.photos),
             library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: false), verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(limited.library?.selected == .newPhoto)
-        #expect(limited.library?.replace?.unavailableReasonKey == "dest.photos.replace.libraryAccess")
+        #expect(limited.library?.replace?.unavailableReason == .selectedAssetUnavailable)
         let authorized = plan(request(.destination(.photos),
             library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: true), verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(authorized.library?.selected == .replace)
         let addOnly = plan(request(.destination(.photos),
             library: ExportLibraryFacts(origin: .photoLibrary, access: .addOnly, verifiedModes: Set(LibrarySaveMode.allCases))))
-        #expect(addOnly.library?.replace?.unavailableReasonKey == "dest.photos.replace.addOnly")
+        #expect(addOnly.library?.replace?.unavailableReason == .addOnly)
     }
 
     @Test func refusedAccessBlocksTheExport() {
@@ -628,14 +627,13 @@ struct ExportLibraryPlanTests {
     }
 }
 
-@Suite("Export planning: the Will write summary")
+@Suite("Export planning: what it will write")
 struct ExportSummaryTests {
     @Test func photosNamesItsEncodingGamutSizeAndPeak() {
-        let summary = plan(request(.destination(.photos))).summary
-        #expect(summary.labelKey == "dest.willWrite")
-        #expect(summary.parts.map(\.key) == ["enc.adaptive.label", "choice.colorGamut.p3",
-                                             "plan.size.original", "plan.peak %@"])
-        #expect(summary.parts[3].arguments == [.stops(2.4)])
+        let value = plan(request(.destination(.photos)))
+        #expect(value.encoding == .adaptive && value.gamut == .p3)
+        #expect(value.size == value.sourceSize && value.photoSize == value.sourceSize)
+        #expect(value.peakStops == 2.4)
     }
 
     @Test func limitsThatDoNotShrinkThePhotoStillNameTheOriginalSize() {
@@ -646,20 +644,20 @@ struct ExportSummaryTests {
         for choice in choices {
             let value = plan(request(choice, source: source(size: size)))
             #expect(value.sourceSize == size)
-            #expect(value.summary.parts[2].key == "plan.size.original")
+            #expect(value.size == size && value.photoSize == size)
         }
     }
 
     @Test func aResizedDestinationNamesBothSides() {
-        let summary = plan(request(.destination(.web))).summary
-        #expect(summary.parts[2].key == "plan.size.pixels")
-        #expect(summary.parts[2].arguments == [.pixels(2560), .pixels(1707)])
+        let value = plan(request(.destination(.web)))
+        #expect(value.size == ExportPixelSize(width: 2560, height: 1707))
+        #expect(value.size != value.sourceSize)
     }
 
     @Test func anSDRExportHasNoPeak() {
-        let summary = plan(request(.destination(.photos), hdrEnabled: false)).summary
-        #expect(summary.parts.map(\.key) == ["enc.adaptive.label", "choice.colorGamut.p3",
-                                             "plan.size.original"])
+        let value = plan(request(.destination(.photos), hdrEnabled: false))
+        #expect(value.peakStops == nil)
+        #expect(value.size == value.sourceSize)
     }
 
     @Test func stopsAreWrittenWithASignAndAtMostOneDecimal() {
@@ -672,15 +670,13 @@ struct ExportSummaryTests {
 
     @Test func aClampedPeakSaysWhatTheDestinationAllows() {
         let plan = plan(request(.destination(.social), peakStops: 3))
-        #expect(plan.notices.map(\.key) == ["dest.ceiling %@"])
-        #expect(plan.notices.first?.arguments == [.stops(2)])
+        #expect(plan.notices == [.ceiling(stops: 2, scope: .destination(.social))])
     }
 
     @Test func aCustomFormatUsesTheFormatsOwnNotice() {
         let plan = plan(request(.custom(CustomExportFormat(encoding: .hlg, gamut: .p3, quality: 90)),
                                 peakStops: 4))
-        #expect(plan.notices.map(\.key) == ["export.rangeClamped %@ %@"])
-        #expect(plan.notices.first?.arguments == [.key("enc.hlg.label"), .stops(2.3)])
+        #expect(plan.notices == [.ceiling(stops: 2.3, scope: .format(.hlg))])
     }
 }
 
@@ -720,8 +716,7 @@ struct ExportGeometryTests {
         let plan = plan(request(.destination(.photos),
                                 frame: ExportFrameFacts(canvas: canvas)))
         #expect(plan.size == canvas)
-        #expect(plan.summary.parts[2].key == "plan.size.pixels")
-        #expect(plan.summary.parts[2].arguments == [.pixels(6200), .pixels(4200)])
+        #expect(plan.size != plan.sourceSize)
     }
 }
 
@@ -756,7 +751,7 @@ struct ExportPlanGapTests {
         for encoding in ExportEncoding.allCases {
             let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: false))
             #expect(value.blockers.contains { $0.code == "hdrOff" } == encoding.isBT2100)
-            #expect(value.notices.contains { $0.key == "plan.sdrVersion" } == encoding.writesGainMap)
+            #expect(value.notices.contains(.sdrVersion) == encoding.writesGainMap)
             if encoding == .isoGainMapJPEG { #expect(value.encoding == .sdrJPEG) }
             if encoding == .adaptive { #expect(value.baseBitDepth == 8 && !value.gainMap.writesGainMap) }
         }
@@ -776,20 +771,6 @@ struct ExportPlanGapTests {
         #expect(!plan(smaller, available: budget).memory.fits)
         #expect(plan(input, available: 1).memory.maxAdmissibleLongEdge == nil)
     }
-
-    @Test func planMessagesResolveInBothLanguages() {
-        for locale in [Locale(identifier: "en"), Locale(identifier: "zh-Hans")] {
-            for encoding in ExportEncoding.allCases {
-                for hdr in [true, false] {
-                    let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: hdr, peakStops: 8), available: 1)
-                    for message in value.notices.map(\.message) + value.blockers.map(\.message) + value.summary.parts {
-                        #expect(message.localized(locale: locale) != message.key)
-                        #expect(!message.localized(locale: locale).contains("%@"))
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Suite("Typed export facts")
@@ -804,8 +785,6 @@ struct TypedExportFactsTests {
         let value = plan(ExportPlanRequest(choice: .destination(.web),
             source: .init(domain: .sdr, pixelSize: photo, hasAlpha: true), edit: .init(peakStops: 8)))
         #expect(value.notices.contains(.alphaOnBlack))
-        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "zh-Hans")) == "透明区域会铺黑色。")
-        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "en")) == "Transparent areas will be filled with SDR black.")
         #expect(value.notices.contains(.ceiling(stops: ExportDestination.web.profile.ceilingStops, scope: .destination(.web))))
     }
     @Test func encoderAdmissionMatchesCardAvailability() {

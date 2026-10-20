@@ -33,7 +33,6 @@ struct ExportSheet: View {
         .frame(width: mode.width)
         .background(Color.hdr.surfacePanel)
         .background(WindowReader { sheetWindow = $0 })
-        .onDisappear { if case .rangeClamped? = model.notice { model.notice = nil } }
     }
 
     private func close() { dismiss() }
@@ -84,7 +83,7 @@ private struct ExportSettingsView: View {
                 ExportSummaryColumn(model: model, changeFrame: changeFrame)
                     .frame(width: 212)
                 Divider()
-                settings
+                settings(plan)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -93,7 +92,7 @@ private struct ExportSettingsView: View {
         }
     }
 
-    private var settings: some View {
+    private func settings(_ plan: ExportPlan?) -> some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             if model.export.phase == .cancelled {
                 InspectorNotice(Text("export.stoppedNotice"), style: .info)
@@ -107,9 +106,10 @@ private struct ExportSettingsView: View {
                 .foregroundStyle(Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
-            if case .rangeClamped(let maxStops)? = model.notice {
-                InspectorNotice(Text("export.rangeClamped \(AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)) \(maxStops.formatted(.number.precision(.fractionLength(1)).locale(locale)))"),
-                                style: .info)
+            // Kit's notes on what this format writes (the peak's ceiling,
+            // an SDR version, a transparency fill).
+            ForEach(plan?.notices ?? [], id: \.self) { notice in
+                InspectorNotice(Text(verbatim: notice.phrase.text(locale: locale)), style: .info)
             }
             colorSetting
             sizeSetting
@@ -123,7 +123,6 @@ private struct ExportSettingsView: View {
 
     private var selection: Binding<String> {
         Binding(get: { model.export.encodingID }, set: { id in
-            if case .rangeClamped? = model.notice { model.notice = nil }
             model.selectEncoding(id)
         })
     }
@@ -202,9 +201,9 @@ private struct ExportSettingsView: View {
     // MARK: Footer
 
     private func footer(_ plan: ExportPlan?) -> some View {
-        let memory = plan.flatMap(ExportLongEdge.memoryBlocker)
+        let blocker = plan?.blockers.first
         return HStack(spacing: Space.s3) {
-            if let memory, let plan { memoryNote(memory, plan: plan) } else { footerNote }
+            if let blocker { planNote(blocker) } else { footerNote }
             Spacer(minLength: Space.s3)
             Button("export.action.cancel", action: close)
                 .buttonStyle(.hdrSecondary)
@@ -213,24 +212,26 @@ private struct ExportSettingsView: View {
                                                                           asksForPlace: asksForPlace)), action: begin)
                 .buttonStyle(.hdrPrimary)
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.export.blockerKey != nil || memory != nil)
+                .disabled(model.export.blockerKey != nil || blocker != nil)
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)
     }
 
-    /// Memory blocks the export: Kit's sentence, and the largest long edge
-    /// that fits when there is one.
-    private func memoryNote(_ blocker: ExportBlocker, plan: ExportPlan) -> some View {
+    /// Why Kit's plan cannot run, and, when memory is why, the largest long
+    /// edge that fits.
+    private func planNote(_ blocker: ExportBlockReason) -> some View {
         HStack(spacing: Space.s2) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
                 .accessibilityHidden(true)
-            Text(verbatim: blocker.message.localized(locale: locale))
+            Text(verbatim: blocker.phrase.text(locale: locale))
                 .foregroundStyle(Color.hdr.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            if let edge = ExportLongEdge.admissible(plan) {
-                Button("export.useLongEdge \(String(edge))") { model.setExportLongEdge(edge) }
-                    .buttonStyle(.hdrCompact(.link))
+            if let edge = blocker.suggestedLongEdge {
+                Button { model.setExportLongEdge(edge) } label: {
+                    Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                }
+                .buttonStyle(.hdrCompact(.link))
             }
         }
         .font(Font.hdr.caption)
@@ -540,6 +541,8 @@ private struct ExportFailureView: View {
     let close: () -> Void
     let again: () -> Void
 
+    @Environment(\.locale) private var locale
+
     var body: some View {
         VStack(spacing: 0) {
             ExportTitleBar(model: model)
@@ -547,6 +550,16 @@ private struct ExportFailureView: View {
                 if let failure = model.export.failure {
                     let text = ErrorText(failure)
                     ExportFailureCard(title: Text(text.title), message: Text(text.message), detail: text.detail)
+                }
+                // Out of memory: the largest long edge that fits, then the settings.
+                if let edge = model.export.failure?.suggestedLongEdge {
+                    Button {
+                        model.setExportLongEdge(edge)
+                        again()
+                    } label: {
+                        Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                    }
+                    .buttonStyle(.hdrCompact(.link))
                 }
             }
             .padding(Space.s5)

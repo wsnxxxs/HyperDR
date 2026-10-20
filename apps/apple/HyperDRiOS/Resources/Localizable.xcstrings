@@ -1023,40 +1023,6 @@
         }
       }
     },
-    "ios.export.memory.estimate %@ %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Estimated peak %1$@ MiB, %2$@ MiB available"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "估计峰值 %1$@ MiB，可用 %2$@ MiB"
-          }
-        }
-      }
-    },
-    "ios.export.memory.estimateUnknown %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Estimated peak %@ MiB, available memory unknown"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "估计峰值 %@ MiB，可用内存未知"
-          }
-        }
-      }
-    },
     "ios.export.memory.gpu %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1104,24 +1070,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个格式不支持分段写入：需要 %1$@ MiB，可用 %2$@ MiB"
-          }
-        }
-      }
-    },
-    "ios.export.notYetAvailable" : {
-      "comment" : "A destination or action that is not offered yet.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not available yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未提供"
           }
         }
       }
@@ -1341,24 +1289,6 @@
         }
       }
     },
-    "ios.export.socialAspect" : {
-      "comment" : "Social destination with an aspect ratio Instagram crops.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Instagram may crop this photo to 4:5 or 1.91:1."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Instagram 会把这张照片裁成 4:5 或 1.91:1。"
-          }
-        }
-      }
-    },
     "ios.export.start" : {
       "comment" : "Starts a custom-format export.",
       "extractionState" : "manual",
@@ -1461,24 +1391,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "改用自定义格式…"
-          }
-        }
-      }
-    },
-    "ios.export.useLongEdge %@" : {
-      "comment" : "Will write: memory blocks the export; switches to the custom format at the largest long edge that fits, in pixels.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change to long edge %@ px"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "改为长边 %@ px"
           }
         }
       }

@@ -36,9 +36,12 @@ and is checked against it the same way, every file held to the no-Chinese
 rule as a view is. `apps/apple/Shared`, which both apps compile, has no
 catalogue: it may use no key and no Chinese literal.
 
-Kit speaks in keys of its own (`ExportMessage`: the plan's notices,
-blockers, "will write" summary and Photos save options, a progress's stage),
-translated in Kit's own catalogue, not the app's. The Mac app and `Shared/`
+Kit's plan is typed (`ExportNotice`, `ExportBlockReason`); its words are
+HyperDRDesign's (`ExportReasonPhrase`, mapped from Kit's types in
+`Shared/Export/ExportReasonText`), so every one of those keys is a literal in
+the design package and checked with it. Kit still speaks in keys of its own
+for a progress's stage (`ExportMessage`), translated in Kit's own catalogue,
+not the app's. The Mac app and `Shared/`
 show them with `localized(locale:)`. While any of those keys is not
 translated there, they must not read Kit's messages at all; and a file that
 reads them must never read a message's raw `.key`, which shown or looked up
@@ -910,8 +913,6 @@ def main() -> int:
         problems += check(files, entries)
         problems += engine_imports(files)
         kit_keys = kit_message_keys([path.read_text(encoding="utf-8") for path in sorted(KIT_SOURCES.rglob("*.swift"))])
-        if not kit_keys:
-            problems.append(f"no ExportMessage keys found under {KIT_SOURCES.relative_to(REPO_ROOT)}")
         # Until Kit has a catalogue, none of its keys is translated.
         try:
             kit_entries = json.loads(KIT_CATALOG.read_text(encoding="utf-8")).get("strings", {})

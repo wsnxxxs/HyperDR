@@ -26,12 +26,11 @@ nonisolated enum ExportLongEdge {
     /// The largest long edge the memory budget admits, when memory is what
     /// blocks the plan and a smaller size would fit.
     static func admissible(_ plan: ExportPlan) -> Int? {
-        guard memoryBlocker(plan) != nil else { return nil }
-        return plan.memory.maxAdmissibleLongEdge
+        memoryBlocker(plan)?.suggestedLongEdge
     }
 
-    /// The plan's memory blocker, if memory blocks it.
-    static func memoryBlocker(_ plan: ExportPlan) -> ExportBlocker? {
-        plan.blockers.first { $0.code == "export_memory_exceeded" }
+    /// The plan's memory reason, if memory blocks it.
+    static func memoryBlocker(_ plan: ExportPlan) -> ExportBlockReason? {
+        plan.blockers.first { if case .memory = $0 { true } else { false } }
     }
 }

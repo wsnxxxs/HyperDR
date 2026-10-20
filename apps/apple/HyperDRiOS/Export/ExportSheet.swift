@@ -88,14 +88,19 @@ struct ExportSheet: View {
     private var destinations: some View {
         Section {
             ForEach(ExportDestination.allCases, id: \.self) { destination in
-                let available = destination != .photos
+                // The plan says which destination cannot be chosen yet (Photos
+                // before its saving is verified, p7-3c-export §1.3 F).
+                let unavailable = model.unavailableReason(destination, editor)?.destinationShortPhrase
                 Button { model.destination = destination } label: {
                     HStack(spacing: Space.s3) {
                         Image(systemName: Self.icon(destination)).font(.title2).frame(width: 32)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(Self.name(destination)).font(.headline)
-                            Text(available ? Self.hint(destination) : "ios.export.notYetAvailable")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                            Group {
+                                if let unavailable { Text(verbatim: unavailable.text(locale: locale)) }
+                                else { Text(Self.hint(destination)) }
+                            }
+                            .font(.subheadline).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if model.destination == destination { Image(systemName: "checkmark").foregroundStyle(.tint) }
@@ -104,7 +109,7 @@ struct ExportSheet: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .disabled(!available)
+                .disabled(unavailable != nil)
                 .accessibilityAddTraits(model.destination == destination ? .isSelected : [])
             }
         }
@@ -139,10 +144,16 @@ struct ExportSheet: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Space.s2) {
                 ForEach(ExportEncoding.allCases, id: \.self) { encoding in
                     let selected = model.custom.encoding == encoding
+                    // The plan's answer for this encoding here (K6).
+                    let reason = model.unavailableReason(encoding, editor)
                     Button { model.select(encoding) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(LocalizedStringKey(encoding.labelKey)).font(.subheadline.weight(.semibold))
-                            Text(LocalizedStringKey(encoding.hintKey)).font(.caption).foregroundStyle(.secondary)
+                            if let reason {
+                                Text(verbatim: reason.phrase.text(locale: locale)).font(.caption).foregroundStyle(.orange)
+                            } else {
+                                Text(LocalizedStringKey(encoding.hintKey)).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                         .padding(Space.s2)
@@ -151,6 +162,7 @@ struct ExportSheet: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .disabled(reason != nil && !selected)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
@@ -221,27 +233,21 @@ struct ExportSheet: View {
     private func willWrite(_ plan: ExportPlan) -> some View {
         Section {
             summary(plan).font(.subheadline)
-            if let ceiling = IOSExportModel.ceiling(in: plan) {
-                Label { Text("ios.export.ceiling \(ExportPlanText.stops(ceiling))") } icon: { Image(systemName: "info.circle") }
+            ForEach(plan.notices, id: \.self) { notice in
+                Label { Text(verbatim: notice.phrase.text(locale: locale)) } icon: { Image(systemName: "info.circle") }
                     .font(.footnote).foregroundStyle(.secondary)
-            }
-            if plan.notices.contains(where: { $0.key == "dest.social.aspect" }) {
-                Label("ios.export.socialAspect", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
             if let look = model.luts.missingLook(editor) {
                 Label { Text("ios.export.lutMissing \(look.name)") } icon: { Image(systemName: "exclamationmark.triangle") }
                     .font(.footnote).foregroundStyle(.orange)
             }
-            if !plan.isExecutable {
-                Label(plan.blockers.contains { $0.code == "export_memory_exceeded" }
-                          ? LocalizedStringKey("ios.export.error.memory") : LocalizedStringKey("ios.export.blocked"),
-                      systemImage: "exclamationmark.triangle")
+            ForEach(plan.blockers, id: \.self) { blocker in
+                Label { Text(verbatim: blocker.phrase.text(locale: locale)) } icon: { Image(systemName: "exclamationmark.triangle") }
                     .font(.footnote).foregroundStyle(.orange)
-                if let estimate = IOSExportModel.memoryEstimate(plan) {
-                    Text(verbatim: estimate).font(.caption).foregroundStyle(.secondary)
-                }
-                if let edge = ExportLongEdge.admissible(plan) {
-                    Button("ios.export.useLongEdge \(String(edge))") { model.useLongEdge(edge, from: plan) }
+                if let edge = blocker.suggestedLongEdge {
+                    Button { model.useLongEdge(edge, from: plan) } label: {
+                        Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                    }
                 }
             }
         } header: {
@@ -264,7 +270,7 @@ struct ExportSheet: View {
         switch plan?.handling {
         case .file: Text("ios.export.saveToFiles")
         case .share: Text("ios.export.share")
-        case .photoLibrary: Text("ios.export.notYetAvailable")
+        case .photoLibrary: Text(verbatim: ExportReasonPhrase.notYetAvailable.text(locale: locale))
         case nil: Text("ios.export.start")
         }
     }
@@ -321,6 +327,16 @@ struct ExportSheet: View {
             }
             if let detail = failure.detail {
                 Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            // Out of memory: the largest long edge that fits, back on the choice.
+            if let edge = failure.suggestedLongEdge {
+                Button {
+                    model.useLongEdge(edge, from: model.plan(editor))
+                    model.reset()
+                } label: {
+                    Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                }
+                .buttonStyle(.bordered)
             }
             if failure.restartable {
                 Button("ios.export.restart") { model.start(editor) }.buttonStyle(.borderedProminent)

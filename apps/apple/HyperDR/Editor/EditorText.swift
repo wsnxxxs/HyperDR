@@ -24,7 +24,6 @@ extension EditorNotice {
     var messageKey: String? {
         switch self {
         case .clipboardImageUnsupported: "paste.imageData"
-        case .rangeClamped: "export.rangeClamped %@ %@"
         }
     }
 }

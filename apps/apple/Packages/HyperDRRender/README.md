@@ -55,12 +55,12 @@ Changing these options invalidates the development cache. Export defaults to
 `SourceOptions(recipe: recipe, rawResolution: .preview(maximumSize: canvasPixelSize))`;
 CIRAWFilter scales development to fit that oriented canvas without upscaling. Both paths keep
 Apple detail defaults and disable draft mode. Resolution is part of the source cache key, so
-preview and full development cannot alias; the cache still retains just one developed source.
+preview and full development cannot alias. Both variants are retained together.
 `rawSettings.nativeSize` preserves the oriented original size and `scaleFactor` records the
-actual request. Raster formats ignore this RAW option. Previews are lower-resolution source
-approximations; preview/export still use the same graph and fixed 768-edge analysis, with
-analysis cached separately for each developed source. Export must load `.full` before rendering
-at export size rather than enlarging a preview texture.
+actual request. The shared `resolution` option also applies to ImageIO. Previews are
+lower-resolution source approximations; preview/export share a fixed 1024-edge source
+and 768-edge analysis, independent of the last loaded variant. Export must load `.full`
+before rendering at export size rather than enlarging a preview texture.
 
 Processing is RGBA32Float extended-linear Display P3, SDR white 1. Generated pairs have
 RGBA32Float SDR base and R32Float log2 gain, zero offsets: `HDR = base * exp2(gain)`.
@@ -148,9 +148,9 @@ old engine's Oklab input compression. LUT table/domain/transfer/linear-strength 
 
 ## Caches, limits and P7-1b
 
-The engine retains one opened/materialized source, optional dual HDR reconstruction, original
-working-gamut author textures, one LUT resource set, one fixed-scale analysis result and one
-low-level node output. Analysis keys include source, tone/color/LUT, start and coverage;
+The engine retains full and the latest preview for one asset/development family, plus a
+fixed 1024-edge analysis source, optional dual HDR reconstruction, original working-gamut
+author textures, one LUT resource set, one fixed-scale analysis result and one node output. Analysis keys include source, tone/color/LUT, start and coverage;
 strength/range/rolloff/enabled edits reuse it. Fused final frames are rendered on demand;
 stripes allocate only stripe output textures, while source and fixed analysis remain resident.
 `clearCaches()` releases these and CI intermediates. Source textures still obey Metal size
@@ -169,7 +169,7 @@ Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a private TMP
 licensed RAW fixtures with `python3 scripts/fetch_test_fixtures.py`, then run `swift test
 --package-path apps/apple/Packages/HyperDRRender`. Host Metal/codec access is required.
 
-Nineteen focused tests cover the source contracts and each point operation, CPU-double LUT/
+Focused tests cover the source contracts and each point operation, CPU-double LUT/
 spatial analysis/offset references, tone anchors/white derivative, HDR-base invariance, rolloff
 compensation, soft shoulders, fixed analysis reuse, resized stripes, repeated/new-context
 renders, Apple-default RAW development/overrides and the Recipe/default/unit/LUT boundary.
@@ -295,3 +295,52 @@ start does not gate the model. Filter cache excludes light/color/LUT and retains
 source/model/start identity. Captured/model gain combines by maximum; strength,
 range soft shoulder, SDR rolloff compensation and HDR enable apply afterward.
 `DoubleReference.modelGain` provides the guided-postprocess double reference.
+
+
+R4–R8 editor support
+
+```swift
+let options = RenderOptions(bypassedGroups: [.light])
+let sourceOptions = try SourceOptions(recipe: recipe, resolution: resolution, options: options)
+let source = try await engine.load(url, options: sourceOptions)
+let frame = try await engine.render(source, recipe: recipe, options: options, size: size)
+let automatic = try await engine.resolvedAutomatic(source, recipe: recipe, options: options)
+let mask = try await engine.effectMask(source, recipe: recipe,
+                                      parameterID: "tone.highlights", options: options,
+                                      size: size, region: region)
+```
+
+Loaded variants share `RenderSource.id` for source/model identity, while separate
+internal render identities prevent preview/full GPU caches from aliasing. Statistics
+and model input reopen the same asset/development at a fixed 1024 longest edge (no
+upscale), then use the existing fixed 768 analysis grid. Source origin travels with
+the source so a different RenderEngine computes the same analysis. Preview/full
+switches keep statistics and predictions; changing file revision or RAW settings
+starts a new source family. One full, one latest preview and one analysis source
+bound internal residency. Synthetic/already-decoded sources use their supplied pixels.
+
+`RenderOptions.bypassedGroups` is ephemeral. Light/color/look bypass removes their
+edits; RAW color/detail bypass restores camera/Apple defaults. Pass the **same options
+to SourceOptions and rendering** so RAW bypass redevelops when needed. HDR bypass
+turns off HDR output and SDR rolloff. Recipe is never mutated or persisted with bypass.
+
+`resolvedAutomatic(_:recipe:lut:modelGain:options:)` returns `[String:Double]` in
+Recipe units: `hdr.range` in stops; analytic `hdr.expansionStart` in percent. It
+returns only values currently automatic, and omits an AI auto start because that
+means no numeric participation gate. Imported HDR/dual auto range retains source
+headroom (up to four), while generated SDR/RAW range is capped at three.
+
+`effectMask(_:recipe:parameterID:lut:modelGain:options:size:region:) -> RenderMask`
+returns R32Float participation in [0,1] and ROI/output-size metadata. Highlights,
+shadows and blacks use the actual luminance before that light node. Participation
+and coverage show the fixed-grid eligible region; AI auto participation is one.
+`gain` shows positive decoded gain divided by headroom, and `gainFull` shows whether
+positive gain exists. Inactive/bypassed operations return zero. Unsupported mask ids
+throw `invalidAdjustment`; there are no UI/color-map dependencies.
+
+`RAWDevelopment.sourceValues: [String:Double]` holds **pre-override defaults** in
+Recipe units: temperature Kelvin, neutralTint −150…150 directly, NR and sharpness
+0…100 percent. Existing applied scalar fields remain CIRAWFilter units (NR/sharpness
+0…1). `capabilities: Set<String>` uses the exact declaration capability strings.
+Use these dictionaries directly for AdjustmentContext; neither NR double conversion
+nor tint division by 100 belongs in the editor.

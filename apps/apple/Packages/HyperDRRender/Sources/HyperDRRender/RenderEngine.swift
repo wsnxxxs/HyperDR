@@ -20,17 +20,19 @@ public actor RenderEngine {
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
     var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
-    private var sourceCache: (key: SourceKey, source: RenderSource)?
+    private var sourceCache: [SourceKey: RenderSource] = [:]
+    private var sourceFamily: (key: SourceKey, id: UUID)?
+    private var analysisSource: RenderSource?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?
     private var outputCache: (key: OutputKey, planes: RenderPlanes)?
 
     func releaseNodeOutput() { outputCache = nil }
 
-    private struct SourceKey: Equatable {
+    private struct SourceKey: Hashable {
         let url: URL
         let size: Int?
         let modified: Date?
-        let options: SourceOptions
+        var options: SourceOptions
     }
     private struct OutputKey: Equatable {
         let source: UUID
@@ -58,7 +60,7 @@ public actor RenderEngine {
         var pipelines: [String: any MTLComputePipelineState] = [:]
         for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
-                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights"] {
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -66,7 +68,8 @@ public actor RenderEngine {
     }
 
     public func clearCaches() {
-        sourceCache = nil
+        sourceCache.removeAll()
+        analysisSource = nil
         modelPredictionCache = nil
         modelFilterCache = nil
         hdrCache = nil
@@ -84,13 +87,33 @@ public actor RenderEngine {
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let key = SourceKey(url: url.standardizedFileURL, size: values.fileSize,
                             modified: values.contentModificationDate, options: options)
-        if let cached = sourceCache, cached.key == key { return cached.source }
-        // Bound internal source residency to one image, including its RAW development.
-        clearCaches()
+        if let cached = sourceCache[key] { return cached }
+        var familyKey = key
+        familyKey.options.resolution = .full
+        if sourceFamily?.key != familyKey {
+            clearCaches()
+            sourceFamily = (familyKey,UUID())
+        }
         let opened = try Self.open(url, options: options)
-        let source = try materialize(opened)
-        sourceCache = (key, source)
+        let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options))
+        // Retain full and the latest preview together, while bounding variant residency.
+        sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
+        sourceCache[key] = source
         return source
+    }
+
+    /// Stable analysis development for this asset/settings family, independent of
+    /// which canvas tier or full-size variant the caller most recently loaded.
+    func fixedAnalysisSource(_ source: RenderSource) throws -> RenderSource {
+        guard let origin = source.origin else { return source }
+        if let cached = analysisSource, cached.id == source.id { return cached }
+        var options = origin.options
+        let scale = min(1,1024/Double(max(source.nativeSize.width,source.nativeSize.height)))
+        options.resolution = .preview(maximumSize:PixelSize(width:max(1,Int((Double(source.nativeSize.width)*scale).rounded(.up))),
+                                                          height:max(1,Int((Double(source.nativeSize.height)*scale).rounded(.up)))))
+        let result = try materialize(Self.open(origin.url,options:options),id:source.id,origin:origin)
+        analysisSource = result
+        return result
     }
 
     /// Synthetic/test and already-decoded source boundary. CI coordinates are
@@ -101,12 +124,13 @@ public actor RenderEngine {
                                              baseSpace: Self.workingColorSpace, gain: nil, raw: nil))
     }
 
-    private func materialize(_ opened: OpenedSource) throws -> RenderSource {
+    private func materialize(_ opened: OpenedSource, id: UUID = UUID(),
+                             origin: (url: URL, options: SourceOptions)? = nil) throws -> RenderSource {
         let texture = try rasterize(opened.image, space: opened.baseSpace)
         // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
-        return RenderSource(id: UUID(), domain: opened.domain,
+        return RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
             size: PixelSize(width: texture.width, height: texture.height),
             nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height), authoredGainMap: opened.gain,
             hdrImage: opened.hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
@@ -167,7 +191,7 @@ public actor RenderEngine {
         try validate(nodes)
         let size = size ?? source.size
         try validate(size)
-        let key = OutputKey(source: source.id, size: size, nodes: nodes.map(\.cacheKey))
+        let key = OutputKey(source: source.renderID, size: size, nodes: nodes.map(\.cacheKey))
         if let cached = outputCache, cached.key == key { return cached.planes }
         outputCache = nil
         let planes = try renderRegion(source, size: size,
@@ -213,9 +237,9 @@ public actor RenderEngine {
         guard !inputRegion.isNull, inputRegion.contains(region) else { throw RenderError.invalidRegion }
         var texture = source.texture
         if source.domain == .dual && edited {
-            if let cached = hdrCache, cached.id == source.id { texture = cached.texture } else {
+            if let cached = hdrCache, cached.id == source.renderID { texture = cached.texture } else {
                 texture = try rasterize(source.hdrImage, space: Self.workingColorSpace)
-                hdrCache = (source.id, texture)
+                hdrCache = (source.renderID, texture)
             }
         }
         guard let buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
@@ -277,9 +301,9 @@ public actor RenderEngine {
     public func reconstructedHDR(_ source: RenderSource) throws -> RenderedTexture {
         try Task.checkCancellation()
         if source.domain != .dual { return RenderedTexture(texture: source.texture, colorSpace: Self.workingColorSpace) }
-        if let cached = hdrCache, cached.id == source.id { return RenderedTexture(texture: cached.texture, colorSpace: Self.workingColorSpace) }
+        if let cached = hdrCache, cached.id == source.renderID { return RenderedTexture(texture: cached.texture, colorSpace: Self.workingColorSpace) }
         let texture = try rasterize(source.hdrImage, space: Self.workingColorSpace)
-        hdrCache = (source.id, texture)
+        hdrCache = (source.renderID, texture)
         return RenderedTexture(texture: texture, colorSpace: Self.workingColorSpace)
     }
 

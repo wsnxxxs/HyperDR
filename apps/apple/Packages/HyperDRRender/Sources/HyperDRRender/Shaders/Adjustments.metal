@@ -283,3 +283,35 @@ kernel void modelGainWeights(texture2d<float,access::read> cells [[texture(0)]],
     if(start>=0)g*=sm(.75f*start,max(.001f,min(1.f,1.1f*start)),y);
     output.write(float4(y,g,y*y,y*g),pos);
 }
+
+kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
+                       texture2d<float,access::write> output [[texture(1)]],
+                       texture2d<float,access::sample> gain [[texture(2)]],
+                       texture2d<float,access::sample> originalGuide [[texture(3)]],
+                       constant GraphUniform& p [[buffer(0)]],
+                       uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
+    float2 uv=(float2(pos+p.region.zw)+.5f)/float2(p.region.xy);
+    float4 original=source.sample(s,uv);float weight=0;
+    if(p.mode.z) { output.write(float4(0),pos);return; }
+    if(p.mode.x<3) {
+        float3 rgb=pointOp(original.rgb,5,p.tone1.y,p.flags.x==0);
+        rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
+        rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
+        if(p.mode.x>0)rgb=pointOp(rgb,2,p.tone0.z,false);
+        if(p.mode.x>1)rgb=pointOp(rgb,3,p.tone0.w,false);
+        float y=lum(rgb);
+        weight=p.mode.x==0 ? sm(.4f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
+    } else if(p.mode.x<5) {
+        float4 guide=originalGuide.sample(s,uv);
+        if(p.mode.w)weight=p.mode.w==1 ? 1.f : sm(.75f*p.hdr.x,max(.001f,min(1.f,1.1f*p.hdr.x)),guide.x);
+        else weight=guide.y;
+    } else {
+        // Normalized display gain is local to this ROI (or a whole native map).
+        float3 g=gain.sample(s,(float2(pos)+.5f)/float2(output.get_width(),output.get_height())).rgb;
+        float amount=p.mode.y==1 ? g.r : max(g.r,max(g.g,g.b));
+        weight=p.mode.x==5 ? clamp(amount/p.color.z,0.f,1.f) : (amount>1e-6f ? 1.f : 0.f);
+    }
+    output.write(float4(weight,0,0,0),pos);
+}

@@ -30,9 +30,11 @@ enum RenderParameter {
 
 private struct RecipeValues {
     let recipe: Recipe
+    var options = RenderOptions()
     func value(_ id: String) -> ParameterValue? {
         let parameter = RenderParameter.declaration(id)
-        if parameter.allows(recipe.inputDomain), let value = recipe.value(for:id) { return value }
+        if !options.bypassedGroups.contains(parameter.group), parameter.allows(recipe.inputDomain),
+           let value = recipe.value(for:id) { return value }
         guard case .constant(let value) = parameter.defaultValue(in:recipe.inputDomain) else { return nil }
         return value
     }
@@ -62,9 +64,9 @@ private struct RecipeValues {
 extension RenderAdjustments {
     /// Resolve declared recipe units once. The caller resolves recipe.look by its
     /// content hash; an active LUT must match that reference. Bookmarks stay outside Render.
-    public init(recipe: Recipe, lut: ColorLUT? = nil) throws {
+    public init(recipe: Recipe, lut: ColorLUT? = nil, options: RenderOptions = RenderOptions()) throws {
         self.init()
-        let values = RecipeValues(recipe:recipe)
+        let values = RecipeValues(recipe:recipe,options:options)
         tone.exposure = try values.number("tone.exposure")
         tone.contrast = try values.number("tone.contrast")
         tone.highlights = try values.number("tone.highlights")
@@ -75,7 +77,8 @@ extension RenderAdjustments {
         color.vibrance = try values.number("color.vibrance")
         color.saturation = try values.number("color.saturation")
         hdr.enabled = try values.bool("hdr.enabled")
-        hdr.source = recipe.hdrSource
+        if options.bypassedGroups.contains(.hdr) { hdr.enabled = false }
+        hdr.source = options.bypassedGroups.contains(.hdr) ? nil : recipe.hdrSource
         hdr.strength = try values.number("hdr.strength")
         hdr.range = try values.optionalNumber("hdr.range")
         hdr.expansionStart = try values.optionalNumber("hdr.expansionStart")
@@ -85,7 +88,7 @@ extension RenderAdjustments {
         look.strength = try values.number("look.strength")
         look.input = try values.space("look.input")
         look.output = try values.space("look.output")
-        if let reference = recipe.look {
+        if !options.bypassedGroups.contains(.look), let reference = recipe.look {
             if let lut, lut.contentHash != reference.contentHash { throw RenderError.invalidLUT("LUT content hash mismatch") }
             if look.enabled && look.strength != 0 && lut == nil { throw RenderError.invalidLUT("Resolve recipe.look before rendering") }
             look.lut = lut
@@ -95,9 +98,9 @@ extension RenderAdjustments {
 }
 
 extension SourceOptions {
-    public init(recipe: Recipe, rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full) throws {
+    public init(recipe: Recipe, rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full, options: RenderOptions = RenderOptions()) throws {
         self.init(rawResolution:rawResolution, resolution:resolution)
-        let values = RecipeValues(recipe:recipe)
+        let values = RecipeValues(recipe:recipe,options:options)
         lensCorrection = try values.bool("develop.lensCorrection")
         raw.temperature = try values.optionalNumber("develop.temperature")
         raw.tint = try values.optionalNumber("develop.tint")
@@ -109,19 +112,19 @@ extension SourceOptions {
 
 extension RenderEngine {
     public func render(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
-                       modelGain: ModelGainPrediction? = nil,
+                       modelGain: ModelGainPrediction? = nil, options: RenderOptions = RenderOptions(),
                        size: PixelSize? = nil, region: CGRect? = nil) throws -> RenderPlanes {
         guard recipe.inputDomain == source.domain else { throw RenderError.invalidAdjustment }
-        var edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
         edit.hdr.modelGain = modelGain
         return try render(source,adjustments:edit,size:size,region:region)
     }
     public func renderStripes(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
-                              modelGain: ModelGainPrediction? = nil,
+                              modelGain: ModelGainPrediction? = nil, options: RenderOptions = RenderOptions(),
                               size: PixelSize? = nil, rows: Int = 256,
                               consume: @Sendable (RenderPlanes) throws -> Void) throws {
         guard recipe.inputDomain == source.domain else { throw RenderError.invalidAdjustment }
-        var edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
         edit.hdr.modelGain = modelGain
         try renderStripes(source,adjustments:edit,size:size,rows:rows,consume:consume)
     }

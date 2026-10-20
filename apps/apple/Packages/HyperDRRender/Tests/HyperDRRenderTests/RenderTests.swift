@@ -118,6 +118,11 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let preview = try await engine.load(url,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:1,height:1))))
         #expect(preview.domain == .sdr && preview.size == PixelSize(width:1,height:1))
         #expect(preview.nativeSize == PixelSize(width:1,height:2))
+        let fixed = try await engine.analysis(preview)
+        let another = try RenderEngine()
+        let independent = try await another.analysis(preview)
+        #expect(fixed.size == PixelSize(width:1,height:2) && fixed.size == independent.size)
+        close(RenderEngine.readTexture(fixed.cells),RenderEngine.readTexture(independent.cells))
         #expect(try SourceResolution.preview(canvasSize:PixelSize(width:1400,height:900),nativeSize:PixelSize(width:6000,height:4000))
                 == .preview(maximumSize:PixelSize(width:2048,height:1365)))
     }
@@ -201,6 +206,10 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         #expect(settings.colorNR == defaults.colorNoiseReductionAmount)
         #expect(settings.temperature == defaults.neutralTemperature)
         #expect(settings.tint == defaults.neutralTint)
+        #expect(settings.sourceValues["develop.tint"] == Double(defaults.neutralTint))
+        #expect(settings.sourceValues["develop.temperature"] == Double(defaults.neutralTemperature))
+        #expect(settings.sourceValues["develop.luminanceNR"] == Double(defaults.luminanceNoiseReductionAmount)*100)
+        #expect(settings.capabilities.contains("CIRAWFilter.isSharpnessSupported") == defaults.isSharpnessSupported)
         #expect(settings.scaleFactor == 1 && !settings.isDraft)
         let previewOptions = SourceOptions(lensCorrection:false,rawResolution:.preview(maximumSize:target))
         let previewStart = DispatchTime.now().uptimeNanoseconds
@@ -210,7 +219,13 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let previewRendered = DispatchTime.now().uptimeNanoseconds
         let previewCached = try await engine.load(temporary,options:previewOptions)
         let previewSettings = try #require(preview.rawSettings)
-        #expect(preview.id != source.id && preview.id == previewCached.id)
+        #expect(preview.id == source.id && preview.id == previewCached.id)
+        #expect(preview.texture !== source.texture)
+        let restoredFull = try await engine.load(temporary,options:SourceOptions(lensCorrection:false))
+        #expect(restoredFull.texture === source.texture)
+        let previewAnalysis = try await engine.analysis(preview)
+        let fullAnalysis = try await engine.analysis(source)
+        #expect(previewAnalysis.cells === fullAnalysis.cells && previewAnalysis.expansion === fullAnalysis.expansion)
         #expect(preview.size.width <= target.width+1 && preview.size.height <= target.height+1)
         #expect(previewSettings.nativeSize == settings.nativeSize && previewSettings.scaleFactor < 1)
         #expect(!previewSettings.isDraft && previewSettings.sharpness == settings.sharpness)
@@ -247,6 +262,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let adjusted = try #require(developed.rawSettings)
         #expect(developed.id != source.id)
         #expect(adjusted.temperature == raw.temperature && adjusted.tint == raw.tint)
+        #expect(adjusted.sourceValues == settings.sourceValues)
         if adjusted.supportsLuminanceNR { #expect(adjusted.luminanceNR == 0.4) }
         if adjusted.supportsColorNR { #expect(adjusted.colorNR == 0.3) }
         if adjusted.supportsSharpness { #expect(adjusted.sharpness == 0.2) }
@@ -274,7 +290,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let gain = AuthoredGainMap(standard: .iso, auxiliaryInfo: tags as NSDictionary,
             image: gainSource.hdrImage, channelCount: 3, baseColorSpace: p3,
             alternateColorSpace: nil, auxiliaryColorSpace: nil, tags: tags)
-        let pairSource = RenderSource(id: UUID(), domain: .dual, size: baseSource.size, nativeSize: baseSource.nativeSize,
+        let pairSource = RenderSource(id: UUID(), renderID:UUID(), origin:nil, domain: .dual, size: baseSource.size, nativeSize: baseSource.nativeSize,
             authoredGainMap: gain, hdrImage: baseSource.hdrImage, authoredBaseImage: baseSource.hdrImage,
             rawSettings: nil, texture: baseSource.texture, baseSpace: p3, gainTexture: gainSource.texture)
         let carriedPair = try await engine.render(pairSource)

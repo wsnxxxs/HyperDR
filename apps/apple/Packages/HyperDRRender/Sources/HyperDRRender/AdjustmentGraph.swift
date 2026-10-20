@@ -89,6 +89,7 @@ extension RenderEngine {
     public func analysis(_ source: RenderSource, adjustments edit: RenderAdjustments = RenderAdjustments()) throws -> SpatialAnalysis {
         try Task.checkCancellation()
         try edit.validate(domain:source.domain)
+        let source = try fixedAnalysisSource(source)
         let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look,
                               start: edit.hdr.expansionStart ?? RenderParameter.expansionStart, coverage: edit.hdr.coverage)
         if let cached = analysisCache, cached.key == key { return cached.result }
@@ -226,7 +227,7 @@ extension RenderEngine {
     }
 
     func authorWorking(_ source: RenderSource) throws -> (base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata) {
-        if let cache = authorCache, cache.id == source.id { return (cache.base, cache.hdr, cache.metadata) }
+        if let cache = authorCache, cache.id == source.renderID { return (cache.base, cache.hdr, cache.metadata) }
         authorCache = nil
         guard let original = source.authoredGainMap, let baseImage = source.authoredBaseImage else { throw RenderError.missingGainMap }
         let space = original.gainWorkingColorSpace ?? source.baseSpace
@@ -239,7 +240,7 @@ extension RenderEngine {
         }
         let metadata = ISOLogGainMetadata(source: original, workingColorSpace: space,
             baseOffset: vector(\.baseOffset), alternateOffset: vector(\.alternateOffset))
-        authorCache = (source.id, base, hdr, metadata)
+        authorCache = (source.renderID, base, hdr, metadata)
         return (base, hdr, metadata)
     }
 

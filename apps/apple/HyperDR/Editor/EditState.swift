@@ -17,6 +17,8 @@ nonisolated struct ExportChoices: Equatable, Sendable {
     /// For an SDR format: `auto`, `srgb` or `p3`.
     var outputGamut = "auto"
     var quality = Double(CustomExportFormat().quality)
+    /// The photo's long edge in the export; nil keeps the original size.
+    var longEdge: Int?
 
     var workflow: Workflow { Workflow(encoding: encoding) }
 
@@ -36,6 +38,7 @@ nonisolated struct ExportChoices: Equatable, Sendable {
     init(_ format: CustomExportFormat) {
         encoding = format.encoding.rawValue
         quality = Double(format.quality)
+        longEdge = format.longEdge
         if workflow == .colorOnly { outputGamut = format.gamut == .p3 ? "p3" : "srgb" }
     }
     init() {}
@@ -43,13 +46,12 @@ nonisolated struct ExportChoices: Equatable, Sendable {
     /// What Kit plans from.
     var customFormat: CustomExportFormat {
         CustomExportFormat(encoding: ExportEncoding(rawValue: encoding) ?? .adaptive, gamut: gamut,
-                           quality: Int(quality.rounded()))
+                           quality: Int(quality.rounded()), longEdge: longEdge)
     }
 }
 
 /// A one-shot message the view shows in place (not an alert).
 nonisolated enum EditorNotice: Equatable {
-    case rangeClamped(maxStops: Double)
     case clipboardImageUnsupported
 }
 

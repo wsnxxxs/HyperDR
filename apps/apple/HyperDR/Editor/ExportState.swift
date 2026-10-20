@@ -186,6 +186,8 @@ nonisolated extension Duration {
     var outputGamut = "srgb"
     /// The gamut the export writes, as the planner resolves it.
     var gamut: ExportColorGamut = .p3
+    /// The custom format's long edge; nil keeps the original size.
+    var longEdge: Int?
     var phase: Phase = .idle
     var startedAt: Date?
     var stage: String?

@@ -38,6 +38,7 @@ extension EditorModel {
         export.encodingID = choices.encoding
         export.outputGamut = choices.outputGamut == "auto" ? (choices.encoding == "sdr-tiff" ? "p3" : "srgb") : choices.outputGamut
         export.gamut = choices.gamut
+        if export.longEdge != choices.longEdge { export.longEdge = choices.longEdge }
         if let capabilities = exportCapabilities {
             export.encodingAvailability = capabilities.availability(isHDR: source.domain == .hdr || source.domain == .dual)
         }
@@ -91,7 +92,8 @@ extension EditorModel {
     func captureExport() throws -> ExportIntent {
         let capture = try editor.exportCapture()
         let model = restoredModel.flatMap { $0.recipe == capture.recipe ? $0.identity : nil }
-        return ExportIntent(capture: capture, frame: try makeExportFrame(), choices: exportChoices, expectedModelIdentity: model)
+        return ExportIntent(capture: capture, frame: try makeExportFrame(), choices: exportChoices,
+                            capabilities: exportCapabilities?.exportFacts ?? .init(), expectedModelIdentity: model)
     }
     /// Capture immediately before presenting the save panel (or starting a
     /// fixed-folder export). Only the most recently issued token remains valid.
@@ -141,10 +143,16 @@ extension EditorModel {
                 try Task.checkCancellation()
                 let job = try intent.get().job(revision: try await services.sourceRevision(photo))
                 try Task.checkCancellation()
+                // The size written: the frame's canvas, else the photo after
+                // the format's long edge (the history keeps written pixels).
                 let exportSize: PixelSize?
                 if let frame = try intent.get().frame {
                     exportSize = PixelSize(width: frame.layout.width, height: frame.layout.height)
-                } else { exportSize = document?.pixelSize }
+                } else {
+                    let request = job.request
+                    let fitted = ExportPlanner.photoSize(for: request.choice, photo: request.source.pixelSize)
+                    exportSize = PixelSize(width: fitted.width, height: fitted.height)
+                }
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: false, hasFrame: framed, verifies: true), pixels: pixels)
@@ -194,7 +202,7 @@ extension EditorModel {
             if error.code != "raw_unsupported", let line = export.lastLine, !line.isEmpty, detail?.contains(line) != true {
                 detail = detail.map { $0 + "\n" + line } ?? line
             }
-            failure = UserFacingError(code: error.code, detail: detail, variant: variant)
+            failure = UserFacingError(code: error.code, detail: detail, variant: variant, suggestedLongEdge: error.suggestedLongEdge)
         }
         export.isStopping = false; exportTask = nil
         if failure?.code == "session_expired" { handleExportError(failure!); return }
@@ -404,6 +412,23 @@ extension EditorModel {
         exportChoices.outputGamut = id
         exportChoicesChanged()
     }
+    /// The photo's long edge before any limit.
+    var exportPhotoLongEdge: Int? { document?.pixelSize.map { max($0.width, $0.height) } }
+    /// A picked or typed long edge (`ExportLongEdge.normalized`); also
+    /// "Change to long edge N px" when memory blocks the export.
+    func setExportLongEdge(_ edge: Int?) {
+        let edge = ExportLongEdge.normalized(edge, photo: exportPhotoLongEdge)
+        guard photo != nil, !isEditingLocked, exportChoices.longEdge != edge else { return }
+        exportChoices.longEdge = edge
+        exportChoicesChanged()
+    }
+    /// Kit's plan for the current edit and format, with the measured memory
+    /// budget: what the settings page asks before starting. nil while there
+    /// is nothing to plan.
+    func exportPlan() -> ExportPlan? {
+        guard photo != nil, document?.phase == .ready else { return nil }
+        return try? ExportPlanner.plan(captureExport().request)
+    }
     private var rawDiagnostics: String {
         guard let raw = document?.source?.raw else { return "" }
         let support = raw.lensCorrectionSupported ? "supported" : "unsupported"
@@ -463,6 +488,8 @@ struct ExportIntent {
     let capture: EditorExportCapture
     let frame: FrameExportPlan?
     let choices: ExportChoices
+    /// The encoder facts the plan checks the format against.
+    var capabilities = ExportEncodingCapabilities()
     /// Set when re-rendering a restored version that used AI.
     var expectedModelIdentity: String? = nil
 
@@ -470,7 +497,7 @@ struct ExportIntent {
     var request: ExportPlanRequest {
         capture.planRequest(.custom(choices.customFormat), frame: ExportFrameFacts(canvas: frame.map {
             ExportPixelSize(width: $0.layout.width, height: $0.layout.height)
-        }))
+        }), capabilities: capabilities)
     }
 
     func snapshot(revision: RecipeSourceRevision) -> RecipeExportSnapshot {

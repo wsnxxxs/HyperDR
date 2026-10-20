@@ -14,6 +14,8 @@ nonisolated struct ExportStack: Sendable {
     /// The LUT library, on the same session store: an export applies the
     /// look's LUT from it into the photo's session.
     let luts: LUTLibrary
+    /// This device's encoder facts, which the plan checks formats against (K6).
+    var capabilities = ExportEncodingCapabilities()
 
     static func live() async throws -> ExportStack {
         let configuration = KitConfiguration()
@@ -23,7 +25,8 @@ nonisolated struct ExportStack: Sendable {
         let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
                                           target: ExportTarget(configuration: configuration, sessions: sessions))
         return ExportStack(sessions: sessions, service: service,
-                           luts: LUTLibrary(configuration: configuration, sessions: sessions))
+                           luts: LUTLibrary(configuration: configuration, sessions: sessions),
+                           capabilities: ExportEncodingCapabilities(try await engine.capabilities()))
     }
 }
 
@@ -67,6 +70,8 @@ nonisolated struct ExportStack: Sendable {
         var memory: String?
         /// Stopped by leaving the app: "Export again" restarts with the edit.
         var restartable = false
+        /// Out of memory: the largest long edge that fits.
+        var suggestedLongEdge: Int?
     }
 
     enum Phase {
@@ -95,6 +100,9 @@ nonisolated struct ExportStack: Sendable {
     /// `fileExporter`'s binding.
     var presentingFileExporter = false
 
+    /// The device's encoder facts, once the stack is up.
+    private(set) var capabilities = ExportEncodingCapabilities()
+
     /// Whether the editor's photo has a session (open or still opening).
     private(set) var hasPhoto = false
     /// The host's photo request being loaded (copied or decoded), from the
@@ -122,6 +130,9 @@ nonisolated struct ExportStack: Sendable {
         let stack = Task { try await makeStack() }
         self.stack = stack
         luts = IOSLUTLibrary { Task { try await stack.value.luts } }
+        Task { [weak self] in
+            if let capabilities = try? await stack.value.capabilities { self?.capabilities = capabilities }
+        }
     }
 
     var choice: ExportChoice {
@@ -136,20 +147,23 @@ nonisolated struct ExportStack: Sendable {
     /// The plan for the current choice, from the editor as it is.
     func plan(_ editor: RecipeEditor) -> ExportPlan? {
         guard let capture = try? editor.exportCapture() else { return nil }
-        return ExportPlanner.plan(capture.planRequest(choice))
+        return ExportPlanner.plan(capture.planRequest(choice, capabilities: capabilities))
     }
 
-    /// The long edges offered besides the original size (p7-3c-export §1.3 B).
-    static let longEdgePresets = [3840, 2560, 2160, 1080]
+    /// Why a destination cannot be chosen: only the Photos destination
+    /// before its saving is verified (the plan's `photosNotAvailable`).
+    func unavailableReason(_ destination: ExportDestination, _ editor: RecipeEditor) -> ExportBlockReason? {
+        guard let capture = try? editor.exportCapture() else { return nil }
+        return ExportPlanner.plan(capture.planRequest(.destination(destination), capabilities: capabilities))
+            .blockers.first { $0.destinationShortPhrase != nil }
+    }
 
-    /// The long edges the size picker offers for a photo whose long edge is
-    /// `photo`: the original size (nil), the presets smaller than the photo,
-    /// and the current limit when it is none of those (typed, or the memory
-    /// budget's).
-    static func longEdgeChoices(photo: Int?, current: Int?) -> [Int?] {
-        var edges = longEdgePresets.filter { edge in photo.map { edge < $0 } ?? true }
-        if let current, !edges.contains(current) { edges.append(current) }
-        return [nil] + edges.sorted(by: >)
+    /// Why an encoding cannot be written here (no HEVC encoder, HDR off):
+    /// the same answer the plan gives (K6).
+    func unavailableReason(_ encoding: ExportEncoding, _ editor: RecipeEditor) -> ExportBlockReason? {
+        guard let capture = try? editor.exportCapture() else { return nil }
+        let request = capture.planRequest(.custom(custom), capabilities: capabilities)
+        return ExportPlanner.availability(of: encoding, source: request.source, capabilities: capabilities, edit: request.edit)
     }
 
     /// The photo's own long edge, before any limit.
@@ -158,32 +172,17 @@ nonisolated struct ExportStack: Sendable {
         return capture.planRequest(choice).source.pixelSize.longEdge
     }
 
-    /// A typed long edge: a positive number below the photo's; anything else
-    /// keeps the original size.
+    /// A picked or typed long edge (`ExportLongEdge.normalized`).
     func setLongEdge(_ edge: Int?, photo: Int?) {
-        guard let edge, edge > 0, photo.map({ edge < $0 }) ?? true else {
-            custom.longEdge = nil
-            return
-        }
-        custom.longEdge = edge
+        custom.longEdge = ExportLongEdge.normalized(edge, photo: photo)
     }
 
     /// "Change to long edge N px" when memory blocks the export: the custom
     /// page with the choice's settings and the largest long edge the budget
     /// admits.
-    func useLongEdge(_ edge: Int, from plan: ExportPlan) {
+    func useLongEdge(_ edge: Int, from plan: ExportPlan?) {
         if page == .destination { useCustomFormat(from: plan) }
         custom.longEdge = edge
-    }
-
-    /// The ceiling the planner's own notice names when it brings the edit's
-    /// highlights down (`dest.ceiling` for a destination, `export.rangeClamped`
-    /// for a custom format): the one notice with a stop count.
-    static func ceiling(in plan: ExportPlan) -> Double? {
-        for notice in plan.notices {
-            if case .ceiling(let stops, _) = notice { return stops }
-        }
-        return nil
     }
 
     /// The ceiling the export actually applied, from Render's report: the
@@ -212,12 +211,11 @@ nonisolated struct ExportStack: Sendable {
         if loadingRequest == id { loadingRequest = nil }
     }
 
-    /// Whether the current choice can start: a settled photo, a destination
-    /// that exists on iOS now, and a plan without blockers. The session may
+    /// Whether the current choice can start: a settled photo and a plan
+    /// without blockers (which include a destination not open yet). The session may
     /// still be hashing; the run waits for it.
     func canStart(_ plan: ExportPlan?, _ editor: RecipeEditor) -> Bool {
-        guard isSettled(editor), luts.missingLook(editor) == nil, let plan, plan.isExecutable else { return false }
-        return !(page == .destination && destination == .photos)
+        isSettled(editor) && luts.missingLook(editor) == nil && plan?.isExecutable == true
     }
 
     /// "Custom format…": the destination's encoding, gamut and quality carried over.
@@ -396,7 +394,10 @@ nonisolated struct ExportStack: Sendable {
             return
         }
         var failure = Self.failure(error)
-        if let memory { failure = Failure(key: failure.key, detail: memory.summary, memory: Self.memoryLine(memory)) }
+        if let memory {
+            failure = Failure(key: failure.key, detail: memory.summary, memory: Self.memoryLine(memory),
+                              suggestedLongEdge: failure.suggestedLongEdge)
+        }
         phase = .failed(failure)
     }
 
@@ -415,23 +416,6 @@ nonisolated struct ExportStack: Sendable {
         case .process: return String(localized: "ios.export.memory.process \(needed) \(available)")
         case .gpu: return String(localized: "ios.export.memory.gpu \(needed) \(available)")
         }
-    }
-
-    /// The plan's own estimate, when its memory blocks the export.
-    static func memoryEstimate(_ plan: ExportPlan) -> String? {
-        guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return nil }
-        let peak = mebibytes(plan.memory.estimate.peak)
-        guard let available = plan.memory.availableBytes else {
-            return String(localized: "ios.export.memory.estimateUnknown \(peak)")
-        }
-        return String(localized: "ios.export.memory.estimate \(peak) \(mebibytes(available))")
-    }
-
-    /// The largest long edge the memory budget admits, when memory is what
-    /// blocks the export and a smaller size would fit.
-    static func admissibleLongEdge(_ plan: ExportPlan) -> Int? {
-        guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return nil }
-        return plan.memory.maxAdmissibleLongEdge
     }
 
     /// A cancelled run (by the user or by leaving the app), not a failure.
@@ -481,7 +465,8 @@ nonisolated struct ExportStack: Sendable {
             case .sourceChanged: return Failure(key: "ios.error.sourceChanged", detail: nil)
             case .missingLUT: return Failure(key: "ios.export.error.missingLUT", detail: nil)
             case .missingModel: return Failure(key: "ios.export.error.missingModel", detail: nil)
-            case .memoryExceeded: return Failure(key: "ios.export.error.memory", detail: nil)
+            case .memoryExceeded(let reason):
+                return Failure(key: "ios.export.error.memory", detail: nil, suggestedLongEdge: reason.suggestedLongEdge)
             case .planBlocked(let codes): return Failure(key: "ios.export.blocked", detail: codes.joined(separator: ", "))
             case .verificationFailed(let reason): return Failure(key: "ios.export.error.verification", detail: reason)
             case .invalidSnapshot, .invalidStripes: return Failure(key: "ios.export.error.other", detail: String(describing: error))

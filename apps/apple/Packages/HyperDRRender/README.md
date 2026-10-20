@@ -487,3 +487,9 @@ Repeat explicitly with `HYPERDR_EXPORT_MEMORY_PROBE=full` or `stream` and
 The ordinary suite skips this measurement. Functional tests compare oriented
 raster, authored gain pairs and RAW ROI/resized exports against whole-source
 rendering within one normalized 10-bit code; gain uses the 0–4-stop code range.
+Export reports distinguish the rendered `sourceProvenance` from final
+`provenance`. `rangeBeforeCeiling` / `rangeAfterCeiling` are resolved stops;
+`ceilingApplied` says the output ceiling narrowed that range. This upstream H3
+adjustment does not require a resplit and is reported even when `resplitReasons`
+is empty. A later output-boundary conversion still records `.outputCeiling`
+among its actual resplit reasons.

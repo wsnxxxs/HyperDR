@@ -6,10 +6,11 @@ let package = Package(
     platforms: [.macOS(.v26), .iOS(.v26)],
     products: [.library(name: "HyperDRKit", targets: ["HyperDRKit"]),
                .executable(name: "HyperDRKitParity", targets: ["HyperDRKitParity"])],
-    dependencies: [.package(path: "../HyperDREngine")],
+    dependencies: [.package(path: "../HyperDREngine"), .package(path: "../HyperDRRecipe")],
     targets: [
         .target(name: "HyperDRKit", dependencies: [
-            .product(name: "HyperDREngine", package: "HyperDREngine")
+            .product(name: "HyperDREngine", package: "HyperDREngine"),
+            .product(name: "HyperDRRecipe", package: "HyperDRRecipe")
         ]),
         .executableTarget(name: "HyperDRKitParity", dependencies: ["HyperDRKit"]),
         .testTarget(name: "HyperDRKitTests", dependencies: ["HyperDRKit"],

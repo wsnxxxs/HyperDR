@@ -1,36 +1,66 @@
 import Foundation
+import HyperDRRecipe
 
 /// What the open photo is, as far as export planning cares.
 public struct ExportSource: Sendable, Hashable {
-    public enum Kind: String, Sendable, Hashable, Codable {
-        /// RAW, developed through `CIRAWFilter`: an HDR rendition.
-        case raw
-        /// One rendition: JPEG, PNG, TIFF, or a HEIC/AVIF without a gain map.
-        case raster
-        /// An SDR base plus the photo's own gain map (the `dual` domain).
-        case dual
-    }
-
-    public let kind: Kind
-    /// The oriented size the photo is written at.
+    /// The source's input domain, as the Recipe states it (gpu-pipeline §3):
+    /// `sdr`, `hdr`, `dual` or `rawEDR`. The domain decides the base depth, and
+    /// with it the writer and the memory row, so a caller never has to claim a
+    /// RAW or a pair that is not there.
+    public let domain: InputDomain
+    /// The oriented raster the source decodes to, before any destination limit.
     public let pixelSize: ExportPixelSize
     /// The RAW sensor size, when it differs from the developed size.
     public let sensorSize: ExportPixelSize?
-    /// The channel count of the photo's own gain map; 1 when it has none.
-    public let authoredGainChannels: Int
 
-    public init(kind: Kind, pixelSize: ExportPixelSize, sensorSize: ExportPixelSize? = nil,
-                authoredGainChannels: Int = 1) {
-        self.kind = kind
+    public init(domain: InputDomain, pixelSize: ExportPixelSize,
+                sensorSize: ExportPixelSize? = nil) {
+        self.domain = domain
         self.pixelSize = pixelSize
         self.sensorSize = sensorSize
-        self.authoredGainChannels = authoredGainChannels
     }
 
-    /// RAW and photos that carry their own gain map have highlight information
-    /// above SDR white, so an adaptive HEIC pair for them takes a 10-bit base
-    /// (M3 contract §5.4).
-    public var isHDRRendition: Bool { kind != .raster }
+    /// Anything but `sdr` carries real values above SDR white, so an adaptive
+    /// HEIC pair for it takes a 10-bit base (M3 contract §5.4).
+    public var isHDRRendition: Bool { domain != .sdr }
+}
+
+/// The gain-map pair the render produced for this export (gpu-pipeline §3, and
+/// p7-adjustments' 2026-10-21 H1 exception). The plan decides the writer and
+/// any re-separation from this, never from the source file's channel count: a
+/// one-channel authored map can become a three-channel pair once an HDR-only
+/// edit is folded into it exactly (`RenderEngine.renderAuthorRegion` reports
+/// `gainChannelCount: 3` then).
+public struct ExportGainPair: Sendable, Hashable, Codable {
+    public enum Provenance: String, Sendable, Hashable, Codable {
+        /// The photo's own pair, untouched (Render's `.authored`).
+        case authored
+        /// The photo's own pair with an HDR-only edit folded into its gain, so
+        /// the channel count may have changed (Render's `.authored`).
+        case editedAuthored
+        /// Separated by us from an HDR rendition or an expansion (Render's `.split`).
+        case separated
+        /// Re-separated after an edit that changed tone, colour or look
+        /// (Render's `.resplit`).
+        case resplit
+    }
+
+    public let provenance: Provenance
+    /// 1 or 3 (ISO 21496-1). Ours are always 1; an authored pair may be 3.
+    public let channels: Int
+    /// True when the pair's base and alternate offsets are both zero, which is
+    /// always true of what we separate and not always of an imported pair.
+    public let offsetsAreZero: Bool
+
+    public init(provenance: Provenance, channels: Int = 1, offsetsAreZero: Bool = true) {
+        self.provenance = provenance
+        self.channels = channels == 3 ? 3 : 1
+        self.offsetsAreZero = offsetsAreZero
+    }
+
+    /// The pair we separate from an `sdr`, `hdr` or `rawEDR` source: one channel,
+    /// zero offsets.
+    public static let separatedMono = ExportGainPair(provenance: .separated)
 }
 
 /// The edit state the plan needs, and nothing else.
@@ -40,17 +70,10 @@ public struct ExportEditFacts: Sendable, Hashable {
     /// The resolved `hdr.range` in stops. "Auto" is resolved before planning:
     /// for `hdr` and `dual` sources it is never below the source's own headroom.
     public var peakStops: Double
-    /// A `dual` source whose edit stayed inside the HDR group keeps its own gain
-    /// map (p7-adjustments, the 2026-10-21 H1 exception). Anything else makes the
-    /// pair a resplit. The default is false on purpose: without proof that the
-    /// gain is still a transform of the photo's own map, re-separating is the
-    /// answer that is always right.
-    public var keepsAuthoredGain: Bool
 
-    public init(hdrEnabled: Bool = true, peakStops: Double, keepsAuthoredGain: Bool = false) {
+    public init(hdrEnabled: Bool = true, peakStops: Double) {
         self.hdrEnabled = hdrEnabled
         self.peakStops = peakStops
-        self.keepsAuthoredGain = keepsAuthoredGain
     }
 }
 
@@ -128,17 +151,24 @@ public enum ExportPlanText {
 public struct ExportPlanRequest: Sendable, Hashable {
     public var choice: ExportChoice
     public var source: ExportSource
+    /// The pair the render produced, when it produced one. nil is read as "the
+    /// render did what our separation always does" for an `sdr`, `hdr` or
+    /// `rawEDR` source, and as a resplit for a `dual` one: without a
+    /// description, re-separating is the answer that is always right.
+    public var pair: ExportGainPair?
     public var frame: ExportFrameFacts
     public var edit: ExportEditFacts
     /// Only the "Photos" destination reads this; a web or social export ignores it.
     public var library: ExportLibraryFacts
     public var resources: ExportRetainedResources
 
-    public init(choice: ExportChoice, source: ExportSource, frame: ExportFrameFacts = ExportFrameFacts(),
+    public init(choice: ExportChoice, source: ExportSource, pair: ExportGainPair? = nil,
+                frame: ExportFrameFacts = ExportFrameFacts(),
                 edit: ExportEditFacts, library: ExportLibraryFacts = ExportLibraryFacts(),
                 resources: ExportRetainedResources = ExportRetainedResources()) {
         self.choice = choice
         self.source = source
+        self.pair = pair
         self.frame = frame
         self.edit = edit
         self.library = library
@@ -358,21 +388,24 @@ public enum ExportPlanner {
     static func gainMapPlan(request: ExportPlanRequest, writer: ExportWriter,
                             writesGainMap: Bool) -> GainMapPlan {
         guard writesGainMap else { return .sdr }
+        // Without a description, a dual source is planned as a resplit (correct
+        // pixels, and it is what Render does once tone, colour or look changed).
+        let pair = request.pair
+            ?? (request.source.domain == .dual ? ExportGainPair(provenance: .resplit) : .separatedMono)
         let zeroInFrame = request.frame.isFramed
-        guard request.source.kind == .dual else {
-            // Everything we separate ourselves is one channel with zero offsets.
-            return GainMapPlan(origin: .separated, channels: 1, zeroGainInFrame: zeroInFrame)
-        }
-        guard request.edit.keepsAuthoredGain else {
-            return GainMapPlan(origin: .resplit, channels: 1, zeroGainInFrame: zeroInFrame,
-                               resplitReason: .editedBeyondGain)
-        }
-        let channels = request.source.authoredGainChannels == 3 ? 3 : 1
-        if channels == 3, !writer.carriesThreeChannelGain {
-            return GainMapPlan(origin: .resplit, channels: 1, zeroGainInFrame: zeroInFrame,
+        let authored = pair.provenance == .authored || pair.provenance == .editedAuthored
+        if authored, pair.channels > 1, !writer.carriesThreeChannelGain {
+            // The chosen writer carries one channel only, so the pair must be
+            // separated again; ours is mono with zero offsets.
+            return GainMapPlan(origin: .resplit, channels: 1, offsetsAreZero: true,
+                               zeroGainInFrame: zeroInFrame,
                                resplitReason: .writerCarriesOneChannel)
         }
-        return GainMapPlan(origin: .authored, channels: channels, zeroGainInFrame: zeroInFrame)
+        let origin: GainMapPlan.Origin = authored
+            ? .authored : pair.provenance == .separated ? .separated : .resplit
+        return GainMapPlan(origin: origin, channels: pair.channels,
+                           offsetsAreZero: pair.offsetsAreZero,
+                           zeroGainInFrame: zeroInFrame)
     }
 
     // MARK: Memory

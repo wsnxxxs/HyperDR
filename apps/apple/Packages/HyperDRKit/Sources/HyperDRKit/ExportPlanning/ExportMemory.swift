@@ -118,9 +118,12 @@ public struct ExportRetainedResources: Sendable, Hashable {
         self.frameOverlayPixels = frameOverlayPixels
     }
 
-    /// A LUT value is an `array<float, 3>`; the overlay is kept as RGBA float.
+    /// A LUT value costs three copies of 16 bytes: the CPU table
+    /// (`[SIMD3<Float>]` has a 16-byte stride), the `rgba32Float` 3D texture, and
+    /// the `[SIMD4<Float>]` the upload stages through (HyperDRRender's
+    /// `ColorLUT`). The frame overlay is RGBA float.
     public var bytes: Int {
-        lutAssetBytes + lutValueCount * 12 + frameSpecificationBytes
+        lutAssetBytes + lutValueCount * (16 * 3) + frameSpecificationBytes
             + frameOverlayBytes + frameOverlayPixels * 16
     }
 }
@@ -165,11 +168,11 @@ extension ExportMemoryEstimate {
         let sensorPixels = (input.source.sensorSize ?? source).pixels
 
         let sdr = input.encoding.isSDR
-        let raw = input.source.kind == .raw
+        let raw = input.source.domain == .rawEDR
         // An imported pair holds its HDR and SDR float planes beside the gain
-        // map; a single-rendition raster does not.
-        let pair = input.source.kind == .dual
-        let raster = input.source.kind == .raster
+        // map; a single rendition (SDR or HDR) does not.
+        let pair = input.source.domain == .dual
+        let raster = !raw && !pair
         // RAW keeps the renderer's floor plus a GPU working set; everything
         // else pays the process and framework caches.
         let overhead = raw ? 192 * mib : 32 * mib

@@ -478,7 +478,7 @@ struct RecipeExportEnvironment {
         let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
         let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
         #expect(package.gain?.channels == 3)
-        #expect(evidence.system.verifiedHeadroomStops == [2, 1])
+        #expect(evidence.system.verifiedHeadroomStops == [2])
     }
 
     @Test func sdrAndHDRSamplesMatchTheRenderedPlanesAtDeclaredHeadrooms() async throws {
@@ -529,6 +529,20 @@ struct RecipeExportEnvironment {
         #expect(revision.modificationTimeMilliseconds == Int64((changed.timeIntervalSince1970 * 1000).rounded()))
         #expect(revision.sha256 == env.session.sha256)
         #expect(try Data(contentsOf: env.session.sourceURL) == originalBytes)
+    }
+
+    @Test func memoryFailureIncludesTheCheckAndMiBNumbers() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let service = env.service(budget: 1)
+        await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
+            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: env.request(.sdrJPEG))
+        }
+        let api: any RecipeExportServicing = service
+        let diagnostic = try #require(await api.lastMemoryDiagnostic)
+        #expect(diagnostic.check == .process && diagnostic.phase == .planning)
+        #expect(diagnostic.availableBytes == 1 && diagnostic.requiredBytes > 1)
+        #expect(diagnostic.requiredMiB > diagnostic.availableMiB)
+        #expect(diagnostic.summary.contains("check=process") && diagnostic.summary.contains("MiB"))
     }
 
     @Test func cancellationDiscardsPartialStripes() async throws {

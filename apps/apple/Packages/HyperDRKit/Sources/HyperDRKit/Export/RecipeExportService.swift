@@ -22,6 +22,7 @@ public struct RecipeExportReport: Sendable, Codable {
 /// One operation at a time. Dedicated RenderEngine caches can be discarded
 /// without disturbing the editor. The caller's Task owns cancellation.
 public actor RecipeExportService: RecipeExportServicing {
+    public private(set) var lastMemoryDiagnostic: ExportMemoryDiagnostic?
     /// Custom provider: receives the Recipe selection and returns its full model identity.
     public typealias Prediction = @Sendable (RenderSource, String) async throws -> ModelGainPrediction
     private let engine: Engine
@@ -50,6 +51,7 @@ public actor RecipeExportService: RecipeExportServicing {
                        progress: @escaping @Sendable (RecipeExportProgress) -> Void = { _ in }) async throws -> RecipeExportResult {
         guard !busy else { throw RecipeExportError.busy }
         busy = true
+        lastMemoryDiagnostic = nil
         defer { busy = false }
         var pending: ExportID?
         var published = false
@@ -88,7 +90,10 @@ public actor RecipeExportService: RecipeExportServicing {
             var plan = ExportPlanner.plan(actualRequest, budget: budget)
             // Photos authorization gates library delivery, never file generation.
             let blockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
-            guard blockers.isEmpty else { throw RecipeExportError.planBlocked(blockers.map(\.code)) }
+            guard blockers.isEmpty else {
+                recordPlanMemoryFailure(plan, residentBytes: 0)
+                throw RecipeExportError.planBlocked(blockers.map(\.code))
+            }
             let ext = fileExtension(plan.encoding)
             let destinationLease: SecurityScopeLease?
             if let destination { destinationLease = try await target.leaseDestination(destination, expectedExtension: ext) }
@@ -183,7 +188,10 @@ public actor RecipeExportService: RecipeExportServicing {
             plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
                 bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
             let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
-            guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
+            guard resolvedBlockers.isEmpty else {
+                recordPlanMemoryFailure(plan, residentBytes: resident)
+                throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code))
+            }
             if !plan.memory.usesRowInput && lazySource != nil {
                 source = try await renderEngine.load(photo.sourceURL,
                     options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
@@ -399,7 +407,10 @@ public actor RecipeExportService: RecipeExportServicing {
     private func checkMemory(_ plan: ExportPlan, residentBytes: Int, sourceSize: ExportPixelSize) async throws {
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let needed = max(0, plan.memory.estimate.peak - residentBytes)
-        guard needed <= available else { throw RecipeExportError.memoryExceeded(required: needed, available: available) }
+        guard needed <= available else {
+            recordMemoryFailure(.init(check: .process, phase: .running, requiredBytes: needed, availableBytes: available))
+            throw RecipeExportError.memoryExceeded(required: needed, available: available)
+        }
         // Metal's recommendation is an independent GPU constraint, never the
         // process limit. Source and active graph textures still occupy memory.
         let sourcePixels = sourceSize.pixels
@@ -419,9 +430,21 @@ public actor RecipeExportService: RecipeExportServicing {
                 + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 64
         }
         let gpuBudget = await renderEngine.device.recommendedMaxWorkingSetSize
-        guard gpu <= gpuBudget else {
+        if let failure = ExportMemoryDiagnostic.gpuFailure(required: gpu, recommended: Int(gpuBudget)) {
+            recordMemoryFailure(failure)
             throw RecipeExportError.memoryExceeded(required: gpu, available: Int(gpuBudget))
         }
+    }
+    private func recordPlanMemoryFailure(_ plan: ExportPlan, residentBytes: Int) {
+        guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return }
+        recordMemoryFailure(.init(check: .process, phase: .planning,
+            requiredBytes: max(0, plan.memory.estimate.peak - residentBytes),
+            availableBytes: max(0, (plan.memory.availableBytes ?? 256 * 1024 * 1024) - residentBytes)))
+    }
+    private func recordMemoryFailure(_ failure: ExportMemoryDiagnostic) {
+        lastMemoryDiagnostic = failure
+        Logger(subsystem: "com.hyperdr.HyperDR", category: "Export")
+            .error("Export memory admission: \(failure.summary, privacy: .public)")
     }
     private func renderGamut(_ gamut: ExportColorGamut) -> ExportGamut {
         switch gamut { case .p3: .displayP3; case .srgb: .sRGB; case .rec2020: .rec2020 }

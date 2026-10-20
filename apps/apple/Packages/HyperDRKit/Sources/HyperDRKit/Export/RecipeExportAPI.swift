@@ -50,7 +50,13 @@ extension ExportRecord {
 /// Select a Mac file destination before calling; nil retains a verified version for
 /// iOS fileExporter / ShareLink. Photos saving remains disabled until Photos Lab.
 public protocol RecipeExportServicing: Sendable {
+    /// Read after a failed export; nil if it did not fail memory admission.
+    var lastMemoryDiagnostic: ExportMemoryDiagnostic? { get async }
     func export(session: SessionID, snapshot: RecipeExportSnapshot,
                 request: ExportPlanRequest, lut: ColorLUT?, destination: URL?,
                 progress: @escaping @Sendable (RecipeExportProgress) -> Void) async throws -> RecipeExportResult
+}
+
+extension RecipeExportServicing {
+    public var lastMemoryDiagnostic: ExportMemoryDiagnostic? { get async { nil } }
 }

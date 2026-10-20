@@ -5,18 +5,21 @@ import HyperDRRender
 
 /// Frozen editing intent. Paths, preview bypasses and display headroom are excluded.
 public struct RecipeExportSnapshot: Sendable, Codable, Equatable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
     public let version: Int
     public let recipe: Recipe
     public let source: RecipeSourceRevision
-    public let modelID: String?
+    /// Recipe's model choice, resolved by the service when AI is needed.
+    public var modelSelection: String? { recipe.conditionValue("hdr.model")?.stringValue }
+    /// Optional exact identity required when re-rendering a historical export.
+    public let expectedModelIdentity: String?
     public let frame: RecipeFrameSnapshot?
     public var lutContentHash: String? { recipe.look?.contentHash }
 
-    public init(recipe: Recipe, source: RecipeSourceRevision, modelID: String? = nil,
+    public init(recipe: Recipe, source: RecipeSourceRevision, expectedModelIdentity: String? = nil,
                 frame: FrameSnapshot? = nil) {
         version = Self.currentVersion; self.recipe = recipe; self.source = source
-        self.modelID = modelID; self.frame = frame.map(RecipeFrameSnapshot.init)
+        self.expectedModelIdentity = expectedModelIdentity; self.frame = frame.map(RecipeFrameSnapshot.init)
     }
 }
 
@@ -93,6 +96,7 @@ public struct RecipeFrameSnapshot: Sendable, Codable, Equatable {
 /// The actual output contract, frozen separately from editable intent.
 public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
     public let snapshot: RecipeExportSnapshot
+    public let modelIdentity: String?
     public let selection: ExportChoice
     public let profileVersion: Int
     public let renderContractVersion: Int
@@ -110,9 +114,10 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
     public let provenance: String?
     /// Resolved Recipe range before/after Render's output ceiling, in stops.
     public let rangeBeforeCeiling, rangeAfterCeiling: Float?
-    public init(snapshot: RecipeExportSnapshot, plan: ExportPlan,
+    public init(snapshot: RecipeExportSnapshot, plan: ExportPlan, modelIdentity: String? = nil,
                 resolvedAutomatic: [String: Double] = [:], resplitReasons: [String] = [],
                 report: ExportRenderReport? = nil) {
+        self.modelIdentity = modelIdentity
         self.snapshot = snapshot; selection = plan.choice; profileVersion = plan.destination?.profile.version ?? 1; renderContractVersion = 1
         encoding = plan.encoding; writer = plan.writer; gamut = plan.gamut; bitDepth = plan.baseBitDepth
         quality = plan.quality; width = plan.size.width; height = plan.size.height; ceilingStops = plan.peakStops
@@ -130,7 +135,7 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
         struct Identity: Encodable {
             let recipe: Recipe
             let sourceSHA256: String
-            let modelID: String?
+            let modelIdentity: String?
             let frame: RecipeFrameSnapshot?
             let selection: ExportChoice
             let profileVersion, renderContractVersion: Int
@@ -143,7 +148,7 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
             let resplitReasons: [String]
             let gain: ResolvedExportGain?
         }
-        let key = Identity(recipe: recipe, sourceSHA256: snapshot.source.sha256, modelID: snapshot.modelID,
+        let key = Identity(recipe: recipe, sourceSHA256: snapshot.source.sha256, modelIdentity: modelIdentity,
                            frame: snapshot.frame, selection: selection, profileVersion: profileVersion,
                            renderContractVersion: renderContractVersion, encoding: encoding, writer: writer,
                            gamut: gamut, bitDepth: bitDepth, quality: quality, width: width, height: height,

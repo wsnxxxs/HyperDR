@@ -46,12 +46,11 @@ private struct DisplayISOUniform {
     var minimum, maximum, inverseGamma: SIMD4<Float>
     var channels: SIMD4<UInt32>
 }
-private struct DisplaySampling { var width,height,x,y: UInt32 }
 private struct DisplayLegacyUniform {
     var gainToP3: simd_float3x3
     var baseOffset, alternateOffset: SIMD4<Float>
     var region: SIMD4<Float>
-    var size: SIMD4<Float>
+    var size,inputRegion: SIMD4<Float>
 }
 
 extension RenderEngine {
@@ -125,11 +124,11 @@ extension RenderEngine {
             try node.dispatch("displayISOGain",width:decoded.width,height:decoded.height,
                               textures:[encoded,decoded],buffers:[peak],value:&p)
             let bounds = CGRect(x:0,y:0,width:planes.outputSize.width,height:planes.outputSize.height)
-            if planes.region == bounds && planes.outputSize == source.size { gain = decoded }
+            if source.gainSamplingRegion == CGRect(x:0,y:0,width:1,height:1) && planes.region == bounds && planes.outputSize == source.size { gain = decoded }
             else {
                 gain = try node.texture(width:base.width,height:base.height,format:decoded.pixelFormat)
-                var sampling = DisplaySampling(width:UInt32(planes.outputSize.width),height:UInt32(planes.outputSize.height),
-                                               x:UInt32(planes.region.minX),y:UInt32(planes.region.minY))
+                var sampling = SourceSampling(width:UInt32(planes.outputSize.width),height:UInt32(planes.outputSize.height),
+                                               x:UInt32(planes.region.minX),y:UInt32(planes.region.minY),sourceRegion:sourceSampling(encoded,source.gainSamplingRegion))
                 try node.dispatch("sampleSource",width:gain.width,height:gain.height,textures:[decoded,gain],value:&sampling)
             }
         } else if legacy {
@@ -139,7 +138,7 @@ extension RenderEngine {
             // Match a cropped preview or detail region against the original source.
             var p = DisplayLegacyUniform(gainToP3:gainToP3,baseOffset:SIMD4(baseOffset,0),alternateOffset:SIMD4(alternateOffset,0),
                 region:SIMD4(Float(planes.region.minX),Float(planes.region.minY),Float(planes.region.width),Float(planes.region.height)),
-                size:SIMD4(Float(planes.outputSize.width),Float(planes.outputSize.height),0,0))
+                size:SIMD4(Float(planes.outputSize.width),Float(planes.outputSize.height),0,0),inputRegion:sourceSampling(source.texture,source.samplingRegion))
             try node.dispatch("displayLegacyGain",width:gain.width,height:gain.height,
                               textures:[working.base,working.hdr,gain],buffers:[peak],value:&p)
         } else {

@@ -8,11 +8,13 @@ struct GraphUniform {
     var flags, lutInfo: SIMD4<UInt32>
     var lutMin, lutMax: SIMD4<Float>
     var region, mode: SIMD4<UInt32>
+    var inputRegion: SIMD4<Float>
 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
 struct AuthorUniform {
     var minimum, maximum, inverseGamma, baseOffset, alternateOffset, controls: SIMD4<Float>
     var info: SIMD4<UInt32>
+    var inputRegion,gainRegion: SIMD4<Float>
 }
 struct AnalysisKey: Equatable {
     let source: UUID
@@ -81,7 +83,7 @@ extension RenderEngine {
                          lut != nil && !l.input.isSDR ? 1 : 0, h.enabled ? 1 : 0),
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
-            region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero)
+            region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -272,7 +274,8 @@ extension RenderEngine {
             inverseGamma: 1 / vector(\.gamma, fallback: 1), baseOffset: SIMD4(working.metadata.baseOffset,0),
             alternateOffset: SIMD4(working.metadata.alternateOffset,0),
             controls: SIMD4(edit.hdr.strength, range, Float(size.width), Float(size.height)),
-            info: SIMD4(UInt32(working.metadata.source.channelCount), (channels == nil ? 0 : 1) | (shoulder ? 2 : 0), UInt32(region.minX), UInt32(region.minY)))
+            info: SIMD4(UInt32(working.metadata.source.channelCount), (channels == nil ? 0 : 1) | (shoulder ? 2 : 0), UInt32(region.minX), UInt32(region.minY)),
+            inputRegion:sourceSampling(source.texture,source.samplingRegion),gainRegion:sourceSampling(source.gainTexture!,source.gainSamplingRegion))
         try context.dispatch("authoredOutput", width: gain.width, height: gain.height,
             textures: [working.base, source.gainTexture!, working.hdr, gain], value: &p)
         try finish(command)

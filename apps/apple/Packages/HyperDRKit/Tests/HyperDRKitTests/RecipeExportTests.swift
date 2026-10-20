@@ -311,11 +311,72 @@ private struct RecipeExportEnvironment {
         print("KIT_ROWS_MEMORY " + String(data: data, encoding: .utf8)!)
     }
 
-    @Test func pullWritersReplayRowsAndMatchWholePlanePixels() async throws {
+    /// Fresh process per height; real system JPEG source, Render scan/ROI,
+    /// Kit bridge and package. Record verification separately from row writing.
+    @Test func realStreamingHeightMemoryMeasurement() async throws {
+        guard let value = ProcessInfo.processInfo.environment["HYPERDR_STREAM_REAL_HEIGHT"],
+              let height = Int(value), height > 0 else { return }
+        let width = 2048, rows = 64
+        let root = URL(fileURLWithPath: "/tmp/p7-stream-real-memory")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let input = root.appendingPathComponent("source-\(height).jpg")
+        let output = root.appendingPathComponent("output-\(height).tif")
+        if !FileManager.default.fileExists(atPath: input.path) {
+            try autoreleasepool {
+                let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                    bytesPerRow: width*4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                for y in 0..<height {
+                    context.setFillColor(CGColor(red: CGFloat(y % 127)/127, green: CGFloat(y)/CGFloat(height), blue: 0.4, alpha: 1))
+                    context.fill(CGRect(x: 0, y: y, width: width, height: 1))
+                }
+                let destination = try #require(CGImageDestinationCreateWithURL(input as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+                CGImageDestinationAddImage(destination, try #require(context.makeImage()),
+                    [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+                #expect(CGImageDestinationFinalize(destination))
+            }
+        }
+        // Generate in a separate invocation so its full-size CGContext does not
+        // inflate this process's lifetime high-water mark.
+        if ProcessInfo.processInfo.environment["HYPERDR_STREAM_REAL_GENERATE_ONLY"] == "1" { return }
+        defer { try? FileManager.default.removeItem(at: input); try? FileManager.default.removeItem(at: output) }
+        func peak() -> Int { var usage = rusage(); getrusage(RUSAGE_SELF, &usage); return usage.ru_maxrss }
+        let initialPeak = peak()
+        let engine = try await Engine(configuration: .init(cacheDirectory: root.appendingPathComponent("cache")))
+        let render = try RenderEngine()
+        let source = try await render.openExportSource(input)
+        let sourcePeak = peak()
+        var recipe = Recipe(); recipe.setValue(.bool(false), for: "hdr.enabled")
+        let request = ExportRenderRequest(photoSize: .init(width: width, height: height), includesGain: false,
+            capabilities: .init(supportsThreeChannelGain: false, supportsSignedGain: true,
+                                requiresGainMaximumHeadroom: false))
+        let prepared = try await render.prepareRows(source, recipe: recipe, lut: nil, modelGain: nil,
+            request: request, rows: rows)
+        let preparedPeak = peak()
+        // An arbitrary repeated band must be value-identical before encoding.
+        let band = try prepared.read(y: height/2, count: min(rows, height-height/2))
+        #expect(try prepared.read(y: height/2, count: min(rows, height-height/2)).baseRGB == band.baseRGB)
+        let bridge = PackageRowBridge(source: prepared, frame: nil)
+        _ = try await engine.packageRows(width: width, height: height, rows: rows, to: output,
+            options: .init(format: "sdr-tiff", gamut: "p3", verify: false),
+            read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
+        _ = try bridge.thumbnail()
+        let writePeak = peak()
+        let probe = try await engine.probe(output)
+        #expect(probe.width == width && probe.height == height)
+        let values: [String: Any] = ["width": width, "height": height, "rows": rows,
+            "initialPeak": initialPeak, "sourcePeak": sourcePeak, "preparedPeak": preparedPeak,
+            "writePeak": writePeak, "verifiedPeak": peak()]
+        let data = try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys])
+        try data.write(to: root.appendingPathComponent("\(height).json"))
+        print("KIT_REAL_ROWS_MEMORY " + String(data: data, encoding: .utf8)!)
+    }
+
+    @Test(arguments: [false, true]) func pullWritersReplayRowsAndMatchWholePlanePixels(realRender: Bool) async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let calls = Mutex<[(Int, Int)]>([])
         let fake = StripeFake(onRead: { y, rows in calls.withLock { $0.append((y, rows)) } })
-        let service = env.service(fake)
+        let service = realRender ? env.realService() : env.service(fake)
         let frame = FrameSnapshot(canvasSize: .init(width: 112, height: 600),
             photo: .init(x: 8, y: 8, width: 96, height: 64), paper: .init(repeating: 0.8))
         func pixels(_ url: URL) throws -> [Float] {
@@ -339,6 +400,7 @@ private struct RecipeExportEnvironment {
             #expect(await env.sessions.exportThumbnail(env.session.id, export: streamed.record.id) != nil)
         }
         let reads = calls.withLock { $0 }
+        if realRender { return }
         #expect(reads.count > 6) // Gain analysis and encoding replay the same rows.
         #expect(reads.allSatisfy { $0.1 <= 256 })
         #expect(reads.filter { $0.0 == 0 }.count > 6)

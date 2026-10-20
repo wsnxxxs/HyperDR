@@ -15,3 +15,15 @@ public protocol ExportRowRendering: Sendable {
                      modelGain: ModelGainPrediction?, request: ExportRenderRequest,
                      rows: Int) async throws -> any ExportRowSource
 }
+
+extension PreparedExportRows: ExportRowSource {}
+
+extension RenderEngine: ExportRowRendering {
+    public func prepareRows(_ source: HyperDRRender.ExportSource, recipe: Recipe, lut: ColorLUT?,
+                            modelGain: ModelGainPrediction?, request: ExportRenderRequest,
+                            rows: Int) async throws -> any ExportRowSource {
+        // Render's global scan is fixed at 256 rows. The package reader controls
+        // subsequent band sizes through read(y:count:), including replays.
+        try await prepareExportRows(source, recipe: recipe, lut: lut, modelGain: modelGain, request: request)
+    }
+}

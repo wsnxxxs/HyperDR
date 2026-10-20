@@ -188,3 +188,29 @@ import Testing
             options: PackageOptions(format: "adaptive", framePhoto: photo))
     }
 }
+
+@Test func packageRowsUsesBorrowedBandsAndPropagatesFailure() async throws {
+    let engine = try await Engine()
+    #expect(Engine.supportsPackageRows(format: "iso-gainmap-jpeg"))
+    #expect(!Engine.supportsPackageRows(format: "avif-pq"))
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let output = directory.appendingPathComponent("band.jpg")
+    let report = try await engine.packageRows(width: 35, height: 29, gainChannels: 1,
+        gainMetadata: PackageGainMetadata(alternateHeadroom: 2), rows: 7,
+        to: output, options: PackageOptions(format: "iso-gainmap-jpeg")) { y, rows, base, gain in
+            #expect(rows <= 7 && base.count == 35 * rows * 3)
+            for i in 0..<base.count { base[i] = 0.3 }
+            for i in 0..<gain!.count { gain![i] = Float(y + i / 35) / 29 }
+        }
+    #expect(report.width == 35 && report.height == 29 && report.verified)
+    enum Stop: Error { case requested }
+    let stopped = directory.appendingPathComponent("stopped.jpg")
+    do {
+        _ = try await engine.packageRows(width: 35, height: 29, to: stopped,
+            options: PackageOptions(format: "sdr-jpeg")) { _, _, _, _ in throw Stop.requested }
+        Issue.record("A throwing row reader succeeded")
+    } catch Stop.requested {}
+    #expect(!FileManager.default.fileExists(atPath: stopped.path))
+}

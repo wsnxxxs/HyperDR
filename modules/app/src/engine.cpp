@@ -52,6 +52,11 @@ std::string Engine::convert(ConvertOptions options, ProgressSink* sink,
   if (exit_code) *exit_code = status;
   return report;
 }
+std::string Engine::package_rows(const PackageRequest& request,std::uint32_t rows,const PackageRows& read,const CancelToken* cancel) const {
+  CancelScope cancellation(cancel);
+  ExecutionScope execution({config_.heic_tile_workers,config_.memory_budget_bytes});
+  return package_image_rows(request,rows,read);
+}
 std::string Engine::package(const PackageRequest& request, const CancelToken* cancel) const {
   CancelScope cancellation(cancel);
   ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});

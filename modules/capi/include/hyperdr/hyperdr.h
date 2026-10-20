@@ -193,9 +193,8 @@ HYPERDR_API void hyperdr_buffer_free(hyperdr_buffer*);
  *   written as 1, because the planes are expected upright. There is no ICC
  *   input: the base space is fixed by this contract, so each writer stores the
  *   profile for it.
- * - Whole planes only. A banded, row-callback form for iPhone memory limits is
- *   deliberately not invented yet: it arrives with P7-3's chunked export, and
- *   this struct grows then. TODO(P7-3): chunked input.
+ * - This entry consumes whole planes. See hyperdr_package_rows for the
+ *   additive repeatable row-callback entry.
  *
  * The report (hyperdr.package/v1) states the format, size, byte count, the
  * verification performed, and the gain parameters actually written (not the
@@ -264,6 +263,33 @@ typedef struct hyperdr_package_request {
  * report belongs to the library; free it with hyperdr_string_free. */
 HYPERDR_API int hyperdr_package(hyperdr_engine*, const hyperdr_package_request* request,
                                 char** out_report_json, hyperdr_error** err);
+
+/* Additive ABI 4 entry points; existing structures and symbols are unchanged.
+ * Supported: SDR JPEG/TIFF, ISO gain-map JPEG, Adaptive/PQ/HLG HEIC.
+ * AVIF currently retains all YUV cells and must use hyperdr_package instead.
+ * JPEG uses fixed Huffman tables to avoid a whole-frame coefficient store:
+ * entropy bytes differ from whole-plane, decoded codes do not. TIFF uses strips.
+ * HEIC assembles 512-row slabs and retains compressed tiles/container bytes.
+ * Verification (including E5) still uses full-image decoders in a separate phase.
+ * This query describes compiled paths, not runtime HEVC device availability. */
+HYPERDR_API int hyperdr_package_rows_supported(const char* format);
+/* Fill caller-provided, tightly packed float32 buffers: count*width*3 base
+ * values and count*width*gain_channels gain values (NULL when there is no gain).
+ * Called synchronously, serially, on the package thread. Buffers are borrowed
+ * only inside the callback. The library may replay/revisit rows for global
+ * statistics, gamma and separate base/gain encoding; always return identical
+ * values. Return 0 on success, nonzero to abort (callback_failed, or cancelled
+ * when the cancel token is set). Never call another engine operation here. */
+typedef int (*hyperdr_package_row_callback)(void* user, uint32_t y, uint32_t count,
+                                           float* base, float* gain);
+/* request.sdr / request.gain supply full dimensions/channels and metadata;
+ * their plane data/size/row_bytes are ignored, format must be F32. rows is
+ * 1..4096 (256 recommended). No caller planes are retained. The request, its
+ * strings and callback context stay alive for this call. Stages and errors,
+ * E5 staging/readback, cancellation and report match hyperdr_package. */
+HYPERDR_API int hyperdr_package_rows(hyperdr_engine*, const hyperdr_package_request*,
+    uint32_t rows, hyperdr_package_row_callback, void* user,
+    char** out_report_json, hyperdr_error** err);
 
 #ifdef __cplusplus
 }

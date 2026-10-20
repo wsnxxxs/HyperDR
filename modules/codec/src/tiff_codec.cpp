@@ -277,6 +277,61 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
   return std::move(file.bytes);
 }
 
+void write_sdr_tiff_rows(const EncodingRows& image, const PhotoMetadata& metadata,
+                         ColorGamut gamut, const std::filesystem::path& path) {
+  if (image.channels != 3) throw std::invalid_argument("SDR TIFF requires RGB pixels");
+  if (gamut != ColorGamut::kSrgb && gamut != ColorGamut::kDisplayP3)
+    throw std::invalid_argument("SDR TIFF supports sRGB or Display P3");
+  {
+    codec::TiffHandle tiff(TIFFOpen(path.c_str(),"wl"));
+    if(!tiff) throw std::runtime_error("cannot open streaming TIFF");
+    if (!TIFFSetField(tiff.get(), TIFFTAG_IMAGEWIDTH, image.width) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_IMAGELENGTH, image.height) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_SAMPLESPERPIXEL, 3) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_BITSPERSAMPLE, 16) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_COMPRESSION, COMPRESSION_ADOBE_DEFLATE) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tiff.get(), 0)))
+      throw std::runtime_error("cannot configure SDR TIFF");
+    const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
+    if (!TIFFSetField(tiff.get(), TIFFTAG_ICCPROFILE,
+                      static_cast<std::uint32_t>(icc.size()), icc.data()))
+      throw std::runtime_error("cannot attach colour ICC to TIFF");
+    if (!metadata.make.empty()) TIFFSetField(tiff.get(), TIFFTAG_MAKE, metadata.make.c_str());
+    if (!metadata.model.empty()) TIFFSetField(tiff.get(), TIFFTAG_MODEL, metadata.model.c_str());
+    if (!metadata.artist.empty()) TIFFSetField(tiff.get(), TIFFTAG_ARTIST, metadata.artist.c_str());
+    if (!metadata.copyright.empty()) TIFFSetField(tiff.get(), TIFFTAG_COPYRIGHT, metadata.copyright.c_str());
+    if (!metadata.date_time.empty()) TIFFSetField(tiff.get(), TIFFTAG_DATETIME, metadata.date_time.c_str());
+    TIFFSetField(tiff.get(), TIFFTAG_SOFTWARE, "HyperDR");
+    std::vector<std::uint16_t> row(static_cast<std::size_t>(image.width) * 3);
+    std::vector<float> linear(row.size());
+    for (std::uint32_t y = 0; y < image.height; ++y) {
+      check_cancelled();
+      image.read(y,linear);
+      for (std::size_t x = 0; x < image.width; ++x) {
+        const auto i = x * 3;
+        if(gamut==ColorGamut::kSrgb) {
+          const auto fitted=compress_linear_p3_to_srgb(linear[i],linear[i+1],linear[i+2]);
+          std::copy(fitted.begin(),fitted.end(),linear.begin()+i);
+        }
+        auto color = fit_linear_p3_gamut(linear[i], linear[i+1], linear[i+2],
+                                         1.0F, gamut == ColorGamut::kSrgb);
+        if (gamut == ColorGamut::kSrgb) color = linear_p3_to_rec709(color[0], color[1], color[2]);
+        for (unsigned c = 0; c < 3; ++c) {
+          const float encoded = srgb_oetf(std::clamp(color[c], 0.0F, 1.0F));
+          row[x * 3 + c] = static_cast<std::uint16_t>(std::lround(encoded * 65535.0F));
+        }
+      }
+      if (TIFFWriteScanline(tiff.get(), row.data(), y) < 0)
+        throw std::runtime_error("SDR TIFF scanline encoding failed");
+    }
+  }
+}
+
 void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes) {
   const auto result = codec::decode_tiff_bytes(bytes, 0, ColorGamut::kSrgb);
   if (!result.linear_p3.width || !result.linear_p3.height || result.decode.resolution_reduced)

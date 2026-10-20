@@ -17,7 +17,7 @@ white (H1), `sdrOnly` only the base with gain compensation (H2).
 | `hdr.source` | choice (`HDRSource`) | per domain: `sdr`→expand, `rawEDR`→captured, `hdr`/`dual`→builtIn | all, HDR on | hdrOnly · inference |
 | `hdr.model` | reference | `research-cnn-v1` | all, source is AI, ≥2 models | hdrOnly · inference |
 | `hdr.strength` | 0…200 %, 1 | 100 % | all, HDR on | hdrOnly · instant |
-| `hdr.range` | floatOrAuto 0.5…4 stops, 0.1 | auto (≤3, C1) | all, HDR on | hdrOnly · instant |
+| `hdr.range` | floatOrAuto 0.5…4 stops, 0.1 | auto (≤3 for generated HDR, C1) | all, HDR on | hdrOnly · instant |
 | `hdr.expansionStart` | floatOrAuto 18…75 %, 1 | auto (25 % for expansion, C1) | all, source expands or is AI | hdrOnly · instant |
 | `hdr.coverage` | 0…100 %, 1 | 60 % (C1) | all, source expands | hdrOnly · instant |
 | `hdr.sdrRolloff` | 0…100 %, 1 | 0 % | `rawEDR`, `hdr`; HDR on | sdrOnly · instant |
@@ -52,13 +52,24 @@ Localization keys are derived, never stored: `ctrl.<id>.label`, `ctrl.<id>.help`
 
 ## Units and the engine
 
-Recipes and the inspector use the declared units above. `ParameterDeclaration.engineValue(_:)`
-maps them to what nodes consume: `percent` → ÷100, `signed` → ÷100 (−1…+1), `ev`,
-`stops`, `kelvin` unchanged. The one exception is `tone.contrast`, which the engine
-takes as a multiplier: `1.6^(value/100)` — 0 → 1, +100 → 1.6, −100 → 0.625 (C1 calls
-the default 1, the inspector shows 0). `hdr.range`'s automatic resolution is capped at
-`Adjustments.automaticRangeCeiling` (3 stops, C1); the analytic expansion's automatic
-start is `Adjustments.automaticExpansionStart` (25 %, C1).
+Recipes and the inspector use the declared units above. Each numeric declaration states
+its own `scale`, and `ParameterDeclaration.engineValue(_:)` applies it; the readout
+`format` never decides an engine unit:
+
+| scale | engine receives | parameters |
+|---|---|---|
+| `direct` | the declared value | `tone.exposure` (EV), `hdr.range` (stops), `develop.temperature` (kelvin), `develop.tint` (−150…150, CIRAWFilter's `neutralTint`) |
+| `hundredth` | value ÷ 100 | percent controls, and signed levels such as `tone.shadows`, `color.saturation` (−1…+1) |
+| `contrast` | `1.6^(value/100)` | `tone.contrast`: 0 → 1, +100 → 1.6, −100 → 0.625 (C1 calls the default 1, the inspector shows 0) |
+
+RAW `develop.tint` is the case that makes the split necessary: it reads as a signed
+number like `tone.shadows`, but CIRAWFilter takes it unchanged.
+
+The automatic range is capped at `Adjustments.generatedRangeCeiling` (3 stops) only for
+HDR that HyperDR generates itself — the `sdr` expansion and `rawEDR` (C1). `hdr` and
+`dual` sources already have HDR, so an automatic range must not go below the source's
+own headroom and may reach the declared 4 stops; Render resolves that. The analytic
+expansion's automatic start is `Adjustments.automaticExpansionStart` (25 %, C1).
 
 ## Recipe v1
 
@@ -73,7 +84,10 @@ start is `Adjustments.automaticExpansionStart` (25 %, C1).
 - A LUT is identified by content hash (and, optionally, a security-scoped bookmark),
   never by a path.
 - Values for ids this build does not know are kept verbatim and written back, so a
-  newer recipe survives a round trip. Unknown top-level keys are not preserved.
+  newer recipe survives a round trip. `ParameterValue` is a small JSON tree, so an
+  unknown object or array from a newer build round-trips instead of failing the whole
+  recipe. Numbers are `Double`: integers above 2^53 lose precision. Unknown top-level
+  keys are not preserved.
 - `encoded()` writes sorted keys, so the same recipe always produces the same bytes.
 - `adjustmentData()` returns `formatIdentifier` `com.hyperdr.HyperDR.recipe`,
   `formatVersion` `"1"` and the bytes, ready for `PHAdjustmentData` without importing
@@ -81,7 +95,8 @@ start is `Adjustments.automaticExpansionStart` (25 %, C1).
 
 ## Tests
 
-Four checks in `Tests/HyperDRRecipeTests`: the declaration table (count, unique ids,
+Seven checks in `Tests/HyperDRRecipeTests`: the declaration table (count, unique ids,
 defaults inside ranges, options and derived keys), recipe round trip and stable JSON,
-unknown ids surviving a round trip, and domain/condition filtering. Determinism of
-actual rendering is Render's business.
+unknown ids surviving a round trip, structure-valued unknown ids, domain/condition
+filtering, the engine scale of each numeric declaration, and the generated-HDR range
+ceiling. Determinism of actual rendering is Render's business.

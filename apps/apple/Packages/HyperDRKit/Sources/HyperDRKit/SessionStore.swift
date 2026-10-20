@@ -1912,7 +1912,7 @@ public actor SessionStore {
         var stale = false
         do {
             let url = try URL(resolvingBookmarkData: data,
-                options: SecurityScopedBookmarks.resolutionOptions, relativeTo: nil, bookmarkDataIsStale: &stale)
+                options: bookmarkResolution, relativeTo: nil, bookmarkDataIsStale: &stale)
             // Keep the exact URL the scope was resolved for; callers lease it
             // before standardizing or otherwise touching the file system.
             return (url, stale)
@@ -1923,7 +1923,7 @@ public actor SessionStore {
 
     private func makeBookmark(_ url: URL) throws -> Data {
         do {
-            return try url.bookmarkData(options: SecurityScopedBookmarks.creationOptions,
+            return try url.bookmarkData(options: bookmarkCreation,
                 includingResourceValuesForKeys: nil, relativeTo: nil)
         } catch {
             throw HyperDRError(code: "source_unreadable",

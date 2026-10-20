@@ -70,6 +70,8 @@ private struct ExportSettingsView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        // Kit's plan, for its memory check, while nothing else blocks.
+        let plan = model.export.blockerKey == nil ? model.exportPlan() : nil
         VStack(spacing: 0) {
             Text("export.title")
                 .font(Font.hdr.title)
@@ -87,7 +89,7 @@ private struct ExportSettingsView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             Divider()
-            footer
+            footer(plan)
         }
     }
 
@@ -110,6 +112,7 @@ private struct ExportSettingsView: View {
                                 style: .info)
             }
             colorSetting
+            sizeSetting
             if model.exportQuality != nil { ExportQualitySlider(model: model) }
         }
         .padding(Space.s5)
@@ -162,11 +165,46 @@ private struct ExportSettingsView: View {
         }
     }
 
+    // MARK: Size
+
+    /// Original size, a common long edge smaller than the photo, or a typed
+    /// one (p7-3c-export §1.3 B).
+    @ViewBuilder private var sizeSetting: some View {
+        let binding = Binding(get: { model.export.longEdge }, set: { model.setExportLongEdge($0) })
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("export.size")
+                .font(Font.hdr.control)
+                .foregroundStyle(Color.hdr.ink)
+            HStack(spacing: Space.s3) {
+                Picker(selection: binding) {
+                    ForEach(ExportLongEdge.choices(photo: model.exportPhotoLongEdge, current: model.export.longEdge),
+                            id: \.self) { edge in
+                        if let edge {
+                            Text("export.size.pixels \(String(edge))").tag(Int?.some(edge))
+                        } else {
+                            Text("export.size.original").tag(Int?.none)
+                        }
+                    }
+                } label: {
+                    Text("export.size")
+                }
+                .labelsHidden()
+                .fixedSize()
+                TextField(value: binding, format: .number.grouping(.never), prompt: Text("export.size.custom")) {
+                    Text("export.size.custom")
+                }
+                .labelsHidden()
+                .frame(width: 120)
+            }
+        }
+    }
+
     // MARK: Footer
 
-    private var footer: some View {
-        HStack(spacing: Space.s3) {
-            footerNote
+    private func footer(_ plan: ExportPlan?) -> some View {
+        let memory = plan.flatMap(ExportLongEdge.memoryBlocker)
+        return HStack(spacing: Space.s3) {
+            if let memory, let plan { memoryNote(memory, plan: plan) } else { footerNote }
             Spacer(minLength: Space.s3)
             Button("export.action.cancel", action: close)
                 .buttonStyle(.hdrSecondary)
@@ -175,10 +213,27 @@ private struct ExportSettingsView: View {
                                                                           asksForPlace: asksForPlace)), action: begin)
                 .buttonStyle(.hdrPrimary)
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.export.blockerKey != nil)
+                .disabled(model.export.blockerKey != nil || memory != nil)
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)
+    }
+
+    /// Memory blocks the export: Kit's sentence, and the largest long edge
+    /// that fits when there is one.
+    private func memoryNote(_ blocker: ExportBlocker, plan: ExportPlan) -> some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
+                .accessibilityHidden(true)
+            Text(verbatim: blocker.message.localized(locale: locale))
+                .foregroundStyle(Color.hdr.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if let edge = ExportLongEdge.admissible(plan) {
+                Button("export.useLongEdge \(String(edge))") { model.setExportLongEdge(edge) }
+                    .buttonStyle(.hdrCompact(.link))
+            }
+        }
+        .font(Font.hdr.caption)
     }
 
     private var asksForPlace: Bool { model.preferences.value.saveMode == .ask }
@@ -368,7 +423,10 @@ private struct ExportProgressView: View {
     /// "HDR JPEG · 6000 × 4000 · Quality 90".
     private var meta: String {
         var pieces = [AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)]
-        if let size = model.document?.pixelSize { pieces.append("\(size.width) × \(size.height)") }
+        if let size = model.document?.pixelSize {
+            let written = ExportPixelSize(width: size.width, height: size.height).fitted(longEdge: model.export.longEdge)
+            pieces.append("\(written.width) × \(written.height)")
+        }
         if let quality = model.exportQuality {
             pieces.append(AppStrings.string("export.quality", locale: locale) + " " + Int(quality.rounded()).formatted(.number.locale(locale)))
         }

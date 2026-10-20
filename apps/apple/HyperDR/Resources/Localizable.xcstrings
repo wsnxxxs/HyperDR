@@ -9451,6 +9451,96 @@
           }
         }
       }
+    },
+    "export.size" : {
+      "comment" : "Export settings: the size of the photo in the export.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尺寸"
+          }
+        }
+      }
+    },
+    "export.size.original" : {
+      "comment" : "Export settings: the size picker keeps the photo's own size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原尺寸"
+          }
+        }
+      }
+    },
+    "export.size.pixels %@" : {
+      "comment" : "Export settings: a long edge in the size picker, in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge %@ px"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边 %@ px"
+          }
+        }
+      }
+    },
+    "export.size.custom" : {
+      "comment" : "Export settings: a long edge typed in pixels; empty keeps the original size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge (px)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边（px）"
+          }
+        }
+      }
+    },
+    "export.useLongEdge %@" : {
+      "comment" : "Export footer: memory blocks the export; sets the largest long edge that fits, in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change to long edge %@ px"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改为长边 %@ px"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

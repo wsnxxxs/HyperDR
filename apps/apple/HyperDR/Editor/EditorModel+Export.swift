@@ -38,6 +38,7 @@ extension EditorModel {
         export.encodingID = choices.encoding
         export.outputGamut = choices.outputGamut == "auto" ? (choices.encoding == "sdr-tiff" ? "p3" : "srgb") : choices.outputGamut
         export.gamut = choices.gamut
+        if export.longEdge != choices.longEdge { export.longEdge = choices.longEdge }
         if let capabilities = exportCapabilities {
             export.encodingAvailability = capabilities.availability(isHDR: source.domain == .hdr || source.domain == .dual)
         }
@@ -403,6 +404,23 @@ extension EditorModel {
         guard photo != nil, !isEditingLocked, ["srgb", "p3"].contains(id), exportChoices.outputGamut != id else { return }
         exportChoices.outputGamut = id
         exportChoicesChanged()
+    }
+    /// The photo's long edge before any limit.
+    var exportPhotoLongEdge: Int? { document?.pixelSize.map { max($0.width, $0.height) } }
+    /// A picked or typed long edge (`ExportLongEdge.normalized`); also
+    /// "Change to long edge N px" when memory blocks the export.
+    func setExportLongEdge(_ edge: Int?) {
+        let edge = ExportLongEdge.normalized(edge, photo: exportPhotoLongEdge)
+        guard photo != nil, !isEditingLocked, exportChoices.longEdge != edge else { return }
+        exportChoices.longEdge = edge
+        exportChoicesChanged()
+    }
+    /// Kit's plan for the current edit and format, with the measured memory
+    /// budget: what the settings page asks before starting. nil while there
+    /// is nothing to plan.
+    func exportPlan() -> ExportPlan? {
+        guard photo != nil, document?.phase == .ready else { return nil }
+        return try? ExportPlanner.plan(captureExport().request)
     }
     private var rawDiagnostics: String {
         guard let raw = document?.source?.raw else { return "" }

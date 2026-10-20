@@ -27,6 +27,22 @@ public struct RecipeExportResult: Sendable {
     public let saved: SavedExport?
     /// A delivery failure leaves record/file available for another save attempt.
     public let deliveryError: HyperDRError?
+    public init(record: ExportRecord, resolved: ResolvedExportSnapshot, file: URL,
+                saved: SavedExport? = nil, deliveryError: HyperDRError? = nil) {
+        self.record = record; self.resolved = resolved; self.file = file
+        self.saved = saved; self.deliveryError = deliveryError
+    }
+}
+
+extension ExportRecord {
+    /// Public construction for platform service Fakes; no legacy options needed.
+    public init(id: ExportID, name: String, byteCount: Int64, createdAt: Date = Date(),
+                resolved: ResolvedExportSnapshot, reportJSON: Data = Data(), sequence: Int = 1) throws {
+        self.init(id: id, name: name, byteCount: byteCount, createdAt: createdAt,
+                  sourceDigest: resolved.snapshot.source.sha256, options: [:], reportJSON: reportJSON,
+                  sequence: sequence, key: try resolved.exportKey(), frame: nil,
+                  recipeSnapshot: resolved.snapshot, resolvedSnapshot: resolved)
+    }
 }
 
 /// All platforms use the same service. Keep its Task to cancel the entire operation.

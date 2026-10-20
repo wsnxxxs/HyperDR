@@ -1,5 +1,6 @@
 import Foundation
 import HyperDREngine
+import HyperDRRender
 
 public struct LUTID: Sendable, Hashable, Codable, CustomStringConvertible {
     public let rawValue: String
@@ -21,6 +22,16 @@ public struct LUTID: Sendable, Hashable, Codable, CustomStringConvertible {
 public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
     case srgb, p3, rec709, hlg, pq
     case slog3SGamut3Cine = "slog3-sgamut3cine"
+    public var renderSpace: HyperDRRender.LUTSpace {
+        switch self {
+        case .srgb: .sRGB
+        case .p3: .displayP3
+        case .rec709: .rec709
+        case .hlg: .hlg
+        case .pq: .pq
+        case .slog3SGamut3Cine: .sLog3
+        }
+    }
 }
 public struct LUTEntry: Sendable, Hashable, Codable, Identifiable {
     public let id: LUTID

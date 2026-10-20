@@ -479,6 +479,14 @@ struct ExportMemoryPlanTests {
         }
     }
 
+    @Test func macAndSimulatorBudgetUseTheHostPhysicalShare() {
+        #if os(macOS) || targetEnvironment(simulator)
+        #expect(SystemExportMemoryBudget(physicalShare: 0.25).availableBytes()
+            == Int(Double(ProcessInfo.processInfo.physicalMemory) * 0.25))
+        #expect(SystemExportMemoryBudget(physicalShare: 0).availableBytes() == nil)
+        #endif
+    }
+
     @Test func theSystemBudgetAnswersOrDeclines() {
         // Whatever the host reports, the answer is either a positive budget or
         // an explicit "cannot say" — never a guess of zero.

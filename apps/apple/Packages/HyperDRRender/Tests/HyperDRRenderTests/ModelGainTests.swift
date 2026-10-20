@@ -4,6 +4,7 @@ import CoreML
 import ImageIO
 import Metal
 import Testing
+import HyperDRRecipe
 @testable import HyperDRRender
 
 /// The gate the AI gain model has to pass before it can replace ncnn.
@@ -361,6 +362,66 @@ private struct Difference: CustomStringConvertible {
             print(String(format: "model gain %dx%d @%@: %.1f ms", scaledSize.width, scaledSize.height,
                          String(describing: units), milliseconds))
             #expect(milliseconds < 2000)
+        }
+    }
+
+    /// The provider render-dev's graph calls: one prediction per source, a
+    /// single-channel stop grid as a texture, and the model identity it should
+    /// cache under.
+    @Test func coreMLProviderCarriesTheModelGrid() async throws {
+        let engine = try RenderEngine()
+        let width = 384, height = 256
+        var bytes = [UInt8](repeating: 0, count: width * height * 3)
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 3
+                bytes[index] = UInt8(40 + 120 * y / height)
+                bytes[index + 1] = UInt8(30 + 160 * x / width)
+                bytes[index + 2] = UInt8(200 - 120 * y / height)
+            }
+        }
+        let cgImage = try #require(Self.cgImage(rgb8: bytes, width: width, height: height))
+        let source = try await engine.source(image: CIImage(cgImage: cgImage), domain: .sdr)
+        let provider = try CoreMLModelGainProvider()
+        let prediction = try await provider.predict(source: source)
+
+        #expect(prediction.sourceID == source.id)
+        #expect(prediction.modelID.contains(ModelGain.modelName))
+        #expect(prediction.modelID.contains(ModelGain.preprocessingRevision))
+        #expect(prediction.modelID.contains(ModelGain.modelVersion))
+
+        let tensor = ModelGain.tensorSize(for: source.size)
+        #expect(tensor == PixelSize(width: 384, height: 256))
+        #expect(prediction.gain.width == ModelGain.gridSize(for: tensor).width)
+        #expect(prediction.gain.height == ModelGain.gridSize(for: tensor).height)
+
+        // The texture carries exactly the grid the model predicted for this base.
+        let context = try #require(Self.context())
+        let grid = try ModelGainModel(computeUnits: .all).gain(for: ModelGainInput.features(
+            from: source.hdrImage, context: context, tensorSize: tensor))
+        let readback = RenderEngine.readTexture(prediction.gain)
+        #expect(readback.count == grid.log2Stops.count)
+        let difference = Difference(lhs: readback, rhs: grid.log2Stops)
+        #expect(difference.maximum < 0.0001, "provider texture differs from the model grid: \(difference)")
+        #expect(prediction.gain.pixelFormat == .r32Float)
+
+        // Inference runs once per source; the second call returns the same grid.
+        let repeated = try await provider.predict(source: source)
+        #expect(repeated.gain === prediction.gain)
+    }
+
+    /// Only SDR and RAW sources choose an AI HDR source.
+    @Test func coreMLProviderRefusesAuthoredHDR() async throws {
+        let engine = try RenderEngine()
+        let cgImage = try #require(Self.cgImage(rgb8: [UInt8](repeating: 120, count: 64 * 64 * 3),
+                                                width: 64, height: 64))
+        let source = try await engine.source(image: CIImage(cgImage: cgImage), domain: .hdr)
+        let provider = try CoreMLModelGainProvider()
+        do {
+            _ = try await provider.predict(source: source)
+            Issue.record("an authored HDR source must not get an AI gain")
+        } catch {
+            #expect(error is ModelGainError)
         }
     }
 

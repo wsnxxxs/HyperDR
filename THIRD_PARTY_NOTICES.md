@@ -14,7 +14,6 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | zlib | TIFF Deflate compression | zlib license |
 | liblzma (XZ Utils) | TIFF LZMA compression, through libtiff | 0BSD (the liblzma library) |
 | libyuv | Colour conversion and scaling inside libavif | BSD-3-Clause |
-| ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
 ## Platform codec configurations
 
@@ -28,11 +27,8 @@ The exact dependency versions and feature choices are defined in
 license files distributed with each dependency; this notice is an aid, not a
 substitute for those license texts.
 
-The ONNX export and ncnn conversion tools listed in
-[`HyperDR_Model/requirements.txt`](HyperDR_Model/requirements.txt) are
-build-time tooling only. They are not required by, or installed with, the
-native release executable; its ncnn model bytes are embedded as aligned C++
-byte arrays on every platform.
+Model inference uses Core ML in HyperDRRender. Training and ONNX export tools
+in `HyperDR_Model/` are offline tools and are not linked into the engine.
 
 `libavif` and its libaom codec are build dependencies for the two AVIF output
 formats; they are not merely reference implementations. The ISO 21496 metadata

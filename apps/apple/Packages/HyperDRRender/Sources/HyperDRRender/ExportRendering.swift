@@ -43,6 +43,22 @@ extension RenderEngine: ExportStripeRendering {
                                     modelGain: ModelGainPrediction? = nil, request: ExportRenderRequest, rows: Int = 256,
                                     prepare: @Sendable (ExportRenderReport) throws -> Void,
                                     consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
+        try renderExport(source,lazy:nil,recipe:recipe,lut:lut,modelGain:modelGain,request:request,rows:rows,prepare:prepare,consume:consume)
+    }
+
+    /// Lazy source overload: no full-size RenderSource or RGBAf input texture.
+    public func renderExportStripes(_ source: ExportSource, recipe: Recipe, lut: ColorLUT? = nil,
+                                    modelGain: ModelGainPrediction? = nil, request: ExportRenderRequest, rows: Int = 256,
+                                    prepare: @Sendable (ExportRenderReport) throws -> Void,
+                                    consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
+        try renderExport(source.analysisSource,lazy:source,recipe:recipe,lut:lut,modelGain:modelGain,
+                         request:request,rows:rows,prepare:prepare,consume:consume)
+    }
+
+    private func renderExport(_ source: RenderSource, lazy: ExportSource?, recipe: Recipe, lut: ColorLUT?,
+                              modelGain: ModelGainPrediction?, request: ExportRenderRequest, rows: Int,
+                              prepare: @Sendable (ExportRenderReport) throws -> Void,
+                              consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
         try Task.checkCancellation()
         guard source.domain == recipe.inputDomain, rows > 0 else { throw RenderError.invalidAdjustment }
         try validate(request.photoSize); try validate(request.canvasSize)
@@ -68,10 +84,12 @@ extension RenderEngine: ExportStripeRendering {
         for y in stride(from:0,to:request.photoSize.height,by:rows) {
             try Task.checkCancellation()
             try autoreleasepool {
-                let planes = try render(source,adjustments:edit,size:request.photoSize,
+                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,
+                    region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y))) } ?? source
+                let planes = try render(tile,adjustments:edit,size:request.photoSize,
                     region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y)))
                 guard !planes.aiPending else { throw RenderError.aiNotAvailable }
-                let pair = try displayPair(planes,source:source)
+                let pair = try displayPair(planes,source:tile)
                 if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
                 guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
                 let node = nodeContext(domain:source.domain,buffer:command)
@@ -141,9 +159,10 @@ extension RenderEngine: ExportStripeRendering {
                 let start = max(y,photo.y), end = min(y+height,photo.y+photo.height)
                 var photoPlanes: RenderPlanes?
                 if start < end {
-                    let rendered = try render(source,adjustments:edit,size:request.photoSize,
-                        region:CGRect(x:0,y:start-photo.y,width:photo.width,height:end-start))
-                    let pair = try displayPair(rendered,source:source)
+                    let region = CGRect(x:0,y:start-photo.y,width:photo.width,height:end-start)
+                    let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
+                    let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
+                    let pair = try displayPair(rendered,source:tile)
                     photoPlanes = try exportNormalize(pair,source:source,channels:metadata?.channelCount ?? 1,
                         resplit:resplit,flatten:transparent,sdrOnly:!request.includesGain,ceiling:ceiling,shoulder:shoulder)
                 }

@@ -141,12 +141,14 @@ missing-source notice and relinking, diagnostics, HEIF feature messages).
 Open, roughly in order: D1-b (one set of default values, approved as C1:
 contrast 1, vibrance 0, pop 0, exposure bias 0, gain strength 1, headroom auto
 up to 3, expansion start 0.25, area coverage 0.6; `source_defaults`,
-`unadjusted` and Kit `applySourceIdentity` are removed; the engine part is
-unmerged work on `wip/e5`, the Kit and App parts are not started); AE-1 (the
-RAW default exposure follows the camera's shooting exposure, Apple's baseline;
-after D1-b); P3b-6 (five minutes of fuzzing per target, in the background, and
-acceptance); P3a-2 (encoder quality, including the photo-area errors E5 froze
-as non-regression cases, and E-07; run locally, no self-hosted runner); P-04
-(preview ceiling, needs the user's A3 frame times); the hands-on checks in
-`docs/design/user-acceptance.md` (including the C20 headroom approach and a
-backlit or sunset RAW sample for D1).
+`unadjusted` and Kit `applySourceIdentity` are removed; engine, Kit and App
+are done on `wip/e5` = `5b1a3364`, unreviewed and not yet rebased); the P7
+plan (GPU render graph, system decoding, iPhone and iPad), whose prototype is
+`wip/ae2-spike` = `4acec719` and which replaces AE-1 (RAW now follows
+`CIRAWFilter`'s own development, `docs/research/ae2-apple-raw-ci.md`); two
+experiments the plan waits on: a writer comparison (ImageIO versus our own
+writers) and writing an edited HDR HEIC back to the photo library; P3b-6 (five
+minutes of fuzzing per target, in the background, and acceptance); P3a-2
+(encoder quality, including the photo-area errors E5 froze as non-regression
+cases, and E-07; run locally, no self-hosted runner); the hands-on checks in
+`docs/design/user-acceptance.md`.

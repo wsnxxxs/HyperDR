@@ -135,6 +135,11 @@ struct RecipeExportEnvironment {
                 let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
                 #expect(package.verified)
             }
+            #expect(result.size == ExportPixelSize(width: 96, height: 64))
+            #expect(result.byteCount == result.record.byteCount)
+            #expect(result.verified)
+            #expect(result.elapsed > .zero)
+            #expect((result.peakStops != nil) == !encoding.isSDR)
             #expect(result.resolved.snapshot.recipe == recipe)
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(evidence.system.width == 96 && evidence.system.height == 64)

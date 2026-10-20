@@ -40,6 +40,9 @@ struct ExternalGainSnapshot {
 };
 
 struct ConvertOptions {
+  // True once headroom_max was given; otherwise a fixed headroom above the
+  // default ceiling raises the ceiling to itself (apply_render_defaults).
+  bool headroom_max_given{false};
   std::filesystem::path input;
   std::filesystem::path output_directory;
   bool recursive{false};

@@ -199,16 +199,8 @@ int model_input_command(int argc, char** argv) {
         "model-input requires SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
   }
   // Keep cache generation identical to the deployed input/base preparation.
-  GainMapOptions development_options{};
-  development_options.exposure_bias_ev = 0.0F;
-  development_options.clamp_srgb = options.clamp_srgb;
-  development_options.gain_strength = 1.0F;
-  development_options.look.contrast = 1.0F;
-  development_options.look.vibrance = 0.0F;
-  development_options.look.pop = 0.0F;
-  if (decoded.describe_input().domain == InputDomain::kDisplayReferredSdr) {
-    development_options.gain_strength = 0.0F;
-  }
+  const auto development_options = native_model_development_options(
+      decoded.describe_input().domain, options.clamp_srgb);
   auto developed = render_native_model_base(decoded, options.clamp_srgb);
   const auto [width, height] = model_tensor_size(
       developed.base_linear.width, developed.base_linear.height, long_side);

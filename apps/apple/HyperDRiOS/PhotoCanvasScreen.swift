@@ -51,6 +51,9 @@ struct PhotoCanvasScreen: View {
     @State private var confirmingReset = false
     @State private var exports = IOSExportModel()
     @State private var showingExport = false
+    @State private var importingLUTs = false
+    @State private var showingLUTs = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingAdjustments = false
     @Environment(\.undoManager) private var undoManager
     @Environment(\.displayScale) private var displayScale
@@ -65,6 +68,15 @@ struct PhotoCanvasScreen: View {
                     ProgressView().tint(.white)
                 } else {
                     emptyState
+                }
+            }
+            // The photo importer is on the screen; this one is on its content,
+            // since one view takes one importer.
+            .fileImporter(isPresented: $importingLUTs, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result, let editor else { return }
+                Task {
+                    await exports.luts.importLUTs(urls, into: editor)
+                    if !exports.luts.failures.isEmpty { showingLUTs = true }
                 }
             }
             .toolbar { if let editor, editor.source != nil { toolbar(editor) } }
@@ -88,7 +100,13 @@ struct PhotoCanvasScreen: View {
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { open(.file(url)) }
         }
-        .task { makeEditor() }
+        .task {
+            makeEditor()
+            if let editor { await exports.luts.refresh(into: editor) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { exports.enteredBackground() }
+        }
         .task(id: request?.id) { await load(request) }
         .onChange(of: editor.flatMap(viewport), initial: true) { _, viewport in editor?.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { editor?.attach(undoManager: undoManager) }
@@ -97,6 +115,9 @@ struct PhotoCanvasScreen: View {
         }
         .sheet(isPresented: $showingExport) {
             if let editor { ExportSheet(model: exports, editor: editor) }
+        }
+        .sheet(isPresented: $showingLUTs) {
+            if let editor { LUTLibrarySheet(library: exports.luts, editor: editor) }
         }
         #if DEBUG
         .fullScreenCover(isPresented: $showingAdjustments) { AdjustmentsDebugScreen() }
@@ -128,7 +149,8 @@ struct PhotoCanvasScreen: View {
     private func panel(_ editor: RecipeEditor) -> AdjustmentPanel {
         AdjustmentPanel(context: AdjustmentContext(
             sourceValues: editor.source?.sourceValues ?? [:], automaticValues: editor.automaticValues,
-            capabilities: editor.source?.capabilities ?? [], unavailableOptions: editor.unavailableOptions))
+            capabilities: editor.source?.capabilities ?? [], unavailableOptions: editor.unavailableOptions,
+            luts: exports.luts.choices))
     }
 
     private func workspace(_ editor: RecipeEditor) -> some View {
@@ -310,6 +332,8 @@ struct PhotoCanvasScreen: View {
             Menu {
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }
                     .disabled(!exports.canOpenPhoto)
+                Button("ios.lut.import", systemImage: "camera.filters") { importingLUTs = true }
+                Button("ios.lut.manage", systemImage: "list.bullet") { showingLUTs = true }
                 if form == .bottomBar || form == .sideBar {
                     Toggle(isOn: Binding(get: { comparison == .split },
                                          set: { comparison = $0 ? .split : .edited })) {

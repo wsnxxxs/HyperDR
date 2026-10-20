@@ -138,7 +138,7 @@ struct ExportSheet: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Space.s2) {
                 ForEach(ExportEncoding.allCases, id: \.self) { encoding in
                     let selected = model.custom.encoding == encoding
-                    Button { model.custom.encoding = encoding } label: {
+                    Button { model.select(encoding) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(LocalizedStringKey(encoding.labelKey)).font(.subheadline.weight(.semibold))
                             Text(LocalizedStringKey(encoding.hintKey)).font(.caption).foregroundStyle(.secondary)
@@ -159,12 +159,21 @@ struct ExportSheet: View {
 
     private func customControls(_ plan: ExportPlan) -> some View {
         Section {
-            Picker(selection: $model.custom.gamut) {
-                ForEach(ExportColorGamut.allCases, id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
-            } label: {
-                Text("ios.export.gamut")
+            // SDR: sRGB or Display P3. Gain maps write Display P3 and
+            // BT.2100 Rec. 2020; the format fixes it (F2).
+            if plan.gamutIsFixedByFormat || !model.custom.encoding.isSDR {
+                LabeledContent {
+                    Text(LocalizedStringKey(plan.gamut.labelKey))
+                } label: {
+                    Text("ios.export.gamut")
+                }
+            } else {
+                Picker(selection: $model.custom.gamut) {
+                    ForEach([ExportColorGamut.srgb, .p3], id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
+                } label: {
+                    Text("ios.export.gamut")
+                }
             }
-            .disabled(plan.gamutIsFixedByFormat)
             if model.custom.encoding != .sdrTIFF {
                 LabeledContent {
                     Slider(value: Binding(get: { Double(model.custom.quality) },
@@ -187,6 +196,10 @@ struct ExportSheet: View {
             }
             if plan.notices.contains(where: { $0.key == "dest.social.aspect" }) {
                 Label("ios.export.socialAspect", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let look = model.luts.missingLook(editor) {
+                Label { Text("ios.export.lutMissing \(look.name)") } icon: { Image(systemName: "exclamationmark.triangle") }
+                    .font(.footnote).foregroundStyle(.orange)
             }
             if !plan.isExecutable {
                 Label(plan.blockers.contains { $0.code == "export_memory_exceeded" }
@@ -233,6 +246,7 @@ struct ExportSheet: View {
                 ProgressView()
             }
             Button("ios.export.cancel", role: .cancel) { model.cancel() }
+            Text("ios.export.stayInApp").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .padding(Space.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -274,7 +288,12 @@ struct ExportSheet: View {
             if let detail = failure.detail {
                 Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            Button("ios.export.retry") { model.reset() }.buttonStyle(.borderedProminent)
+            if failure.restartable {
+                Button("ios.export.restart") { model.start(editor) }.buttonStyle(.borderedProminent)
+                Button("ios.export.done") { model.reset() }
+            } else {
+                Button("ios.export.retry") { model.reset() }.buttonStyle(.borderedProminent)
+            }
         }
         .padding(Space.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

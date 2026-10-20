@@ -1096,6 +1096,23 @@
         }
       }
     },
+    "ios.export.lutMissing %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The look uses “%@”, which is not in the LUT library. Import it again, or set the look to None."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "风格用到的“%@”不在 LUT 库里。重新导入它，或把风格改为“无”。"
+          }
+        }
+      }
+    },
     "ios.export.memory.estimate %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1289,6 +1306,23 @@
         }
       }
     },
+    "ios.export.restart" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新导出"
+          }
+        }
+      }
+    },
     "ios.export.retry" : {
       "comment" : "After a failure: back to the choice.",
       "extractionState" : "manual",
@@ -1433,6 +1467,40 @@
         }
       }
     },
+    "ios.export.stayInApp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stay in HyperDR while exporting. Switching to another app or locking the screen stops the export."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出期间请留在 HyperDR。切到别的 App 或锁屏会停止导出。"
+          }
+        }
+      }
+    },
+    "ios.export.stopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The export stopped because you left HyperDR. No file was saved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出因离开 HyperDR 而停止，没有保存任何文件。"
+          }
+        }
+      }
+    },
     "ios.export.title" : {
       "comment" : "The export sheet's title, and the label of its page switch.",
       "extractionState" : "manual",
@@ -1535,6 +1603,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "从文件打开…"
+          }
+        }
+      }
+    },
+    "ios.lut.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No LUTs yet. Import .cube files from the More menu."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有 LUT。可以在“更多”菜单里导入 .cube 文件。"
+          }
+        }
+      }
+    },
+    "ios.lut.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not import"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入"
+          }
+        }
+      }
+    },
+    "ios.lut.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe left to remove a LUT. Edits that use a removed LUT cannot be exported until it is imported again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向左轻扫可以移除 LUT。用到已移除 LUT 的编辑，要重新导入它才能导出。"
+          }
+        }
+      }
+    },
+    "ios.lut.import" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import LUT…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入 LUT…"
+          }
+        }
+      }
+    },
+    "ios.lut.manage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT Library…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT 库…"
+          }
+        }
+      }
+    },
+    "ios.lut.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT Library"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT 库"
           }
         }
       }

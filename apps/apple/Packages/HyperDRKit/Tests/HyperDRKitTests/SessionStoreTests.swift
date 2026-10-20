@@ -26,7 +26,7 @@ private final class TestEnvironment {
         for directory in [support, cache, sources] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        formats = try InputFormats(schema: Engine.schema())
+        formats = InputFormats()
     }
 
     deinit { try? FileManager.default.removeItem(at: root) }
@@ -328,7 +328,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
                 options: ["encoding": .string("sdr-jpeg")], key: ExportKey(rawValue: "fixture"))
             let output = directory.appendingPathComponent(name)
             try Data(bytes).write(to: output)
-            let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+            let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(
                 input: source.path, output: output.path, success: true, skipped: false,
                 message: "", width: 1, height: 1)])
             let record = try await store.publishExport(session.id, export: id, report: report)
@@ -472,7 +472,7 @@ extension SessionStoreTests {
             let (id, directory) = try await store.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
             let output = directory.appendingPathComponent(name)
             try Data(name.utf8).write(to: output)
-            let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,
+            let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(input: source.path,
                 output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
             _ = try await store.publishExport(photo.id, export: id, report: report)
             published.append((id, output))
@@ -489,9 +489,9 @@ extension SessionStoreTests {
             let (id, directory) = try await recreated.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
             let output = mode == "outside" ? env.root.appendingPathComponent("outside.jpg") : directory.appendingPathComponent("result.jpg")
             if mode != "missing" { try Data([9]).write(to: output) }
-            let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,
+            let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(input: source.path,
                 output: output.path, success: mode != "failed", skipped: false, message: "", width: 1, height: 1)])
-            let supplied = mode == "empty-report" ? ConvertReport(json: Data("{}".utf8), files: []) : report
+            let supplied = mode == "empty-report" ? ExportPublication(json: Data("{}".utf8), files: []) : report
             do { _ = try await recreated.publishExport(photo.id, export: id, report: supplied); Issue.record("Invalid report published: \(mode)") }
             catch let error as HyperDRError { #expect(error.code == (mode == "outside" ? "invalid_options" : "internal_error")) }
             await recreated.discardExport(photo.id, export: id)
@@ -536,7 +536,7 @@ extension SessionStoreTests {
             options: [:], key: ExportKey(rawValue: "fixture"))
         let output = directory.appendingPathComponent(name)
         try Data(bytes).write(to: output)
-        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+        let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(
             input: "", output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
         return (try await store.publishExport(session.id, export: id, report: report), output)
     }
@@ -722,7 +722,7 @@ extension SessionStoreTests {
         let (id, directory) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let output = directory.appendingPathComponent("one.heic")
         try Data([1, 2, 3]).write(to: output)
-        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+        let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(
             input: "", output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
         let record = try await store.publishExport(session.id, export: id, report: report)
         try FileManager.default.removeItem(at: original)

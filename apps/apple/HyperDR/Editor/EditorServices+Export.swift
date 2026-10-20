@@ -13,7 +13,6 @@ extension EditorServices {
     func sourceRevision(_ photo: EditorPhoto) async throws -> RecipeSourceRevision {
         RecipeSourceRevision(sha256: photo.url.path, byteCount: photo.byteCount, modificationDate: .distantPast)
     }
-    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage? { nil }
     func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? { nil }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> { AsyncStream { $0.finish() } }
     func cancelAllExports() async {}

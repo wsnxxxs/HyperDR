@@ -63,7 +63,6 @@ public struct PackageOptions: Sendable {
     public var quality: Int
     /// Base bit depth for `adaptive`; 8 or 10.
     public var depth: Int
-    public var hevcPreset: String
     /// `srgb` or `p3` for the SDR formats; the format default when nil.
     public var gamut: String?
     public var verify: Bool
@@ -82,14 +81,13 @@ public struct PackageOptions: Sendable {
     /// safe portable subset with orientation 1, because the planes are upright.
     public var exif: Data?
 
-    public init(format: String, quality: Int = 90, depth: Int = 8, hevcPreset: String = "slow",
+    public init(format: String, quality: Int = 90, depth: Int = 8,
                 gamut: String? = nil, verify: Bool = true, overwrite: Bool = false,
                 presentationFrame: Bool = false, framePhoto: FrameLayout.Rect? = nil,
                 exif: Data? = nil) {
         self.format = format
         self.quality = quality
         self.depth = depth
-        self.hevcPreset = hevcPreset
         self.gamut = gamut
         self.verify = verify
         self.overwrite = overwrite
@@ -102,7 +100,6 @@ public struct PackageOptions: Sendable {
         var values: [String: JSONValue] = [
             "quality": .number(Double(quality)),
             "depth": .number(Double(depth)),
-            "hevc_preset": .string(hevcPreset),
             "verify": .bool(verify),
             "overwrite": .bool(overwrite)]
         if let gamut { values["gamut"] = .string(gamut) }

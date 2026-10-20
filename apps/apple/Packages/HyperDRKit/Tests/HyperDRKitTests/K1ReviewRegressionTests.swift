@@ -58,7 +58,7 @@ private final class ReviewEnvironment {
         for directory in [support, cache, sources] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        formats = try InputFormats(schema: Engine.schema())
+        formats = InputFormats()
     }
 
     deinit { try? FileManager.default.removeItem(at: root) }
@@ -195,7 +195,7 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let (export, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let output = folder.appendingPathComponent("result.jpg")
         try Data([1, 2, 3]).write(to: output)
-        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+        let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(
             input: source.path, output: output.path, success: true, skipped: false,
             message: "", width: 1, height: 1)])
         let record = try await store.publishExport(session.id, export: export, report: report)

@@ -93,7 +93,7 @@ struct RecipeExportEnvironment {
                                          cacheDirectory: root.appendingPathComponent("cache"))
         engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
         render = try RenderEngine()
-        sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: Engine.schema()))
+        sessions = SessionStore(configuration: configuration, formats: InputFormats())
         target = ExportTarget(configuration: configuration, sessions: sessions)
         photo = try TinyPhoto()
         session = try await sessions.open(photo.url)

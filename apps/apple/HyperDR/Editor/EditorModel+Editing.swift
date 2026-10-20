@@ -195,7 +195,7 @@ extension EditorModel {
     /// edit and has no undo step.
     func selectEncoding(_ id: String) {
         guard photo != nil, !isEditingLocked, (export.encodingAvailability[id] ?? nil) == nil, id != exportChoices.encoding,
-              EditChoices.byKey["encoding"]?.options.contains(where: { $0.id == id }) == true else { return }
+              ExportEncoding(rawValue: id) != nil else { return }
         exportChoices.encoding = id
         exportChoicesChanged()
     }

@@ -22,14 +22,13 @@ to `build/xcframework/`. It also creates the local artifact symlink consumed by 
 Package Manager. These products are ignored. The engine is one static library, so the
 App embeds no dylibs. Gain-map JPEGs use the native parser, libjpeg-turbo and ImageIO.
 
-`HyperDREngine` wraps the original six C ABI functions. It imports a Clang module,
-with no Swift C++ interoperability. Its schema test compares the raw engine output
-with the CLI built in `build-apple/`. The Metal tests additionally require Node on
+`HyperDREngine` wraps C ABI 5: writer capabilities, probing, frame layout and
+whole-plane/replayable-row packaging. It imports a Clang module without Swift
+C++ interoperability. There is no CLI or schema adapter. The Metal tests additionally require Node on
 `PATH` (Homebrew's default locations are included) to run the existing JS `sampleHdr`.
 
 The iOS and iPadOS shell is the `HyperDRiOS` target and scheme in the same project
-(`HyperDRiOS/`, plus `Shared/`, which both apps compile); it links only `HyperDRDesign`
-for now. Installing it with a free Apple ID: `README-iOS.md`.
+(`HyperDRiOS/`, plus `Shared/`, which both apps compile); it links the shared Recipe, Render, Design and Kit packages. Installing it with a free Apple ID: `README-iOS.md`.
 
 The app source and preview tests use Xcode synchronized folders. `HyperDR/Views/`
 belongs to the static window layout; the EDR spike lives in `HyperDR/macOS/Preview/`.

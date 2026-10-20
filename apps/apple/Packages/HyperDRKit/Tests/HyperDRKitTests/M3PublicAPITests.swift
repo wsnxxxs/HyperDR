@@ -13,6 +13,5 @@ import Testing
         #expect(!kit.capabilities.buildFingerprint.isEmpty)
         #expect(!kit.capabilities.encodings.isEmpty)
         _ = kit.capabilities.encoder
-        _ = kit.capabilities.models
     }
 }

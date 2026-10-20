@@ -49,25 +49,8 @@ public enum InputFormat: Sendable, Hashable, Codable {
     }
 }
 
-/// Classification derived from the engine schema's `inputs` section.
+/// Supported inputs and their file signatures, shared by both platform hosts.
 public struct InputFormats: Sendable {
-    private struct SchemaDocument: Decodable { let inputs: SchemaInputs }
-
-    private struct SchemaInputs: Decodable {
-        struct Extensions: Decodable {
-            let raw: [String]
-            let raster: [String: [String]]
-        }
-        struct Signature: Decodable {
-            let offset: Int
-            let magic: String
-        }
-        let extensions: Extensions
-        let canonicalExtensions: [String: String]
-        let signatures: [String: [Signature]]
-        let prefixBytes: Int?
-    }
-
     private struct ParsedSignature: Sendable {
         let offset: Int
         let magic: [UInt8]
@@ -81,28 +64,27 @@ public struct InputFormats: Sendable {
     private let signatures: [String: [ParsedSignature]]
     public let prefixBytes: Int
 
-    public init(schema: SettingsSchema) throws {
-        let decoded: SchemaInputs
-        do {
-            decoded = try JSONDecoder().decode(SchemaDocument.self, from: schema.rawJSON).inputs
-        } catch {
-            throw HyperDRError(code: "internal_error", message: "Invalid engine input schema: \(error)")
-        }
-        rawExtensions = Set(decoded.extensions.raw.map { $0.lowercased() })
-        rasterExtensions = decoded.extensions.raster.mapValues { Set($0.map { $0.lowercased() }) }
-        canonicalExtensions = decoded.canonicalExtensions.mapValues { $0.lowercased() }
-        prefixBytes = decoded.prefixBytes ?? 16
-        var parsed: [String: [ParsedSignature]] = [:]
-        for (family, entries) in decoded.signatures {
-            parsed[family] = try entries.map { entry in
-                guard let magic = Self.hexBytes(entry.magic) else {
-                    throw HyperDRError(code: "internal_error",
-                        message: "Invalid \(family) signature in engine schema")
-                }
-                return ParsedSignature(offset: entry.offset, magic: magic)
-            }
-        }
-        signatures = parsed
+    public init() {
+        rawExtensions = Set([".3fr", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr", ".dng", ".erf", ".fff", ".gpr", ".iiq", ".k25", ".kdc", ".mef", ".mos", ".mrw", ".nef", ".nrw", ".orf", ".pef", ".raf", ".raw", ".rwl", ".rw2", ".sr2", ".srf", ".srw", ".x3f"])
+        rasterExtensions = [
+            "jpeg": Set([".jpg", ".jpeg"]),
+            "png": Set([".png"]),
+            "tiff": Set([".tif", ".tiff"]),
+            "isobmff": Set([".heic", ".heif", ".hif", ".avif"])
+        ]
+        canonicalExtensions = [
+            "jpeg": ".jpg",
+            "png": ".png",
+            "tiff": ".tif",
+            "isobmff": ".heic"
+        ]
+        prefixBytes = 16
+        signatures = [
+            "jpeg": [ParsedSignature(offset: 0, magic: [255, 216, 255])],
+            "png": [ParsedSignature(offset: 0, magic: [137, 80, 78, 71, 13, 10, 26, 10])],
+            "tiff": [ParsedSignature(offset: 0, magic: [73, 73, 42, 0]), ParsedSignature(offset: 0, magic: [77, 77, 0, 42])],
+            "isobmff": [ParsedSignature(offset: 4, magic: [102, 116, 121, 112])]
+        ]
     }
 
     public var contentTypes: [UTType] {
@@ -184,17 +166,4 @@ public struct InputFormats: Sendable {
         return nil
     }
 
-    private static func hexBytes(_ value: String) -> [UInt8]? {
-        guard value.count % 2 == 0 else { return nil }
-        var bytes: [UInt8] = []
-        bytes.reserveCapacity(value.count / 2)
-        var index = value.startIndex
-        while index < value.endIndex {
-            let next = value.index(index, offsetBy: 2)
-            guard let byte = UInt8(value[index..<next], radix: 16) else { return nil }
-            bytes.append(byte)
-            index = next
-        }
-        return bytes
-    }
 }

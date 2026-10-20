@@ -29,7 +29,7 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
     try #require(chmod(version.directory.path, 0o755) == 0)
     let file = version.directory.appendingPathComponent("photo.jpg")
     try Data([1, 2, 3]).write(to: file)
-    let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: "", output: file.path,
+    let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(input: "", output: file.path,
         success: true, skipped: false, message: "", width: 16, height: 8)])
     _ = try await env.sessions.publishExport(photo.id, export: version.id, report: report)
     return (version.id, version.directory)
@@ -48,39 +48,6 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
             #expect(throws: HyperDRError.self) { try ExportThumbnail(jpegData: data) }
         }
         #expect(throws: HyperDRError.self) { try ExportThumbnail(image: thumbnailImage(257, 2)) }
-    }
-
-    @Test func baseOnlyLinearAreaAveragePreservesSizeAndIgnoresGain() async throws {
-        let photo = try TinyPhoto(); defer { photo.remove() }
-        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
-        defer { session.close() }
-        let a = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(0)]))
-        let b = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(2)]))
-        #expect(a.base.withUnsafeBytes { Data($0) } == b.base.withUnsafeBytes { Data($0) })
-        #expect(a.gain.withUnsafeBytes { Data($0) } != b.gain.withUnsafeBytes { Data($0) })
-        let image = try ExportThumbnail.sdrImage(from: a, maxPixelSize: 3)
-        let other = try ExportThumbnail.sdrImage(from: b, maxPixelSize: 3)
-        #expect(image.dataProvider?.data == other.dataProvider?.data)
-        #expect(max(image.width, image.height) == 3)
-        #expect(abs(Double(image.width) / Double(image.height) - Double(a.base.width) / Double(a.base.height)) <= 1 / Double(image.height))
-        let full = try ExportThumbnail.sdrImage(from: a, maxPixelSize: 256)
-        #expect(full.width == a.base.width && full.height == a.base.height)
-        let one = try ExportThumbnail.sdrImage(from: a, maxPixelSize: 1)
-        let pixel = [UInt8](try #require(one.dataProvider?.data) as Data)
-        // Independent one-pixel integration oracle: averaging encoded samples
-        // instead would differ substantially on this real high-contrast input.
-        var sum = [Double](repeating: 0, count: 3)
-        a.base.withUnsafeBytes { raw in
-            let samples = raw.bindMemory(to: Float.self)
-            for y in 0..<a.base.height { for x in 0..<a.base.width { for c in 0..<3 {
-                sum[c] += Double(min(1, max(0, samples[y * a.base.rowBytes / 4 + x * 3 + c])))
-            } } }
-        }
-        for c in 0..<3 {
-            let v = sum[c] / Double(a.base.width * a.base.height)
-            let expected = (v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055) * 255
-            #expect(abs(Double(pixel[c]) - expected) <= 0.51)
-        }
     }
 
     @Test func versionLifecycleAndUntrustedReads() async throws {

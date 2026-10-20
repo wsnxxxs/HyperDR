@@ -120,7 +120,7 @@ public struct CustomExportFormat: Sendable, Hashable, Codable {
     /// 0...100; TIFF ignores it.
     public var quality: Int
 
-    public init(encoding: ExportEncoding, gamut: ExportColorGamut, quality: Int) {
+    public init(encoding: ExportEncoding = .adaptive, gamut: ExportColorGamut = .p3, quality: Int = 90) {
         self.encoding = encoding
         self.gamut = gamut
         self.quality = quality

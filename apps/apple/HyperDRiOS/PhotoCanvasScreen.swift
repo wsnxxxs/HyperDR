@@ -403,6 +403,9 @@ struct PhotoCanvasScreen: View {
                 imported = try await Task.detached(priority: .userInitiated) { try ImportedPhoto.copyFromFiles(url) }.value
             }
             guard let imported else { throw CocoaError(.fileReadUnknown) }
+            // The Files copy runs detached and ignores this task's cancellation:
+            // a request superseded meanwhile stops here, and its copy is removed.
+            try Task.checkCancellation()
             try await editor.open(imported.url)
             photo?.discard()
             photo = imported

@@ -3,6 +3,7 @@ import CoreImage
 import ImageIO
 import Metal
 import simd
+import Accelerate
 import HyperDRRecipe
 
 private struct ExportUniform {
@@ -36,6 +37,7 @@ private struct FrameUniform {
     var photo,caption: SIMD4<UInt32>
     var paper,shadow: SIMD4<Float>
     var region: SIMD4<UInt32>
+    var horizontal: SIMD4<UInt32>
 }
 
 // Caption texture is immutable and used only on its owning renderer executor.
@@ -44,7 +46,7 @@ private struct ExportPreparation: @unchecked Sendable {
     let lazy: ExportSource?
     let request: ExportRenderRequest
     let edit: RenderAdjustments
-    let caption: (any MTLTexture)?
+    let caption: CIImage?
     let report: ExportRenderReport
     let transparent, resplit, shoulder: Bool
     let ceiling: Float
@@ -105,26 +107,29 @@ extension RenderEngine: ExportStripeRendering {
         // fixed-scale analysis can miss. Scan GPU bands, retain only five words.
         var summary = SIMD8<UInt32>.zero
         var firstPair: ExportPairInfo?, provenance = PairProvenance.identity
-        for y in stride(from:0,to:request.photoSize.height,by:rows) {
+        let tileSize = exportTileSize(lazy,request:request)
+        let scanRows = min(rows,tileSize.height)
+        for y in stride(from:0,to:request.photoSize.height,by:scanRows) {
             try Task.checkCancellation()
-            try autoreleasepool {
-                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,
-                    region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y))) } ?? source
-                let planes = try render(tile,adjustments:edit,size:request.photoSize,
-                    region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y)))
-                guard !planes.aiPending else { throw RenderError.aiNotAvailable }
-                let pair = try displayPair(planes,source:tile)
-                if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
-                guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
-                let node = nodeContext(domain:source.domain,buffer:command)
-                guard let stats = device.makeBuffer(length:32,options:.storageModeShared) else { throw RenderError.allocationFailed }
-                stats.contents().initializeMemory(as:UInt8.self,repeating:0,count:32)
-                var p = ExportUniform(pair)
-                try node.dispatch("exportSummary",width:pair.base.width,height:pair.base.height,
-                                  textures:[pair.base,pair.gain],buffers:[stats],value:&p)
-                try finish(command)
-                let words = stats.contents().bindMemory(to:UInt32.self,capacity:8)
-                for i in 0..<5 { summary[i] = max(summary[i],words[i]) }
+            for x in stride(from:0,to:request.photoSize.width,by:tileSize.width) {
+                try autoreleasepool {
+                    let region = CGRect(x:x,y:y,width:min(tileSize.width,request.photoSize.width-x),height:min(scanRows,request.photoSize.height-y))
+                    let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
+                    let planes = try render(tile,adjustments:edit,size:request.photoSize,region:region)
+                    guard !planes.aiPending else { throw RenderError.aiNotAvailable }
+                    let pair = try displayPair(planes,source:tile)
+                    if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
+                    guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                    let node = nodeContext(domain:source.domain,buffer:command)
+                    guard let stats = device.makeBuffer(length:32,options:.storageModeShared) else { throw RenderError.allocationFailed }
+                    stats.contents().initializeMemory(as:UInt8.self,repeating:0,count:32)
+                    var p = ExportUniform(pair)
+                    try node.dispatch("exportSummary",width:pair.base.width,height:pair.base.height,
+                                      textures:[pair.base,pair.gain],buffers:[stats],value:&p)
+                    try finish(command)
+                    let words = stats.contents().bindMemory(to:UInt32.self,capacity:8)
+                    for i in 0..<5 { summary[i] = max(summary[i],words[i]) }
+                }
             }
         }
         let pair = firstPair!
@@ -178,7 +183,50 @@ extension RenderEngine: ExportStripeRendering {
                                  transparent:transparent,resplit:resplit,shoulder:shoulder,ceiling:ceiling)
     }
 
+    // Cap the projected native crop as well as the output. An export downscale
+    // must not recreate a full-width source texture just to sample a small band.
+    func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest) -> PixelSize {
+        let limit = PreparedExportRows.maximumSourceTileSize
+        guard let source else { return PixelSize(width:limit.width,height:PreparedExportRows.maximumReadRows) }
+        let gain = source.opened.gain?.image.extent.size ?? .zero
+        let width = max(Double(source.nativeSize.width),gain.width)
+        let height = max(Double(source.nativeSize.height),gain.height)
+        // Four native texels of halo plus up to two from outward integral rounding.
+        return PixelSize(width:max(1,min(limit.width,Int(Double(limit.width-6)*Double(request.photoSize.width)/width))),
+                         height:max(1,min(PreparedExportRows.maximumReadRows,Int(Double(limit.height-6)*Double(request.photoSize.height)/height))))
+    }
+
     private func readExport(_ state: ExportPreparation, y: Int, count: Int) throws -> ExportStripe {
+        let width = state.request.canvasSize.width
+        guard y >= 0, count > 0, y < state.request.canvasSize.height, count <= state.request.canvasSize.height-y else {
+            throw RenderError.invalidRegion
+        }
+        let tileSize = exportTileSize(state.lazy,request:state.request)
+        if width <= tileSize.width && count <= tileSize.height {
+            return try readExportTile(state,rect:ExportRect(x:0,y:y,width:width,height:count))
+        }
+        var base = [Float](repeating:0,count:width*count*3)
+        let channels = state.report.gain?.channelCount ?? 0
+        var gain = [Float](repeating:0,count:width*count*channels)
+        for row in stride(from:0,to:count,by:tileSize.height) {
+            for x in stride(from:0,to:width,by:tileSize.width) {
+                let tile = try readExportTile(state,rect:ExportRect(x:x,y:y+row,width:min(tileSize.width,width-x),height:min(tileSize.height,count-row)))
+                func copy(_ input: [Float], _ output: inout [Float], _ components: Int) {
+                    guard components > 0 else { return }
+                    input.withUnsafeBufferPointer { src in output.withUnsafeMutableBufferPointer { dst in
+                        vDSP_mmov(src.baseAddress!,dst.baseAddress!+(row*width+x)*components,
+                                  vDSP_Length(tile.rect.width*components),vDSP_Length(tile.rect.height),
+                                  vDSP_Length(tile.rect.width*components),vDSP_Length(width*components))
+                    } }
+                }
+                copy(tile.baseRGB,&base,3); copy(tile.gain,&gain,channels)
+            }
+        }
+        return ExportStripe(rect:ExportRect(x:0,y:y,width:width,height:count),baseRGB:base,gain:gain)
+    }
+
+    private func readExportTile(_ state: ExportPreparation, rect: ExportRect) throws -> ExportStripe {
+        let y = rect.y, count = rect.height
         let source = state.source, lazy = state.lazy, request = state.request, edit = state.edit
         let metadata = state.report.gain, caption = state.caption
         let resplit = state.resplit, transparent = state.transparent, ceiling = state.ceiling, shoulder = state.shoulder
@@ -191,9 +239,10 @@ extension RenderEngine: ExportStripeRendering {
             let height = count
             let photo = request.frame?.photo ?? ExportRect(x:0,y:0,width:request.photoSize.width,height:request.photoSize.height)
             let start = max(y,photo.y), end = min(y+height,photo.y+photo.height)
+            let left = max(rect.x,photo.x), right = min(rect.x+rect.width,photo.x+photo.width)
             var photoPlanes: RenderPlanes?
-            if start < end {
-                let region = CGRect(x:0,y:start-photo.y,width:photo.width,height:end-start)
+            if start < end && left < right {
+                let region = CGRect(x:left-photo.x,y:start-photo.y,width:right-left,height:end-start)
                 let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
                 let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
                 let pair = try displayPair(rendered,source:tile)
@@ -203,23 +252,12 @@ extension RenderEngine: ExportStripeRendering {
             let output: RenderPlanes
             if let frame = request.frame {
                 output = try exportFrame(photoPlanes,source:source,frame:frame,caption:caption,
-                                         y:y,height:height,photoStart:start,channels:metadata?.channelCount ?? 1)
+                                         rect:rect,photoStart:start,photoLeft:left,channels:metadata?.channelCount ?? 1)
             } else { output = photoPlanes! }
-            let rgba = Self.readTexture(output.base)
-            var rgb = [Float](); rgb.reserveCapacity(output.base.width*output.base.height*3)
-            for i in stride(from:0,to:rgba.count,by:4) { rgb.append(contentsOf:rgba[i..<i+3]) }
-            let gain: [Float]
-            if let metadata {
-                let values = Self.readTexture(output.gain)
-                if metadata.channelCount == 1 { gain = values }
-                else {
-                    var packed = [Float](); packed.reserveCapacity(output.gain.width*output.gain.height*3)
-                    for i in stride(from:0,to:values.count,by:4) { packed.append(contentsOf:values[i..<i+3]) }
-                    gain = packed
-                }
-            } else { gain = [] }
+            let rgb = Self.readRGB(output.base)
+            let gain = metadata.map { $0.channelCount == 1 ? Self.readTexture(output.gain) : Self.readRGB(output.gain) } ?? []
             try Task.checkCancellation()
-            return ExportStripe(rect:ExportRect(x:0,y:y,width:request.canvasSize.width,height:height),baseRGB:rgb,gain:gain)
+            return ExportStripe(rect:rect,baseRGB:rgb,gain:gain)
         }
     }
 
@@ -256,7 +294,7 @@ extension RenderEngine: ExportStripeRendering {
                             provenance:.identity,region:pair.region,outputSize:pair.outputSize)
     }
 
-    private func exportCaption(_ frame: FrameSnapshot?, photoSize: PixelSize) throws -> (any MTLTexture)? {
+    private func exportCaption(_ frame: FrameSnapshot?, photoSize: PixelSize) throws -> CIImage? {
         guard let frame else { return nil }
         func contains(_ r: ExportRect) -> Bool {
             r.x >= 0 && r.y >= 0 && r.width > 0 && r.height > 0 && r.x <= frame.canvasSize.width-r.width && r.y <= frame.canvasSize.height-r.height
@@ -276,24 +314,55 @@ extension RenderEngine: ExportStripeRendering {
         let photo = CGRect(x:frame.photo.x,y:frame.photo.y,width:frame.photo.width,height:frame.photo.height)
         let band = CGRect(x:caption.rect.x,y:caption.rect.y,width:caption.rect.width,height:caption.rect.height)
         guard !photo.intersects(band) else { throw RenderError.invalidAdjustment }
-        return try rasterize(image,space:Self.workingColorSpace)
+        return image
     }
 
     private func exportFrame(_ photo: RenderPlanes?, source: RenderSource, frame: FrameSnapshot,
-                             caption: (any MTLTexture)?, y: Int, height: Int, photoStart: Int, channels: Int) throws -> RenderPlanes {
+                             caption: CIImage?, rect: ExportRect, photoStart: Int, photoLeft: Int, channels: Int) throws -> RenderPlanes {
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let node = nodeContext(domain:source.domain,buffer:command)
-        let base = try node.texture(width:frame.canvasSize.width,height:height)
-        let gain = try node.texture(width:base.width,height:height,format:channels == 1 ? .r32Float : .rgba32Float)
+        let base = try node.texture(width:rect.width,height:rect.height)
+        let gain = try node.texture(width:base.width,height:base.height,format:channels == 1 ? .r32Float : .rgba32Float)
         let dummy = try node.texture(width:1,height:1)
         func vector(_ r: ExportRect) -> SIMD4<UInt32> { SIMD4(UInt32(r.x),UInt32(r.y),UInt32(r.width),UInt32(r.height)) }
+        var captionTexture: (any MTLTexture)?
+        var captionOrigin = SIMD2<UInt32>.zero
+        if let caption, let band = frame.caption?.rect {
+            let visible = CGRect(x:rect.x,y:rect.y,width:rect.width,height:rect.height)
+                .intersection(CGRect(x:band.x,y:band.y,width:band.width,height:band.height))
+            if !visible.isNull && !visible.isEmpty {
+                let local = CGRect(x:visible.minX-Double(band.x),y:Double(band.height)-(visible.maxY-Double(band.y)),
+                                   width:visible.width,height:visible.height)
+                captionTexture = try rasterize(caption.cropped(to:local),space:Self.workingColorSpace)
+                captionOrigin = SIMD2(UInt32(visible.minX),UInt32(visible.minY))
+            }
+        }
         var p = FrameUniform(photo:vector(frame.photo),caption:frame.caption.map { vector($0.rect) } ?? .zero,
             paper:SIMD4(frame.paper,1),shadow:SIMD4(frame.shadow.opacity,frame.shadow.sigma,frame.shadow.offset.x,frame.shadow.offset.y),
-            region:SIMD4(UInt32(y),UInt32(max(0,photoStart)),photo == nil ? 0 : 1,caption == nil ? 0 : 1))
-        try node.dispatch("exportFrame",width:base.width,height:height,
-            textures:[photo?.base ?? dummy,photo?.gain ?? dummy,caption ?? dummy,base,gain],value:&p)
+            region:SIMD4(UInt32(rect.y),UInt32(max(0,photoStart)),photo == nil ? 0 : 1,captionTexture == nil ? 0 : 1),
+            horizontal:SIMD4(UInt32(rect.x),UInt32(max(0,photoLeft)),captionOrigin.x,captionOrigin.y))
+        try node.dispatch("exportFrame",width:base.width,height:base.height,
+            textures:[photo?.base ?? dummy,photo?.gain ?? dummy,captionTexture ?? dummy,base,gain],value:&p)
         try finish(command)
         return RenderPlanes(base:base,gain:gain,gainChannelCount:channels,baseColorSpace:Self.workingColorSpace,
-                            provenance:.identity,region:CGRect(x:0,y:y,width:base.width,height:height),outputSize:frame.canvasSize)
+                            provenance:.identity,region:CGRect(x:rect.x,y:rect.y,width:rect.width,height:rect.height),outputSize:frame.canvasSize)
+    }
+}
+
+extension RenderEngine {
+    nonisolated static func readRGB(_ texture: any MTLTexture) -> [Float] {
+        let rgba = readTexture(texture)
+        return [Float](unsafeUninitializedCapacity: texture.width*texture.height*3) { output, count in
+            rgba.withUnsafeBufferPointer { input in
+                var source = vImage_Buffer(data:UnsafeMutableRawPointer(mutating:input.baseAddress!),
+                    height:vImagePixelCount(texture.height),width:vImagePixelCount(texture.width),rowBytes:texture.width*16)
+                var destination = vImage_Buffer(data:output.baseAddress!,height:source.height,width:source.width,rowBytes:texture.width*12)
+                let status = vImageConvert_RGBAFFFFtoRGBFFF(&source,&destination,vImage_Flags(kvImageNoFlags))
+                if status != kvImageNoError {
+                    vDSP_mmov(input.baseAddress!,output.baseAddress!,3,vDSP_Length(texture.width*texture.height),4,3)
+                }
+            }
+            count = output.count
+        }
     }
 }

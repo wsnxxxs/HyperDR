@@ -71,6 +71,7 @@ public final class RenderNodeContext {
     }
 
     public func texture(width: Int, height: Int, format: MTLPixelFormat = .rgba32Float) throws -> any MTLTexture {
+        try device.validateTexture(width: width, height: height)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format,
             width: width, height: height, mipmapped: false)
         descriptor.storageMode = .shared
@@ -133,3 +134,20 @@ public struct AdjustmentNode: RenderNode {
 }
 
 struct PointUniform { var operation: UInt32; var sdr: UInt32; var value: Float; var unused: Float }
+
+// Metal has no maxTextureDimension2D query. Use the supported GPU family's
+// feature-table limit, with Simulator's smaller software-device limit.
+extension MTLDevice {
+    var renderTextureLimit: Int {
+        #if targetEnvironment(simulator)
+        8192
+        #else
+        supportsFamily(.apple3) || supportsFamily(.mac2) ? 16384 : 8192
+        #endif
+    }
+    func validateTexture(width: Int, height: Int) throws {
+        guard width > 0, height > 0, width <= renderTextureLimit, height <= renderTextureLimit else {
+            throw RenderError.invalidSize
+        }
+    }
+}

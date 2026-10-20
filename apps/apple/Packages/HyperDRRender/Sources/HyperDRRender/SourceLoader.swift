@@ -31,11 +31,24 @@ extension RenderEngine {
         let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue ?? 0
         let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue ?? 0
         let nativeSize = PixelSize(width: orientation >= 5 ? height : width, height: orientation >= 5 ? width : height)
+        // ImageIO's deferred TIFF provider re-decodes strips for each CI ROI.
+        // Detach its native bitmap once; this is decoder storage, not a full-size
+        // float Render texture. All subsequent GPU work still uses bounded ROIs.
+        let cacheTIFF = deferred && type == .tiff && max(nativeSize.width,nativeSize.height) > 4096
+            && !auxiliary.contains { $0.1 != nil }
         let baseCG: CGImage
         switch options.resolution {
         case .full:
             guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, deferred ? [kCGImageSourceShouldCache:false] as CFDictionary : nil) else { throw RenderError.cannotDecodeSource }
-            baseCG = decoded
+            if cacheTIFF, let data = decoded.dataProvider?.data,
+               let provider = CGDataProvider(data:data),
+               let bitmap = CGImage(width:decoded.width,height:decoded.height,
+                    bitsPerComponent:decoded.bitsPerComponent,bitsPerPixel:decoded.bitsPerPixel,
+                    bytesPerRow:decoded.bytesPerRow,space:decoded.colorSpace ?? CGColorSpace(name:CGColorSpace.sRGB)!,
+                    bitmapInfo:decoded.bitmapInfo,provider:provider,decode:decoded.decode,
+                    shouldInterpolate:decoded.shouldInterpolate,intent:decoded.renderingIntent) {
+                baseCG = CGImageCreateCopyWithContentHeadroom(decoded.contentHeadroom,bitmap) ?? bitmap
+            } else { baseCG = decoded }
         case .preview(let maximumSize):
             guard maximumSize.width > 0, maximumSize.height > 0, width > 0, height > 0 else { throw RenderError.invalidSize }
             let scale = min(1,Double(maximumSize.width)/Double(nativeSize.width),Double(maximumSize.height)/Double(nativeSize.height))
@@ -50,8 +63,16 @@ extension RenderEngine {
         }
         let baseSpace = baseCG.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
         let nativeLinear = CGColorSpaceCreateExtendedLinearized(baseSpace)
-        let base = CIImage(cgImage: baseCG, options: [.toneMapHDRtoSDR: false])
-            .oriented(forExifOrientation: orientation)
+        let base: CIImage
+        if deferred, !cacheTIFF, max(nativeSize.width,nativeSize.height) > 4096, !auxiliary.contains(where:{ $0.1 != nil }),
+           let fileImage = CIImage(contentsOf:url,options:[.toneMapHDRtoSDR:false,.applyOrientationProperty:true]) {
+            // Other large rasters keep Core Image's file/region provider.
+            // TIFF uses the reusable native bitmap detached above; bounded
+            // (<=4096) rasters keep the cheaper ImageIO CGImage provider.
+            base = fileImage
+        } else {
+            base = CIImage(cgImage:baseCG,options:[.toneMapHDRtoSDR:false]).oriented(forExifOrientation:orientation)
+        }
         var gain: AuthoredGainMap?
         for (standard, info) in auxiliary {
             guard let info else { continue }

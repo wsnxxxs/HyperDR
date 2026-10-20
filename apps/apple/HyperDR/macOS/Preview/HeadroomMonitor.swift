@@ -15,23 +15,10 @@ nonisolated enum HeadroomPolicy: String {
     }
 }
 
-nonisolated enum GainWeight {
-    static let rebuildThreshold: Float = 0.005
-    static func value(headroom: Double, base: Double, alternate: Double) -> Float {
-        let denominator = alternate - base
-        guard headroom.isFinite, headroom > 1, base.isFinite, alternate.isFinite,
-              abs(denominator) >= 1e-8 else { return 0 }
-        return Float(min(1, max(0, (log2(headroom) - base) / denominator)))
-    }
+extension DisplayWeight {
     static func value(headroom: Double, metadata: PreviewMetadata) -> Float {
         value(headroom: headroom, base: metadata.baseHeadroom ?? 0,
               alternate: metadata.alternateHeadroom ?? metadata.headroomStops)
-    }
-    /// Compare with the last *rendered* weight, so small steps accumulate.
-    /// Endpoints are exact: never leave a residual HDR contribution on SDR.
-    static func needsRebuild(from old: Float?, to new: Float) -> Bool {
-        guard let old else { return true }
-        return abs(new - old) > rebuildThreshold || (new != old && (new == 0 || new == 1))
     }
 }
 

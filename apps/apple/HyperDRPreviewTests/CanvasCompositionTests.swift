@@ -28,13 +28,9 @@ import XCTest
         return values.map(Float.init)
     }
 
-    private func planes(_ device: any MTLDevice, base: Float, stops: Float, width: Int = 16, height: Int = 8) throws -> FramePlanes {
-        let base = [Float](repeating: base, count: width*height*3)
-        let gain = [Float](repeating: 0, count: width*height)
-        return FramePlanes(base: try XCTUnwrap(device.makeBuffer(bytes: base, length: base.count*4)),
-            baseRowBytes: width*12, gain: try XCTUnwrap(device.makeBuffer(bytes: gain, length: gain.count*4)),
-            gainRowBytes: width*4, gainChannels: 1, width: width, height: height,
-            gainWidth: width, gainHeight: height, gainMin: stops, gainMax: stops)
+    private func pair(_ device: any MTLDevice, base: Float, stops: Float, width: Int = 16, height: Int = 8) throws -> DisplayPair {
+        try makeDisplayPair(device, base: [Float](repeating: base, count: width*height*3), width: width, height: height,
+            gain: [Float](repeating: stops, count: width*height))
     }
 
     /// Uses exactly the production pass-1 and pass-2 encoding. Expected
@@ -42,9 +38,9 @@ import XCTest
     private func pixels(base: Float, stops: Float, flags: UInt32, weight: Float = 1,
                         range: Float = 2, scale: Float = 1) throws -> [Float] {
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let compositor = try DisplayCompositor(device: renderer.device, library: renderer.library)
         let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-        let image = try compositor.makeTestTexture(planes(renderer.device, base: base, stops: stops), weight: weight, command: command)
+        let image = try compositor.makeTestTexture(pair(renderer.device, base: base, stops: stops), weight: weight, command: command)
         let out = try target(renderer.device)
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = out
@@ -130,7 +126,7 @@ import XCTest
         let original = try await frame(session, exposure: -1)
         let edited = try await frame(session, exposure: 1)
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let compositor = try CanvasCompositor(device: renderer.device, library: renderer.library)
         let w = edited.base.width, h = edited.base.height
         var geometry = CanvasTransform(imageSize: CGSize(width:w,height:h), viewport: CGSize(width:w,height:h))
         let out = try target(renderer.device,width:w,height:h)
@@ -180,7 +176,7 @@ import XCTest
         let size = CGSize(width:editedTile.metadata.fullWidth!,height:editedTile.metadata.fullHeight!)
         let w = Int(size.width), h = Int(size.height)
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
         let geometry = CanvasTransform(imageSize:size,viewport:size)
         let out = try target(renderer.device,width:w,height:h)
         let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
@@ -189,7 +185,7 @@ import XCTest
         try compositor.encode(content,transform:geometry,target:out,command:command)
         let image = try read(out,after:command)
         for (tile,isOriginal) in [(originalTile,true),(editedTile,false)] {
-            let local = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+            let local = try CanvasCompositor(device: renderer.device, library:renderer.library)
             let tileOut = try target(renderer.device,width:tile.base.width,height:tile.base.height)
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
             try local.encode(CanvasComposition(original:tile,edited:tile,mode:.edited,headroom:16),
@@ -221,7 +217,7 @@ extension CanvasCompositionTests {
         let whole = try await frame(session,exposure:0)
         let tile = try await frame(session,exposure:0,region:CGRect(x:16,y:12,width:32,height:24))
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
         let out = try target(renderer.device,width:64,height:48)
         let transform = CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:CGSize(width:64,height:48))
         for headroom in [1.0,1.3,2.0,4.0] { for sdr in [false,true] { for overlay in [false,true] {
@@ -273,14 +269,11 @@ extension CanvasCompositionTests {
 extension CanvasCompositionTests {
     func testReviewerReconstructionRetainsGainWhenFullRenditionClipsToBlack() throws {
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
         let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-        let b:[Float] = [0.1,0.1,0.1], g:[Float] = [0]
-        let source = FramePlanes(base:try XCTUnwrap(renderer.device.makeBuffer(bytes:b,length:12)),baseRowBytes:12,
-            gain:try XCTUnwrap(renderer.device.makeBuffer(bytes:g,length:4)),gainRowBytes:4,gainChannels:1,
-            width:1,height:1,gainWidth:1,gainHeight:1,gainMin:-1,gainMax:2,
-            gainWeight:0.5,baseOffset:0,alternateOffset:0.08)
-        let image = try compositor.makeTestTexture(source,command:command)
+        let source = try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1],width:1,height:1,gain:[0],
+            coding:.isoCode(minimum:-1,maximum:2,gamma:1),alternateOffset:0.08)
+        let image = try compositor.makeTestTexture(source,weight:0.5,command:command)
         let out = try target(renderer.device,width:1,height:1)
         let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture=out
         pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
@@ -299,7 +292,7 @@ extension CanvasCompositionTests {
         let a=try await frame(session,exposure:-1), b=try await frame(session,exposure:1)
         let edit=try await frame(session,exposure:0)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:edit.base.width,height:edit.base.height)
         let geometry=CanvasTransform(imageSize:CGSize(width:edit.base.width,height:edit.base.height),viewport:CGSize(width:out.width,height:out.height))
         func render(_ original:PreviewFrame) throws -> [Float] {
@@ -342,7 +335,7 @@ extension CanvasCompositionTests {
         let original=try await make(0,detail:false), edit=try await make(0.5,detail:false)
         let originalTile=try await make(0,detail:true), editedTile=try await make(0.5,detail:true)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:64,height:48)
         func render(_ content:CanvasComposition,geometry:CanvasTransform,target:any MTLTexture) throws -> [Float] {
             let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
@@ -359,13 +352,13 @@ extension CanvasCompositionTests {
             // Isolated crop metadata can be degenerate. The crop follows its
             // whole rendition's weight, as the production atlas does.
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-            let image = try compositor.makeTestTexture(FramePlanes(tile, device: renderer.device),
-                weight: GainWeight.value(headroom: 16, metadata: (left ? original : edit).metadata), command: command)
+            let image = try compositor.display.makeTestTexture(compositor.upload(tile, command: command),
+                weight: DisplayWeight.value(headroom: 16, metadata: (left ? original : edit).metadata), command: command)
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = tileOut
             pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
             let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor: pass))
-            compositor.draw(encoder, texture: image, params: CompositionParams(rect: SIMD4(-1,-1,1,1)))
+            compositor.display.draw(encoder, texture: image, params: CompositionParams(rect: SIMD4(-1,-1,1,1)))
             encoder.endEncoding()
             let expected = try read(tileOut, after: command)
             var changed=false
@@ -384,7 +377,7 @@ extension CanvasCompositionTests {
         let session=try await session(); defer { session.close() }
         let frame=try await frame(session,exposure:3)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:frame.base.width,height:frame.base.height)
         let geometry=CanvasTransform(imageSize:CGSize(width:out.width,height:out.height),viewport:CGSize(width:out.width,height:out.height))
         func render(_ mode:CanvasComposition.Mode,_ overlay:CanvasOverlays) throws -> [Float] {
@@ -407,7 +400,7 @@ extension CanvasCompositionTests {
     /// independent legacy float output, with RGB bases and compact bilinear gain.
     func testISOLogGainCacheMatchesReconstructionAcrossWeightsAndOffsets() throws {
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let compositor = try DisplayCompositor(device: renderer.device, library: renderer.library)
         let base: [Float] = [0,0.1,0.55, 0.02,0.1,0.9, 0.05,0.1,0.3, 0.1,0.2,1]
         let baseBuffer = try XCTUnwrap(renderer.device.makeBuffer(bytes: base, length: base.count*4))
         let gains: [Float] = [0,0.8]
@@ -425,9 +418,12 @@ extension CanvasCompositionTests {
                     gainMin: minimum, gainMax: maximum, gainGamma: gamma, gainWeight: weight,
                     baseOffset: baseOffset, alternateOffset: alternateOffset)
             }
+            let pair = try makeDisplayPair(renderer.device, base: base, width: 4, height: 1, gain: gains,
+                gainWidth: 2, gainHeight: 1, coding: .isoCode(minimum: minimum, maximum: maximum, gamma: gamma),
+                baseOffset: baseOffset, alternateOffset: alternateOffset)
             for weight: Float in [0,0.25,0.5,0.65,1] {
                 let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-                let texture = try compositor.makeTestTexture(source(weight), command: command)
+                let texture = try compositor.makeTestTexture(pair, weight: weight, command: command)
                 let out = try target(renderer.device,width:4,height:1)
                 let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
                 pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
@@ -452,33 +448,36 @@ extension CanvasCompositionTests {
         }
     }
 
-    func testRGBRenditionKeepsExistingInterpolationAndExplicitSDROverride() throws {
+    /// Three-channel log2 gain follows the ISO formula per channel; a v1
+    /// alternate rendition keeps both endpoints exact. The SDR override shows
+    /// the base.
+    func testRGBGainAndAlternateRenditionAndExplicitSDROverride() throws {
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
         let base: [Float] = [0.1,0.2,0.5], hdr: [Float] = [0,0.8,4]
-        let source = FramePlanes(base:try XCTUnwrap(renderer.device.makeBuffer(bytes:base,length:12)),baseRowBytes:12,
-            gain:try XCTUnwrap(renderer.device.makeBuffer(bytes:hdr,length:12)),gainRowBytes:12,gainChannels:3,
-            width:1,height:1,gainWidth:1,gainHeight:1,baseOffset:0.02,alternateOffset:0.08)
-        let legacy = try renderer.reconstructFloat(planes:source)
-        for (weight,flags) in [(Float(0),UInt32(0)),(0.5,0),(1,0),(0.5,1)] {
-            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-            let texture = try compositor.makeTestTexture(source, weight: weight, command: command)
-            let out = try target(renderer.device,width:1,height:1)
-            let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
-            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
-            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
-            var params = CompositionParams(rect:SIMD4(-1,-1,1,1))
-            params.flags = flags
-            compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
-            let actual = try read(out,after:command)
-            for c in 0..<3 {
-                let expected: Float = flags == 1 || weight == 0 ? base[c] : weight == 1 ? hdr[c]
-                    : max(0,(base[c]+0.02)*pow((hdr[c]+0.08)/(base[c]+0.02),weight)-0.08)
-                XCTAssertEqual(actual[c],expected,accuracy:0.002)
-                if weight == 1 { XCTAssertEqual(actual[c],legacy[c],accuracy:0.002) }
+        let gain = (0..<3).map { log2((hdr[$0]+0.08)/(base[$0]+0.02)) }
+        for alternate in [false,true] {
+            let source = try makeDisplayPair(renderer.device,base:base,width:1,height:1,gain:alternate ? hdr : gain,
+                gainChannels:3,coding:alternate ? .alternate : .log2,baseOffset:0.02,alternateOffset:0.08)
+            for (weight,flags) in [(Float(0),UInt32(0)),(0.5,0),(1,0),(0.5,1)] {
+                let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+                let texture = try compositor.makeTestTexture(source, weight: weight, command: command)
+                let out = try target(renderer.device,width:1,height:1)
+                let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
+                pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+                let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+                var params = CompositionParams(rect:SIMD4(-1,-1,1,1))
+                params.flags = flags
+                compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
+                let actual = try read(out,after:command)
+                for c in 0..<3 {
+                    let expected: Float = flags == 1 || (alternate && weight == 0) ? base[c] : alternate && weight == 1 ? hdr[c]
+                        : max(0,(base[c]+0.02)*pow((hdr[c]+0.08)/(base[c]+0.02),weight)-0.08)
+                    XCTAssertEqual(actual[c],expected,accuracy:0.002,"alternate=\(alternate) weight=\(weight)")
+                }
             }
         }
-        XCTAssertEqual(compositor.rebuilds,4)
+        XCTAssertEqual(compositor.rebuilds,8)
     }
 }
 
@@ -487,11 +486,9 @@ extension CanvasCompositionTests {
 extension CanvasCompositionTests {
     func testReviewerMinifiedISOGainRemainsContinuousAtFullHeadroom() throws {
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
-        let base:[Float]=[0.1,0.1,0.1, 0.1,0.1,0.1], gain:[Float]=[0,1]
-        let planes=FramePlanes(base:try XCTUnwrap(renderer.device.makeBuffer(bytes:base,length:24)),baseRowBytes:24,
-            gain:try XCTUnwrap(renderer.device.makeBuffer(bytes:gain,length:8)),gainRowBytes:8,gainChannels:1,
-            width:2,height:1,gainWidth:2,gainHeight:1,gainMin:0,gainMax:4)
+        let compositor=try DisplayCompositor(device:renderer.device,library:renderer.library)
+        let planes=try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1, 0.1,0.1,0.1],width:2,height:1,gain:[0,1],
+            coding:.isoCode(minimum:0,maximum:4,gamma:1))
         let setup=try XCTUnwrap(renderer.queue.makeCommandBuffer())
         let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:2,height:1,mipmapped:true)
         descriptor.textureType = .type2DArray;descriptor.arrayLength=3;descriptor.storageMode = .private
@@ -523,14 +520,12 @@ extension CanvasCompositionTests {
 extension CanvasCompositionTests {
     func testLinearFilteringKeepsBothISOEndpointsContinuousWithOffsetsAndClipping() throws {
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
         let base: [Float] = [0.1,0.02,0.6, 0.1,0.3,0.02], gains: [Float] = [0,1]
-        let b = try XCTUnwrap(renderer.device.makeBuffer(bytes:base,length:base.count*4))
-        let g = try XCTUnwrap(renderer.device.makeBuffer(bytes:gains,length:8))
         let weights: [Float] = [0,0.001,0.5,0.999,1]
         for (minimum,maximum,baseOffset,alternateOffset): (Float,Float,Float,Float) in [(0,4,0,0),(-2,4,0,0.08),(-2,4,0.08,0.08),(-3,2,0.15,0.025)] {
-            let planes = FramePlanes(base:b,baseRowBytes:24,gain:g,gainRowBytes:8,gainChannels:1,
-                width:2,height:1,gainWidth:2,gainHeight:1,gainMin:minimum,gainMax:maximum,
+            let planes = try makeDisplayPair(renderer.device,base:base,width:2,height:1,gain:gains,
+                coding:.isoCode(minimum:minimum,maximum:maximum,gamma:1),
                 baseOffset:baseOffset,alternateOffset:alternateOffset)
             // 1x1 uses production mipmaps. The centre of a 3x1 enlargement
             // linearly averages the same two texels without mip minification.
@@ -573,7 +568,7 @@ extension CanvasCompositionTests {
         let whole = try await frame(session,exposure:0)
         let tile = try await frame(session,exposure:0,region:CGRect(x:4,y:4,width:16,height:12))
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
         let out = try target(renderer.device,width:64,height:48)
         let fullWidth = try XCTUnwrap(tile.metadata.fullWidth), fullHeight = try XCTUnwrap(tile.metadata.fullHeight)
         let transform = CanvasTransform(imageSize:CGSize(width:fullWidth,height:fullHeight),viewport:CGSize(width:64,height:48))

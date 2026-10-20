@@ -13,23 +13,23 @@ import HyperDREngine
         for stops in [0.0, 0.5, 1.0, 2.0, 4.0] {
             let frame = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge":.number(64), "headroom":.number(stops)]))
             let m = frame.metadata
-            XCTAssertEqual(Double(GainWeight.value(headroom: exp2(m.headroomStops), metadata: m)),
+            XCTAssertEqual(Double(DisplayWeight.value(headroom: exp2(m.headroomStops), metadata: m)),
                            try XCTUnwrap(m.gainWeight), accuracy: 1e-6)
         }
     }
     func testSDRDegenerateAndReversedHeadrooms() {
-        XCTAssertEqual(GainWeight.value(headroom: 1, base: 0, alternate: 4), 0)
-        XCTAssertEqual(GainWeight.value(headroom: 8, base: 2, alternate: 2 + 1e-10), 0)
-        XCTAssertEqual(GainWeight.value(headroom: 8, base: 2, alternate: 2 - 1e-10), 0)
-        XCTAssertEqual(GainWeight.value(headroom: 2, base: 2, alternate: 0), 0.5)
-        XCTAssertEqual(GainWeight.value(headroom: 4, base: 0, alternate: 4), 0.5)
-        XCTAssertEqual(GainWeight.value(headroom: .nan, base: 0, alternate: 4), 0)
+        XCTAssertEqual(DisplayWeight.value(headroom: 1, base: 0, alternate: 4), 0)
+        XCTAssertEqual(DisplayWeight.value(headroom: 8, base: 2, alternate: 2 + 1e-10), 0)
+        XCTAssertEqual(DisplayWeight.value(headroom: 8, base: 2, alternate: 2 - 1e-10), 0)
+        XCTAssertEqual(DisplayWeight.value(headroom: 2, base: 2, alternate: 0), 0.5)
+        XCTAssertEqual(DisplayWeight.value(headroom: 4, base: 0, alternate: 4), 0.5)
+        XCTAssertEqual(DisplayWeight.value(headroom: .nan, base: 0, alternate: 4), 0)
     }
     func testRebuildThresholdAccumulatesAgainstRenderedWeightAndHonorsEndpoints() {
-        XCTAssertFalse(GainWeight.needsRebuild(from: 0.5, to: 0.504))
-        XCTAssertTrue(GainWeight.needsRebuild(from: 0.5, to: 0.506))
-        XCTAssertTrue(GainWeight.needsRebuild(from: 0.004, to: 0))
-        XCTAssertTrue(GainWeight.needsRebuild(from: 0.996, to: 1))
+        XCTAssertFalse(DisplayWeight.needsRebuild(from: 0.5, to: 0.504))
+        XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.5, to: 0.506))
+        XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.004, to: 0))
+        XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.996, to: 1))
     }
     func testLatestScreenSampleAndPolicyAreIndependentOfModelPublication() {
         let monitor = HeadroomMonitor()

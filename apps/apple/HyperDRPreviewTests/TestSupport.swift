@@ -146,3 +146,21 @@ nonisolated final class DrawableProbe: @unchecked Sendable {   // all state behi
         return drawable
     }
 }
+
+/// A display pair from Swift arrays: an RGB base and a gain of one channel or
+/// three (RGB), at the gain's own size.
+nonisolated func makeDisplayPair(_ device: any MTLDevice, base: [Float], width: Int, height: Int,
+                                 gain: [Float], gainWidth: Int? = nil, gainHeight: Int? = nil,
+                                 gainChannels: Int = 1, coding: DisplayPair.GainCoding = .log2,
+                                 baseOffset: Float = 0, alternateOffset: Float = 0) throws -> DisplayPair {
+    func rgba(_ rgb: [Float]) -> [Float] {
+        stride(from: 0, to: rgb.count, by: 3).flatMap { [rgb[$0], rgb[$0 + 1], rgb[$0 + 2], 1] }
+    }
+    let gainWidth = gainWidth ?? width, gainHeight = gainHeight ?? height
+    return DisplayPair(
+        base: try PreviewRenderer.texture(device: device, width: width, height: height, values: rgba(base)),
+        gain: try PreviewRenderer.texture(device: device, width: gainWidth, height: gainHeight,
+            values: gainChannels == 1 ? gain : rgba(gain), monochrome: gainChannels == 1),
+        coding: coding, baseOffset: SIMD3(repeating: baseOffset),
+        alternateOffset: SIMD3(repeating: alternateOffset), alternateHeadroom: 1)
+}

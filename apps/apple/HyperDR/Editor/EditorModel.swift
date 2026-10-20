@@ -761,7 +761,7 @@ import UniformTypeIdentifiers
             document?.previewError = nil
             leaveSourceUnavailable(announce: true)
             canvas.setImageSize(frame.pixelSize, zoom: canvas.zoom)
-            editedGainWeight = frame.hasGain ? frame.frame.map { Double(GainWeight.value(headroom: display.currentHeadroom, metadata: $0.metadata)) } ?? frame.gainWeight ?? services.displayState.gainWeight ?? 1 : nil
+            editedGainWeight = frame.hasGain ? frame.frame.map { Double(DisplayWeight.value(headroom: display.currentHeadroom, metadata: $0.metadata)) } ?? frame.gainWeight ?? services.displayState.gainWeight ?? 1 : nil
             display.gainWeight = selectedMode != .original ? editedGainWeight : nil
         case .failed(let error):
             setRefreshing(false)

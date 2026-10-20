@@ -44,3 +44,9 @@ nonisolated enum PreviewGPUTiming {
         return command.makeComputeCommandEncoder(descriptor: pass)
     }
 }
+
+nonisolated extension PreviewTrace: CanvasTrace {
+    func makeLayerEncoder(device: any MTLDevice, command: any MTLCommandBuffer) -> (any MTLComputeCommandEncoder)? {
+        PreviewGPUTiming.encoder(device: device, command: command, trace: self)
+    }
+}

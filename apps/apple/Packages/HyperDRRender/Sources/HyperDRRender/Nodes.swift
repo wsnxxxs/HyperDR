@@ -111,17 +111,18 @@ public enum AdjustmentOperation: UInt32, CaseIterable, Sendable {
 /// Pointwise light/color nodes. The full graph fuses this identical operator
 /// sequence; individual nodes remain available for scoped evaluation and tests.
 public struct AdjustmentNode: RenderNode {
-    public static let parameters: [ParameterDeclaration] = []
     public static let parameterIDs = AdjustmentIDs.tone + AdjustmentIDs.color
+    public static let parameters = parameterIDs.map { Adjustments.declaration($0)! }
     public let operation: AdjustmentOperation
     public let value: Float
     public init(_ operation: AdjustmentOperation, value: Float) { self.operation = operation; self.value = value }
     public var cacheKey: String { "adjust/v1/\(operation.rawValue)/\(value.bitPattern)" }
-    public var isIdentity: Bool { value == 0 }
+    public var isIdentity: Bool { value == RenderParameter.defaultNumber(operation.parameterID) }
     public func inputRegion(for region: CGRect, imageSize: PixelSize) -> CGRect { region }
     public func encode(_ input: RenderPlanes, context: RenderNodeContext) throws -> RenderPlanes {
-        guard value.isFinite, (operation == .exposure ? -4...4 : -100...100).contains(value) else { throw RenderError.invalidAdjustment }
+        try RenderParameter.check(value,id:operation.parameterID)
         if isIdentity { return input }
+        guard RenderParameter.declaration(operation.parameterID).allows(context.domain) else { throw RenderError.invalidAdjustment }
         let output = try context.texture(width: input.base.width, height: input.base.height)
         var parameters = PointUniform(operation: operation.rawValue, sdr: context.domain == .sdr ? 1 : 0,
                                       value: value, unused: 0)

@@ -1,22 +1,23 @@
 import Foundation
+import HyperDRRecipe
 
-/// Render-side values while the complete Recipe schema is being developed.
-/// Signed controls use the design's -100...100 scale; strengths use 0...1.
+/// Resolved engine values. Use RenderAdjustments(recipe:lut:) for declared recipe units.
+/// Signed controls are -1...1; contrast is a multiplier (default 1).
 public struct ToneAdjustments: Hashable, Sendable {
-    public var exposure: Float = 0
-    public var contrast: Float = 0
-    public var highlights: Float = 0
-    public var shadows: Float = 0
-    public var blacks: Float = 0
+    public var exposure: Float = RenderParameter.defaultNumber("tone.exposure")
+    public var contrast: Float = RenderParameter.defaultNumber("tone.contrast")
+    public var highlights: Float = RenderParameter.defaultNumber("tone.highlights")
+    public var shadows: Float = RenderParameter.defaultNumber("tone.shadows")
+    public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
     public init() {}
     public var isIdentity: Bool { self == Self() }
 }
 
 public struct ColorAdjustments: Hashable, Sendable {
-    public var warmth: Float = 0
-    public var tint: Float = 0
-    public var vibrance: Float = 0
-    public var saturation: Float = 0
+    public var warmth: Float = RenderParameter.defaultNumber("color.warmth")
+    public var tint: Float = RenderParameter.defaultNumber("color.tint")
+    public var vibrance: Float = RenderParameter.defaultNumber("color.vibrance")
+    public var saturation: Float = RenderParameter.defaultNumber("color.saturation")
     public init() {}
     public var isIdentity: Bool { self == Self() }
 }
@@ -32,26 +33,23 @@ public struct RAWAdjustments: Hashable, Sendable {
     public init() {}
 }
 
-public enum HDRSource: String, Hashable, Sendable {
-    case automatic, expand, captured, capturedExpand, ai, capturedAI
-}
-
 public struct HDRAdjustments: Hashable, Sendable {
-    public var enabled = true
-    public var source: HDRSource = .automatic
-    public var strength: Float = 1
+    public var enabled = RenderParameter.defaultBool("hdr.enabled")
+    /// Nil resolves to HyperDRRecipe.HDRSource.defaultSource(for:) at rendering.
+    public var source: HyperDRRecipe.HDRSource? = nil
+    public var strength: Float = RenderParameter.defaultNumber("hdr.strength")
     public var range: Float? = nil
     public var expansionStart: Float? = nil
-    public var coverage: Float = 0.6
-    public var sdrRolloff: Float = 0
+    public var coverage: Float = RenderParameter.defaultNumber("hdr.coverage")
+    public var sdrRolloff: Float = RenderParameter.defaultNumber("hdr.sdrRolloff")
     public init() {}
-    public var isIdentity: Bool { self == Self() }
+    public var isIdentity: Bool { var value = self; value.source = nil; return value == Self() }
 }
 
 public struct LookAdjustments: Hashable, Sendable {
     public var lut: ColorLUT?
-    public var enabled = true
-    public var strength: Float = 1
+    public var enabled = RenderParameter.defaultBool("look.enabled")
+    public var strength: Float = RenderParameter.defaultNumber("look.strength")
     public var input: LUTSpace = .sRGB
     public var output: LUTSpace = .sRGB
     public init() {}
@@ -66,24 +64,25 @@ public struct RenderAdjustments: Hashable, Sendable {
     public init() {}
     public var wholeImageIsIdentity: Bool { tone.isIdentity && color.isIdentity && look.isIdentity }
 
-    func validate() throws {
-        func check(_ value: Float, _ range: ClosedRange<Float>) throws {
-            guard value.isFinite && range.contains(value) else { throw RenderError.invalidAdjustment }
+    func validate(domain: InputDomain) throws {
+        for (id,value) in [("tone.exposure",tone.exposure),("tone.contrast",tone.contrast),
+            ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.blacks",tone.blacks),
+            ("color.warmth",color.warmth),("color.tint",color.tint),("color.vibrance",color.vibrance),
+            ("color.saturation",color.saturation),("hdr.strength",hdr.strength),("hdr.coverage",hdr.coverage),
+            ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength)] {
+            try RenderParameter.check(value,id:id)
         }
-        try check(tone.exposure, -4...4)
-        for value in [tone.contrast, tone.highlights, tone.shadows, tone.blacks,
-                      color.warmth, color.tint, color.vibrance, color.saturation] { try check(value, -100...100) }
-        try check(hdr.strength, 0...2)
-        try check(hdr.coverage, 0...1)
-        try check(hdr.sdrRolloff, 0...1)
-        if let range = hdr.range { try check(range, 0.5...4) }
-        if let start = hdr.expansionStart { try check(start, 0.18...0.75) }
-        try check(look.strength, 0...1)
+        if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
+        if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
         if !look.isIdentity {
             guard !(look.input.isSDR && !look.output.isSDR),
-                  look.output != .sLog3 || look.input == .sLog3 else { throw RenderError.invalidAdjustment }
+                  look.output != .sLog3 || look.input == .sLog3,
+                  look.input != .sLog3 || domain == .rawEDR else { throw RenderError.invalidAdjustment }
         }
-        if hdr.source == .ai || hdr.source == .capturedAI { throw RenderError.aiNotAvailable }
+        let source = hdr.source ?? .defaultSource(for:domain)
+        guard source.domains.contains(domain) else { throw RenderError.invalidAdjustment }
+        if source.usesModel { throw RenderError.aiNotAvailable }
+        if domain == .rawEDR && (color.warmth != 0 || color.tint != 0) { throw RenderError.invalidAdjustment }
     }
 }
 

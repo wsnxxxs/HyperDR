@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum LUTSpace: UInt32, Hashable, Sendable {
     case sRGB, displayP3, rec709, hlg, pq, sLog3
@@ -8,7 +9,8 @@ public enum LUTSpace: UInt32, Hashable, Sendable {
 /// Immutable .cube table, red axis fastest. 1D and 3D, domains and input-range
 /// headers follow the existing engine's semantics. Samples may lie outside [0,1].
 public struct ColorLUT: Hashable, Sendable {
-    public let id = UUID()
+    public var id: String { contentHash }
+    public let contentHash: String
     public let title: String
     public let size: Int
     public let is3D: Bool
@@ -18,7 +20,10 @@ public struct ColorLUT: Hashable, Sendable {
     public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
     public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
-    public init(cube: String) throws {
+    public init(cube: String) throws { try self.init(data:Data(cube.utf8)) }
+
+    private init(data: Data) throws {
+        guard let cube = String(data:data,encoding:.utf8) else { throw RenderError.invalidLUT("Expected UTF-8 .cube") }
         var title = "", size = 0, is3D = true
         var low = SIMD3<Float>(repeating: 0), high = SIMD3<Float>(repeating: 1)
         var values: [SIMD3<Float>] = []
@@ -56,11 +61,12 @@ public struct ColorLUT: Hashable, Sendable {
         }
         guard size > 0, values.count == (is3D ? size * size * size : size),
               low.x < high.x, low.y < high.y, low.z < high.z else { throw RenderError.invalidLUT("Incomplete .cube or invalid domain") }
+        self.contentHash = "sha256:" + SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined()
         self.title = title; self.size = size; self.is3D = is3D
         self.domainMinimum = low; self.domainMaximum = high; self.values = values
     }
 
     public init(contentsOf url: URL) throws {
-        try self.init(cube: String(contentsOf: url, encoding: .utf8))
+        try self.init(data:Data(contentsOf:url))
     }
 }

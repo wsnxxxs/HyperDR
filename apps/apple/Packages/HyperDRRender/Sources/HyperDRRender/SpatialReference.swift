@@ -21,7 +21,7 @@ extension DoubleReference {
         var cells = [SIMD4<Double>](repeating:.zero,count:w*h)
         var peaks = SIMD4<Double>.zero
         var originalPeak = 1.0
-        let start = Double(settings.hdr.expansionStart ?? 0.25)
+        let start = Double(settings.hdr.expansionStart ?? RenderParameter.expansionStart)
         for row in 0..<h { for column in 0..<w {
             let x0 = column*size.width/w, x1 = (column+1)*size.width/w
             let y0 = row*size.height/h, y1 = (row+1)*size.height/h

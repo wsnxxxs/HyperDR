@@ -91,15 +91,15 @@ extension RenderEngine {
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
         let raw = options.raw
         if let value = raw.temperature {
-            guard value.isFinite, (2000...50000).contains(value) else { throw RenderError.invalidAdjustment }
+            try RenderParameter.check(value,id:"develop.temperature")
             filter.neutralTemperature = value
         }
         if let value = raw.tint {
-            guard value.isFinite, (-150...150).contains(value) else { throw RenderError.invalidAdjustment }
+            try RenderParameter.check(value,id:"develop.tint")
             filter.neutralTint = value
         }
-        for value in [raw.luminanceNR, raw.colorNR, raw.sharpness].compactMap({ $0 }) {
-            guard value.isFinite, (0...1).contains(value) else { throw RenderError.invalidAdjustment }
+        for (id,value) in [("develop.luminanceNR",raw.luminanceNR),("develop.colorNR",raw.colorNR),("develop.sharpness",raw.sharpness)] {
+            if let value { try RenderParameter.check(value,id:id) }
         }
         if filter.isLuminanceNoiseReductionSupported, let value = raw.luminanceNR { filter.luminanceNoiseReductionAmount = value }
         if filter.isColorNoiseReductionSupported, let value = raw.colorNR { filter.colorNoiseReductionAmount = value }

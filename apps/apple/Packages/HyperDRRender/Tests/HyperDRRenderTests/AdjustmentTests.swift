@@ -39,6 +39,47 @@ private func cube(swap: Bool = false) -> String {
 }
 
 @Suite(.serialized) struct AdjustmentTests {
+    @Test func recipeUnitsDefaultsAndLUTReference() async throws {
+        for domain in InputDomain.allCases {
+            let resolved = try RenderAdjustments(recipe:Recipe(inputDomain:domain))
+            #expect(resolved.hdr.source == HDRSource.defaultSource(for:domain))
+            #expect(resolved.hdr.range == nil && resolved.hdr.expansionStart == nil)
+            #expect(resolved.tone.contrast == 1 && resolved.hdr.strength == 1)
+        }
+        let rawRecipe = Recipe(inputDomain:.rawEDR,values:["color.warmth":.number(50),
+            "develop.tint":.number(35),"develop.luminanceNR":.number(40),"develop.sharpness":.number(25)])
+        let raw = try SourceOptions(recipe:rawRecipe)
+        #expect(raw.raw.tint == 35 && raw.raw.luminanceNR == 0.4 && raw.raw.sharpness == 0.25)
+        #expect(raw.raw.temperature == nil && raw.raw.colorNR == nil)
+        #expect(try RenderAdjustments(recipe:rawRecipe).color.warmth == 0)
+        #expect(SourceOptions.parameters == AdjustmentIDs.raw.map { Adjustments.declaration($0)! })
+        #expect(AdjustmentNode.parameters == AdjustmentNode.parameterIDs.map { Adjustments.declaration($0)! })
+        let lut = try ColorLUT(cube:cube(swap:true))
+        #expect(lut == (try ColorLUT(cube:cube(swap:true))))
+        let recipe = Recipe(inputDomain:.hdr,look:LUTReference(contentHash:lut.contentHash,name:"Synthetic"),values:[
+            "tone.contrast":.number(-100),"tone.highlights":.number(-40),"color.saturation":.number(-50),
+            "hdr.strength":.number(80),"hdr.range":.number(3),"hdr.expansionStart":.number(25),
+            "look.input":.string("p3"),"look.output":.string("p3"),"look.strength":.number(70)])
+        let edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        #expect(edit.tone.contrast == 0.625 && edit.tone.highlights == -0.4)
+        #expect(edit.color.saturation == -0.5 && edit.hdr.strength == 0.8)
+        #expect(edit.hdr.expansionStart == 0.25 && edit.look.strength == 0.7)
+        let engine = try RenderEngine(), rgb = SIMD3<Double>(4,2,1)
+        let source = try await engine.source(image:bitmap([rgb],width:1,height:1),domain:.hdr)
+        let actual = RenderEngine.readPixels(try await engine.render(source,recipe:recipe,lut:lut))
+        compare(actual,[DoubleReference.hdrOutput(DoubleReference.prepare(rgb,settings:edit,sdr:false),
+            settings:edit.hdr,range:3,shoulder:false,allowRolloff:true)])
+        let rawSource = try await engine.source(image:bitmap([rgb],width:1,height:1),domain:.rawEDR)
+        do {
+            _ = try await engine.render(rawSource,nodes:[AdjustmentNode(.warmth,value:0.1)])
+            Issue.record("Non-RAW white balance node applied to RAW")
+        } catch RenderError.invalidAdjustment {}
+        do {
+            _ = try RenderAdjustments(recipe:recipe,lut:ColorLUT(cube:cube()))
+            Issue.record("Mismatched LUT contents accepted")
+        } catch RenderError.invalidLUT {}
+    }
+
     @Test func pointNodesAgainstDoubleAndToneAnchors() async throws {
         let engine = try RenderEngine()
         let values: [(AdjustmentOperation,Double)] = [(.exposure,0.7),(.contrast,65),(.highlights,-70),
@@ -46,8 +87,9 @@ private func cube(swap: Bool = false) -> String {
         for (operation,value) in values {
             for (rgb,domain) in [(SIMD3<Double>(0.1,0.08,0.05),InputDomain.sdr),(SIMD3<Double>(2.4,1.8,1.2),.hdr)] {
                 let source = try await engine.source(image:bitmap([rgb],width:1,height:1),domain:domain)
-                let output = RenderEngine.readPixels(try await engine.render(source,nodes:[AdjustmentNode(operation,value:Float(value))]))
-                let changed = DoubleReference.point(rgb,operation:operation,value:value,sdr:domain == .sdr)
+                let engineValue = Adjustments.declaration(operation.parameterID)!.engineValue(value)
+                let output = RenderEngine.readPixels(try await engine.render(source,nodes:[AdjustmentNode(operation,value:Float(engineValue))]))
+                let changed = DoubleReference.point(rgb,operation:operation,value:engineValue,sdr:domain == .sdr)
                 let reference = domain == .sdr ? DoubleReference.Split(base:changed,gain:0) : DoubleReference.sourceHDRSplit(changed)
                 compare(output,[reference])
                 if [.warmth,.tint,.vibrance,.saturation].contains(operation) {
@@ -56,7 +98,7 @@ private func cube(swap: Bool = false) -> String {
             }
         }
         let contrast: (Double) -> Double = { value in
-            DoubleReference.point(SIMD3(repeating:value),operation:.contrast,value:100).x
+            DoubleReference.point(SIMD3(repeating:value),operation:.contrast,value:1.6).x
         }
         #expect(abs(contrast(0.18)-0.18) < 1e-12)
         #expect(contrast(0) == 0 && contrast(1) == 1 && contrast(2) == 2)
@@ -69,14 +111,14 @@ private func cube(swap: Bool = false) -> String {
             #expect(abs((right-1)/epsilon-1) < 0.0001)
         }
         for operation in [AdjustmentOperation.shadows,.blacks] {
-            #expect(DoubleReference.point(SIMD3(repeating:0.5),operation:operation,value:100) == SIMD3(repeating:0.5))
+            #expect(DoubleReference.point(SIMD3(repeating:0.5),operation:operation,value:1) == SIMD3(repeating:0.5))
         }
-        let dark = DoubleReference.point(SIMD3(repeating:0),operation:.blacks,value:-60)
+        let dark = DoubleReference.point(SIMD3(repeating:0),operation:.blacks,value:-0.6)
         #expect(dark.x > 0)
         let saturated = SIMD3<Double>(0.1,2,0.1)
         let source = try await engine.source(image:bitmap([saturated],width:1,height:1),domain:.hdr)
         var edit = RenderAdjustments()
-        edit.color.saturation = 100; edit.hdr.range = 3
+        edit.color.saturation = 1; edit.hdr.range = 3
         let fitted = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         let expected = DoubleReference.prepare(saturated,settings:edit,sdr:false)
         compare(fitted,[expected])
@@ -205,9 +247,9 @@ private func cube(swap: Bool = false) -> String {
             hdrImage:bitmap([hdr],width:1,height:1),authoredBaseImage:baseSource.hdrImage,rawSettings:nil,
             texture:baseSource.texture,baseSpace:RenderEngine.workingColorSpace,gainTexture:gainSource.texture)
         var edit = RenderAdjustments()
-        let untouched = try await engine.render(source,adjustments:edit)
+        let untouched = try await engine.render(source,recipe:Recipe(inputDomain:.dual))
         #expect(untouched.provenance == .authored)
-        edit.hdr.source = .captured
+        edit.hdr.coverage = 0.5
         let automatic = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         for c in 0..<3 { #expect(abs(Double(automatic.gain[c])-g[c]) < 0.00001) }
         let sourceAnalysis = try await engine.analysis(source)
@@ -235,8 +277,8 @@ private func cube(swap: Bool = false) -> String {
         }
         let source = try await engine.source(image:bitmap(input,width:width,height:height),domain:.rawEDR)
         var edit = RenderAdjustments()
-        edit.tone.exposure = 0.3; edit.tone.contrast = 25; edit.tone.highlights = -20
-        edit.color.vibrance = 20; edit.hdr.source = .capturedExpand
+        edit.tone.exposure = 0.3; edit.tone.contrast = Float(Adjustments.declaration("tone.contrast")!.engineValue(25)); edit.tone.highlights = -0.2
+        edit.color.vibrance = 0.2; edit.hdr.source = .capturedExpand
         let analysisStart = DispatchTime.now().uptimeNanoseconds
         _ = try await engine.analysis(source,adjustments:edit)
         let analysisMilliseconds = Double(DispatchTime.now().uptimeNanoseconds-analysisStart)/1e6

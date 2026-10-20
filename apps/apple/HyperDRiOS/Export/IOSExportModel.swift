@@ -139,6 +139,43 @@ nonisolated struct ExportStack: Sendable {
         return ExportPlanner.plan(capture.planRequest(choice))
     }
 
+    /// The long edges offered besides the original size (p7-3c-export §1.3 B).
+    static let longEdgePresets = [3840, 2560, 2160, 1080]
+
+    /// The long edges the size picker offers for a photo whose long edge is
+    /// `photo`: the original size (nil), the presets smaller than the photo,
+    /// and the current limit when it is none of those (typed, or the memory
+    /// budget's).
+    static func longEdgeChoices(photo: Int?, current: Int?) -> [Int?] {
+        var edges = longEdgePresets.filter { edge in photo.map { edge < $0 } ?? true }
+        if let current, !edges.contains(current) { edges.append(current) }
+        return [nil] + edges.sorted(by: >)
+    }
+
+    /// The photo's own long edge, before any limit.
+    func photoLongEdge(_ editor: RecipeEditor) -> Int? {
+        guard let capture = try? editor.exportCapture() else { return nil }
+        return capture.planRequest(choice).source.pixelSize.longEdge
+    }
+
+    /// A typed long edge: a positive number below the photo's; anything else
+    /// keeps the original size.
+    func setLongEdge(_ edge: Int?, photo: Int?) {
+        guard let edge, edge > 0, photo.map({ edge < $0 }) ?? true else {
+            custom.longEdge = nil
+            return
+        }
+        custom.longEdge = edge
+    }
+
+    /// "Change to long edge N px" when memory blocks the export: the custom
+    /// page with the choice's settings and the largest long edge the budget
+    /// admits.
+    func useLongEdge(_ edge: Int, from plan: ExportPlan) {
+        if page == .destination { useCustomFormat(from: plan) }
+        custom.longEdge = edge
+    }
+
     /// The ceiling the planner's own notice names when it brings the edit's
     /// highlights down (`dest.ceiling` for a destination, `export.rangeClamped`
     /// for a custom format): the one notice with a stop count.
@@ -390,6 +427,13 @@ nonisolated struct ExportStack: Sendable {
             return String(localized: "ios.export.memory.estimateUnknown \(peak)")
         }
         return String(localized: "ios.export.memory.estimate \(peak) \(mebibytes(available))")
+    }
+
+    /// The largest long edge the memory budget admits, when memory is what
+    /// blocks the export and a smaller size would fit.
+    static func admissibleLongEdge(_ plan: ExportPlan) -> Int? {
+        guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return nil }
+        return plan.memory.maxAdmissibleLongEdge
     }
 
     /// A cancelled run (by the user or by leaving the app), not a failure.

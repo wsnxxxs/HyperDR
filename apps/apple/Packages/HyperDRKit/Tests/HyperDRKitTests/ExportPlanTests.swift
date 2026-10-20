@@ -1,26 +1,25 @@
 import Foundation
+import HyperDRRecipe
 import Testing
 @testable import HyperDRKit
 
 private let photo = ExportPixelSize(width: 6000, height: 4000)
 
-private func source(_ kind: ExportSource.Kind = .raster,
-                    size: ExportPixelSize = photo,
-                    authoredGainChannels: Int = 1) -> ExportSource {
-    ExportSource(kind: kind, pixelSize: size, authoredGainChannels: authoredGainChannels)
+private func source(_ domain: InputDomain = .sdr,
+                    size: ExportPixelSize = photo) -> ExportSource {
+    ExportSource(domain: domain, pixelSize: size)
 }
 
 private func request(_ choice: ExportChoice,
                      source: ExportSource = source(),
+                     pair: ExportGainPair? = nil,
                      frame: ExportFrameFacts = ExportFrameFacts(),
                      hdrEnabled: Bool = true,
                      peakStops: Double = 2.4,
-                     keepsAuthoredGain: Bool = false,
                      library: ExportLibraryFacts = ExportLibraryFacts(origin: .photoLibrary),
                      resources: ExportRetainedResources = ExportRetainedResources()) -> ExportPlanRequest {
-    ExportPlanRequest(choice: choice, source: source, frame: frame,
-        edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops,
-                              keepsAuthoredGain: keepsAuthoredGain),
+    ExportPlanRequest(choice: choice, source: source, pair: pair, frame: frame,
+        edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops),
         library: library, resources: resources)
 }
 
@@ -48,7 +47,7 @@ struct ExportDestinationPlanTests {
     }
 
     @Test func photosTakesATenBitBaseForAnHDRRendition() {
-        let plan = plan(request(.destination(.photos), source: source(.raw, authoredGainChannels: 1)))
+        let plan = plan(request(.destination(.photos), source: source(.rawEDR)))
         #expect(plan.encoding == .adaptive)
         #expect(plan.baseBitDepth == 10)
         #expect(plan.writer == .inHouse)
@@ -110,7 +109,7 @@ struct ExportDestinationPlanTests {
 
     @Test func aLongEdgeLimitNeverUpscales() {
         let small = ExportPixelSize(width: 1200, height: 900)
-        let plan = plan(request(.destination(.web), source: source(.raster, size: small)))
+        let plan = plan(request(.destination(.web), source: source(.sdr, size: small)))
         #expect(plan.size == small)
     }
 
@@ -118,7 +117,7 @@ struct ExportDestinationPlanTests {
         // 3:2 is inside 4:5 … 1.91:1.
         #expect(plan(request(.destination(.social), peakStops: 1)).notices.isEmpty)
         let tall = ExportPixelSize(width: 3000, height: 6000)
-        let plan = plan(request(.destination(.social), source: source(.raster, size: tall), peakStops: 1))
+        let plan = plan(request(.destination(.social), source: source(.sdr, size: tall), peakStops: 1))
         #expect(plan.notices.map(\.key) == ["dest.social.aspect"])
     }
 
@@ -183,7 +182,7 @@ struct ExportCustomPlanTests {
 
     @Test func anHDRRenditionMovesTheAdaptivePairToOurWriter() {
         let plan = plan(request(.custom(CustomExportFormat(encoding: .adaptive, gamut: .p3, quality: 90)),
-                                source: source(.raw)))
+                                source: source(.rawEDR)))
         #expect(plan.baseBitDepth == 10)
         #expect(plan.writer == .inHouse)
     }
@@ -215,23 +214,39 @@ struct ExportCustomPlanTests {
 
 @Suite("Export planning: the gain map pair")
 struct ExportGainMapPlanTests {
+    /// As the render describes its output: ours, or the photo's own pair.
+    private func pair(_ provenance: ExportGainPair.Provenance, channels: Int = 1,
+                      offsetsAreZero: Bool = true) -> ExportGainPair {
+        ExportGainPair(provenance: provenance, channels: channels, offsetsAreZero: offsetsAreZero)
+    }
+
     @Test func ourOwnSeparationIsOneChannelWithZeroOffsets() {
-        let plan = plan(request(.destination(.web), source: source(.raw)))
+        let plan = plan(request(.destination(.web), source: source(.rawEDR)))
         #expect(plan.gainMap.origin == .separated)
         #expect(plan.gainMap.channels == 1)
-        #expect(plan.gainMap.usesZeroOffsets)
+        #expect(plan.gainMap.offsetsAreZero)
         #expect(plan.gainMap.resplitReason == nil)
     }
 
-    @Test func anAuthoredPairIsKeptWhenOurWriterCarriesThreeChannels() {
-        let plan = plan(request(.destination(.photos),
-                                source: source(.dual, authoredGainChannels: 3),
-                                hdrEnabled: true, keepsAuthoredGain: true))
-        // A dual source is an HDR rendition, so the pair goes to our own writer.
+    @Test func aSingleHDRSourceIsAnHDRRendition() {
+        // R14-001: an HDR HEIC or AVIF carries real values above SDR white, so the
+        // adaptive pair takes a 10-bit base and our writer — not an 8-bit SDR base
+        // written by ImageIO.
+        let plan = plan(request(.destination(.photos), source: source(.hdr)))
+        #expect(plan.baseBitDepth == 10)
+        #expect(plan.writer == .inHouse)
+        #expect(plan.writerReason == .peakMemory)
+    }
+
+    @Test func anEditedAuthoredPairKeepsTheChannelsTheRenderReported() {
+        // R14-002: an HDR-only edit on a one-channel authored map can come back as
+        // three channels; the plan reads what the render produced, not the file.
+        let plan = plan(request(.destination(.photos), source: source(.dual),
+                                pair: pair(.editedAuthored, channels: 3, offsetsAreZero: false)))
         #expect(plan.writer == .inHouse)
         #expect(plan.gainMap.origin == .authored)
         #expect(plan.gainMap.channels == 3)
-        #expect(!plan.gainMap.usesZeroOffsets) // the file's own offsets
+        #expect(!plan.gainMap.offsetsAreZero) // the file's own offsets
     }
 
     @Test func anAuthoredPairFallsBackToResplitWhenTheWriterCarriesOneChannel() {
@@ -239,39 +254,48 @@ struct ExportGainMapPlanTests {
         // 10-bit base, which our writer owns), so this is the writer capability
         // rule itself: a writer that carries one channel cannot take three.
         let three = ExportPlanner.gainMapPlan(
-            request: request(.destination(.photos), source: source(.dual, authoredGainChannels: 3),
-                             keepsAuthoredGain: true),
+            request: request(.destination(.photos), source: source(.dual),
+                             pair: pair(.editedAuthored, channels: 3)),
             writer: .imageIO, writesGainMap: true)
         #expect(three.origin == .resplit)
         #expect(three.channels == 1)
+        #expect(three.offsetsAreZero)
         #expect(three.resplitReason == .writerCarriesOneChannel)
     }
 
-    @Test func anEditOutsideTheHDRGroupAlwaysResplits() {
-        let plan = plan(request(.destination(.photos), source: source(.dual, authoredGainChannels: 3),
-                                keepsAuthoredGain: false))
+    @Test func aResplitFromTheRenderIsTakenAsItIs() {
+        let plan = plan(request(.destination(.photos), source: source(.dual),
+                                pair: pair(.resplit)))
         #expect(plan.gainMap.origin == .resplit)
         #expect(plan.gainMap.channels == 1)
-        #expect(plan.gainMap.resplitReason == .editedBeyondGain)
+        #expect(plan.gainMap.offsetsAreZero)
+        #expect(plan.gainMap.resplitReason == nil) // the render re-separated, not us
+    }
+
+    @Test func aDualSourceWithoutAPairDescriptionIsPlannedAsAResplit() {
+        let plan = plan(request(.destination(.photos), source: source(.dual)))
+        #expect(plan.gainMap.origin == .resplit)
+        #expect(plan.gainMap.channels == 1)
+        #expect(plan.gainMap.resplitReason == nil)
     }
 
     @Test func aFramedAuthoredPairKeepsItsMapAndZeroesTheFrame() {
-        let plan = plan(request(.destination(.photos), source: source(.dual, authoredGainChannels: 3),
-                                frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200)),
-                                keepsAuthoredGain: true))
+        let plan = plan(request(.destination(.photos), source: source(.dual),
+                                pair: pair(.authored, channels: 3, offsetsAreZero: false),
+                                frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200))))
         #expect(plan.gainMap.origin == .authored)
         #expect(plan.gainMap.channels == 3)
         #expect(plan.gainMap.zeroGainInFrame)
     }
 
     @Test func aDualSourceWithHDROffWritesNoPair() {
-        let plan = plan(request(.destination(.photos), source: source(.dual, authoredGainChannels: 3),
-                                hdrEnabled: false, keepsAuthoredGain: true))
+        let plan = plan(request(.destination(.photos), source: source(.dual),
+                                pair: pair(.authored, channels: 3), hdrEnabled: false))
         #expect(plan.gainMap == .sdr)
         #expect(plan.peakStops == nil)
     }
 
-    @Test func aframedPairKeepsTheFrameSDR() {
+    @Test func aFramedPairKeepsTheFrameSDR() {
         let framed = plan(request(.destination(.web),
                                   frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200))))
         #expect(framed.gainMap.zeroGainInFrame)
@@ -367,6 +391,16 @@ struct ExportMemoryPlanTests {
         #expect(web.encode == sameShape.encode)
         #expect(web.packaging == sameShape.packaging)
         #expect(web.render == sameShape.render)
+    }
+
+    @Test func aLUTCostsThreeSixteenByteCopiesPerValue() {
+        // R14-003: the CPU table ([SIMD3<Float>], 16-byte stride), the rgba32Float
+        // 3D texture and the SIMD4 upload staging array.
+        #expect(ExportRetainedResources(lutValueCount: 129 * 129 * 129).bytes
+                == 129 * 129 * 129 * 48)
+        #expect(ExportRetainedResources(lutAssetBytes: 1024, lutValueCount: 10,
+                                        frameOverlayPixels: 100).bytes
+                == 1024 + 10 * 48 + 100 * 16)
     }
 
     @Test func retainedResourcesAreCountedInEveryStage() {
@@ -547,7 +581,7 @@ struct ExportGeometryTests {
                 == ExportPixelSize(width: 2560, height: 1707))
         let canvas = ExportPixelSize(width: 2816, height: 1963)
         let plan = plan(request(.destination(.web),
-                                source: source(.raster, size: photo),
+                                source: source(.sdr, size: photo),
                                 frame: ExportFrameFacts(canvas: canvas)))
         #expect(plan.photoSize == ExportPixelSize(width: 2560, height: 1707))
         #expect(plan.size == canvas)

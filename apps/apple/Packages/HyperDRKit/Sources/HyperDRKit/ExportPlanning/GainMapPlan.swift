@@ -20,35 +20,36 @@ public struct GainMapPlan: Sendable, Hashable {
     public let origin: Origin
     /// 1 for everything we separate; 1 or 3 for an authored pair.
     public let channels: Int
+    /// Base and alternate offset both zero: always true of what we separate, and
+    /// what the render reported for an authored pair.
+    public let offsetsAreZero: Bool
     /// Framed exports keep the frame SDR: every pixel the frame fills carries
     /// zero gain, so a mat and its shadow never become HDR.
     public let zeroGainInFrame: Bool
-    /// Set for `.resplit`, nil otherwise.
+    /// Set when this layer had to re-separate a pair the render wrote, nil when
+    /// the render had already re-separated it (an edit outside the HDR group).
     public let resplitReason: ResplitReason?
 
     public var writesGainMap: Bool { origin != .none }
 
-    /// Everything we separate is mono with base and alternate offset zero; an
-    /// authored pair keeps the offsets the file carries.
-    public var usesZeroOffsets: Bool { origin == .separated || origin == .resplit }
-
-    public init(origin: Origin, channels: Int, zeroGainInFrame: Bool,
+    public init(origin: Origin, channels: Int, offsetsAreZero: Bool, zeroGainInFrame: Bool,
                 resplitReason: ResplitReason? = nil) {
         self.origin = origin
         self.channels = channels
+        self.offsetsAreZero = offsetsAreZero
         self.zeroGainInFrame = zeroGainInFrame
         self.resplitReason = resplitReason
     }
 
-    public static let sdr = GainMapPlan(origin: .none, channels: 0, zeroGainInFrame: false)
+    public static let sdr = GainMapPlan(origin: .none, channels: 0, offsetsAreZero: true,
+                                        zeroGainInFrame: false)
 }
 
-/// Why an authored pair could not be written as it is.
+/// Why this layer had to re-separate a pair the render wrote. An edit that
+/// changed tone, colour or look is not here: the render re-separates for that and
+/// says so in `ExportGainPair.Provenance.resplit`.
 public enum ResplitReason: String, Sendable, Hashable, Codable {
     /// The chosen writer only carries a one-channel gain map, so a three-channel
     /// authored pair has to be separated again.
     case writerCarriesOneChannel
-    /// Tone, colour or look changed, so the gain is no longer a transform of the
-    /// photo's own map (gpu-pipeline §3): rebuild the HDR, process, re-separate.
-    case editedBeyondGain
 }

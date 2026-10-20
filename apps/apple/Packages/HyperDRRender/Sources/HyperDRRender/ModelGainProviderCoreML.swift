@@ -58,7 +58,7 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
                 device: (any MTLDevice)? = MTLCreateSystemDefaultDevice(),
                 analysisLongSide: Int = ModelGain.analysisLongSide,
                 bundle: Bundle? = nil) throws {
-        guard let device else { throw RenderError.metalUnavailable }
+        guard let device else { throw ModelGainError.deviceUnavailable("Metal is unavailable") }
         let model = try ModelGainModel(computeUnits: computeUnits, bundle: bundle)
         self.device = device
         self.model = model

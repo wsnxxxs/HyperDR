@@ -69,6 +69,13 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         let predicted = try await engine.predictModelGain(source,provider:provider)
         let cached = try await engine.predictModelGain(source,provider:provider)
         #expect(predicted.sourceID == source.id && predicted.modelID == provider.modelID && predicted.gain === cached.gain)
+        let alternative = try CoreMLModelGainProvider(computeUnits:.cpuOnly,device:device,analysisLongSide:32)
+        let otherModel = try await engine.predictModelGain(source,provider:alternative)
+        let retained = try await engine.predictModelGain(source,provider:provider)
+        #expect(otherModel.modelID != predicted.modelID && retained.gain === predicted.gain)
+        #expect(await engine.modelPredictionCache.count == 2)
+        do { _ = try CoreMLModelGainProvider(device:nil); Issue.record("Missing device accepted") }
+        catch ModelGainError.deviceUnavailable {}
         let sdrPrediction = try await engine.predictModelGain(baseSource,provider:provider)
         #expect(sdrPrediction.sourceID == baseSource.id)
         let hdr = try await engine.source(image:aiImage([SIMD3(4,2,1)]),domain:.hdr)

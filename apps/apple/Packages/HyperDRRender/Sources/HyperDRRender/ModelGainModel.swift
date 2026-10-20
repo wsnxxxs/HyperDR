@@ -45,6 +45,9 @@ public final class ModelGainModel: @unchecked Sendable {
 
     public init(computeUnits: MLComputeUnits = .all,
                 bundle: Bundle? = nil) throws {
+        guard !MLModel.availableComputeDevices.isEmpty else {
+            throw ModelGainError.deviceUnavailable("Core ML has no available compute device")
+        }
         let bundle = bundle ?? Bundle.module
         let configuration = MLModelConfiguration()
         configuration.computeUnits = computeUnits

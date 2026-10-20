@@ -95,8 +95,8 @@ extension RenderAdjustments {
 }
 
 extension SourceOptions {
-    public init(recipe: Recipe) throws {
-        self.init()
+    public init(recipe: Recipe, rawResolution: RAWResolution = .full) throws {
+        self.init(rawResolution:rawResolution)
         let values = RecipeValues(recipe:recipe)
         lensCorrection = try values.bool("develop.lensCorrection")
         raw.temperature = try values.optionalNumber("develop.temperature")

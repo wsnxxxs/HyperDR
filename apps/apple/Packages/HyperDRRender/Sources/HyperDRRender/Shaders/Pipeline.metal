@@ -1,5 +1,15 @@
 #include <metal_stdlib>
 using namespace metal;
+// Bilinear weights are computed in GLOBAL native pixel coordinates. Hardware
+// normalized sampling depends on texture dimensions and can disagree by several
+// codes when a full image is replaced with an ROI texture.
+float4 sourceSample(texture2d<float,access::sample> src,float2 center,float2 outputSize,float4 window) {
+    float2 pixel=center*(window.zw/outputSize)-.5f,lo=floor(pixel),t=pixel-lo;
+    int2 p=int2(lo)-int2(window.xy),hi=int2(src.get_width()-1,src.get_height()-1);
+    float4 a=mix(src.read(uint2(clamp(p,int2(0),hi))),src.read(uint2(clamp(p+int2(1,0),int2(0),hi))),t.x);
+    float4 b=mix(src.read(uint2(clamp(p+int2(0,1),int2(0),hi))),src.read(uint2(clamp(p+int2(1,1),int2(0),hi))),t.x);
+    return mix(a,b,t.y);
+}
 // AE-3 P3 Oklab fitting, preserving negatives until this output boundary.
 float sm(float a, float b, float x) {
   float t = clamp((x - a) / (b - a), 0.f, 1.f);
@@ -76,15 +86,13 @@ kernel void sourceHDRSplit(texture2d<float, access::read> src [[texture(0)]],
     gain.write(float4(g, 0, 0, 1), pos);
 }
 
-struct Sampling { uint outputWidth, outputHeight, x, y; };
+struct Sampling { uint outputWidth, outputHeight, x, y; float4 sourceRegion; };
 kernel void sampleSource(texture2d<float, access::sample> src [[texture(0)]],
                          texture2d<float, access::write> dst [[texture(1)]],
                          constant Sampling &p [[buffer(0)]],
                          uint2 pos [[thread_position_in_grid]]) {
     if (pos.x >= dst.get_width() || pos.y >= dst.get_height()) return;
-    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
-    float2 uv = (float2(pos + uint2(p.x, p.y)) + .5f) / float2(p.outputWidth, p.outputHeight);
-    dst.write(src.sample(s, uv), pos);
+    dst.write(sourceSample(src,float2(pos+uint2(p.x,p.y))+.5f,float2(p.outputWidth,p.outputHeight),p.sourceRegion), pos);
 }
 kernel void zeroGain(texture2d<float, access::write> dst [[texture(0)]],
                      constant uint &unused [[buffer(0)]], uint2 pos [[thread_position_in_grid]]) {

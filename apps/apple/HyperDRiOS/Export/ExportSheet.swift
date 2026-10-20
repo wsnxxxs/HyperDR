@@ -193,6 +193,9 @@ struct ExportSheet: View {
                           ? LocalizedStringKey("ios.export.error.memory") : LocalizedStringKey("ios.export.blocked"),
                       systemImage: "exclamationmark.triangle")
                     .font(.footnote).foregroundStyle(.orange)
+                if let estimate = IOSExportModel.memoryEstimate(plan) {
+                    Text(verbatim: estimate).font(.caption).foregroundStyle(.secondary)
+                }
             }
         } header: {
             Text("ios.export.willWrite")
@@ -265,6 +268,9 @@ struct ExportSheet: View {
             Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.orange)
             Text("ios.export.failed").font(.headline)
             Text(LocalizedStringKey(failure.key)).multilineTextAlignment(.center)
+            if let memory = failure.memory {
+                Text(verbatim: memory).font(.footnote).multilineTextAlignment(.center)
+            }
             if let detail = failure.detail {
                 Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }

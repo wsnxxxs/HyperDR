@@ -138,17 +138,19 @@ is removed; HEVC uses the calibrated quality route (tests/quality).
 Photos saving still waits for the user's Photos Lab result. Local quality and
 fuzz gates remain outside CI; do not add a hosted runner.
 
-Open, roughly in order (2026-10-21, end of phase; details in
-`docs/architecture/handoff-2026-10-21.md` §10): review and merge
-`wip/render-detail-memory` (`b719b4a7`: ROI detail, device texture limits,
-faster export rows; contract in `Packages/HyperDRRender/EXPORT_MEMORY.md`),
-then replace Kit's area-based Render terms in the export estimate with that
-contract. The target is at least 110MP at full size on iPhone 17 Pro, for
-editing and export; a smaller long edge is only a fallback. Functionality
-comes first: the iOS/iPadOS UI will be redesigned, so iOS gets minimal
-screens only (the P7-3c panel design is paused). Then: P7-3e (saving to
-the photo library, after the user's Photos Lab run on `wip/photos-lab`), the
-iOS background host and the hands-on checks in `docs/design/user-acceptance.md`.
+Open, roughly in order (2026-10-21; details in
+`docs/architecture/handoff-2026-10-21.md` §11): Render detail ROI, bounded
+export tiles, native-tile RAW preview, the Kit export estimate on
+`Packages/HyperDRRender/EXPORT_MEMORY.md` and the HEIF streaming sink are in.
+The target is at least 110MP at full size on iPhone 17 Pro, for editing and
+export; a smaller long edge is only a fallback. The estimate admits 110MP with
+about 4 GiB of free process memory and not with 3 GiB, so the next step is the
+user's device measurement (available memory with the editor open, 61MP open,
+1:1, pan and full-size export). Functionality comes first: the iOS/iPadOS UI
+will be redesigned, so iOS gets minimal screens only (the P7-3c panel design
+is paused). Then: P7-3e (saving to the photo library, after the user's Photos
+Lab run on `wip/photos-lab`), the iOS background host and the hands-on checks
+in `docs/design/user-acceptance.md`.
 `.github/workflows/ci.yml` runs only for `main`; its sanitizer job runs the
 C ABI lifecycle and package tests through `ctest`. Run the test scripts with
 `python3.12`.

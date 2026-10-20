@@ -51,10 +51,14 @@ public enum PhotoLibraryAccess: Sendable, Hashable, Codable {
 public struct ExportLibraryFacts: Sendable, Hashable, Codable {
     public var origin: PhotoLibraryOrigin
     public var access: PhotoLibraryAccess
+    /// Empty until a save route has passed Photos Lab (P7-3e).
+    public var verifiedModes: Set<LibrarySaveMode>
 
-    public init(origin: PhotoLibraryOrigin = .files, access: PhotoLibraryAccess = .notDetermined) {
+    public init(origin: PhotoLibraryOrigin = .files, access: PhotoLibraryAccess = .notDetermined,
+                verifiedModes: Set<LibrarySaveMode> = PhotoLibrarySaver.verifiedModes) {
         self.origin = origin
         self.access = access
+        self.verifiedModes = verifiedModes
     }
 }
 
@@ -63,14 +67,10 @@ public struct ExportLibraryFacts: Sendable, Hashable, Codable {
 /// hidden, so the user knows the option exists.
 public struct LibrarySaveOption: Sendable, Hashable {
     public let mode: LibrarySaveMode
-    /// `dest.photos.replace.*` in `Localizable.xcstrings`.
-    public let unavailableReasonKey: String?
-
-    public var isAvailable: Bool { unavailableReasonKey == nil }
-
-    public init(mode: LibrarySaveMode, unavailableReasonKey: String? = nil) {
-        self.mode = mode
-        self.unavailableReasonKey = unavailableReasonKey
+    public let unavailableReason: PhotosUnavailableReason?
+    public var isAvailable: Bool { unavailableReason == nil }
+    public init(mode: LibrarySaveMode, unavailableReason: PhotosUnavailableReason? = nil) {
+        self.mode = mode; self.unavailableReason = unavailableReason
     }
 }
 
@@ -99,30 +99,24 @@ public struct LibrarySavePlan: Sendable, Hashable {
     ///   leaves no second copy behind; otherwise a new photo.
     public static func plan(facts: ExportLibraryFacts, isFramed: Bool,
                             remembered: LibrarySaveMode?) -> LibrarySavePlan {
-        guard facts.access.allowsNewPhoto else {
-            return LibrarySavePlan(
-                options: [LibrarySaveOption(mode: .replace, unavailableReasonKey: "dest.photos.permission"),
-                          LibrarySaveOption(mode: .newPhoto, unavailableReasonKey: "dest.photos.permission")],
-                selected: nil)
+        let options = LibrarySaveMode.allCases.map { mode -> LibrarySaveOption in
+            let reason: PhotosUnavailableReason?
+            if !facts.verifiedModes.contains(mode) { reason = .notVerified }
+            else if !facts.access.allowsNewPhoto { reason = .permissionDenied }
+            else if mode == .newPhoto { reason = nil }
+            else if facts.origin == .files { reason = .fileSource }
+            else if isFramed { reason = .framed }
+            else if facts.access == .addOnly { reason = .addOnly }
+            else if !facts.access.allowsReplacement { reason = .selectedAssetUnavailable }
+            else { reason = nil }
+            return .init(mode: mode, unavailableReason: reason)
         }
-        let replaceReason: String?
-        if facts.origin == .files {
-            replaceReason = "dest.photos.replace.files"
-        } else if isFramed {
-            replaceReason = "dest.photos.replace.framed"
-        } else if facts.access == .addOnly {
-            replaceReason = "dest.photos.replace.addOnly"
-        } else if !facts.access.allowsReplacement {
-            replaceReason = "dest.photos.replace.libraryAccess"
-        } else {
-            replaceReason = nil
-        }
-        let options = [LibrarySaveOption(mode: .replace, unavailableReasonKey: replaceReason),
-                       LibrarySaveOption(mode: .newPhoto)]
+        let available = options.filter(\.isAvailable)
+        guard !available.isEmpty else { return .init(options: options, selected: nil) }
         let selected: LibrarySaveMode
         if let remembered, options.contains(where: { $0.mode == remembered && $0.isAvailable }) {
             selected = remembered
-        } else if replaceReason == nil {
+        } else if available.contains(where: { $0.mode == .replace }) {
             selected = .replace
         } else {
             selected = .newPhoto

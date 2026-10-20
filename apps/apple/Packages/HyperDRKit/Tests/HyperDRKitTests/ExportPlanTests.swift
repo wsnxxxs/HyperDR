@@ -16,7 +16,7 @@ private func request(_ choice: ExportChoice,
                      frame: ExportFrameFacts = ExportFrameFacts(),
                      hdrEnabled: Bool = true,
                      peakStops: Double = 2.4,
-                     library: ExportLibraryFacts = ExportLibraryFacts(origin: .photoLibrary),
+                     library: ExportLibraryFacts = ExportLibraryFacts(origin: .photoLibrary, verifiedModes: Set(LibrarySaveMode.allCases)),
                      resources: ExportRetainedResources = ExportRetainedResources()) -> ExportPlanRequest {
     ExportPlanRequest(choice: choice, source: source, pair: pair, frame: frame,
         edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops),
@@ -582,7 +582,7 @@ struct ExportMemoryPlanTests {
 struct ExportLibraryPlanTests {
     @Test func aLibraryPhotoReplacesTheOriginalByDefault() {
         let plan = plan(request(.destination(.photos),
-                                library: ExportLibraryFacts(origin: .photoLibrary, access: .notDetermined)))
+                                library: ExportLibraryFacts(origin: .photoLibrary, access: .notDetermined, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == .replace)
         #expect(plan.library?.replace?.isAvailable == true)
         #expect(plan.library?.newPhoto?.isAvailable == true)
@@ -590,7 +590,7 @@ struct ExportLibraryPlanTests {
 
     @Test func aFileOnlyBecomesANewPhoto() {
         let plan = plan(request(.destination(.photos),
-                                library: ExportLibraryFacts(origin: .files, access: .addOnly)))
+                                library: ExportLibraryFacts(origin: .files, access: .addOnly, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == .newPhoto)
         #expect(plan.library?.replace?.unavailableReasonKey == "dest.photos.replace.files")
         #expect(plan.library?.newPhoto?.isAvailable == true)
@@ -599,27 +599,27 @@ struct ExportLibraryPlanTests {
     @Test func aFrameCannotBePutBackOverTheOriginal() {
         let plan = plan(request(.destination(.photos),
                                 frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200)),
-                                library: ExportLibraryFacts(origin: .photoLibrary)))
+                                library: ExportLibraryFacts(origin: .photoLibrary, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == .newPhoto)
         #expect(plan.library?.replace?.unavailableReasonKey == "dest.photos.replace.framed")
     }
 
     @Test func limitedAccessNeedsTheWholeLibraryToReplace() {
         let limited = plan(request(.destination(.photos),
-            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: false))))
+            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: false), verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(limited.library?.selected == .newPhoto)
         #expect(limited.library?.replace?.unavailableReasonKey == "dest.photos.replace.libraryAccess")
         let authorized = plan(request(.destination(.photos),
-            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: true))))
+            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: true), verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(authorized.library?.selected == .replace)
         let addOnly = plan(request(.destination(.photos),
-            library: ExportLibraryFacts(origin: .photoLibrary, access: .addOnly)))
+            library: ExportLibraryFacts(origin: .photoLibrary, access: .addOnly, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(addOnly.library?.replace?.unavailableReasonKey == "dest.photos.replace.addOnly")
     }
 
     @Test func refusedAccessBlocksTheExport() {
         let plan = plan(request(.destination(.photos),
-                                library: ExportLibraryFacts(origin: .photoLibrary, access: .denied)))
+                                library: ExportLibraryFacts(origin: .photoLibrary, access: .denied, verifiedModes: Set(LibrarySaveMode.allCases))))
         #expect(plan.library?.selected == nil)
         #expect(plan.blockers.map(\.code) == ["photos_permission_denied"])
         #expect(!plan.isExecutable)
@@ -628,7 +628,7 @@ struct ExportLibraryPlanTests {
     @Test func theRememberedModeWinsWhenItIsStillAvailable() {
         let preferences = InMemoryExportPreferences(mode: .newPhoto)
         let planned = ExportPlanner.plan(request(.destination(.photos),
-            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: true))),
+            library: ExportLibraryFacts(origin: .photoLibrary, access: .readWrite(canReplaceSelected: true), verifiedModes: Set(LibrarySaveMode.allCases))),
             budget: FixedExportMemoryBudget(bytes: nil), preferences: preferences)
         #expect(planned.library?.selected == .newPhoto)
     }
@@ -638,7 +638,7 @@ struct ExportLibraryPlanTests {
         let preferences = InMemoryExportPreferences(mode: .replace)
         let planned = ExportPlanner.plan(request(.destination(.photos),
             frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200)),
-            library: ExportLibraryFacts(origin: .photoLibrary)),
+            library: ExportLibraryFacts(origin: .photoLibrary, verifiedModes: Set(LibrarySaveMode.allCases))),
             budget: FixedExportMemoryBudget(bytes: nil), preferences: preferences)
         #expect(planned.library?.selected == .newPhoto)
     }
@@ -666,6 +666,18 @@ struct ExportSummaryTests {
         #expect(summary.parts.map(\.key) == ["enc.adaptive.label", "choice.colorGamut.p3",
                                              "plan.size.original", "plan.peak %@"])
         #expect(summary.parts[3].arguments == [.stops(2.4)])
+    }
+
+    @Test func limitsThatDoNotShrinkThePhotoStillNameTheOriginalSize() {
+        let size = ExportPixelSize(width: 96, height: 64)
+        let choices: [ExportChoice] = [.destination(.web), .destination(.social),
+            .custom(.init(encoding: .sdrJPEG, longEdge: 96)),
+            .custom(.init(encoding: .sdrJPEG, longEdge: 2560))]
+        for choice in choices {
+            let value = plan(request(choice, source: source(size: size)))
+            #expect(value.sourceSize == size)
+            #expect(value.summary.parts[2].key == "plan.size.original")
+        }
     }
 
     @Test func aResizedDestinationNamesBothSides() {
@@ -804,12 +816,62 @@ struct ExportPlanGapTests {
             for encoding in ExportEncoding.allCases {
                 for hdr in [true, false] {
                     let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: hdr, peakStops: 8), available: 1)
-                    for message in value.notices + value.blockers.map(\.message) + value.summary.parts {
+                    for message in value.notices.map(\.message) + value.blockers.map(\.message) + value.summary.parts {
                         #expect(message.localized(locale: locale) != message.key)
                         #expect(!message.localized(locale: locale).contains("%@"))
                     }
                 }
             }
         }
+    }
+}
+
+@Suite("Typed export facts")
+struct TypedExportFactsTests {
+    @Test func photosIsBlockedUntilASaveModeIsVerified() {
+        let value = plan(ExportPlanRequest(choice: .destination(.photos), source: source(), edit: .init(peakStops: 2)))
+        #expect(value.blockers.contains(.photosNotAvailable(.notVerified)))
+        #expect(value.library?.selected == nil)
+        #expect(value.library?.options.allSatisfy { $0.unavailableReason == .notVerified } == true)
+    }
+    @Test func transparencyAndCeilingsAreFacts() {
+        let value = plan(ExportPlanRequest(choice: .destination(.web),
+            source: .init(domain: .sdr, pixelSize: photo, hasAlpha: true), edit: .init(peakStops: 8)))
+        #expect(value.notices.contains(.alphaOnBlack))
+        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "zh-Hans")) == "透明区域会铺黑色。")
+        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "en")) == "Transparent areas will be filled with SDR black.")
+        #expect(value.notices.contains(.ceiling(stops: ExportDestination.web.profile.ceilingStops, scope: .destination(.web))))
+    }
+    @Test func encoderAdmissionMatchesCardAvailability() {
+        let capabilities = ExportEncodingCapabilities(main8: true, main10: false)
+        var request = ExportPlanRequest(choice: .custom(.init(encoding: .adaptive)),
+            source: source(.hdr), edit: .init(peakStops: 2), capabilities: capabilities)
+        let expected = ExportBlockReason.encoderUnavailable(.adaptive, .main10Unavailable)
+        #expect(ExportPlanner.availability(of: .adaptive, source: request.source, capabilities: capabilities, edit: request.edit) == expected)
+        #expect(plan(request).blockers.contains(expected))
+        request.edit.hdrEnabled = false
+        #expect(plan(request).blockers.isEmpty)
+        #expect(ExportPlanner.availability(of: .pq, source: request.source, capabilities: capabilities, edit: request.edit) == .hdrOff(.pq))
+    }
+}
+
+extension TypedExportFactsTests {
+    @Test func editingIdentityIgnoresDestinationButFullMatchIncludesIt() throws {
+        let revision = RecipeSourceRevision(sha256: "source", byteCount: 10, modificationDate: .distantPast)
+        let snapshot = RecipeExportSnapshot(recipe: Recipe(), source: revision)
+        let web = plan(request(.destination(.web)))
+        let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: web)
+        let record = try ExportRecord(id: ExportID(rawValue: String(repeating: "a", count: 32)), name: "test.jpg", byteCount: 10, resolved: resolved)
+        #expect(record.matchesEdit(snapshot))
+        #expect(record.matches(snapshot, selection: .destination(.web), profileVersion: web.destination!.profile.version))
+        #expect(!record.matches(snapshot, selection: .destination(.social), profileVersion: web.destination!.profile.version))
+        #expect(!record.matches(snapshot, selection: .destination(.web), profileVersion: 999))
+        let changed = RecipeExportSnapshot(recipe: Recipe(), source: .init(sha256: "source", byteCount: 11, modificationDate: .distantPast))
+        #expect(!record.matchesEdit(changed))
+        let result = RecipeExportResult(record: record, resolved: resolved, file: URL(fileURLWithPath: "/tmp/test.jpg"))
+        #expect(result.size == web.size)
+        #expect(result.byteCount == 10)
+        #expect(!result.verified) // No verification evidence in a fake record.
+        #expect(result.peakStops == nil)
     }
 }

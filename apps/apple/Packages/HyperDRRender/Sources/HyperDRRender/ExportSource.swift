@@ -14,8 +14,9 @@ func sourceSampling(_ texture: any MTLTexture, _ region: CGRect) -> SIMD4<Float>
     return SIMD4(Float((region.minX*width).rounded()),Float((region.minY*height).rounded()),Float(width),Float(height))
 }
 
-/// Lazy system decode/development graph. No full-size RGBAf texture is allocated
-/// by Render. Apple codecs/CIRAWFilter may still cache full-frame data internally.
+/// System decode/development source. No full-size RGBAf texture is allocated
+/// by Render. Large TIFFs retain one detached native bitmap for ROI reuse;
+/// other Apple codecs/CIRAWFilter may still cache full-frame data internally.
 /// The caller must keep file access valid until export finishes. Immutable and may
 /// be shared with another RenderEngine on the same Metal device.
 public struct ExportSource: @unchecked Sendable {
@@ -32,8 +33,8 @@ public struct ExportSource: @unchecked Sendable {
 }
 
 extension RenderEngine {
-    /// Keeps full-quality system graphs lazy, and materializes only the fixed
-    /// analysis source. Drops engine-owned pixel caches, retaining four AI grids.
+    /// Opens full-quality system graphs/native decoder storage and materializes
+    /// only the fixed analysis texture. Drops pixel caches, retaining four AI grids.
     /// Use an export engine if the editor must keep its preview caches warm.
     public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions()) throws -> ExportSource {
         try Task.checkCancellation()
@@ -86,8 +87,11 @@ extension RenderEngine {
         var gainTexture: (any MTLTexture)?, gainRegion = CGRect(x:0,y:0,width:1,height:1)
         if let gain = opened.gain {
             let size = gain.image.extent.integral.size
-            let rect = CGRect(x:normalized.minX*size.width,y:normalized.minY*size.height,
-                width:normalized.width*size.width,height:normalized.height*size.height)
+            // Project independently: the base ROI already includes its own halo.
+            // Reusing it here would add the gain halo to the base halo.
+            let gx = size.width/Double(outputSize.width), gy = size.height/Double(outputSize.height)
+            let rect = CGRect(x:(region.minX+0.5)*gx-0.5,y:(region.minY+0.5)*gy-0.5,
+                width:(region.width-1)*gx+1,height:(region.height-1)*gy+1)
                 .insetBy(dx:-1,dy:-1).integral.intersection(CGRect(origin:.zero,size:size))
             gainRegion = CGRect(x:rect.minX/size.width,y:rect.minY/size.height,width:rect.width/size.width,height:rect.height/size.height)
             gainTexture = try rasterize(crop(gain.image,normalized:gainRegion),space:nil,

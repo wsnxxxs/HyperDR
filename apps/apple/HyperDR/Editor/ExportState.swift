@@ -83,7 +83,7 @@ nonisolated struct ExportHistoryItem: Sendable {
     /// again: the same recipe of the same file, the same frame, the same format.
     func matches(_ snapshot: RecipeExportSnapshot, options current: ExportChoices) -> Bool {
         guard let made = recipeSnapshot else { return false }
-        return made.recipe == snapshot.recipe && made.source == snapshot.source && made.frame == snapshot.frame
+        return made.matchesEdit(snapshot)
             && options.customFormat == current.customFormat
     }
 }

@@ -1,10 +1,11 @@
 # Parser fuzzing on macOS arm64
 
-These targets are opt-in and are excluded from the default build. The six
-native targets exercise the real container/LUT parsers with LLVM libFuzzer,
+These targets are opt-in and are excluded from the default build. The five
+native targets exercise the real container parsers with LLVM libFuzzer,
 ASan and UBSan. No reference HEVC library is linked. `heif_reader` includes
 image/gain/alpha resolution; it does not ask VideoToolbox to decode pixels.
-The other native targets are `heif_inspect`, `tmap`, `exif`, `hvcc`, and `cube`.
+The other native targets are `heif_inspect`, `tmap`, `exif`, and `hvcc`.
+The retired C++ LUT parser (`cube`) was removed with P7-4 and is no longer a target.
 
 Use Homebrew LLVM (Apple Clang does not ship libFuzzer). The local P3b run used
 LLVM 23.1.3, not the earlier batch's LLVM 21. All tests use their own TMPDIR.
@@ -18,14 +19,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --preset macos-ar
   '-DCMAKE_CXX_FLAGS=-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer' \
   '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
   '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
-cmake --build build-fuzz --target fuzz_heif_reader fuzz_heif_inspect fuzz_tmap fuzz_exif fuzz_hvcc fuzz_cube
+cmake --build build-fuzz --target fuzz_heif_reader fuzz_heif_inspect fuzz_tmap fuzz_exif fuzz_hvcc
 TMPDIR="$PWD/build-fuzz-tmp" ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
   taskpolicy -b /opt/homebrew/bin/python3.12 tests/fuzz/run.py --build-dir build-fuzz --seconds 300
 ```
 
 `300` seconds per target is the P3b-6 acceptance run (the default; cut from 30
 minutes on 2026-10-20); `taskpolicy -b` keeps it from slowing other work. The
-six targets run in parallel, so on a loaded machine a starved process can trip
+five targets run in parallel, so on a loaded machine a starved process can trip
 libFuzzer's watchdog with an input that runs in under a millisecond (a
 "timeout" artifact that replays in 0 ms): pass `--timeout 30` (default 5) and
 replay any artifact directly before treating it as a bug. The runner copies seeds into
@@ -40,3 +41,25 @@ Private user photos are never fuzz seeds. Exif/hvcC/tmap seeds are extracted
 from synthetic writer outputs. Native target input is capped at 64 KiB; resource
 limit acceptance/rejection is also tested directly by `heif_reader_limits_test`,
 including larger ICC, metadata and sample payloads.
+
+## Local acceptance, 2026-10-20 (HEIF sink)
+
+Five current targets, ASan + UBSan, `taskpolicy -b`, `--seconds 300`,
+`--timeout 120`, `-max_len=65536`: all exit 0; no crash or sanitizer finding.
+
+| Target | Runs | Coverage | Corpus | Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| heif_reader | 640,893 | 4170 | 566 | 301 |
+| heif_inspect | 733,798 | 3604 | 535 | 301 |
+| tmap | 2,216,254 | 221 | 44 | 301 |
+| exif | 7,007,767 | 295 | 124 | 301 |
+| hvcc | 973,060 | 505 | 235 | 301 |
+
+The first attempt's 30-second watchdog fired for inspect/tmap/hvcc while the
+machine load average approached 100. Each timeout input passed 100 foreground
+replays in 0.06–0.15 seconds including process startup. The completed run used
+a 120-second watchdog and saved four `slow-unit` artifacts, all of which also
+passed 100 foreground replays. These were scheduling delays, not reproducible
+parser failures. Logs/artifacts remain under `build-fuzz/fuzz-runs` and the
+first attempt under `build-fuzz/fuzz-runs-initial`; replay logs and the JSON
+summary are under `build/tmp/fuzz-*`.

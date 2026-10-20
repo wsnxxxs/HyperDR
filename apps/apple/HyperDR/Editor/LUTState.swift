@@ -29,12 +29,17 @@ nonisolated struct EditorCapabilities: Sendable {
     func availability(isHDR: Bool) -> [String: String?] {
         var result: [String: String?] = [:]
         for id in Preferences.encodings {
-            var reason: String? = encodings[id].map { $0.available ? nil : $0.reason } ?? "hevc_unavailable"
-            if id == "adaptive" && !(isHDR ? main10 : main8) || ["pq", "hlg"].contains(id) && !main10 {
-                reason = encoderReason ?? (isHDR || id != "adaptive" ? "hevc_main10_unavailable" : "hevc_unavailable")
+            let facts = ExportEncodingCapabilities(main8: main8, main10: main10,
+                probeFailed: encoderReason == "hevc_probe_failed",
+                unavailableEncodings: Set(Preferences.encodings.compactMap { id in
+                    encodings[id]?.available == true ? nil : ExportEncoding(rawValue: id)
+                }))
+            let reason = ExportEncoding(rawValue: id).flatMap {
+                ExportPlanner.availability(of: $0,
+                    source: ExportSource(domain: isHDR ? .hdr : .sdr, pixelSize: .init(width: 1, height: 1)),
+                    capabilities: facts, edit: .init(peakStops: 1))
             }
-            let key = reason.map { ["hevc_unavailable", "hevc_main10_unavailable", "hevc_probe_failed"].contains($0)
-                ? "err.server.\($0)" : "err.server.hevc_unavailable" }
+            let key = reason.map { "err.server." + $0.code }
             result[id] = .some(key)
         }
         return result

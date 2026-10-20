@@ -20,6 +20,7 @@ public protocol PhotoLibrarySaving: Sendable {
 /// P7-3e entry and Fake seam. Photos Lab must establish supported modes before
 /// this performs any library transaction or asks for library permission.
 public actor PhotoLibrarySaver: PhotoLibrarySaving {
+    public static let verifiedModes: Set<LibrarySaveMode> = []
     public init() {}
     public func save(file: URL, snapshot: ResolvedExportSnapshot, source: ExportLibrarySource,
                      mode: LibrarySaveMode) async throws -> SavedAsset {

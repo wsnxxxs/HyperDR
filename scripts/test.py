@@ -23,6 +23,8 @@ APPLE_PACKAGES = {
     "HyperDREngine": "swift-engine",
     "HyperDRKit": "swift-kit",
     "HyperDRDesign": "swift-design",
+    "HyperDRRecipe": "swift-recipe",
+    "HyperDRRender": "swift-render",
 }
 APPLE_DEVELOPER_DIR = Path("/Applications/Xcode.app/Contents/Developer")
 

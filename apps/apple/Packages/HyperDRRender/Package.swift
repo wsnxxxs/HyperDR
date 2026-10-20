@@ -15,7 +15,11 @@ let package = Package(
                             // fails inside the build sandbox; the model is
                             // compiled once per process instead, and an Xcode app
                             // target will compile it at build time.
-                            .copy("Resources/research-cnn-v1.mlpackage")]),
+                            .copy("Resources/research-cnn-v1.mlpackage"),
+                            // Compiled into the bundle's default library by an Xcode
+                            // build; copied as source otherwise, so the runtime can
+                            // compile it itself.
+                            .copy("Resources/ModelGainAnalysis.metal")]),
         .testTarget(name: "HyperDRRenderTests", dependencies: ["HyperDRRender"],
                     resources: [.copy("Fixtures")])
     ]

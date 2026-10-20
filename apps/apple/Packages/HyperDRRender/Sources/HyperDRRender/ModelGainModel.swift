@@ -3,10 +3,12 @@ import CoreML
 
 /// The Core ML AI gain model.
 ///
-/// One instance owns one loaded model and is safe to share: `MLModel`'s
-/// prediction calls are independent, and this type adds no mutable state beyond
-/// that. Callers should keep one instance for the life of the process; loading is
-/// the expensive part.
+/// One instance owns one loaded model and may be shared, but predictions through
+/// it are serialized: Core ML requires that one `MLModel` is used by one thread or
+/// queue at a time, so a preview and an export asking at once would otherwise be
+/// a contract violation. Everything else here is immutable, so sharing is safe as
+/// long as every call goes through `gain(for:)`. Callers should keep one instance
+/// for the life of the process; loading is the expensive part.
 ///
 /// Compute units default to `.all`, so the model runs on the neural engine and
 /// the GPU where the system chooses. The numbers the tests compare are produced
@@ -22,6 +24,10 @@ public final class ModelGainModel: @unchecked Sendable {
     private let model: MLModel
     private let inputName: String
     private let outputName: String
+    /// Serializes predictions for the duration of one `predict` call. A response
+    /// is already queued behind any other in flight, so two callers never touch
+    /// the same `MLModel` concurrently.
+    private let predictionQueue = DispatchQueue(label: "hyperdr.modelgain.mlmodel")
 
     /// Model identity without a grid: what a cached gain grid depends on besides
     /// its own input.
@@ -109,6 +115,10 @@ public final class ModelGainModel: @unchecked Sendable {
     /// that is not a multiple of the stride, or channels that do not match, is a
     /// caller bug and should not reach the neural engine as an opaque failure.
     public func gain(for features: ModelGainFeatures) throws -> ModelGainGrid {
+        try predictionQueue.sync { try predict(features) }
+    }
+
+    private func predict(_ features: ModelGainFeatures) throws -> ModelGainGrid {
         let size = features.size
         guard size.width % ModelGain.stride == 0, size.height % ModelGain.stride == 0 else {
             throw ModelGainError.invalidTensorSize(size)

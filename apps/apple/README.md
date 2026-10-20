@@ -27,6 +27,10 @@ with no Swift C++ interoperability. Its schema test compares the raw engine outp
 with the CLI built in `build-apple/`. The Metal tests additionally require Node on
 `PATH` (Homebrew's default locations are included) to run the existing JS `sampleHdr`.
 
+The iOS and iPadOS shell is the `HyperDRiOS` target and scheme in the same project
+(`HyperDRiOS/`, plus `Shared/`, which both apps compile); it links only `HyperDRDesign`
+for now. Installing it with a free Apple ID: `README-iOS.md`.
+
 The app source and preview tests use Xcode synchronized folders. `HyperDR/Views/`
 belongs to the static window layout; the EDR spike lives in `HyperDR/macOS/Preview/`.
 The current entry view displays engine diagnostics and the 0–8× synthetic EDR ramp.

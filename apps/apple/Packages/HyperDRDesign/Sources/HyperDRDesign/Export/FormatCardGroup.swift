@@ -55,11 +55,13 @@ public struct FormatCardGroup<ID: Hashable>: View {
                     .focused($focused, equals: item.id)
                 }
             }
+            #if os(macOS)
             .onMoveCommand { direction in
                 guard let next = Self.neighbor(of: focused ?? selection, in: items, direction: direction) else { return }
                 selection = next
                 focused = next
             }
+            #endif
         }
         .accessibilityRepresentation { radioGroup }
     }
@@ -74,7 +76,9 @@ public struct FormatCardGroup<ID: Hashable>: View {
         } label: {
             title
         }
+        #if os(macOS)
         .pickerStyle(.radioGroup)
+        #endif
     }
 
     /// A format's name, followed by why it cannot be chosen when it cannot.
@@ -83,6 +87,7 @@ public struct FormatCardGroup<ID: Hashable>: View {
         return item.name + Text(verbatim: ", ") + reason
     }
 
+    #if os(macOS)
     /// The format an arrow key moves to from `current`: the nearest one in
     /// list order, left / up before and right / down after, that can be
     /// chosen; nil at the ends or for an unknown `current`.
@@ -94,4 +99,5 @@ public struct FormatCardGroup<ID: Hashable>: View {
         @unknown default: return nil
         }
     }
+    #endif
 }

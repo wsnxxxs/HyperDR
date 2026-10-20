@@ -84,6 +84,11 @@ def apple() -> None:
     run(*xcode, "build", env=env)
     run(*xcode, "test", "-test-timeouts-enabled", "YES",
         "-default-test-execution-time-allowance", "60", env=env)
+    # The iOS and iPadOS shell: device and simulator, unsigned (no team needed).
+    for destination in ("generic/platform=iOS", "generic/platform=iOS Simulator"):
+        run("xcodebuild", "-project", "apps/apple/HyperDR.xcodeproj", "-scheme", "HyperDRiOS",
+            "-destination", destination, "-derivedDataPath", "build-apple/DerivedData",
+            "CODE_SIGNING_ALLOWED=NO", "build", env=env)
     run(sys.executable, "scripts/check_apple_i18n.py")
     run(sys.executable, "scripts/summarize_preview_timings.py", "--self-test")
     run(sys.executable, "tests/apple/export_parity.py", env=env)

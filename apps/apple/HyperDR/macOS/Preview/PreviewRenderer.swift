@@ -99,24 +99,9 @@ nonisolated struct ReconstructParams {
     }
 }
 
-/// Matches `DisplayParams` in Preview.metal.
-nonisolated struct DisplayParams {
-    var rect: SIMD4<Float>
-}
-
-/// A renderer failure. The message is a developer-facing English detail: the
-/// model reports it as `metal_unavailable`, whose title and message come from
-/// the catalogue, and `ErrorText` shows the detail untranslated.
-nonisolated enum PreviewError: LocalizedError {
-    case unavailable(String)
-    var errorDescription: String? {
-        switch self { case .unavailable(let message): return message }
-    }
-}
-
 /// Two-pass renderer: reconstruct the frame into an `rgba16Float` intermediate
 /// from the engine's native planes, then draw that intermediate through
-/// `CanvasTransform` into the EDR drawable.
+/// `CanvasTransform` into the EDR drawable (`EDRDisplayPass`, shared with iOS).
 ///
 /// Not tied to an actor: a canvas confines its renderer to its own render
 /// thread (`PreviewRenderLoop`); tests drive one from a single thread too. Only
@@ -127,7 +112,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     let queue: any MTLCommandQueue
     private let reconstructPipeline: any MTLComputePipelineState
     private let reconstruct32Pipeline: any MTLComputePipelineState
-    private let displayPipeline: any MTLRenderPipelineState
+    private let display: EDRDisplayPass
     /// The intermediate and what it was built from. `source` (the frame, or
     /// the caller's base buffer) is held, so its address cannot be reused by a
     /// newer object while the cache compares against it, and a frame's
@@ -208,13 +193,8 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
             name: "reconstructFrame")
         reconstruct32Pipeline = try Self.computePipeline(device: device, library: library,
             name: "reconstructFrame32")
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "previewDisplayVertex")
-        descriptor.fragmentFunction = library.makeFunction(name: "previewDisplayFragment")
-        descriptor.colorAttachments[0].pixelFormat = .rgba16Float
-        displayPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-        guard MemoryLayout<ReconstructParams>.stride == 56,
-              MemoryLayout<DisplayParams>.stride == 16 else {
+        display = try EDRDisplayPass(device: device, library: library)
+        guard MemoryLayout<ReconstructParams>.stride == 56 else {
             throw PreviewError.unavailable("Preview shader parameter layout changed")
         }
     }
@@ -255,7 +235,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         pass1Count.withLock { $0 += 1 }
         let signpost = Self.signposter.beginInterval("Pass1", id: signpostID)
         defer { Self.signposter.endInterval("Pass1", signpost) }
-        let texture = try Self.intermediateTexture(device: device,
+        let texture = try EDRDisplayPass.intermediateTexture(device: device,
             width: planes.width, height: planes.height)
         encodeReconstruct(planes, original: original, into: texture, pipeline: reconstructPipeline)
         prepared = Prepared(source: source, original: original, texture: texture,
@@ -420,16 +400,8 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         }
         needsRetry = false
         let encoding = Self.signposter.beginInterval("Encode", id: signpostID)
-        let pass = Self.clearPass(drawable)
-        if let encoder = command.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.setRenderPipelineState(displayPipeline)
-            var params = DisplayParams(rect: Self.normalisedRect(transform,
-                drawableSize: layer.drawableSize))
-            encoder.setVertexBytes(&params, length: MemoryLayout<DisplayParams>.stride, index: 0)
-            encoder.setFragmentTexture(prepared.texture, index: 0)
-            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            encoder.endEncoding()
-        }
+        display.encode(prepared.texture, transform: transform, into: drawable,
+                       drawableSize: layer.drawableSize, command: command)
         Self.signposter.endInterval("Encode", encoding)
         submit(command, presenting: drawable)
         return true
@@ -466,7 +438,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
             return false
         }
         needsRetry = false
-        if let encoder = command.makeRenderCommandEncoder(descriptor: Self.clearPass(drawable)) {
+        if let encoder = command.makeRenderCommandEncoder(descriptor: EDRDisplayPass.clearPass(drawable)) {
             encoder.endEncoding()
         }
         submit(command, presenting: drawable)
@@ -486,15 +458,6 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         Self.signposter.endInterval("NextDrawable", signpost)
         if drawable == nil { needsRetry = true }
         return drawable
-    }
-
-    private static func clearPass(_ drawable: any CAMetalDrawable) -> MTLRenderPassDescriptor {
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        pass.colorAttachments[0].storeAction = .store
-        return pass
     }
 
     private func makePresentingCommand() -> (any MTLCommandBuffer)? {
@@ -532,36 +495,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         Self.signposter.endInterval("Present", presenting)
     }
 
-    /// The photo rect in normalised device coordinates, y up. Edges snap to
-    /// whole device pixels so a 100% view lands on the source grid instead of
-    /// resampling by a fraction of a pixel.
-    static func normalisedRect(_ transform: CanvasTransform,
-                               drawableSize: CGSize) -> SIMD4<Float> {
-        let frame = transform.imageFrame
-        let width = max(drawableSize.width, 1)
-        let height = max(drawableSize.height, 1)
-        let scale = width / max(transform.viewport.width, 1)
-        func pixel(_ points: CGFloat) -> Float {
-            Float((points * scale).rounded())
-        }
-        let x0 = 2 * pixel(frame.minX) / Float(width) - 1
-        let x1 = 2 * pixel(frame.maxX) / Float(width) - 1
-        let bottom = 1 - 2 * pixel(frame.maxY) / Float(height)
-        let top = 1 - 2 * pixel(frame.minY) / Float(height)
-        return SIMD4<Float>(x0, bottom, x1, top)
-    }
-
     // MARK: - Textures
-
-    static func intermediateTexture(device: any MTLDevice, width: Int, height: Int) throws
-        -> any MTLTexture {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float,
-            width: max(width, 1), height: max(height, 1), mipmapped: true)
-        descriptor.usage = [.shaderRead, .shaderWrite]
-        descriptor.storageMode = .private
-        let texture = try requireTexture(device: device, descriptor: descriptor)
-        return texture
-    }
 
     /// Shared texture used by the diagnostic window and by tests.
     static func texture(device: any MTLDevice, width: Int, height: Int, values: [Float],
@@ -613,9 +547,6 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
 
     private static func requireTexture(device: any MTLDevice,
                                        descriptor: MTLTextureDescriptor) throws -> any MTLTexture {
-        guard let texture = device.makeTexture(descriptor: descriptor) else {
-            throw PreviewError.unavailable("Unable to allocate a Metal texture")
-        }
-        return texture
+        try EDRDisplayPass.makeTexture(device: device, descriptor: descriptor)
     }
 }

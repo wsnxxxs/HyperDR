@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "HyperDRDesign",
     defaultLocalization: "en",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v26), .iOS(.v26)],
     products: [
         .library(name: "HyperDRDesign", targets: ["HyperDRDesign"]),
     ],

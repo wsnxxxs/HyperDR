@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import SwiftUI
 
 /// An arrow key event as the controls read it: which phase, which arrow,
@@ -19,6 +21,7 @@ public struct ArrowKeyInput: Equatable {
         self.init(phase: press.phase, key: press.key, shift: press.modifiers.contains(.shift))
     }
 
+    #if canImport(AppKit)
     /// A key-down (or its auto-repeat) or key-up of an arrow key; nil for
     /// anything else.
     public init?(_ event: NSEvent) {
@@ -34,6 +37,7 @@ public struct ArrowKeyInput: Equatable {
         let phase: KeyPress.Phases = event.type == .keyUp ? .up : (event.isARepeat ? .repeat : .down)
         self.init(phase: phase, key: key, shift: event.modifierFlags.contains(.shift))
     }
+    #endif
 
     /// The steps this key asks for: right and up add, left and down take
     /// away, Shift makes it ten. Nil for a horizontal arrow when the control

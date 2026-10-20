@@ -66,39 +66,14 @@ kernel void reconstructFrame32(device const float* base [[buffer(0)]],
     out.write(float4(reconstructPixel(xy, base, gain, p, p.gainWeight), 1.0), xy);
 }
 
-// Pass 2 draws the intermediate texture into the drawable. The photo rect is
-// computed on the CPU by CanvasTransform and passed in normalised device
-// coordinates; everything outside it stays transparent.
-struct DisplayParams {
-    float4 rect;  // minX, minY, maxX, maxY in NDC
-};
+// Pass 2, drawing the intermediate into the drawable, is shared with the iOS
+// canvas: `previewDisplayVertex` / `previewDisplayFragment` in
+// Shared/Canvas/EDRDisplay.metal.
 
-struct DisplayVertex {
+struct CompositionVertex {
     float4 position [[position]];
     float2 uv;
 };
-
-vertex DisplayVertex previewDisplayVertex(uint index [[vertex_id]],
-                                         constant DisplayParams& p [[buffer(0)]]) {
-    const float2 corners[4] = {float2(0, 0), float2(1, 0), float2(0, 1), float2(1, 1)};
-    const float2 corner = corners[index];
-    const float2 position = float2(mix(p.rect.x, p.rect.z, corner.x),
-                                   mix(p.rect.y, p.rect.w, corner.y));
-    DisplayVertex out;
-    out.position = float4(position, 0, 1);
-    // Source frames are top-down; NDC y grows upwards.
-    out.uv = float2(corner.x, 1.0 - corner.y);
-    return out;
-}
-
-fragment float4 previewDisplayFragment(DisplayVertex in [[stage_in]],
-                                       texture2d<float> image [[texture(0)]]) {
-    // Mip filtering keeps a zoomed-out photo stable instead of aliasing;
-    // magnification uses the same linear filter, as the Web canvas does.
-    constexpr sampler displaySampler(filter::linear, mip_filter::linear,
-                                     address::clamp_to_edge);
-    return image.sample(displaySampler, in.uv);
-}
 
 // Reconstruct all display weights at SOURCE resolution, before filtering.
 // The three slices are base, full HDR (overlay statistics), and weighted HDR.
@@ -143,17 +118,17 @@ struct CompositionParams {
     float4 maskColor, highlightColor, shadowColor, stripe;
 };
 
-vertex DisplayVertex compositionVertex(uint index [[vertex_id]],
+vertex CompositionVertex compositionVertex(uint index [[vertex_id]],
                                         constant CompositionParams& p [[buffer(0)]]) {
     const float2 corners[4] = {float2(0,0),float2(1,0),float2(0,1),float2(1,1)};
     float2 c = corners[index];
-    DisplayVertex out;
+    CompositionVertex out;
     out.position = float4(mix(p.rect.x,p.rect.z,c.x),mix(p.rect.y,p.rect.w,c.y),0,1);
     out.uv = float2(c.x,1-c.y) * p.uvScale;
     return out;
 }
 
-fragment float4 compositionFragment(DisplayVertex in [[stage_in]],
+fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
                                       constant CompositionParams& p [[buffer(0)]],
                                       texture2d_array<float> image [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);

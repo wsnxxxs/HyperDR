@@ -31,6 +31,11 @@ from the tables and asserts each is in the catalogue in both languages, and
 that no key under these prefixes lacks a control, option or field behind it.
 A literal that uses one of them in a view still has to exist in the catalogue.
 
+The iOS and iPadOS shell (`apps/apple/HyperDRiOS`) has its own catalogue
+and is checked against it the same way, every file held to the no-Chinese
+rule as a view is. `apps/apple/Shared`, which both apps compile, has no
+catalogue: it may use no key and no Chinese literal.
+
 One rule here is not about strings but sits with them because it reads the
 same sources: nothing under `Views/` imports `HyperDREngine`. Views talk only
 to the editor models (batch 3 §3.4); engine types and calls stay in
@@ -89,6 +94,9 @@ CATALOG = APP / "Resources" / "Localizable.xcstrings"
 DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources" / "HyperDRDesign"
 DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
 DESIGN_COMPONENTS = DESIGN / "Inspector"
+IOS_APP = REPO_ROOT / "apps" / "apple" / "HyperDRiOS"
+IOS_CATALOG = IOS_APP / "Resources" / "Localizable.xcstrings"
+SHARED = REPO_ROOT / "apps" / "apple" / "Shared"
 LOCALES = ["en", "zh-Hans"]
 # Every engine source (not the tests) that can throw HeifReadError with a feature.
 HEIF_SOURCE_GLOBS = ("modules/*/src/**/*", "modules/*/include/**/*")
@@ -630,6 +638,21 @@ def main() -> int:
     ]
 
     try:
+        ios_catalog = json.loads(IOS_CATALOG.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        print(f"cannot read {IOS_CATALOG.relative_to(REPO_ROOT)}: {error}")
+        return 1
+    ios_entries: dict = ios_catalog.get("strings", {})
+    ios_files = [
+        (str(path.relative_to(REPO_ROOT)), True, path.read_text(encoding="utf-8"))
+        for path in sorted(IOS_APP.rglob("*.swift"))
+    ]
+    shared_files = [
+        (str(path.relative_to(REPO_ROOT)), True, path.read_text(encoding="utf-8"))
+        for path in sorted(SHARED.rglob("*.swift"))
+    ]
+
+    try:
         heif_sources = heif_engine_sources()
         error_text = ERROR_TEXT.read_text(encoding="utf-8")
     except OSError as error:
@@ -639,7 +662,7 @@ def main() -> int:
     problems = (self_test(files, entries) + heif_self_test(heif_sources, error_text, entries) + design_self_test(design_files, design_entries)
                 + boundary_self_test(files) + chinese_self_test(files))
     if "--self-test" not in sys.argv[1:]:
-        for name, document in (("app", catalog), ("design package", design_catalog)):
+        for name, document in (("app", catalog), ("design package", design_catalog), ("iOS app", ios_catalog)):
             if document.get("sourceLanguage") != "en":
                 problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
@@ -652,6 +675,8 @@ def main() -> int:
             for warning in outside:
                 print(f"warning: {warning}")
         problems += check(design_files, design_entries, module_bundle=True)
+        problems += check(ios_files, ios_entries)
+        problems += check(shared_files, {})
 
     for problem in problems:
         print(problem)
@@ -662,6 +687,7 @@ def main() -> int:
         print("ok: self-test")
     else:
         print(f"ok: {len(entries)} app keys, {len(design_entries)} design package keys, "
+              f"{len(ios_entries)} iOS app keys, "
               f"{len(LOCALES)} locales, no engine imports in views (self-test passed)")
     return 0
 

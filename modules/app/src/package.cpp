@@ -136,11 +136,12 @@ void validate_offsets(const PackageGain& gain, std::uint32_t channels, bool pres
 }
 
 // Quantizes the caller's log2-stop plane into the 8-bit codes and metadata the
-// writers store. `apple_strict` is ISO 21496-1's Apple form: one channel, and
+// writers store, or float codes when BT.2100 only needs HDR reconstruction.
+// `apple_strict` is ISO 21496-1's Apple form: one channel, and
 // alternate headroom equal to the map's largest gain. `presentation_frame`
 // applies E5 to the codebook: the mat outside the photograph must decode to no
 // gain at all, which needs an exact integer zero-gain code at gamma 1.
-QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool presentation_frame) {
+QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool presentation_frame, bool store_codes) {
   QuantizedGain out;
   float low = 0.0F, high = 0.0F;
   FloatImage grid = copy_plane(gain.plane, "gain", &low, &high);
@@ -212,10 +213,10 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool pre
       for (std::uint32_t c = 0; c < channels; ++c) {
         const auto index = pixel * channels + c;
         const float encoded = encode_gain_code(normalized[index], out.gamma);
-        out.codes.pixels[index] = !presentation_frame
-            ? quantize_gain_code_dithered(encoded, x, y)
-            : std::abs(grid.pixels[index]) <= kFrameZeroTolerance
-                  ? zero_code : std::round(encoded * 255.0F) / 255.0F;
+        out.codes.pixels[index] = presentation_frame && std::abs(grid.pixels[index]) <= kFrameZeroTolerance
+            ? zero_code : !store_codes ? encoded : !presentation_frame
+                  ? quantize_gain_code_dithered(encoded, x, y)
+                  : std::round(encoded * 255.0F) / 255.0F;
       }
     }
   });
@@ -539,7 +540,7 @@ std::string package_image(const PackageRequest& request) {
   std::optional<QuantizedGain> gain;
   if (request.gain != nullptr && (gain_map_output || bt2100_output)) {
     gain = quantize_gain(*request.gain, encoding == OutputEncoding::Adaptive,
-                         request.presentation_frame);
+                         request.presentation_frame, gain_map_output || is_avif_encoding(encoding));
     // E5 at the codebook, before anything is encoded: whatever the caller left
     // outside the photograph must be the zero code.
     if (request.frame_photo) {
@@ -592,9 +593,8 @@ std::string package_image(const PackageRequest& request) {
     case OutputEncoding::Hlg:
     case OutputEncoding::AvifPq:
     case OutputEncoding::AvifHlg: {
-      // The pair reconstructs the HDR rendition this format stores, at the
-      // headroom it declares, so the HDR pixels are exactly what the same gain
-      // map would decode to.
+      // HEIC BT.2100 reconstructs from float codes: an unnecessary 8-bit
+      // gain round trip adds noise before HEVC. AVIF keeps its existing path.
       PhotoRenditions renditions;
       renditions.sdr = std::move(base);
       renditions.hdr = reconstruct_gain_map(renditions.sdr, gain->codes, gain->metadata,
@@ -702,8 +702,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
       const auto v=request.encoding==OutputEncoding::Adaptive?std::max(0.f,grid[offset+i]):grid[offset+i];
       const auto normalized=range>kEpsilon?clamp_finite((v-gain->gain_min)/range,0.f,1.f):0.f;
       const auto encoded=encode_gain_code(normalized,gain->gamma);
-      const auto code=!request.presentation_frame?quantize_gain_code_dithered(encoded,x,y):
-          std::abs(v)<=kFrameZeroTolerance?gain->zero_code:std::round(encoded*255)/255;
+      const auto code=request.presentation_frame&&std::abs(v)<=kFrameZeroTolerance?gain->zero_code:
+          !is_gain_map_encoding(request.encoding)?encoded:
+          !request.presentation_frame?quantize_gain_code_dithered(encoded,x,y):std::round(encoded*255)/255;
       if(request.frame_photo) {
         const auto& f=*request.frame_photo;
         if((x<f.x||x>=f.x+f.width||y<f.y||y>=f.y+f.height)&&code!=gain->zero_code)
@@ -721,7 +722,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
     default: {
-      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.hevc_preset);
+      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.hevc_preset,request.presentation_frame);
       write_binary_file_atomic(staged.path,bytes,true);break;
     }
   }

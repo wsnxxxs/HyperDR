@@ -76,11 +76,14 @@ struct ColorDescription {
   int primaries{2}, transfer{2}, matrix{2};
 };
 
+enum class QualityRole { Color, Gain, FramedGain };
+
 struct EncodeParams {
   int quality{90};          // 0-100, mapped by `vt_quality`
   bool main10{false};       // tiles must then be 10-bit
   bool prefer_speed{false}; // `hevc_preset = medium`
   ColorDescription color{};
+  QualityRole quality_role{QualityRole::Color};
 };
 
 struct EncodedSequence {
@@ -115,9 +118,10 @@ struct BitstreamColor {
 };
 [[nodiscard]] BitstreamColor bitstream_color(const EncodedSequence& sequence);
 
-// `quality` (0-100) to kVTCompressionPropertyKey_Quality (0-1). Monotonic and
-// provisional: P3a-2 calibrates it against the sample set.
-[[nodiscard]] float vt_quality(int quality);
+// `quality` (0-100) to kVTCompressionPropertyKey_Quality (0-1).
+// P3a-2 calibration is separate for color depth/transfer and gain role.
+[[nodiscard]] float vt_quality(int quality, bool main10 = false,
+                               QualityRole role = QualityRole::Color, int transfer = 13);
 
 // --- Tiling and colour conversion ------------------------------------------
 

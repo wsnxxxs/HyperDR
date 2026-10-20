@@ -33,19 +33,12 @@ extension EditorModel {
         lutInstallTask?.cancel()
         let editor = editor
         lutInstallTask = Task { [weak self, services] in
-            for item in missing {
-                guard !Task.isCancelled else { return }
-                do {
-                    let cube = try await services.lutCube(item.id)
-                    let lut = try ColorLUT(cube: cube)
-                    // The editor keeps it for exports too (`exportCapture`).
-                    await editor.installLUT(lut)
-                    self?.setLUTReference(LUTReference(contentHash: lut.contentHash, name: item.name), for: item.id)
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    self?.lut.failures = [UserFacingError(code: "lut_invalid", detail: item.name)]
-                }
+            let failures = await editor.installLibraryLUTs(missing.map { LibraryLUT(id: $0.id, name: $0.name) },
+                                                           cube: { try await services.lutCube($0) }) { id, reference in
+                self?.setLUTReference(reference, for: id)
             }
+            guard !Task.isCancelled else { return }
+            if let name = failures.last { self?.lut.failures = [UserFacingError(code: "lut_invalid", detail: name)] }
             // A look waiting for its LUT can now be captured, and matched.
             self?.refreshExportMetadata()
         }

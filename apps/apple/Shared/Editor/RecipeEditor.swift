@@ -178,7 +178,8 @@ import Observation
     @ObservationIgnored private var modelTask: Task<Void, Never>?
 
     /// The LUTs installed in the renderer, by content hash: an export freezes the one its recipe uses.
-    @ObservationIgnored private var luts: [String: ColorLUT] = [:]
+    /// Installed LUTs by content hash; observed, so `missingLook` follows.
+    private var luts: [String: ColorLUT] = [:]
     @ObservationIgnored private var viewport: CanvasViewport?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
     @ObservationIgnored private var detailGeneration = 0
@@ -607,6 +608,8 @@ import Observation
     // MARK: - LUTs and export
 
     /// Makes a LUT available to the recipe's look, for previews and exports.
+    func hasLUT(_ contentHash: String) -> Bool { luts[contentHash] != nil }
+
     func installLUT(_ lut: ColorLUT) async {
         luts[lut.contentHash] = lut
         await renderer.installLUT(lut)

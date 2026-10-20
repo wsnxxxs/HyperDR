@@ -22,10 +22,15 @@
 struct Source {
   unsigned width=65,height=533,channels=1;
   bool frame=false,fail=false,cancel=false;
+  float gain_scale=1.f;
   hyperdr_cancel* token=nullptr;
-  unsigned largest=0;
+  unsigned largest=0, reads=0;
+  static float gain_scale_value(const Source& s,float u,float v,unsigned c) {
+    return s.gain_scale*((s.channels==3?-.3f:0.f)+1.8f*u*v*(1-.1f*float(c)));
+  }
   static int read(void* context,unsigned y,unsigned count,float* base,float* gain) {
     auto& s=*static_cast<Source*>(context);s.largest=std::max(s.largest,count);
+    ++s.reads;
     if(s.fail)return 1;
     if(s.cancel)hyperdr_cancel_request(s.token);
     for(unsigned row=0;row<count;++row)for(unsigned x=0;x<s.width;++x) {
@@ -34,7 +39,7 @@ struct Source {
       base[i*3]=.1f+.7f*u;base[i*3+1]=.1f+.6f*v;base[i*3+2]=.15f;
       if(gain)for(unsigned c=0;c<s.channels;++c)
         gain[i*s.channels+c]=s.frame&&(x<16||x>=s.width-16||y+row<16||y+row>=s.height-16)?0.f:
-            (s.channels==3?-.3f:0.f)+1.8f*u*v*(1-.1f*float(c));
+            gain_scale_value(s,u,v,c);
     }
     return 0;
   }
@@ -131,8 +136,13 @@ int main(int argc,char** argv) try {
     request.output_path=whole_path.c_str();char* report=nullptr;error=nullptr;
     auto code=hyperdr_package(engine,&request,&report,&error);status(code,report,error);
     request.output_path=stream_path.c_str();report=nullptr;error=nullptr;
+    source.reads=0;
     code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
     REQUIRE(source.largest<=13);
+    if(std::string(format)=="pq"||std::string(format)=="hlg") {
+      // Codebook + encode; CLLI must not cause a third render/read pass.
+      REQUIRE(source.reads==2*((source.height+12)/13));
+    }
     const auto a=hyperdr::read_binary_file(whole),bbytes=hyperdr::read_binary_file(stream);
     const auto encoding=*hyperdr::hdr_encoding_from_name(format);
     const auto verified=hyperdr::verify_encoded_file(stream,encoding);
@@ -197,6 +207,26 @@ int main(int argc,char** argv) try {
     std::cout<<format<<" bytes_equal="<<(a==bbytes)<<" max_linear_difference="<<worst<<'\n';
     std::filesystem::remove(whole);std::filesystem::remove(stream);
   }
+  // An exact-zero full scan removes only the gain replay, preserving quantization,
+  // including unframed dither. Tiny positive values must still replay the source.
+  for(bool framed:{false,true})for(float scale:{0.f,1e-6f}) {
+    source.channels=gain.plane.channels=1;source.frame=framed;source.gain_scale=scale;
+    request.format="adaptive";request.gain=&gain;
+    request.presentation_frame=framed;request.has_frame_photo=framed;
+    for(unsigned c=0;c<3;++c)gain.base_offset[c]=gain.alternate_offset[c]=framed?1.f/64:0.f;
+    std::vector<float> b(std::size_t(source.width)*source.height*3),g(std::size_t(source.width)*source.height);
+    Source::read(&source,0,source.height,b.data(),g.data());
+    base.data=b.data();base.size=b.size()*sizeof(float);gain.plane.data=g.data();gain.plane.size=g.size()*sizeof(float);
+    request.output_path=whole_path.c_str();char* report=nullptr;error=nullptr;
+    auto code=hyperdr_package(engine,&request,&report,&error);status(code,report,error);
+    request.output_path=stream_path.c_str();report=nullptr;error=nullptr;source.reads=0;
+    code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
+    REQUIRE(source.reads==(scale==0.f?2:3)*((source.height+12)/13));
+    const auto a=hyperdr::decode_image(whole),bimage=hyperdr::decode_image(stream);
+    REQUIRE(a.linear_p3.pixels==bimage.linear_p3.pixels);
+    std::filesystem::remove(whole);std::filesystem::remove(stream);
+  }
+  source.gain_scale=1.f;
   // E5 is independent of verify, and a failed staged export preserves a destination.
   hyperdr::write_text_file_atomic(stream,"keep",false);
   request.format="iso-gainmap-jpeg";request.gain=&gain;request.presentation_frame=1;request.has_frame_photo=1;

@@ -1,6 +1,7 @@
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/heif_writer.hpp"
 #include "hevc/hevc.hpp"
+#include "hevc/metal_yuv.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -22,6 +23,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
+#include <fcntl.h>
+#include <unistd.h>
 #include <limits>
 #include <fstream>
 #include <memory>
@@ -182,6 +186,55 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
   return bytes;
 }
 namespace {
+// Anonymous, automatically removed storage for completed VT tiles. Encoded
+// samples overlap neither the full sequence nor a mapped whole-file owner.
+// Four MiB is an enforced per-512px-picture bound, not a canvas-size guess.
+class HeifSampleSpool {
+ public:
+  static constexpr std::size_t maximum_sample_bytes = 4U * 1024 * 1024;
+  codec::hevc::EncodedSequence headers;
+  HeifSampleSpool(std::size_t count, const std::filesystem::path& directory)
+      : offsets(count), sizes(count) {
+    auto name = (directory / ".heic-tiles-XXXXXX").string();
+    const int descriptor = mkstemp(name.data());
+    if (descriptor < 0) throw std::runtime_error("cannot create HEIF tile storage");
+    if (unlink(name.c_str()) != 0) {
+      ::close(descriptor);
+      throw std::runtime_error("cannot anonymize HEIF tile storage");
+    }
+    file = fdopen(descriptor, "w+b");
+    if (!file) { ::close(descriptor); throw std::runtime_error("cannot open HEIF tile storage"); }
+    (void)fcntl(descriptor, F_NOCACHE, 1);
+    (void)fcntl(descriptor, F_SETFD, FD_CLOEXEC);
+  }
+  ~HeifSampleSpool() { if (file) std::fclose(file); }
+  HeifSampleSpool(const HeifSampleSpool&) = delete;
+  HeifSampleSpool& operator=(const HeifSampleSpool&) = delete;
+  void append(std::size_t index, std::span<const std::uint8_t> bytes) {
+    if (index >= sizes.size() || sizes[index] || bytes.empty() || bytes.size() > maximum_sample_bytes)
+      throw std::runtime_error("invalid or oversized HEIF stored tile");
+    const auto offset = ftello(file);
+    if (offset < 0 || std::fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
+      throw std::runtime_error("cannot write HEIF tile storage");
+    offsets[index] = offset; sizes[index] = bytes.size();
+  }
+  HeifSequenceView view() {
+    return {headers, sizes, [this](std::size_t index) {
+      check_cancelled();
+      if (index >= sizes.size() || !sizes[index] || fseeko(file, offsets[index], SEEK_SET))
+        throw std::runtime_error("cannot seek HEIF tile storage");
+      std::vector<std::uint8_t> bytes(sizes[index]);
+      if (std::fread(bytes.data(), 1, bytes.size(), file) != bytes.size())
+        throw std::runtime_error("cannot read HEIF tile storage");
+      return bytes;
+    }};
+  }
+ private:
+  std::FILE* file{};
+  std::vector<off_t> offsets;
+  std::vector<std::size_t> sizes;
+};
+
 class HeifFileOutput {
  public:
   explicit HeifFileOutput(const std::filesystem::path& path) {
@@ -221,9 +274,10 @@ void write_heic_rows(const EncodingRows& base,const EncodingRows& codes,
   using namespace codec::hevc;
   const auto grid=tile_grid(base.width,base.height);
   auto picture=[&](const EncodingRows& rows,const EncodeParams& parameters,bool luma,bool hdr) {
+    auto stored = std::make_unique<HeifSampleSpool>(grid.count(), path.parent_path().empty() ? "." : path.parent_path());
     FloatImage slab(rows.width,std::min(kTileSize,rows.height),rows.channels);
     unsigned first=rows.height;
-    return encode(grid.count(),[&](std::size_t index,YuvTile& tile) {
+    auto load_slab=[&](std::size_t index) {
       const auto block=unsigned(index/grid.columns)*kTileSize;
       if(block!=first) {
         first=block;const auto count=std::min(kTileSize,rows.height-first);
@@ -231,25 +285,37 @@ void write_heic_rows(const EncodingRows& base,const EncodingRows& codes,
           check_cancelled();rows.read(first+y,std::span(slab.pixels).subspan(std::size_t(y)*rows.width*rows.channels,std::size_t(rows.width)*rows.channels));
         }
       }
-      if(luma) {
-        luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row) {
-          std::copy_n(slab.pixels.data()+(std::size_t(y-first)*rows.width+x),count,row);
-        },tile);
-      } else {
-        rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row) {
-          for(unsigned i=0;i<count;++i) {
-            const auto offset=(std::size_t(y-first)*rows.width+x+i)*3;
-            std::array<float,3> rgb{slab.pixels[offset],slab.pixels[offset+1],slab.pixels[offset+2]};
-            if(hdr) {
-              rgb=p3_to_rec2020(rgb[0],rgb[1],rgb[2]);
-              for(auto& v:rgb)v=std::max(0.f,v);
-              rgb=encoding==OutputEncoding::Pq?std::array<float,3>{pq_oetf(rgb[0]),pq_oetf(rgb[1]),pq_oetf(rgb[2])}:hlg_encode(rgb);
-            } else for(auto& v:rgb)v=srgb_oetf(v);
-            std::copy(rgb.begin(),rgb.end(),row+i*3);
-          }
-        },hdr?9:1,false,tile);
+    };
+    RgbRowReader read_rgb=[&](unsigned y,unsigned x,unsigned count,float* row) {
+      for(unsigned i=0;i<count;++i) {
+        const auto offset=(std::size_t(y-first)*rows.width+x+i)*3;
+        std::array<float,3> rgb{slab.pixels[offset],slab.pixels[offset+1],slab.pixels[offset+2]};
+        if(hdr) {
+          // HDR slabs already carry linear Rec.2020 from CLLI accumulation.
+          for(auto& v:rgb)v=std::max(0.f,v);
+          rgb=encoding==OutputEncoding::Pq?std::array<float,3>{pq_oetf(rgb[0]),pq_oetf(rgb[1]),pq_oetf(rgb[2])}:hlg_encode(rgb);
+        } else for(auto& v:rgb)v=srgb_oetf(v);
+        std::copy(rgb.begin(),rgb.end(),row+i*3);
       }
-    },parameters);
+    };
+    SampleConsumer consume=[&](std::size_t index,std::span<const std::uint8_t> bytes) {stored->append(index,bytes);};
+    const auto* experiment=std::getenv("HYPERDR_METAL_HEVC");
+    if(!luma&&experiment&&std::string_view(experiment)=="1") {
+      MetalRgbTiles metal;
+      stored->headers=encode_surfaces_to(grid.count(),[&](std::size_t index,CVPixelBufferRef buffer) {
+        load_slab(index);metal.convert(grid,index,read_rgb,hdr?9:1,parameters.main10?10:8,buffer);
+      },parameters,consume);
+    } else {
+      stored->headers=encode_to(grid.count(),[&](std::size_t index,YuvTile& tile) {
+        load_slab(index);
+        if(luma) {
+          luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row) {
+            std::copy_n(slab.pixels.data()+(std::size_t(y-first)*rows.width+x),count,row);
+          },tile);
+        } else rgb_tile(grid,index,read_rgb,hdr?9:1,false,tile);
+      },parameters,consume);
+    }
+    return stored;
   };
   HeifWriteOptions options;options.exif=make_minimal_exif(photo);
   if(encoding==OutputEncoding::Adaptive) {
@@ -257,34 +323,37 @@ void write_heic_rows(const EncodingRows& base,const EncodingRows& codes,
     auto b=picture(base,{quality,depth==10,{12,13,1}},false,false);
     auto g=picture(codes,{quality,false,{2,2,1},frame?QualityRole::FramedGain:QualityRole::Gain},true,false);
     const auto icc=codec::display_p3_profile();
-    HeifEncodedImage primary{b,base.width,base.height,{},std::nullopt,icc};
-    HeifEncodedImage gain{g,base.width,base.height,{2,2,1,true},std::nullopt,{}};
+    HeifEncodedImage primary{b->view(),base.width,base.height,{},std::nullopt,icc};
+    HeifEncodedImage gain{g->view(),base.width,base.height,{2,2,1,true},std::nullopt,{}};
     options.gain_metadata=metadata;options.xmp=make_xmp(photo,headroom,true);
     write_heif_to(sink,primary,&gain,options);
     output.close();
     return;
   }
   FloatImage b(base.width,1,3),g(base.width,1,codes.channels);
+  float peak=0;double sum=0;
   EncodingRows hdr{base.width,base.height,3,[&](unsigned y,std::span<float> out) {
     base.read(y,b.pixels);codes.read(y,g.pixels);
     const auto reconstructed=reconstruct_gain_map(b,g,metadata,headroom);
     std::copy(reconstructed.pixels.begin(),reconstructed.pixels.end(),out.begin());
-  }};
-  std::vector<float> row(std::size_t(base.width)*3);
-  float peak=0;double sum=0;
-  for(unsigned y=0;y<base.height;++y) {
-    hdr.read(y,row);double row_sum=0;
+    // The slab producer visits each native row exactly once, in order. Measure
+    // CLLI here instead of replaying the entire HDR reconstruction and renderer
+    // in a separate scan. HEIF metadata is emitted only after encoding finishes.
+    double row_sum=0;
     for(unsigned x=0;x<base.width;++x) {
-      const auto rgb=p3_to_rec2020(row[x*3],row[x*3+1],row[x*3+2]);
+      const auto rgb=p3_to_rec2020(out[x*3],out[x*3+1],out[x*3+2]);
       const auto light=std::max({0.f,rgb[0],rgb[1],rgb[2]});peak=std::max(peak,light);row_sum+=light;
+      // Reuse this exact conversion during encoding instead of multiplying the
+      // P3-to-Rec.2020 matrix again for every pixel in the tile producer.
+      std::copy(rgb.begin(),rgb.end(),out.begin()+std::size_t(x)*3);
     }
     sum+=row_sum;
-  }
-  const auto clamp=[](double nits){return std::uint16_t(std::clamp(std::ceil(nits),0.,10000.));};
-  const HeifContentLight light{clamp(peak*kReferenceWhiteNits),clamp(sum*kReferenceWhiteNits/(double(base.width)*base.height))};
+  }};
   const int transfer=encoding==OutputEncoding::Pq?16:18;
   auto coded=picture(hdr,{quality,true,{9,transfer,9}},false,true);
-  HeifEncodedImage primary{coded,base.width,base.height,{9,static_cast<std::uint16_t>(transfer),9,true},light,{}};
+  const auto clamp=[](double nits){return std::uint16_t(std::clamp(std::ceil(nits),0.,10000.));};
+  const HeifContentLight light{clamp(peak*kReferenceWhiteNits),clamp(sum*kReferenceWhiteNits/(double(base.width)*base.height))};
+  HeifEncodedImage primary{coded->view(),base.width,base.height,{9,static_cast<std::uint16_t>(transfer),9,true},light,{}};
   options.xmp=make_xmp(photo,headroom,false);
   write_heif_to(sink,primary,nullptr,options);
   output.close();

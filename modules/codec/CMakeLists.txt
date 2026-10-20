@@ -10,7 +10,7 @@ set(HYPERDR_CODEC_SOURCES
 
 if(HYPERDR_WITH_CODECS)
   enable_language(OBJCXX)
-  set_source_files_properties(src/raw_ciraw.mm src/gain_map_jpeg_imageio.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  set_source_files_properties(src/raw_ciraw.mm src/gain_map_jpeg_imageio.mm src/hevc/metal_yuv.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   list(APPEND HYPERDR_CODEC_SOURCES
     src/avif_decoder.cpp
     src/avif_encoder.cpp
@@ -27,6 +27,7 @@ if(HYPERDR_WITH_CODECS)
     src/hevc/vt_common.cpp
     src/hevc/vt_decoder.cpp
     src/hevc/vt_encoder.cpp
+    src/hevc/metal_yuv.mm
     src/hevc/yuv.cpp
     src/hevc/yuv_to_rgb.cpp)
 endif()

@@ -11,6 +11,7 @@
 // Everything here is plain C++ over the VideoToolbox, CoreMedia and CoreVideo
 // C APIs; no Objective-C.
 
+#include <CoreVideo/CoreVideo.h>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -93,6 +94,9 @@ struct EncodedSequence {
 // Fills `tile` (already sized by `make_tile`) with picture `index`. Called on
 // the encoding thread, in order, one tile at a time.
 using TileProducer = std::function<void(std::size_t index, YuvTile& tile)>;
+// Optional bounded output, called serially on the VT callback thread. Exceptions
+// stop encoding and propagate to the caller after invalidating the session.
+using SampleConsumer = std::function<void(std::size_t, std::span<const std::uint8_t>)>;
 
 // Encodes `count` tiles, in order, as one sequence. Tiles are produced one at a
 // time and at most a few are in flight inside VideoToolbox, so a large picture
@@ -102,6 +106,13 @@ using TileProducer = std::function<void(std::size_t index, YuvTile& tile)>;
 // the cached capabilities.
 [[nodiscard]] EncodedSequence encode(std::size_t count, const TileProducer& produce,
                                      const EncodeParams& params);
+// Only parameter sets are returned when consume is supplied.
+[[nodiscard]] EncodedSequence encode_to(std::size_t count, const TileProducer& produce,
+    const EncodeParams& params, const SampleConsumer& consume);
+// Internal direct-surface route: producer must finish all writes before return.
+using PixelBufferProducer=std::function<void(std::size_t,CVPixelBufferRef)>;
+[[nodiscard]] EncodedSequence encode_surfaces_to(std::size_t,const PixelBufferProducer&,
+    const EncodeParams&,const SampleConsumer&);
 [[nodiscard]] EncodedSequence encode(std::span<const YuvTile> tiles, const EncodeParams& params);
 
 // Decodes a sequence produced by `encode` back into tiles of the given depth.

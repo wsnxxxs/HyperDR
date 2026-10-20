@@ -486,13 +486,13 @@ struct ExportMemoryPlanTests {
         #expect(failure?.summary.contains("shortfall=256.0 MiB") == true)
     }
 
-    @Test func heifSinkBorrowsSamplesWithoutACompleteOutputCopy() {
+    @Test func heifStoredSamplesHaveCanvasIndependentWorkspace() {
         let size = ExportPixelSize(width: 12800, height: 8600)
         let memory = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
             photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
             writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
             retainedBytes: 0, quality: 95))
-        let oneCopy = ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95)
+        let oneCopy = ExportMemoryEstimate.streamedHEICSampleBytes
         let slab = size.width * 512 * 12
         let rowOwners = 2 * 4 * (3 + 3) * size.width * 256
         #expect(memory.packaging == memory.render + rowOwners + (32 << 20) + oneCopy)

@@ -104,6 +104,41 @@ void sink_failures() {
   require(calls==4,"continued after sink cancellation");
 }
 
+void stored_samples() {
+  auto sequence = writer_fixture::sequence(8, 4);
+  hyperdr::HeifEncodedImage memory{sequence, 700, 513, {}, std::nullopt, {}};
+  const auto expected = hyperdr::write_heif(memory);
+  std::vector<std::size_t> sizes;
+  for (const auto& sample : sequence.samples) sizes.push_back(sample.size());
+  unsigned reads = 0;
+  hyperdr::HeifEncodedImage stored{
+      hyperdr::HeifSequenceView(sequence, sizes, [&](std::size_t i) {
+        ++reads;
+        return sequence.samples.at(i);
+      }), 700, 513, {}, std::nullopt, {}};
+  require(hyperdr::write_heif(stored) == expected, "stored sample offsets or payload differ");
+  require(reads == 8, "expected one validation and one emission per stored sample");
+  auto borrowed = stored.sequence;
+  hyperdr::HeifEncodedImage copied{borrowed, 700, 513, {}, std::nullopt, {}};
+  require(hyperdr::write_heif(copied) == expected, "copying a stored view lost its reader");
+  stored.sequence.read_stored = [&](std::size_t) -> writer_fixture::Bytes {
+    throw std::runtime_error("storage read failed");
+  };
+  try {
+    (void)hyperdr::write_heif(stored);
+    throw std::logic_error("storage failure swallowed");
+  } catch (const std::runtime_error& e) {
+    require(std::string(e.what()) == "storage read failed", "wrong storage error");
+  }
+  stored.sequence.read_stored = [&](std::size_t i) { auto bytes = sequence.samples.at(i); bytes.pop_back(); return bytes; };
+  try {
+    (void)hyperdr::write_heif(stored);
+    throw std::logic_error("changed stored length accepted");
+  } catch (const std::runtime_error& e) {
+    require(std::string(e.what()) == "HEIF stored sample length changed", "wrong stored length error");
+  }
 }
-int main(){try{sink_failures();for(const auto& name:writer_fixture::names())check(name);}
+
+}
+int main(){try{stored_samples();sink_failures();for(const auto& name:writer_fixture::names())check(name);}
 catch(const std::exception& error){std::cerr<<"heif_writer_items_test: "<<error.what()<<'\n';return 1;}}

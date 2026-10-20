@@ -78,11 +78,14 @@ struct Item {
   std::vector<std::uint16_t> derived_from;
   std::string_view content_type;
   std::uint16_t auxiliary_to{};
-  // Encoded sequences outlive this call. Never duplicate their compressed samples.
-  // The view points into the caller, not data, so Item moves cannot invalidate it.
-  std::span<const std::uint8_t> sample{};
-  [[nodiscard]] std::span<const std::uint8_t> payload() const {
-    return sample.empty() ? std::span<const std::uint8_t>(data) : sample;
+  const HeifSequenceView* sequence{};
+  std::size_t sample_index{};
+  [[nodiscard]] std::size_t payload_size() const {
+    return sequence ? sequence->size(sample_index) : data.size();
+  }
+  void visit(const std::function<void(std::span<const std::uint8_t>)>& use) const {
+    if (sequence) sequence->visit(sample_index, use);
+    else use(data);
   }
 };
 
@@ -189,7 +192,7 @@ Bytes make_iloc(const std::vector<Item>& items, std::uint64_t media_start) {
   put16(payload, static_cast<std::uint16_t>(items.size()));
   for (const auto& item : items) {
     if (media_start > std::numeric_limits<std::uint32_t>::max() ||
-        item.payload().size() > std::numeric_limits<std::uint32_t>::max() - media_start) {
+        item.payload_size() > std::numeric_limits<std::uint32_t>::max() - media_start) {
       throw std::runtime_error("assembled HEIF exceeds 32-bit item offsets");
     }
     put16(payload, item.id);
@@ -197,8 +200,8 @@ Bytes make_iloc(const std::vector<Item>& items, std::uint64_t media_start) {
     put16(payload, 0);  // data_reference_index 0
     put16(payload, 1);  // extent_count
     put32(payload, static_cast<std::uint32_t>(media_start));
-    put32(payload, static_cast<std::uint32_t>(item.payload().size()));
-    media_start += item.payload().size();
+    put32(payload, static_cast<std::uint32_t>(item.payload_size()));
+    media_start += item.payload_size();
   }
   return make_box("iloc", payload);
 }
@@ -245,7 +248,7 @@ Grid validate_image(const HeifEncodedImage& image, const HevcConfiguration& conf
   const auto columns = (std::uint64_t(image.width) + 511) / 512;
   const auto rows = (std::uint64_t(image.height) + 511) / 512;
   if (!columns || !rows || columns > 256 || rows > 256 || columns * rows > kMaxTiles ||
-      image.sequence.samples.size() != columns * rows || config.width != 512 || config.height != 512 ||
+      image.sequence.count() != columns * rows || config.width != 512 || config.height != 512 ||
       config.chroma_format != 1 || (config.bit_depth != 8 && config.bit_depth != 10))
     throw std::invalid_argument("HEIF requires a valid grid of 512x512 4:2:0 Main/Main10 tiles");
   if ((config.record[1] & 31) != (config.bit_depth == 8 ? 1 : 2))
@@ -305,12 +308,12 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
     const auto& image = *images[group];
     configs.push_back(make_hevc_configuration(image.sequence.vps, image.sequence.sps, image.sequence.pps));
     grids.push_back(validate_image(image, configs.back()));
-    tiles += image.sequence.samples.size();
-    item_count += image.sequence.samples.size() + ((image.width != 512 || image.height != 512));
-    for (const auto& sample : image.sequence.samples) {
+    tiles += image.sequence.count();
+    item_count += image.sequence.count() + ((image.width != 512 || image.height != 512));
+    for (std::size_t i = 0; i < image.sequence.count(); ++i) {
       check_cancelled();
-      media_size = container::bounded_heif_add(media_size,sample.size());
-      validate_sample(sample);
+      media_size = container::bounded_heif_add(media_size, image.sequence.size(i));
+      image.sequence.visit(i, validate_sample);
     }
   }
   // Leave bounded space for all meta boxes, grid descriptors and tmap payload.
@@ -334,7 +337,7 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
     if (!group) base_description = description;
     Item logical{logical_id, grid ? "grid" : "hvc1", group ? "Gain map" : "Image",
                  group != 0, grid ? grid_payload(grids[group]) : Bytes{}, description, {}, {}, 0,
-                 grid ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(image.sequence.samples[0])};
+                 grid ? nullptr : &image.sequence};
     const auto hvcc = pool.add({make_box("hvcC", config.record), true});
     if (!grid) logical.properties.push_back(hvcc);
     items.push_back(std::move(logical));
@@ -342,11 +345,11 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
       auto tile_description = describe(HeifEncodedImage{image.sequence, 512, 512, image.color,
           image.light, image.display_p3_icc}, config, false, pool);
       tile_description.push_back(hvcc);
-      for (const auto& sample : image.sequence.samples) {
+      for (std::size_t i = 0; i < image.sequence.count(); ++i) {
         check_cancelled();
         const auto id = static_cast<std::uint16_t>(items.size() + 1);
         items[logical_id - 1].derived_from.push_back(id);
-        items.push_back({id, "hvc1", "Tile", true, {}, tile_description, {}, {}, 0, sample});
+        items.push_back({id, "hvc1", "Tile", true, {}, tile_description, {}, {}, 0, &image.sequence, i});
       }
     }
   }
@@ -378,7 +381,7 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
   auto meta = make_meta(items, pool, hdlr, primary, 0);
   const std::uint64_t media_start = ftyp.size() + std::uint64_t(meta.size()) + 8;
   media_size = 0;
-  for (const auto& item : items) media_size=container::bounded_heif_add(media_size,item.payload().size());
+  for (const auto& item : items) media_size=container::bounded_heif_add(media_size,item.payload_size());
   if (media_start > kFileLimit || media_size > kFileLimit - media_start)
     throw std::invalid_argument("HEIF file exceeds 32-bit offsets");
   meta = make_meta(items, pool, hdlr, primary, media_start);
@@ -389,13 +392,14 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
   // Bound writes (and cancellation latency) even for an unusually large tile.
   constexpr std::size_t chunk = 256U * 1024;
   for (const auto& item : items) {
-    auto payload = item.payload();
-    while (!payload.empty()) {
-      check_cancelled();
-      const auto count = std::min(chunk, payload.size());
-      sink(payload.first(count));
-      payload = payload.subspan(count);
-    }
+    item.visit([&](auto payload) {
+      while (!payload.empty()) {
+        check_cancelled();
+        const auto count = std::min(chunk, payload.size());
+        sink(payload.first(count));
+        payload = payload.subspan(count);
+      }
+    });
   }
   check_cancelled();
 }

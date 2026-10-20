@@ -60,6 +60,7 @@ static OSStatus prepare(VTCompressionSessionRef s) {
   if (transfer)
     CFRelease(transfer);
   number(s, kVTCompressionPropertyKey_ExpectedFrameRate, "HYPERDR_LAB_FPS");
+  number(s, kVTCompressionPropertyKey_MaxFrameDelayCount, "HYPERDR_LAB_DELAY");
   number(s, kVTCompressionPropertyKey_ConstantBitRate, "HYPERDR_LAB_CBR");
   boolean(s, kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
           "HYPERDR_LAB_SPEED");

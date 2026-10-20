@@ -243,14 +243,13 @@ extension ExportMemoryEstimate {
         // encode_heic_rows materializes one RGB Float slab (12 B/px), not
         // full-width YUV/float canvases. VT has at most four 512px pictures in
         // flight; reserve their buffers/framework workspace separately (32 MiB).
-        // The sink retains compressed tiles, but never a complete output container.
+        // Completed tiles are spooled to an anonymous file, not retained by VT.
         let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
             : input.canvas.width * 32
-        let compressedCache = heic ? compressedHEICCache(pixels: input.canvas.pixels,
-            bitDepth: input.baseBitDepth, quality: input.quality) : 0
+        let compressedCache = heic ? streamedHEICSampleBytes : 0
         // Both package routes stream the container into the staged file.
-        // Items and each <=256 KiB sink write borrow the sequence bytes; there
-        // is no chunk allocation or complete output vector. Keep the existing
+        // Items retain offsets/lengths; validation and sink emission read one
+        // stored sample at a time, with <=256 KiB sink writes. Keep the existing
         // 32 MiB allowance for bounded metadata/box construction and filebuf;
         // encoding slabs/VT pictures have finished before assembly.
         let rowResident = resident + rgbScratch + readback + packageBand
@@ -282,20 +281,11 @@ extension ExportMemoryEstimate {
         return width * height * 48 + width * outputRows * 64 + 1024 * 1024 * 48
     }
 
-    /// Upper envelope from 1MP random base + random gain native writer samples,
-    /// not a fixed RGB byte count. Includes 20% rate variation and container slack
-    /// for the single retained encoded sequence. The file sink and Item payloads
-    /// borrow these samples without retaining an assembled container. Smooth RAW
-    /// gain maps normally encode far below this envelope; do not assume that.
-    static func compressedHEICCache(pixels: Int, bitDepth: Int, quality: Int) -> Int {
-        let rates = bitDepth == 10 ? [20.533, 23.966, 25.671] : [17.405, 19.035, 19.640] // bits/pixel
-        let q = min(100, max(90, quality))
-        let index = q <= 95 ? 0 : 1
-        let t = Double(q - (index == 0 ? 90 : 95)) / 5
-        let bits = rates[index] + (rates[index+1] - rates[index]) * t
-        let encoded = Int(ceil(Double(pixels) * bits * 1.2 / 8)) + 2 * 1024 * 1024
-        return encoded
-    }
+    /// HEIC row output enforces a 4 MiB maximum per encoded tile. Reserve
+    /// four such buffers for the callback's input/repack, one stored read and
+    /// allocator/stdio overlap. Offset/length tables are bounded to 4096 tiles.
+    /// It no longer scales with canvas area, quality, or the encoded file size.
+    static let streamedHEICSampleBytes = 16 * 1024 * 1024
 
     /// libaom refuses a source frame above its cap, so a large canvas is coded
     /// as a grid of cells (`modules/codec/include/hyperdr/codec/avif_grid.hpp`).

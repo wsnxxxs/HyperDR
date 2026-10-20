@@ -286,9 +286,10 @@ std::vector<Association> describe(const HeifEncodedImage& image, const HevcConfi
 }
 } // namespace
 
-std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEncodedImage* gain,
+void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const HeifEncodedImage* gain,
     const HeifWriteOptions& options) {
   check_cancelled();
+  if (!sink) throw std::invalid_argument("HEIF requires an output sink");
   if (bool(gain) != options.gain_metadata.has_value() || options.exif.size() > kMetadataLimit ||
       options.xmp.size() > kMetadataLimit || (gain && base.display_p3_icc.empty()) ||
       (gain && !gain->display_p3_icc.empty()))
@@ -381,12 +382,34 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
   if (media_start > kFileLimit || media_size > kFileLimit - media_start)
     throw std::invalid_argument("HEIF file exceeds 32-bit offsets");
   meta = make_meta(items, pool, hdlr, primary, media_start);
+  Bytes header;
+  put32(header, static_cast<std::uint32_t>(media_size + 8));
+  header.insert(header.end(), {'m','d','a','t'});
+  sink(ftyp); sink(meta); sink(header);
+  // Bound writes (and cancellation latency) even for an unusually large tile.
+  constexpr std::size_t chunk = 256U * 1024;
+  for (const auto& item : items) {
+    auto payload = item.payload();
+    while (!payload.empty()) {
+      check_cancelled();
+      const auto count = std::min(chunk, payload.size());
+      sink(payload.first(count));
+      payload = payload.subspan(count);
+    }
+  }
+  check_cancelled();
+}
+
+std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEncodedImage* gain,
+    const HeifWriteOptions& options) {
   Bytes out;
-  out.reserve(static_cast<std::size_t>(media_start + media_size));
-  append(out, ftyp); append(out, meta);
-  put32(out, static_cast<std::uint32_t>(media_size + 8));
-  out.insert(out.end(), {'m','d','a','t'});
-  for (const auto& item : items) { check_cancelled(); append(out, item.payload()); }
+  unsigned part=0;
+  write_heif_to([&](auto bytes) {
+    // The third write is the mdat header. Reserve the full vector once its
+    // declared length is available; only the bounded metadata precedes it.
+    if (++part == 3) out.reserve(out.size()+container::be32(bytes,0));
+    append(out, bytes);
+  }, base, gain, options);
   return out;
 }
 } // namespace hyperdr

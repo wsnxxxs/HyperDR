@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -124,8 +125,9 @@ HeifContentLight content_light(const FloatImage& hdr){
 }
 } // namespace
 
-std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
-    const PhotoMetadata& metadata,int quality,int depth){
+template<class Emit>
+static void encode_adaptive_heic_to(const GainMapResult& images,
+    const PhotoMetadata& metadata,int quality,int depth,const Emit& emit){
   validate_gain_map_metadata(images.metadata,GainMapWriterProfile::apple_strict);
   auto base=encode_base(images.base_linear,depth,quality);
   auto gain=encode_gain(images.gain_map,quality,images.presentation_frame);
@@ -134,10 +136,11 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   HeifEncodedImage g{gain,images.gain_map.width,images.gain_map.height,{2,2,1,true},std::nullopt,{}};
   HeifWriteOptions options;options.gain_metadata=images.metadata;
   options.exif=make_minimal_exif(metadata);options.xmp=make_xmp(metadata,images.headroom_stops,true);
-  return write_heif(b,&g,options);
+  emit(b,&g,options);
 }
-std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
-    const PhotoMetadata& metadata,int quality,HdrEncoding encoding){
+template<class Emit>
+static void encode_hdr_heic_to(const PhotoRenditions& images,
+    const PhotoMetadata& metadata,int quality,HdrEncoding encoding,const Emit& emit){
   using namespace codec::hevc;
   if(encoding!=HdrEncoding::Pq && encoding!=HdrEncoding::Hlg)
     throw std::invalid_argument("encode_hdr_heic requires PQ or HLG");
@@ -157,12 +160,64 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
   HeifEncodedImage image{coded,hdr.width,hdr.height,{9,static_cast<std::uint16_t>(transfer),9,true},content_light(hdr),{}};
   HeifWriteOptions options;options.exif=make_minimal_exif(metadata);
   options.xmp=make_xmp(metadata,images.stats.headroom_stops,false);
-  return write_heif(image,nullptr,options);
+  emit(image,nullptr,options);
 }
 
-std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const EncodingRows& codes,
+// In-memory adapters remain for codec callers/tests; package writes use the
+// file adapters so no complete compressed output is retained alongside samples.
+std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
+    const PhotoMetadata& metadata,int quality,int depth) {
+  std::vector<std::uint8_t> bytes;
+  encode_adaptive_heic_to(images,metadata,quality,depth,[&](const auto& b,const auto* g,const auto& options) {
+    bytes=write_heif(b,g,options);
+  });
+  return bytes;
+}
+std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
+    const PhotoMetadata& metadata,int quality,HdrEncoding encoding) {
+  std::vector<std::uint8_t> bytes;
+  encode_hdr_heic_to(images,metadata,quality,encoding,[&](const auto& b,const HeifEncodedImage* g,const auto& options) {
+    bytes=write_heif(b,g,options);
+  });
+  return bytes;
+}
+namespace {
+class HeifFileOutput {
+ public:
+  explicit HeifFileOutput(const std::filesystem::path& path) {
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output.open(path,std::ios::binary | std::ios::trunc);
+  }
+  HeifByteSink sink() { return [&](auto bytes) {
+    output.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+  }; }
+  void close() { output.close(); }
+ private:
+  std::ofstream output;
+};
+}
+void write_adaptive_heic(const GainMapResult& images,const PhotoMetadata& metadata,
+    int quality,int depth,const std::filesystem::path& path) {
+  HeifFileOutput output(path);
+  encode_adaptive_heic_to(images,metadata,quality,depth,[&](const auto& b,const auto* g,const auto& options) {
+    write_heif_to(output.sink(),b,g,options);
+  });
+  output.close();
+}
+void write_hdr_heic(const PhotoRenditions& images,const PhotoMetadata& metadata,
+    int quality,HdrEncoding encoding,const std::filesystem::path& path) {
+  HeifFileOutput output(path);
+  encode_hdr_heic_to(images,metadata,quality,encoding,[&](const auto& b,const HeifEncodedImage* g,const auto& options) {
+    write_heif_to(output.sink(),b,g,options);
+  });
+  output.close();
+}
+
+void write_heic_rows(const EncodingRows& base,const EncodingRows& codes,
     const GainMapMetadata& metadata,float headroom,const PhotoMetadata& photo,
-    OutputEncoding encoding,int quality,int depth,bool frame) {
+    OutputEncoding encoding,int quality,int depth,bool frame,const std::filesystem::path& path) {
+  HeifFileOutput output(path);
+  const auto sink=output.sink();
   using namespace codec::hevc;
   const auto grid=tile_grid(base.width,base.height);
   auto picture=[&](const EncodingRows& rows,const EncodeParams& parameters,bool luma,bool hdr) {
@@ -205,7 +260,9 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
     HeifEncodedImage primary{b,base.width,base.height,{},std::nullopt,icc};
     HeifEncodedImage gain{g,base.width,base.height,{2,2,1,true},std::nullopt,{}};
     options.gain_metadata=metadata;options.xmp=make_xmp(photo,headroom,true);
-    return write_heif(primary,&gain,options);
+    write_heif_to(sink,primary,&gain,options);
+    output.close();
+    return;
   }
   FloatImage b(base.width,1,3),g(base.width,1,codes.channels);
   EncodingRows hdr{base.width,base.height,3,[&](unsigned y,std::span<float> out) {
@@ -229,7 +286,8 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
   auto coded=picture(hdr,{quality,true,{9,transfer,9}},false,true);
   HeifEncodedImage primary{coded,base.width,base.height,{9,static_cast<std::uint16_t>(transfer),9,true},light,{}};
   options.xmp=make_xmp(photo,headroom,false);
-  return write_heif(primary,nullptr,options);
+  write_heif_to(sink,primary,nullptr,options);
+  output.close();
 }
 
 void verify_heic_decodable(std::span<const std::uint8_t> bytes) {

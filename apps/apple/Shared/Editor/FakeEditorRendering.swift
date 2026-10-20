@@ -27,6 +27,8 @@ actor FakeEditorRendering: EditorRendering {
     var photos: [URL: Photo] = [:]
     var defaultPhoto = Photo()
     var modelBehavior = ModelBehavior.succeed
+    /// Thrown by every render while set.
+    var renderError: EditorRenderingError?
 
     private(set) var opened: [URL] = []
     /// Every render request in arrival order, finished or not.
@@ -110,6 +112,7 @@ actor FakeEditorRendering: EditorRendering {
         }
         guard let current else { throw EditorRenderingError.noSource }
         guard current.id == request.sourceID else { throw EditorRenderingError.staleSource }
+        if let renderError { throw renderError }
         if let look = request.recipe.activeLook, !installedLUTs.contains(look.contentHash) {
             throw EditorRenderingError.missingLUT(look.contentHash)
         }

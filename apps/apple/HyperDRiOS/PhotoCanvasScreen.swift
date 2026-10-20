@@ -154,6 +154,7 @@ struct PhotoCanvasScreen: View {
                 if holdingOriginal, editor.originalFrame != nil { capsule(Text("ios.canvas.original")) }
                 if editor.aiStatus == .computing { capsule(Text("ios.ai.computing")) }
                 if case .failed = editor.aiStatus { capsule(Text("ios.ai.failed")) }
+                if editor.sourceChanged { capsule(Text("ios.error.sourceChanged")) }
                 if let notice { capsule(Text(notice)) }
                 if loading { ProgressView().tint(.white) }
             }

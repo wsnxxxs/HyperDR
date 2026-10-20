@@ -24,6 +24,9 @@ actor RenderSession: EditorRendering {
     private let engine: RenderEngine
     private struct Opened {
         let editor: EditorSource
+        /// The file as opened. `load` of a replaced file quietly opens the new
+        /// one, so a reload checks this first (R23-001).
+        let revision: FileRevision
         /// The latest loaded variant; all share `id` (source and model identity).
         var source: RenderSource
         var options: SourceOptions
@@ -55,10 +58,15 @@ actor RenderSession: EditorRendering {
     }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
+        try await mapped { try await openSource(url, previewSize: previewSize) }
+    }
+
+    private func openSource(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
         generation += 1
         let generation = self.generation
         let resolution: SourceResolution = previewSize.map { .preview(maximumSize: $0) } ?? .full
         let options = try SourceOptions(recipe: Recipe(), resolution: resolution)
+        let revision = try FileRevision(url)
         let source = try await engine.load(url, options: options)
         let report = try await engine.sourceReport(source)
         try Task.checkCancellation()
@@ -66,7 +74,7 @@ actor RenderSession: EditorRendering {
         let editor = EditorSource(id: UUID(), url: url, domain: source.domain, pixelSize: source.nativeSize,
                                   sourceValues: report.sourceValues,
                                   capabilities: Self.capabilities(report.capabilities))
-        opened = Opened(editor: editor, source: source, options: options)
+        opened = Opened(editor: editor, revision: revision, source: source, options: options)
         predictions = [:]
         predictionOrder = []
         return editor
@@ -100,6 +108,7 @@ actor RenderSession: EditorRendering {
                                               options: options)
         if sourceOptions != opened.options {
             await beforeReload?()
+            guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
             let source = try await engine.load(opened.editor.url, options: sourceOptions)
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
@@ -117,6 +126,10 @@ actor RenderSession: EditorRendering {
     }
 
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
+        try await mapped { try await renderFrame(request) }
+    }
+
+    private func renderFrame(_ request: EditorRenderRequest) async throws -> EditorFrame {
         let prepared = try await prepare(request)
         let source = prepared.source
         let planes = try await engine.render(source, recipe: request.recipe, lut: prepared.lut, modelGain: prepared.modelGain,
@@ -133,6 +146,10 @@ actor RenderSession: EditorRendering {
     }
 
     func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
+        try await mapped { try await renderMask(request, parameterID: parameterID) }
+    }
+
+    private func renderMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
         let prepared = try await prepare(request)
         let mask = try await engine.effectMask(prepared.source, recipe: request.recipe, parameterID: parameterID,
                                                lut: prepared.lut, modelGain: prepared.modelGain, options: prepared.options,
@@ -147,6 +164,10 @@ actor RenderSession: EditorRendering {
     }
 
     func predictModelGain(_ request: EditorRenderRequest) async throws {
+        try await mapped { try await predict(request) }
+    }
+
+    private func predict(_ request: EditorRenderRequest) async throws {
         let prepared = try await prepare(request, needsLUT: false)
         let generation = prepared.generation
         let key = PredictionKey(source: prepared.source.id, model: Self.modelID(request.recipe))
@@ -205,6 +226,25 @@ actor RenderSession: EditorRendering {
     }
 
     // MARK: - Helpers
+
+    /// Size and modification date, as Render's own source revision.
+    private struct FileRevision: Equatable {
+        let size: Int?
+        let modified: Date?
+
+        init(_ url: URL) throws {
+            var url = url
+            url.removeAllCachedResourceValues()
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            size = values.fileSize
+            modified = values.contentModificationDate
+        }
+    }
+
+    /// R23-001: Render refuses a file that changed since it was opened.
+    private func mapped<T>(_ body: () async throws -> T) async throws -> T {
+        do { return try await body() } catch RenderError.sourceChanged { throw EditorRenderingError.sourceChanged }
+    }
 
     private func checkCurrent(_ generation: Int) throws {
         guard generation != self.generation else { return }

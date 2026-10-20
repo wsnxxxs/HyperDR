@@ -60,6 +60,9 @@ nonisolated enum EditorRenderingError: Error, Equatable, Sendable {
     case staleSource
     /// The recipe references a LUT that was never installed.
     case missingLUT(String)
+    /// The file changed on disk after it was opened (Render's R23-001): the
+    /// photo has to be opened again.
+    case sourceChanged
     /// Render does not offer this yet (developer-facing; see p7-2b §6).
     case unsupported(String)
 }

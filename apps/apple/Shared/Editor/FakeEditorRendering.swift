@@ -105,7 +105,7 @@ actor FakeEditorRendering: EditorRendering {
         }
         guard let current else { throw EditorRenderingError.noSource }
         guard current.id == request.sourceID else { throw EditorRenderingError.staleSource }
-        if let look = request.recipe.look, !installedLUTs.contains(look.contentHash) {
+        if let look = request.recipe.activeLook, !installedLUTs.contains(look.contentHash) {
             throw EditorRenderingError.missingLUT(look.contentHash)
         }
         let planes = try makePlanes(size: request.size)

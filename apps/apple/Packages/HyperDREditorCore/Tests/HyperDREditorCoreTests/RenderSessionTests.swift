@@ -60,4 +60,46 @@ import UniformTypeIdentifiers
             try await session.render(EditorRenderRequest(sourceID: UUID(), recipe: recipe, size: PixelSize(width: 48, height: 32)))
         }
     }
+
+    /// R22-001: a region render waiting to reload must not write the closed
+    /// photo back; it and later renders of that photo find no source.
+    @Test func aReloadAcrossCloseWritesNothingBack() async throws {
+        let session = try RenderSession()
+        let url = try Self.tinyPNG()
+        let source = try await session.open(url, previewSize: PixelSize(width: 48, height: 48))
+        let gate = Gate()
+        await session.setBeforeReload { await gate.wait() }
+        let request = EditorRenderRequest(sourceID: source.id, recipe: Recipe(inputDomain: .sdr), size: source.pixelSize,
+                                          region: CGRect(x: 0, y: 0, width: 16, height: 16))
+        let stalled = Task { try await session.render(request) }
+        await gate.reached()
+        await session.close()
+        await gate.open()
+        await #expect(throws: EditorRenderingError.noSource) { try await stalled.value }
+        await #expect(throws: EditorRenderingError.noSource) { try await session.render(request) }
+    }
+}
+
+/// One waiter, released by the test.
+private actor Gate {
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var arrival: CheckedContinuation<Void, Never>?
+    private var arrived = false
+
+    func wait() async {
+        arrived = true
+        arrival?.resume()
+        arrival = nil
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func reached() async {
+        if arrived { return }
+        await withCheckedContinuation { arrival = $0 }
+    }
+
+    func open() {
+        waiter?.resume()
+        waiter = nil
+    }
 }

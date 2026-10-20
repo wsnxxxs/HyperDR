@@ -107,6 +107,17 @@ extension Recipe {
         manager.setActionName(actionName(edit))
     }
 
+    /// Makes the next registration a step of its own even inside the current
+    /// event's undo group (UIKit and AppKit group everything registered in
+    /// one event, so a drag committed by a tap and the tap's own edit would
+    /// otherwise undo together). Only a single open group, the event's, is
+    /// split; nested groups a host opened are left alone.
+    func separateNextStep() {
+        guard let undoManager, undoManager.groupingLevel == 1 else { return }
+        undoManager.endUndoGrouping()
+        undoManager.beginUndoGrouping()
+    }
+
     /// A different photo: its edits are not this photo's.
     func clear() {
         undoManager?.removeAllActions(withTarget: self)

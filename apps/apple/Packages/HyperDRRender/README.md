@@ -357,8 +357,8 @@ current visibility/selection is separate. The lower-level
 that evaluate declaration conditions. `resolvedAutomatic` separately reports the
 actual edited auto output range as `hdr.range`.
 
-AI predictions are retained by `(sourceID, modelID)` until source family replacement
-or `clearCaches()`, so switching models does not replace another model's prediction.
+AI predictions use a four-entry LRU keyed by `(sourceID, modelID)`. Switching
+development families preserves these small grids; `clearCaches()` removes them.
 `ModelGainError.deviceUnavailable(String)` identifies absent Metal/Core ML compute
 devices. Missing/broken model resources remain `modelUnavailable`; inference failures
 remain `predictionFailed`. These are not labelled as hardware incompatibility.
@@ -377,14 +377,14 @@ or transfer to another engine, the editor must reload a changed source.
 
 ### Export handoff (P7-3b-R)
 
-`ExportTypes.swift` fixes the Kit/Fake boundary before the RenderEngine
-implementation lands. `ExportStripeRendering.renderExportStripes` receives a
+`ExportTypes.swift` fixes the Kit/Fake boundary for the RenderEngine
+implementation and backend Fake. `ExportStripeRendering.renderExportStripes` receives a
 source, the frozen Recipe/LUT/model prediction, and `ExportRenderRequest`.
 It calls `prepare(ExportRenderReport)` once with the final metadata, then
 `consume(ExportStripe)` for each top-down band, and returns that same report.
 Both callbacks are synchronous and throwing; retain CPU arrays as needed, do not
 queue unbounded bands. A failed operation leaves partial bands to discard.
-The implementation will not write files or call a codec.
+RenderEngine conforms directly. It never writes files or calls an encoder.
 
 `photoSize` is the destination-limited photograph, before adding a frame.
 `FrameSnapshot` carries the final canvas and integral photo rectangle, linear-P3
@@ -407,3 +407,35 @@ HDR even though their file does not store an auxiliary map. `rows` is explicit
 Kit owns durable Recipe/source/LUT/frame fingerprints, model waiting, memory
 admission, file output and reporting. These Render inputs contain no paths,
 PhotoKit assets, platform views, export history or screen headroom adaptation.
+
+
+The export implementation scans photo bands first to determine one global header
+(channel count, signed gain, transparency, HDR peak), then emits bands. This is
+bounded GPU readback with two render passes, not a file writer or full-source
+streaming. `prepare` follows the scan, before any pixel callback. Intermediate
+textures are recycled per band; b-stage Kit still owns whole-plane accumulation.
+Generated metadata uses the global maximum, never the first band's maximum.
+
+`ceilingStops` only narrows the resolved recipe range via the existing soft
+shoulder. A remaining overflow after ICC reconstruction uses the same shoulder;
+max-channel base is chosen **before** reducing gain. Unsupported RGB gains,
+offsets, signed gain, non-P3 working gamut, Adaptive headroom, and unequal framed
+offsets are reconstructed with ISO vector math and re-separated. Report reasons
+include `flattenTransparency` and `outputCeiling` as well as the six original
+capability reasons. The legacy black-alpha rule is retained (see codec's
+`internal/cicp.hpp`): composite after ISO reconstruction. Zero-offset simple
+pairs can retain their gain while their base is multiplied by alpha.
+
+Frame pixels use only linear-P3 paper, Gaussian print shadow and a decoded caption
+PNG. Text alpha blends in linear light (the planned GPU convention, unlike the
+old encoded-space text blend). Gain outside the photo rectangle is exactly zero;
+Kit must still pass presentation_frame for E5 quantization and, on gain-map output,
+frame_photo for E5 readback. Render does not quantize gain or alter its codebook.
+
+File-backed `RenderSource.id` is a SHA256-derived UUID over canonical path, file
+size/modification-date revision, decoder choice, lens correction and normalized
+engine-unit RAW values (including signed-zero normalization). Preview dimensions
+are omitted. Returning to the same settings, clearing pixel caches, or loading in
+another engine yields the same ID; a different revision yields a different ID.
+Only one development family's full/preview/analysis pixels are resident internally;
+small AI predictions survive a family switch for the last four source/model keys.

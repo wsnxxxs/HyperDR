@@ -34,6 +34,9 @@ actor FakeEditorRendering: EditorRendering {
     private(set) var completed: [EditorRenderRequest] = []
     private(set) var cancelled: [EditorRenderRequest] = []
     private(set) var predictions: [String] = []
+    /// Predictions held, as Render keys them: source, model and development.
+    private var made: Set<String> = []
+    private var loadedDevelopment: String?
     /// The parameter of every mask asked for.
     private(set) var masks: [String] = []
     private(set) var installedLUTs: Set<String> = []
@@ -114,10 +117,13 @@ actor FakeEditorRendering: EditorRendering {
         completed.append(request)
         let display = DisplayGainPair(base: planes.base, gain: planes.gain, alternateHeadroom: 0,
                                       region: planes.region, outputSize: request.size)
-        // "AI pending": without a prediction the frame has no AI gain.
+        // "AI pending": without a prediction for this development the frame has no AI gain.
+        // Like Render, one development is held at a time: another one loaded
+        // drops the predictions of the one before.
+        load(request)
+        let wantsModel = request.recipe.hdrSource.usesModel && request.recipe.conditionValue("hdr.enabled")?.boolValue != false
         return EditorFrame(request: request, planes: planes, display: display,
-                           modelGainPending: request.recipe.hdrSource.usesModel && !request.usesModelGain
-                               && request.recipe.conditionValue("hdr.enabled")?.boolValue != false)
+                           modelGainPending: wantsModel && !(request.usesModelGain && made.contains(Self.family(request))))
     }
 
     func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
@@ -138,14 +144,15 @@ actor FakeEditorRendering: EditorRendering {
         return context.makeImage()!
     }
 
-    func predictModelGain(modelID: String) async throws {
-        predictions.append(modelID)
+    func predictModelGain(_ request: EditorRenderRequest) async throws {
+        predictions.append(request.recipe.conditionValue("hdr.model")?.stringValue ?? "")
         if holdingPredictions {
             await withCheckedContinuation { heldPredictions.append($0) }
         }
         try Task.checkCancellation()
+        load(request)
         switch modelBehavior {
-        case .succeed: return
+        case .succeed: made.insert(Self.family(request))
         case .fail(let reason): throw FakeFailure(reason: reason)
         case .unavailable(let reason): throw EditorRenderingError.modelUnavailable(reason)
         }
@@ -157,6 +164,28 @@ actor FakeEditorRendering: EditorRendering {
 
     func close() async {
         current = nil
+    }
+
+    /// Drops every prediction, as Render's cache may.
+    func forgetPredictions() { made = [] }
+
+    /// Like Render, one development is held at a time: loading another drops
+    /// the predictions of the one before.
+    private func load(_ request: EditorRenderRequest) {
+        let development = Self.development(request)
+        guard development != loadedDevelopment else { return }
+        loadedDevelopment = development
+        made = made.filter { $0.hasPrefix(development) }
+    }
+
+    /// The source a request renders from: photo, development and bypass.
+    private static func development(_ request: EditorRenderRequest) -> String {
+        let development = request.recipe.development.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        return "\(request.sourceID) \(development) \(request.bypassedGroups.map(\.rawValue).sorted())"
+    }
+
+    private static func family(_ request: EditorRenderRequest) -> String {
+        development(request) + " " + (request.recipe.conditionValue("hdr.model")?.stringValue ?? "")
     }
 
     struct FakeFailure: Error, CustomStringConvertible {

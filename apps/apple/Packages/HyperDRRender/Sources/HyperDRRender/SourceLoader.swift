@@ -15,7 +15,7 @@ struct OpenedSource {
 }
 
 extension RenderEngine {
-    static func open(_ url: URL, options: SourceOptions) throws -> OpenedSource {
+    static func open(_ url: URL, options: SourceOptions, deferred: Bool = false) throws -> OpenedSource {
         try Task.checkCancellation()
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw RenderError.cannotOpenSource }
         let type = CGImageSourceGetType(source).flatMap { UTType($0 as String) }
@@ -34,7 +34,7 @@ extension RenderEngine {
         let baseCG: CGImage
         switch options.resolution {
         case .full:
-            guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw RenderError.cannotDecodeSource }
+            guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, deferred ? [kCGImageSourceShouldCache:false] as CFDictionary : nil) else { throw RenderError.cannotDecodeSource }
             baseCG = decoded
         case .preview(let maximumSize):
             guard maximumSize.width > 0, maximumSize.height > 0, width > 0, height > 0 else { throw RenderError.invalidSize }

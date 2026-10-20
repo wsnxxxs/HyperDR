@@ -60,6 +60,7 @@ struct GraphUniform {
     uint4 flags, lutInfo;
     float4 lutMin, lutMax;
     uint4 region, mode;
+    float4 inputRegion;
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -223,7 +224,7 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
     float2 uv=(float2(pos+p.region.zw)+.5f)/float2(p.region.xy);
-    auto pair=preparePair(src.sample(s,uv),p,cube,table);
+    auto pair=preparePair(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table);
     float g=pair.gain;
     if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
     if(p.mode.y)g=max(g,model.sample(s,uv).x);
@@ -240,7 +241,7 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     if(!p.flags.w)g=0;
     base.write(float4(pair.base,pair.alpha),pos);gain.write(float4(g,0,0,0),pos);
 }
-struct AuthorUniform { float4 minimum,maximum,inverseGamma,baseOffset,alternateOffset,controls;uint4 info; };
+struct AuthorUniform { float4 minimum,maximum,inverseGamma,baseOffset,alternateOffset,controls;uint4 info;float4 inputRegion,gainRegion; };
 float3 isoLogRatio(float3 numerator,float3 denominator) {
     // Zero over zero is an unlit channel: choose zero stops, as in the double reference.
     return select(log2(max(numerator/max(denominator,1e-30f),1e-30f)),float3(0),denominator==0);
@@ -250,15 +251,14 @@ kernel void authoredOutput(texture2d<float,access::sample> baseWorking [[texture
                            constant AuthorUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
-    float2 uv=(float2(pos+uint2(p.info.z,p.info.w))+.5f)/p.controls.zw;
-    float3 b=baseWorking.sample(s,uv).rgb,oB=p.baseOffset.xyz,oA=p.alternateOffset.xyz;
+    float3 b=sourceSample(baseWorking,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.inputRegion).rgb,oB=p.baseOffset.xyz,oA=p.alternateOffset.xyz;
     float3 g;
     if(p.info.y&1) {
-        float3 v=encoded.sample(s,uv).rgb;if(p.info.x==1)v=v.rrr;
+        float3 v=sourceSample(encoded,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.gainRegion).rgb;if(p.info.x==1)v=v.rrr;
         g=p.minimum.xyz+(p.maximum.xyz-p.minimum.xyz)*pow(clamp(v,0.f,1.f),p.inverseGamma.xyz);
     } else {
         // Legacy Apple: exact per-channel ISO inversion, never a luminance ratio.
-        g=isoLogRatio(systemHDR.sample(s,uv).rgb+oA,b+oB);
+        g=isoLogRatio(sourceSample(systemHDR,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.inputRegion).rgb+oA,b+oB);
     }
     float3 neutral=isoLogRatio(b+oA,b+oB);
     g=neutral+(g-neutral)*p.controls.x;
@@ -293,7 +293,7 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
     float2 uv=(float2(pos+p.region.zw)+.5f)/float2(p.region.xy);
-    float4 original=source.sample(s,uv);float weight=0;
+    float4 original=sourceSample(source,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion);float weight=0;
     if(p.mode.z) { output.write(float4(0),pos);return; }
     if(p.mode.x<3) {
         float3 rgb=pointOp(original.rgb,5,p.tone1.y,p.flags.x==0);

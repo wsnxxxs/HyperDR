@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import CoreImage
 import Metal
 import simd
@@ -15,6 +16,7 @@ public actor RenderEngine {
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
     var modelPredictionCache: [ModelPredictionKey:ModelGainPrediction] = [:]
+    var modelPredictionOrder: [ModelPredictionKey] = []
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
@@ -22,7 +24,7 @@ public actor RenderEngine {
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
     private var sourceFamily: (key: SourceKey, id: UUID)?
-    private var analysisSource: RenderSource?
+    var analysisSource: RenderSource?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?
     private var outputCache: (key: OutputKey, planes: RenderPlanes)?
 
@@ -32,6 +34,23 @@ public actor RenderEngine {
         let url: URL
         let revision: SourceRevision
         var options: SourceOptions
+        var stableID: UUID {
+            // Values are already in engine units; normalize signed zero and omit
+            // preview size. Swift Hasher is intentionally randomized, so use SHA256.
+            func number(_ value: Float?) -> String {
+                value.map { String(($0 == 0 ? Float(0) : $0).bitPattern,radix:16) } ?? "source"
+            }
+            let r = options.raw
+            let fields = ["hyperdr.source/v1",url.path,String(revision.size ?? -1),
+                revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
+                options.kind.rawValue,String(options.lensCorrection),number(r.temperature),number(r.tint),
+                number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+            let data = try! JSONSerialization.data(withJSONObject:fields)
+            var bytes = Array(SHA256.hash(data:data).prefix(16))
+            bytes[6] = (bytes[6] & 15) | 0x80; bytes[8] = (bytes[8] & 63) | 0x80
+            return UUID(uuid:(bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7],
+                              bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15]))
+        }
     }
     private struct OutputKey: Equatable {
         let source: UUID
@@ -50,8 +69,9 @@ public actor RenderEngine {
         let url = Bundle.module.url(forResource: "Pipeline", withExtension: "metal", subdirectory: "Shaders")!
         let adjustmentURL = Bundle.module.url(forResource: "Adjustments", withExtension: "metal", subdirectory: "Shaders")!
         let displayURL = Bundle.module.url(forResource: "Display", withExtension: "metal", subdirectory: "Shaders")!
+        let exportURL = Bundle.module.url(forResource:"Export",withExtension:"metal",subdirectory:"Shaders")!
         let shader = try String(contentsOf: url, encoding: .utf8) + "\n" + String(contentsOf: adjustmentURL, encoding: .utf8)
-            + "\n" + String(contentsOf:displayURL,encoding:.utf8)
+            + "\n" + String(contentsOf:displayURL,encoding:.utf8) + "\n" + String(contentsOf:exportURL,encoding:.utf8)
         let options = MTLCompileOptions()
         options.mathMode = .safe
         let library = try device.makeLibrary(source: shader, options: options)
@@ -59,7 +79,7 @@ public actor RenderEngine {
         var pipelines: [String: any MTLComputePipelineState] = [:]
         for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
-                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask"] {
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -67,9 +87,14 @@ public actor RenderEngine {
     }
 
     public func clearCaches() {
+        modelPredictionCache.removeAll()
+        modelPredictionOrder.removeAll()
+        clearImageCaches()
+    }
+
+    func clearImageCaches() {
         sourceCache.removeAll()
         analysisSource = nil
-        modelPredictionCache.removeAll()
         modelFilterCache = nil
         hdrCache = nil
         outputCache = nil
@@ -89,8 +114,8 @@ public actor RenderEngine {
         var familyKey = key
         familyKey.options.resolution = .full
         if sourceFamily?.key != familyKey {
-            clearCaches()
-            sourceFamily = (familyKey,UUID())
+            clearImageCaches()
+            sourceFamily = (familyKey,familyKey.stableID)
         }
         let opened = try Self.open(url, options: options)
         let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
@@ -224,7 +249,6 @@ public actor RenderEngine {
         }
     }
 
-    private struct Sampling { var width, height, x, y: UInt32 }
 
     func renderRegion(_ source: RenderSource, size: PixelSize, region: CGRect,
                               nodes: [any RenderNode]) throws -> RenderPlanes {
@@ -246,19 +270,19 @@ public actor RenderEngine {
         guard let buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: buffer)
         let wholeSource = size == source.size && inputRegion == bounds
-        func sample(_ texture: any MTLTexture, preserveNativeSize: Bool = false) throws -> any MTLTexture {
-            if wholeSource && ((preserveNativeSize && region == bounds) ||
+        func sample(_ texture: any MTLTexture, samplingRegion: CGRect, preserveNativeSize: Bool = false) throws -> any MTLTexture {
+            if samplingRegion == CGRect(x:0,y:0,width:1,height:1) && wholeSource && ((preserveNativeSize && region == bounds) ||
                                (texture.width == size.width && texture.height == size.height)) { return texture }
             let target = try context.texture(width: Int(inputRegion.width), height: Int(inputRegion.height), format: texture.pixelFormat)
-            var sampling = Sampling(width: UInt32(size.width), height: UInt32(size.height),
-                                    x: UInt32(inputRegion.minX), y: UInt32(inputRegion.minY))
+            var sampling = SourceSampling(width: UInt32(size.width), height: UInt32(size.height),
+                                    x: UInt32(inputRegion.minX), y: UInt32(inputRegion.minY), sourceRegion:sourceSampling(texture,samplingRegion))
             try context.dispatch("sampleSource", width: target.width, height: target.height,
                                  textures: [texture, target], value: &sampling)
             return target
         }
-        let base = try sample(texture)
+        let base = try sample(texture,samplingRegion:source.samplingRegion)
         let gain: any MTLTexture
-        if authored, let nativeGain = source.gainTexture { gain = try sample(nativeGain, preserveNativeSize: true) } else {
+        if authored, let nativeGain = source.gainTexture { gain = try sample(nativeGain,samplingRegion:source.gainSamplingRegion,preserveNativeSize:true) } else {
             gain = try context.texture(width: base.width, height: base.height, format: .r32Float)
             var unused: UInt32 = 0
             try context.dispatch("zeroGain", width: gain.width, height: gain.height, textures: [gain], value: &unused)

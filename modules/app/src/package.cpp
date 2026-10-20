@@ -19,6 +19,7 @@
 #include "hyperdr/look/rendition.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -27,6 +28,8 @@
 #include <string>
 #include <system_error>
 #include <vector>
+
+#include <unistd.h>
 
 namespace hyperdr {
 namespace {
@@ -245,9 +248,15 @@ ColorGamut resolved_gamut(const PackageRequest& request) {
 }
 
 // E5 read back rather than assumed: the mat outside the photograph must carry no
-// gain, and the only way to know is to decode the file that was just written.
-// Both renditions of a gain-map file come from one decoded base and one stored
-// code, so their difference is stored gain rather than a codec error.
+// gain, and the only way to know is to decode the file that was just written --
+// the staging file, before anything is published to the caller's path.
+//
+// Zero stored gain means the two renditions are the same pixel, whatever the
+// offsets are: a framed pair keeps base and alternate offsets equal, so the
+// reconstruction collapses to the base itself. Comparing the renditions
+// directly also keeps a negative offset pair honest -- with base + offset below
+// zero, any arithmetic that goes through the offsets sees a gain that is not
+// there.
 //
 // One coding block next to the photograph is left out: an 8x8 JPEG or HEVC gain
 // block that straddles the photo's edge rings into the mat, which is a property
@@ -272,10 +281,10 @@ std::uint64_t mat_samples_carrying_gain(const QuantizedGain& gain, const FrameRe
   return count;
 }
 
-void verify_framed_mat(const PackageRequest& request) {
+void verify_framed_mat(const PackageRequest& request, const std::filesystem::path& staged) {
   const auto& photo = *request.frame_photo;
   const auto width = request.sdr->width, height = request.sdr->height;
-  const auto decoded = decode_image(request.output);
+  const auto decoded = decode_image(staged);
   if (!decoded.authored_sdr)
     throw std::runtime_error("the framed package did not read back as a base plus gain map");
   const auto& base = *decoded.authored_sdr;
@@ -283,28 +292,18 @@ void verify_framed_mat(const PackageRequest& request) {
   if (base.width != width || base.height != height || alternate.width != width ||
       alternate.height != height)
     throw std::runtime_error("the framed package read back at a different size than it was given");
-  const auto offset = [&](std::uint32_t c) {
-    const auto index = std::min<std::size_t>(c, 2);
-    return std::pair<float, float>{decoded.gain_map.base_offset[index],
-                                   decoded.gain_map.alternate_offset[index]};
-  };
   std::uint64_t failures = 0, checked = 0;
   float worst = 0.0F;
   std::uint32_t worst_x = 0, worst_y = 0;
   const auto check = [&](std::uint32_t x, std::uint32_t y) {
     const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
     for (std::uint32_t c = 0; c < 3; ++c) {
-      const auto [base_offset, alternate_offset] = offset(c);
-      const float low = std::max(base.pixels[pixel + c] + base_offset, 0.0F);
-      const float high = alternate.pixels[pixel + c] + alternate_offset;
+      const float sdr = base.pixels[pixel + c];
+      const float difference = std::abs(alternate.pixels[pixel + c] - sdr);
       ++checked;
-      // Stops of stored gain: zero is the mat's own value, and offset equality
-      // (enforced for a framed pair) makes the reconstruction a pure ratio.
-      const float stops = low > 1.0e-6F ? std::log2(std::max(high, 1.0e-6F) / low)
-                                        : (std::abs(high) <= 1.0e-6F ? 0.0F : 64.0F);
-      if (std::abs(stops) <= kFrameZeroTolerance) continue;
+      if (difference <= 1.0e-5F * (1.0F + std::abs(sdr))) continue;
       ++failures;
-      if (std::abs(stops) > std::abs(worst)) { worst = stops; worst_x = x; worst_y = y; }
+      if (difference > worst) { worst = difference; worst_x = x; worst_y = y; }
     }
   };
   // One coding block of slack on every side of the photograph, clipped to the
@@ -326,7 +325,32 @@ void verify_framed_mat(const PackageRequest& request) {
     throw std::runtime_error(
         "the framed mat carries gain: " + std::to_string(failures) + " samples, worst at " +
         std::to_string(worst_x) + "," + std::to_string(worst_y) + " (" +
-        json::number_text(worst) + " stops)");
+        json::number_text(worst) + " linear)");
+}
+
+// A framed export is checked before it is published: the bytes go to a staging
+// file beside the destination (so publishing is a rename on one volume), the
+// readback decodes that file, and only then does the caller's path change. A
+// cancelled or failing check must not be able to destroy the file the caller
+// already had there, which a check after the rename cannot promise.
+struct StagingFile {
+  std::filesystem::path path;
+  ~StagingFile() {
+    if (!path.empty()) {
+      std::error_code ignored;
+      std::filesystem::remove(path, ignored);
+    }
+  }
+};
+
+StagingFile staged_beside(const std::filesystem::path& output) {
+  static std::atomic<std::uint64_t> sequence{0};
+  std::string name = output.filename().native();
+  name += ".reading." + std::to_string(::getpid()) + "." +
+          std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+  StagingFile staging;
+  staging.path = output.has_parent_path() ? output.parent_path() / name : std::filesystem::path(name);
+  return staging;
 }
 
 std::string verification_name(OutputEncoding encoding) {
@@ -477,18 +501,18 @@ std::string package_image(const PackageRequest& request) {
     verify_encoded_output(bytes, encoding);
     check_cancelled();
   }
-  write_binary_file_atomic(request.output, bytes, request.overwrite);
-  // The second E5 check: the file that was just written decodes back with no
-  // gain on the mat. The caller asked for it by supplying the rectangle, and a
-  // file that fails it must not be left behind for the caller to publish.
-  if (request.frame_photo) {
-    try {
-      verify_framed_mat(request);
-    } catch (...) {
-      std::error_code ignored;
-      std::filesystem::remove(request.output, ignored);
-      throw;
-    }
+  check_cancelled();
+  // A framed export is verified on a staging copy, so the readback cannot run
+  // after the caller's file has already been replaced.
+  StagingFile staging = request.frame_photo ? staged_beside(request.output) : StagingFile{};
+  const bool staged = !staging.path.empty();
+  write_binary_file_atomic(staged ? staging.path : request.output, bytes,
+                           staged ? true : request.overwrite);
+  if (staged) {
+    // A file that fails the mat check is never published: the staging copy is
+    // removed by its owner and the destination keeps whatever it had.
+    verify_framed_mat(request, staging.path);
+    write_binary_file_atomic(request.output, bytes, request.overwrite);
   }
 
   json::Writer writer;

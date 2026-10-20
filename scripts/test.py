@@ -97,7 +97,6 @@ def apple() -> None:
         "-default-test-execution-time-allowance", "60", env=env)
     run(sys.executable, "scripts/check_apple_i18n.py")
     run(sys.executable, "scripts/summarize_preview_timings.py", "--self-test")
-    run(sys.executable, "tests/apple/export_parity.py", env=env)
 
 
 def has_apple_engine_slices(*, ios: bool = True) -> bool:

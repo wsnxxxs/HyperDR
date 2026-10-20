@@ -58,61 +58,6 @@ private let catalogPhoto = PhotoSession(id: SessionID(rawValue: String(repeating
         #expect(models.defaultID == "engine-first")
         #expect(models.models.first?.document["version"] == .string("v7"))
     }
-    @Test func useModelAndStrengthAreValidatedAndStrengthReplacesManualHdrStrength() throws {
-        let resolver = OptionResolver(schema: try Engine.schema(), models: catalog(), maxEdgeCeiling: 2048)
-        for flag in [JSONValue.string("true"), .number(1), .null, .array([])] {
-            #expect(modelCode { _ = try resolver.resolveExport(EditOptions(["useModel": flag]), session: catalogPhoto) } == "invalid_options")
-        }
-        for strength in [JSONValue.number(-0.1), .number(1.1), .string("0.5"), .null] {
-            #expect(modelCode { _ = try resolver.resolveExport(EditOptions(["modelStrength": strength]), session: catalogPhoto) } == "invalid_options")
-        }
-        let request = try resolver.resolveExport(EditOptions(["useModel": .bool(true), "modelId": .string("second"),
-            "modelStrength": .number(0.65), "hdrStrength": .number(0.1)]), session: catalogPhoto)
-        #expect(request.command["model_id"] == .string("second"))
-        #expect(request.settings["gain_strength"] == .number(0.65))
-        let manual = try resolver.resolveExport(EditOptions(["useModel": .bool(false), "modelId": .number(99)]), session: catalogPhoto)
-        #expect(manual.command["model_mode"] == .bool(false))
-    }
-    @Test func modelPostAdjustmentsReachTheCLIWhileManualDevelopmentFlagsAreOmitted() throws {
-        let resolver = OptionResolver(schema: try Engine.schema(), models: catalog(), maxEdgeCeiling: 2048)
-        let options = EditOptions(["useModel": .bool(true), "modelStrength": .number(0.65),
-            "aiBrightness": .number(0.25), "aiContrast": .number(1.2), "aiShadows": .number(-0.3),
-            "aiHighlights": .number(0.4), "aiHdrRange": .number(2.8), "aiExpansionStart": .number(0.55),
-            "brightness": .number(0.6), "contrast": .number(1.08), "hdrRange": .number(4)])
-        let argv = try Engine.commandLine(resolver.resolveExport(options, session: catalogPhoto))
-        for flag in ["--ai-model", "--gain-strength", "--ai-brightness", "--ai-contrast", "--ai-shadows", "--ai-highlights", "--ai-hdr-range", "--ai-expansion-start"] {
-            #expect(argv.contains(flag))
-        }
-        for flag in ["--look", "--contrast", "--vibrance", "--pop", "--headroom-max", "--exposure-bias", "--expansion-start", "--area-coverage", "--exposure", "--headroom"] {
-            #expect(!argv.contains(flag))
-        }
-        let preview = try resolver.resolve(PreviewRequest(session: catalogPhoto.id, options: options, maxEdge: 640), session: catalogPhoto)
-        #expect(preview.command["model_id"] == .string("first"))
-        #expect(preview.settings["gain_strength"] == .number(0.65))
-        let previewArgv = try Engine.commandLine(preview)
-        for flag in ["--look", "--contrast", "--vibrance", "--pop", "--headroom-max", "--exposure-bias", "--expansion-start", "--area-coverage", "--exposure", "--headroom"] {
-            #expect(!previewArgv.contains(flag))
-        }
-        var manual = options; manual["useModel"] = .bool(false)
-        let manualArgv = try Engine.commandLine(resolver.resolveExport(manual, session: catalogPhoto))
-        #expect(!manualArgv.contains("--ai-brightness") && !manualArgv.contains("--ai-contrast"))
-        let hlg = try resolver.resolveExport(EditOptions(["encoding": .string("hlg"), "useModel": .bool(true),
-            "hdrRange": .number(4), "brightness": .number(0.6)]), session: catalogPhoto)
-        let hlgArgv = try Engine.commandLine(hlg)
-        let ceiling = try #require(hlgArgv.firstIndex(of: "--ai-hdr-range"))
-        #expect(hlgArgv[ceiling + 1] == "-1")
-    }
-    @Test func modelAndColorOptionsDistinguishPreviewIdentities() throws {
-        let resolver = OptionResolver(schema: try Engine.schema(), models: catalog(), maxEdgeCeiling: 2048)
-        let values: [[String: JSONValue]] = [[:], ["modelId": .string("second")],
-            ["colorGamut": .string("p3")], ["colorGamut": .string("p3"), "clampSrgb": .bool(true)]]
-        let keys = try values.map { values in
-            var values = values; values["useModel"] = .bool(true)
-            let request = PreviewRequest(session: catalogPhoto.id, options: EditOptions(values), maxEdge: 640)
-            return try PreviewCacheKey(session: catalogPhoto, request: resolver.resolve(request, session: catalogPhoto), buildFingerprint: "build")
-        }
-        #expect(Set(keys).count == keys.count)
-    }
     @Test func realModelGainPreservesTheEnginesEffectiveIdentityAndPacketHeader() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-k4-model-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

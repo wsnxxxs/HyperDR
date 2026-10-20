@@ -142,27 +142,6 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
         #expect(await env.sessions.exportThumbnail(photo.id, export: id) == nil)
     }
 
-    @Test func engineOutputsNeverOverwriteTheThumbnailJPEG() async throws {
-        let env = try JobEnvironment(), engine = try await Engine()
-        let thumbnail = try ExportThumbnail(image: thumbnailImage())
-        let source = env.root.appendingPathComponent("thumbnail.jpeg")
-        try thumbnail.jpegData.write(to: source)
-        let photo = try await env.sessions.open(source)
-        let runner = JobRunner(configuration: env.configuration, schema: try Engine.schema(),
-            capabilities: try await engine.capabilities(), sessions: env.sessions, engine: engine)
-        for encoding in ["sdr-jpeg", "sdr-tiff", "iso-gainmap-jpeg", "adaptive", "pq", "hlg", "avif-pq", "avif-hlg"] {
-            let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string(encoding)]), thumbnail: thumbnail)
-            for await event in runner.events(ticket.job) {
-                if case .finished(let summary) = event {
-                    #expect(summary.failure == nil)
-                    let result = try #require(summary.result)
-                    #expect(result.name != "thumbnail.jpeg")
-                    #expect(["jpg", "tif", "heic", "avif"].contains(URL(fileURLWithPath: result.name).pathExtension))
-                }
-            }
-            #expect(await env.sessions.exportThumbnail(photo.id, export: ticket.export) == thumbnail.jpegData)
-        }
-    }
 }
 
 /// The generated test photo leaves nothing behind (R6-TINY-1).

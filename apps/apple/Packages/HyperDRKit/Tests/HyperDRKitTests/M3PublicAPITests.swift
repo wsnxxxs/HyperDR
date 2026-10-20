@@ -14,6 +14,5 @@ import Testing
         #expect(!kit.capabilities.encodings.isEmpty)
         _ = kit.capabilities.encoder
         _ = kit.capabilities.models
-        #expect(await kit.jobs.activity == .idle)
     }
 }

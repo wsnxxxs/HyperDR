@@ -4,8 +4,7 @@ import PackageDescription
 let package = Package(
     name: "HyperDRKit",
     platforms: [.macOS(.v26), .iOS(.v26)],
-    products: [.library(name: "HyperDRKit", targets: ["HyperDRKit"]),
-               .executable(name: "HyperDRKitParity", targets: ["HyperDRKitParity"])],
+    products: [.library(name: "HyperDRKit", targets: ["HyperDRKit"])],
     dependencies: [.package(path: "../HyperDREngine"), .package(path: "../HyperDRRecipe"), .package(path: "../HyperDRRender")],
     targets: [
         .target(name: "HyperDRKit", dependencies: [
@@ -13,7 +12,6 @@ let package = Package(
             .product(name: "HyperDRRecipe", package: "HyperDRRecipe"),
             .product(name: "HyperDRRender", package: "HyperDRRender")
         ]),
-        .executableTarget(name: "HyperDRKitParity", dependencies: ["HyperDRKit"]),
         .testTarget(name: "HyperDRKitTests", dependencies: ["HyperDRKit"],
                     resources: [.process("Fixtures")]),
     ]

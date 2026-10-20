@@ -46,13 +46,6 @@ private let photo = PhotoSession(id: SessionID(rawValue: String(repeating: "c", 
     sourceURL: URL(fileURLWithPath: "/tmp/defaults.jpg"), displayName: "defaults.jpg",
     byteCount: 1, sha256: "defaults-digest", format: .jpeg)
 
-/// Resolves panel options the way every preview and export request is built.
-private func resolved(_ values: [String: JSONValue]) throws -> EngineRequest {
-    let resolver = OptionResolver(schema: try Engine.schema(),
-        knownModels: ["research-cnn-v1": true], maxEdgeCeiling: 2048)
-    return try resolver.resolveExport(EditOptions(values), session: photo)
-}
-
 private func bytes(_ request: EngineRequest) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
@@ -77,25 +70,6 @@ private func bytes(_ request: EngineRequest) throws -> Data {
             #expect(spec.options.contains { $0.id == spec.defaultID }, "\(spec.key) default is no option")
             #expect(EditChoices.byKey[spec.key] == spec)
         }
-    }
-
-    /// Settings the adapter fills itself have no control (batch4 §2.1).
-    @Test func adapterSuppliedSettingsAreNotControls() {
-        for key in ["highlightRecovery", "contrast", "vibrance"] {
-            #expect(EditControls.byKey[key] == nil && EditChoices.byKey[key] == nil, "\(key)")
-            #expect(EditDefaults.initial(encoding: "pq")[key] == nil)
-        }
-    }
-
-    @Test func defaultsComeFromTheTables() {
-        let initial = EditDefaults.initial(encoding: "pq")
-        for spec in EditControls.all {
-            #expect(initial[spec.key] == .number(spec.defaultValue), "\(spec.key)")
-        }
-        for spec in EditChoices.all where spec.key != "encoding" {
-            #expect(initial[spec.key] == .string(spec.defaultID), "\(spec.key)")
-        }
-        #expect(EditDefaults.controlKeys == EditControls.all.map(\.key))
     }
 
     /// D1: every mapped Kit default is the engine schema's own value.
@@ -147,102 +121,6 @@ private func bytes(_ request: EngineRequest) throws -> Data {
             for option in spec.options {
                 #expect(choices.contains(option.id), "\(spec.key).\(option.id) is not a \(key) value")
             }
-        }
-    }
-
-    /// The per-format ceiling of hdrRange / aiHdrRange: inside the engine's
-    /// headroom_max, accepted by the adapter, and the format's own limit for
-    /// HLG, where the adapter rejects anything higher.
-    @Test func everyFormatCeilingIsInsideTheEngine() throws {
-        let headroom = try #require(try engineSettings()["headroom_max"]?.maximum)
-        let staticCeiling = try #require(EditControls.byKey["hdrRange"]).range.upperBound
-        #expect(Set(EditChoices.byKey["encoding"]?.options.map(\.id) ?? []) == Set(encodings))
-        for encoding in encodings {
-            let ceiling = EditDefaults.maxRange(for: encoding)
-            #expect(ceiling > 0 && ceiling <= headroom, "\(encoding): \(ceiling) vs \(headroom)")
-            #expect(ceiling <= staticCeiling)
-            _ = try Engine.normalize(["encoding": .string(encoding), "hdrRange": .number(ceiling)])
-            _ = try Engine.normalize(["encoding": .string(encoding), "_model_mode": .bool(true),
-                                      "aiHdrRange": .number(ceiling)])
-            let initial = EditDefaults.initial(encoding: encoding)
-            let initialRange = try #require(initial["hdrRange"]?.numberValue)
-            #expect(initialRange <= ceiling, "\(encoding)")
-        }
-        for encoding in ["hlg", "avif-hlg"] {
-            let above = EditDefaults.maxRange(for: encoding) + 0.1
-            #expect(throws: (any Error).self) {
-                _ = try Engine.normalize(["encoding": .string(encoding), "hdrRange": .number(above)])
-            }
-        }
-        #expect(EditDefaults.maxRange(for: "unknown") == EditDefaults.maxRange(for: "adaptive"))
-    }
-
-    /// Writing a Kit default and leaving the key out give byte-identical
-    /// requests, for every key `EditDefaults.initial` writes, per output
-    /// format, manual and model mode, with no exceptions (D1: one set of
-    /// defaults, and no `command.*_explicit` flags). Binds the tables to the adapter.
-    @Test func writingADefaultEqualsLeavingItOut() throws {
-        for encoding in encodings {
-            for model in [false, true] {
-                var minimal: [String: JSONValue] = ["encoding": .string(encoding)]
-                if model { minimal["useModel"] = .bool(true) }
-                let omitted = try resolved(minimal)
-                let initial = EditDefaults.initial(encoding: encoding)
-                for (key, value) in initial.values where key != "encoding" {
-                    let written = try resolved(minimal.merging([key: value]) { old, _ in old })
-                    let label = "\(encoding) model=\(model) \(key)=\(value)"
-                    #expect(try bytes(written) == bytes(omitted), "\(label)")
-                }
-                // The settings left out on purpose are the adapter's values.
-                for (key, value) in ["highlightRecovery": JSONValue.string("blend"), "contrast": .number(1),
-                                     "vibrance": .number(0), "quality": .number(90)] {
-                    let written = try resolved(minimal.merging([key: value]) { old, _ in old })
-                    #expect(try bytes(written) == bytes(omitted), "\(encoding) model=\(model) \(key)")
-                }
-            }
-        }
-    }
-
-    /// Every table bound is accepted by the adapter; one step outside is
-    /// rejected wherever the engine's limit is the same.
-    @Test func adapterAcceptsTheTableBounds() throws {
-        func normalize(_ key: String, _ value: Double, model: Bool) throws {
-            var options: [String: JSONValue] = ["encoding": .string("pq"), key: .number(value)]
-            if model { options["_model_mode"] = .bool(true); options["_model_id"] = .string("research-cnn-v1") }
-            _ = try Engine.normalize(options)
-        }
-        for spec in EditControls.all where spec.key != "modelStrength" {
-            let model = aiPostFlags[spec.key] != nil
-            try normalize(spec.key, spec.range.lowerBound, model: model)
-            try normalize(spec.key, spec.range.upperBound, model: model)
-        }
-        for key in aiPostFlags.keys {
-            let spec = try #require(EditControls.byKey[key])
-            #expect(throws: (any Error).self, "\(key) below its range") {
-                try normalize(key, spec.range.lowerBound - spec.step, model: true)
-            }
-        }
-        // Numbers above the ceiling are refused; any negative number is automatic.
-        let ceiling = try #require(EditControls.byKey["hdrRange"]).range.upperBound
-        #expect(throws: (any Error).self) { try normalize("hdrRange", ceiling + 0.1, model: false) }
-        try normalize("hdrRange", -0.5, model: false)
-        for (panel, _, equal) in engineMapping where equal {
-            let spec = try #require(EditControls.byKey[panel])
-            #expect(throws: (any Error).self, "\(panel) below its range") {
-                try normalize(panel, spec.range.lowerBound - spec.step, model: false)
-            }
-            #expect(throws: (any Error).self, "\(panel) above its range") {
-                try normalize(panel, spec.range.upperBound + spec.step, model: false)
-            }
-        }
-        // modelStrength is checked by the resolver, which maps it to hdrStrength.
-        let strength = try #require(EditControls.byKey["modelStrength"])
-        for value in [strength.range.lowerBound, strength.range.upperBound] {
-            #expect(try resolved(["useModel": .bool(true), "modelStrength": .number(value)])
-                .settings["gain_strength"] == .number(value))
-        }
-        #expect(throws: (any Error).self) {
-            _ = try resolved(["useModel": .bool(true), "modelStrength": .number(strength.range.upperBound + 0.05)])
         }
     }
 

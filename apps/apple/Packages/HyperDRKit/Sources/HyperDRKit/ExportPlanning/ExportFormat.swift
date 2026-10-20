@@ -32,8 +32,6 @@ public enum ExportEncoding: String, Sendable, Hashable, Codable, CaseIterable {
 
     /// The most stops of HDR this format carries (batch4 §2.2). A destination
     /// may narrow it further; the edit itself is never changed by a format.
-    /// `EditDefaults.maxRange(for:)` answers the same question for the engine,
-    /// and a test pins the two tables together.
     public var ceilingStops: Double {
         switch self {
         case .adaptive: 3

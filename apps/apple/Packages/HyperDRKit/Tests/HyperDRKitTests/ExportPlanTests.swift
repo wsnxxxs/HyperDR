@@ -157,11 +157,6 @@ struct ExportCustomPlanTests {
         #expect(plan.baseBitDepth == (encoding.isBT2100 ? 10 : encoding == .sdrTIFF ? 16 : 8))
     }
 
-    @Test(arguments: ExportEncoding.allCases)
-    func theCeilingIsTheSameOneTheEngineIsTold(_ encoding: ExportEncoding) {
-        #expect(encoding.ceilingStops == EditDefaults.maxRange(for: encoding.rawValue))
-    }
-
     @Test func everyEncodingPicksTheWriterOfThePipelineTable() {
         let expected: [ExportEncoding: (ExportWriter, ExportWriterReason)] = [
             .adaptive: (.imageIO, .qualityAtEqualSize),

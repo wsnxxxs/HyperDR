@@ -96,9 +96,10 @@ Fake seam. It performs no Photos transaction or permission request until Photos
 Lab establishes the modes that may be enabled. Background GPU hosting and
 incremental writers are later batches.
 
-The old JobRunner/preview/EditOptions files remain for the Mac caller's pending
-switch. Recipe history uses `recipeSnapshot` and `resolvedSnapshot`; the legacy
-options field is empty for new exports and is never used to restore a Recipe.
+The Mac and iOS apps both export through this service; the old JobRunner,
+preview service, EditOptions and their CLI parity check are gone. Recipe history
+uses `recipeSnapshot` and `resolvedSnapshot`; the legacy options field is empty
+for new exports and is never used to restore a Recipe.
 
 The real RenderEngine conformance is integrated from `510e39cc`. Service tests
 exercise all eight encodings through the real Recipe graph and both readers,

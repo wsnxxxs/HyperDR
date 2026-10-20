@@ -18,17 +18,17 @@ import XCTest
     @MainActor func testEstimateIsPureMonotonicAcrossStageChangesAndOverrun() throws {
         let state=ExportState();let start=Date(timeIntervalSince1970:100)
         state.startedAt=start;state.stageAt=start;state.durations=[10,30,20,5];state.phase = .running
-        state.progress(stage:"decode",fraction:0,at:start)
+        state.progress(stage:"developing",fraction:0,at:start)
         let a=try XCTUnwrap(state.estimate(at:start+8))
         XCTAssertEqual(a.fraction,8.0/65,accuracy:0.0001)
         let savedFloor=state.fractionFloor
         XCTAssertEqual(state.estimate(at:start+8),state.estimate(at:start+8));XCTAssertEqual(savedFloor,state.fractionFloor)
-        state.progress(stage:"process",fraction:0.3,at:start+8)
+        state.progress(stage:"rendering",fraction:0.3,at:start+8)
         let b=try XCTUnwrap(state.estimate(at:start+8));XCTAssertGreaterThanOrEqual(b.fraction,a.fraction)
         let c=try XCTUnwrap(state.estimate(at:start+100));XCTAssertGreaterThan(c.fraction,b.fraction)
-        state.progress(stage:"encode",fraction:0.7,at:start+100)
+        state.progress(stage:"encoding",fraction:0.7,at:start+100)
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(state.estimate(at:start+100)).fraction,c.fraction)
-        state.progress(stage:"verify",fraction:0.9,at:start+130)
+        state.progress(stage:"verifying",fraction:0.9,at:start+130)
         let overdue=try XCTUnwrap(state.estimate(at:start+140));XCTAssertTrue(overdue.isOverdue)
         XCTAssertEqual(overdue.fraction,0.99);XCTAssertEqual(overdue.remaining,.zero)
         state.phase = .saving
@@ -43,7 +43,7 @@ import XCTest
     @MainActor func testFirstExportHasNoEstimateOrInventedInitialDurations() {
         let state=ExportState();state.phase = .running;state.startedAt=Date(timeIntervalSince1970:0)
         XCTAssertNil(state.estimate(at:Date(timeIntervalSince1970:100)))
-        state.progress(stage:"encode",fraction:0.7,at:Date(timeIntervalSince1970:100))
+        state.progress(stage:"encoding",fraction:0.7,at:Date(timeIntervalSince1970:100))
         XCTAssertNil(state.estimate(at:Date(timeIntervalSince1970:200)))
     }
     func testPreferenceValidationIsPerFieldAndResetDoesNotTouchOtherStores() {
@@ -58,43 +58,43 @@ import XCTest
 }
 
 @MainActor extension ExportETATests {
-    func testRAWDecodeBlockProgressCorrectsRemainingWithIdenticalHistoryAndElapsed() throws {
+    func testRenderedRowsCorrectRemainingWithIdenticalHistoryAndElapsed() throws {
         let start = Date(timeIntervalSince1970: 100)
         func state(_ fraction: Double) -> ExportState {
             let value = ExportState(); value.startedAt = start; value.stageAt = start
-            value.durations = [100,20,10,5]; value.phase = .running
-            value.progress(stage: "decode", fraction: 0, at: start)
-            value.progress(stage: "decode", fraction: fraction, at: start+10)
+            value.durations = [20,100,10,5]; value.phase = .running
+            value.progress(stage: "rendering", fraction: 0, at: start)
+            value.progress(stage: "rendering", fraction: fraction, at: start+10)
             return value
         }
         let low = state(0.1), high = state(0.9)
-        XCTAssertEqual(try XCTUnwrap(low.estimate(at: start+10)?.remaining).seconds, 125, accuracy: 1e-10)
-        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+10)?.remaining).seconds, 45, accuracy: 1e-10)
+        XCTAssertEqual(try XCTUnwrap(low.estimate(at: start+10)?.remaining).seconds, 105, accuracy: 1e-10)
+        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+10)?.remaining).seconds, 25, accuracy: 1e-10)
         let floor = high.fractionFloor
         XCTAssertEqual(high.estimate(at: start+15), high.estimate(at: start+15))
         XCTAssertEqual(high.fractionFloor, floor, "Reading the pure estimator cannot mutate state")
-        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+15)?.remaining).seconds, 40, accuracy: 1e-10)
+        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+15)?.remaining).seconds, 20, accuracy: 1e-10)
         high.durations = nil
         XCTAssertNil(high.estimate(at: start+15), "Real progress cannot invent an ETA for the first export")
     }
-    func testRAWProgressRejectsInvalidAndRegressingEventsAndKeepsFloor() throws {
+    func testRowProgressRejectsInvalidAndRegressingEventsAndKeepsFloor() throws {
         let state = ExportState(), start = Date(timeIntervalSince1970: 0)
-        state.startedAt = start; state.stageAt = start; state.durations = [100,20,10,5]; state.phase = .running
-        state.progress(stage: "decode", fraction: 0.9, at: start+10)
+        state.startedAt = start; state.stageAt = start; state.durations = [20,100,10,5]; state.phase = .running
+        state.progress(stage: "rendering", fraction: 0.9, at: start+10)
         let good = try XCTUnwrap(state.estimate(at: start+10))
         for fraction in [Double.nan, .infinity, -1, 0, 2, 0.1, 0.9] {
-            state.progress(stage: "decode", fraction: fraction, at: start+10)
+            state.progress(stage: "rendering", fraction: fraction, at: start+10)
             XCTAssertEqual(state.fraction, 0.9)
             XCTAssertEqual(state.estimate(at: start+10), good)
         }
-        state.progress(stage: "decode", fraction: 1, at: start+20)
-        let decoded = try XCTUnwrap(state.estimate(at: start+20))
-        state.progress(stage: "process", fraction: 0.3, at: start+20)
-        XCTAssertGreaterThanOrEqual(try XCTUnwrap(state.estimate(at: start+20)).fraction, decoded.fraction)
-        XCTAssertEqual(try XCTUnwrap(state.estimate(at: start+20)?.remaining).seconds, 35, accuracy: 1e-10,
-                       "process=.3 is a milestone, not 30% of processing")
-        state.progress(stage: "decode", fraction: 0.5, at: start+21)
-        XCTAssertEqual(state.stage, "process")
+        state.progress(stage: "rendering", fraction: 1, at: start+20)
+        let rendered = try XCTUnwrap(state.estimate(at: start+20))
+        state.progress(stage: "encoding", fraction: 0.3, at: start+20)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(state.estimate(at: start+20)).fraction, rendered.fraction)
+        XCTAssertEqual(try XCTUnwrap(state.estimate(at: start+20)?.remaining).seconds, 15, accuracy: 1e-10,
+                       "only rendering reports real progress")
+        state.progress(stage: "rendering", fraction: 0.5, at: start+21)
+        XCTAssertEqual(state.stage, "encoding")
         XCTAssertLessThanOrEqual(try XCTUnwrap(state.estimate(at: start+1000)).fraction, 0.99)
     }
 }

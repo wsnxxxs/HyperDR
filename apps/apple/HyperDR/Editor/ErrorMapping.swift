@@ -60,7 +60,13 @@ extension UserFacingError {
         case .missingModel: self.init(code: "model_not_ready")
         case .memoryExceeded(let required, let available):
             self.init(code: "export_memory_budget", detail: "required \(required) bytes, available \(available.map(String.init) ?? "unknown")")
-        case .planBlocked(let reasons): self.init(code: "export_failed", detail: "plan blocked: " + reasons.joined(separator: ", "))
+        // The plan's blocker codes, under the messages that already say them;
+        // the plan's own message keys are not in the catalogue.
+        case .planBlocked(let reasons):
+            let detail = "plan blocked: " + reasons.joined(separator: ", ")
+            if reasons.contains("export_memory_exceeded") { self.init(code: "export_memory_budget", detail: detail) }
+            else if reasons.contains("unsupported_format") { self.init(code: "unsupported_format", detail: detail) }
+            else { self.init(code: "export_failed", detail: detail) }
         case .verificationFailed(let detail): self.init(code: "export_failed", detail: "verification failed: " + detail)
         case .invalidStripes: self.init(code: "export_failed", detail: "invalid stripes")
         }

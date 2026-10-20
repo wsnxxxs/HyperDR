@@ -15,10 +15,10 @@ final class LocalizationCoverageTests: XCTestCase {
     private static let captureFields = ["iso", "exposure_seconds", "f_number", "exposure_bias_ev",
                                         "focal_length_mm", "focal_length_35mm"]
 
-    /// The phases an export reports (`export.stage.<name>`; "processColor"
-    /// is the colour-only wording of "process") and the reasons a format is
+    /// The stages an export reports (`export.stage.<name>`: Kit's
+    /// `RecipeExportStage`, delivering being the saving phase) and the reasons a format is
     /// unavailable (`export.unavailable.short|full.<name>`).
-    private static let exportStages = ["preparing", "decode", "process", "processColor", "encode", "verify"]
+    private static let exportStages = ["preparing", "developing", "model", "rendering", "encoding", "verifying", "publishing"]
     private static let unavailableReasons = ["hevc", "main10", "probe", "generic"]
 
     /// A key's text by language, as the app bundle ships it.

@@ -129,18 +129,22 @@ enum ExportPresentation {
         var remaining: Remaining
     }
 
-    static func statusParts(phase: ExportState.Phase, stage: String?, workflow: Workflow,
+    /// The stage is Kit's (`RecipeExportStage`); publishing is the finishing
+    /// phase and delivering the saving one.
+    static func statusParts(phase: ExportState.Phase, stage: String?,
                             estimate: ExportEstimate?) -> StatusParts {
         let stageKey: String
         switch phase {
         case .saving: stageKey = "export.save.saving"
+        case .finishing: stageKey = "export.stage.publishing"
         case .idle, .preparing: stageKey = "export.stage.preparing"
         default:
             switch stage {
-            case "decode": stageKey = "export.stage.decode"
-            case "process": stageKey = workflow == .colorOnly ? "export.stage.processColor" : "export.stage.process"
-            case "encode", "finalize": stageKey = "export.stage.encode"
-            case "verify": stageKey = "export.stage.verify"
+            case "developing": stageKey = "export.stage.developing"
+            case "model": stageKey = "export.stage.model"
+            case "rendering": stageKey = "export.stage.rendering"
+            case "encoding": stageKey = "export.stage.encoding"
+            case "verifying": stageKey = "export.stage.verifying"
             default: stageKey = "export.stage.preparing"
             }
         }

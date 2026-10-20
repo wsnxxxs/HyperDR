@@ -272,6 +272,12 @@ import HyperDRRender
 }
 
 @MainActor extension ExportModelTests {
+    /// A plan Kit refuses reads as the message its blocker already has.
+    func testPlanBlockersMapToTheirOwnMessages() {
+        XCTAssertEqual(UserFacingError.service(RecipeExportError.planBlocked(["export_memory_exceeded"])).code, "export_memory_budget")
+        XCTAssertEqual(UserFacingError.service(RecipeExportError.planBlocked(["unsupported_format"])).code, "unsupported_format")
+        XCTAssertEqual(UserFacingError.service(RecipeExportError.planBlocked(["other"])).code, "export_failed")
+    }
     func testFrameExportCarriesSnapshotAndSelectsFrameMemoryVariant() async {
         let (m,s)=await ready()
         var frame=m.frame;frame.isEnabled=true;frame.showsCamera=false;frame.showsExposure=false;frame.showsDate=false
@@ -416,19 +422,19 @@ extension ExportModelTests {
 }
 
 @MainActor extension ExportModelTests {
-    func testRAWDecodeEventsReachTheETAWithRealBlockFractions() async throws {
+    func testRenderedRowEventsReachTheETAWithRealFractions() async throws {
         let s = FakeEditorServices(openDelay: .zero)
         let start = Date(timeIntervalSince1970: 100)
         let m = EditorModel(services: s, now: { start })
         m.open([URL(fileURLWithPath: "/tmp/source.ARW")])
         await eventually(timeout: .seconds(3)) { m.document?.phase == .ready }
         m.timingHistory = [.init(kind: .init(isRAW: true, encoding: "adaptive", isAI: false, hasFrame: false, verifies: true),
-            pixels: 24e6, stages: [100,20,10,5])]
+            pixels: 24e6, stages: [5,100,10,5])]
         await running(m,s)
-        s.sendExport(.progress(stage: "decode", fraction: 0.1, at: start+10))
+        s.sendExport(.progress(stage: "rendering", fraction: 0.1, at: start+10))
         await eventually(timeout: .seconds(3)) { m.export.fraction == 0.1 }
         let low = try XCTUnwrap(m.export.estimate(at: start+10))
-        s.sendExport(.progress(stage: "decode", fraction: 0.9, at: start+10))
+        s.sendExport(.progress(stage: "rendering", fraction: 0.9, at: start+10))
         await eventually(timeout: .seconds(3)) { m.export.fraction == 0.9 }
         let high = try XCTUnwrap(m.export.estimate(at: start+10))
         XCTAssertLessThan(try XCTUnwrap(high.remaining), try XCTUnwrap(low.remaining))

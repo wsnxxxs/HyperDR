@@ -18,6 +18,7 @@ public struct RecipeExportReport: Sendable, Codable {
 /// One operation at a time. Dedicated RenderEngine caches can be discarded
 /// without disturbing the editor. The caller's Task owns cancellation.
 public actor RecipeExportService: RecipeExportServicing {
+    /// Custom provider: receives the Recipe selection and returns its full model identity.
     public typealias Prediction = @Sendable (RenderSource, String) async throws -> ModelGainPrediction
     private let engine: Engine
     private let renderEngine: RenderEngine
@@ -25,7 +26,8 @@ public actor RecipeExportService: RecipeExportServicing {
     private let sessions: SessionStore
     private let target: ExportTarget
     private let budget: any ExportMemoryBudget
-    private let prediction: Prediction
+    private let prediction: Prediction?
+    private var defaultModelProvider: CoreMLModelGainProvider?
     private var busy = false
 
     public init(engine: Engine, renderEngine: RenderEngine, renderer: any ExportStripeRendering,
@@ -33,11 +35,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 budget: any ExportMemoryBudget = SystemExportMemoryBudget(), prediction: Prediction? = nil) {
         self.engine = engine; self.renderEngine = renderEngine; self.renderer = renderer
         self.sessions = sessions; self.target = target; self.budget = budget
-        self.prediction = prediction ?? { source, modelID in
-            let provider = try CoreMLModelGainProvider(device: await renderEngine.device)
-            guard provider.modelID == modelID else { throw RecipeExportError.missingModel }
-            return try await renderEngine.predictModelGain(source, provider: provider)
-        }
+        self.prediction = prediction
     }
 
     public func export(session: SessionID, snapshot: RecipeExportSnapshot,
@@ -123,9 +121,30 @@ public actor RecipeExportService: RecipeExportServicing {
             var model: ModelGainPrediction?
             if adjustments.hdr.enabled && [.ai, .capturedAI].contains(snapshot.recipe.hdrSource) {
                 emit(.model)
-                guard let modelID = snapshot.modelID else { throw RecipeExportError.missingModel }
-                model = try await prediction(source, modelID)
-                guard model?.sourceID == source.id, model?.modelID == modelID else { throw RecipeExportError.missingModel }
+                guard let selection = snapshot.modelSelection else { throw RecipeExportError.missingModel }
+                let identity: String
+                if let prediction {
+                    let predicted = try await prediction(source, selection)
+                    model = predicted
+                    identity = predicted.modelID
+                } else {
+                    guard selection == ModelGain.modelName else { throw RecipeExportError.missingModel }
+                    let provider: CoreMLModelGainProvider
+                    if let cached = defaultModelProvider { provider = cached }
+                    else {
+                        provider = try CoreMLModelGainProvider(device: await renderEngine.device)
+                        defaultModelProvider = provider
+                    }
+                    identity = provider.modelID
+                    if let expected = snapshot.expectedModelIdentity, expected != identity {
+                        throw RecipeExportError.missingModel
+                    }
+                    model = try await renderEngine.predictModelGain(source, provider: provider)
+                }
+                guard !identity.isEmpty, model?.sourceID == source.id, model?.modelID == identity,
+                      snapshot.expectedModelIdentity == nil || snapshot.expectedModelIdentity == identity else {
+                    throw RecipeExportError.missingModel
+                }
             }
             try Task.checkCancellation()
             // UI readouts can precede prediction and are only estimates. Resolve
@@ -243,7 +262,7 @@ public actor RecipeExportService: RecipeExportServicing {
             // Render reports that change separately from a boundary resplit.
             var conversionReasons = report.resplitReasons
             if report.ceilingApplied { conversionReasons.insert(.outputCeiling) }
-            let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan,
+            let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan, modelIdentity: model?.modelID,
                 resolvedAutomatic: report.resolvedAutomatic, resplitReasons: conversionReasons.map(\.rawValue),
                 report: report)
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)

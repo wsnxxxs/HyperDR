@@ -82,7 +82,7 @@ private struct RecipeExportEnvironment {
               target: target, budget: FixedExportMemoryBudget(bytes: 1_000_000_000), prediction: prediction)
     }
     func snapshot(recipe: Recipe = Recipe(), frame: FrameSnapshot? = nil, modelID: String? = nil) throws -> RecipeExportSnapshot {
-        .init(recipe: recipe, source: try .init(session: session), modelID: modelID, frame: frame)
+        .init(recipe: recipe, source: try .init(session: session), expectedModelIdentity: modelID, frame: frame)
     }
     func request(_ encoding: ExportEncoding) -> ExportPlanRequest {
         .init(choice: .custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
@@ -371,6 +371,38 @@ private struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).count == 1)
     }
 
+    @Test func defaultProviderResolvesSelectionAndChecksHistoricalIdentity() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        var recipe = Recipe(); recipe.setHDRSource(.ai)
+        let snapshot = try env.snapshot(recipe: recipe)
+        #expect(snapshot.modelSelection == "research-cnn-v1")
+        #expect(snapshot.expectedModelIdentity == nil)
+        let service = env.realService()
+        let result = try await service.export(session: env.session.id, snapshot: snapshot, request: env.request(.isoGainMapJPEG))
+        let identity = try #require(result.resolved.modelIdentity)
+        #expect(identity.hasPrefix("research-cnn-v1/"))
+        #expect(identity.contains("/features-v1/analysis-1024"))
+        #expect(result.record.resolvedSnapshot?.modelIdentity == identity)
+        let decoded = try JSONDecoder().decode(ResolvedExportSnapshot.self, from: JSONEncoder().encode(result.resolved))
+        #expect(decoded.modelIdentity == identity)
+        let plan = ExportPlanner.plan(env.request(.isoGainMapJPEG), budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        let a = ResolvedExportSnapshot(snapshot: snapshot, plan: plan, modelIdentity: identity)
+        let b = ResolvedExportSnapshot(snapshot: snapshot, plan: plan, modelIdentity: identity + "/different-version")
+        #expect(try a.exportKey() != b.exportKey())
+        _ = try await service.export(session: env.session.id,
+            snapshot: env.snapshot(recipe: recipe, modelID: identity), request: env.request(.isoGainMapJPEG))
+        await #expect(throws: RecipeExportError.missingModel) {
+            _ = try await service.export(session: env.session.id,
+                snapshot: env.snapshot(recipe: recipe, modelID: identity + "/wrong-version"), request: env.request(.isoGainMapJPEG))
+        }
+        recipe.setValue(.string("unknown-model"), for: "hdr.model")
+        await #expect(throws: RecipeExportError.missingModel) {
+            _ = try await service.export(session: env.session.id,
+                snapshot: env.snapshot(recipe: recipe), request: env.request(.isoGainMapJPEG))
+        }
+        #expect(await env.sessions.exports(for: env.session.id).count == 2)
+    }
+
     @Test func realAutoAIRangeIsResolvedAfterPrediction() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         var recipe = Recipe(); recipe.setHDRSource(.ai)
@@ -386,7 +418,8 @@ private struct RecipeExportEnvironment {
             values.withUnsafeBytes { texture.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0,
                                                      withBytes: $0.baseAddress!, bytesPerRow: 8 * 4) }
             ready.withLock { $0 = true }
-            return .init(sourceID: source.id, modelID: model, gain: texture)
+            #expect(model == "research-cnn-v1")
+            return .init(sourceID: source.id, modelID: "test-v1", gain: texture)
         })
         // Both pre-inference readouts used to override the frozen auto Recipe.
         for placeholder in [0.0, 0.5] {
@@ -428,7 +461,8 @@ private struct RecipeExportEnvironment {
             let device = try #require(MTLCreateSystemDefaultDevice())
             let texture = try #require(device.makeTexture(descriptor: descriptor))
             ready.withLock { $0 = true }
-            return .init(sourceID: source.id, modelID: model, gain: texture)
+            #expect(model == "research-cnn-v1")
+            return .init(sourceID: source.id, modelID: "test-v1", gain: texture)
         })
         _ = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.sdrJPEG))
         let failing = env.service(prediction: { _, _ in throw RecipeExportError.missingModel })

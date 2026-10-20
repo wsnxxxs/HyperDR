@@ -8,9 +8,20 @@ with `RecipeExportError.busy`.
 
 Construct the service with `Engine`, a dedicated `RenderEngine`, an
 `ExportStripeRendering` (the real Render implementation or a Fake), `SessionStore`
-and `ExportTarget`. An optional prediction closure can reuse a CoreML provider;
-the default checks the frozen model identity and uses Render's RAW/SDR prediction
-entry. The service never converts a Recipe to EditOptions or calls convert.
+and `ExportTarget`. An optional prediction closure receives the Recipe model
+selection and returns a prediction carrying its full provider identity. The
+default resolves `research-cnn-v1` through its CoreML provider and uses Render's
+RAW/SDR prediction entry. The service never converts a Recipe to EditOptions or
+calls convert.
+
+`RecipeExportSnapshot.modelSelection` reads the frozen Recipe's `hdr.model`;
+callers need no loaded provider. The initializer's former `modelID` argument is
+replaced by optional `expectedModelIdentity`, for an exact version requirement
+when re-rendering history. Read that identity from
+`ResolvedExportSnapshot.modelIdentity`, which also feeds ExportKey. The service
+checks source and full identity on the prediction; an expected identity mismatch
+fails with `missingModel`. Snapshot version 2 rejects re-rendering older snapshots
+whose model name/identity semantics were ambiguous.
 
 Capture `RecipeSourceRevision(session:)` when the source is opened. Reuse it at
 export, rather than capturing a new revision after editing. Input source and
@@ -69,12 +80,14 @@ exercise all eight encodings through the real Recipe graph and both readers,
 including a caption/shadow card through gain-map, SDR and PQ paths; a transparent
 PNG against linear-black compositing; and an authored RGB/nonzero-offset pair
 through preservation, writer resplit, a narrower destination and frame neutrality.
-Kit records the planner's output-ceiling constraint even when Render folds it
+Kit records Render's explicit output-ceiling report even when Render folds it
 into the edited authored pair before its capability scan needs a further resplit.
 
 `python3.12 scripts/test.py ios` checks the package artifact for macOS arm64,
-iOS arm64 and iOS simulator arm64 archives/headers. Missing or incomplete slices
-trigger `build_xcframework.sh --platforms all` before either app build.
+iOS arm64 and iOS simulator arm64 archives/headers, plus the adjacent
+`engine-source.sha256` content fingerprint. Missing, incomplete or stale slices
+trigger `build_xcframework.sh --platforms all` before either app build. The Mac
+suite uses the same freshness check for its macOS slice.
 Source SHA-256 already runs off the caller in a detached task, with chunk-level
 cancellation; `SessionStore.open` waits for it to establish content identity and
 history/session reuse. A host may start that task alongside photo decoding and

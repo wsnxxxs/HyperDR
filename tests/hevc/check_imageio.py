@@ -41,8 +41,10 @@ def check_tile_order(probe, width, height, path):
 
     ImageIO resolves the grid's ordered dimg list and the gain map's auxl link
     to the primary image. The fixtures give each tile its own level: the base
-    rises and the gain falls in raster order, so a swapped dimg order, a gain
-    grid linked to the wrong image or a mis-cropped tile changes the sequence.
+    rises and the gain falls in raster order, so a swapped dimg order or a gain
+    grid linked to the wrong image changes the sequence. Each tile is flat and
+    only its centre is sampled: this checks the cropped size and the tile
+    order, not crop offsets or edge pixels inside a tile.
     """
     result = json.loads(invoke(probe, "--tile-order", width, height, path))
     count = result["columns"] * result["rows"]

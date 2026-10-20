@@ -21,6 +21,7 @@
     hyperdr_frame_free;
     hyperdr_model_gain;
     hyperdr_convert;
+    hyperdr_package;
     hyperdr_cancel_create;
     hyperdr_cancel_request;
     hyperdr_cancel_destroy;

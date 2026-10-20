@@ -116,6 +116,9 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage&, const PhotoMetadata
 }
 void verify_sdr_tiff(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR TIFF verification"); }
 
+void verify_encoded_output(const std::vector<std::uint8_t>&, HdrEncoding) {
+  fail_without_codecs("output verification");
+}
 void verify_heic_decodable(const std::vector<std::uint8_t>&) {
   fail_without_codecs("HEIC decode verification");
 }

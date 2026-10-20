@@ -5,7 +5,8 @@
 # the two configurations share one call graph and differ only in these leaves.
 set(HYPERDR_CODEC_SOURCES
   src/descriptors.cpp
-  src/unavailable.cpp)
+  src/unavailable.cpp
+  src/verify.cpp)
 
 if(HYPERDR_WITH_CODECS)
   enable_language(OBJCXX)

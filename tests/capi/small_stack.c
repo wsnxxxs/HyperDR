@@ -49,6 +49,7 @@ enum Operation {
   OP_CONVERT_ADAPTIVE,
   OP_PROBE_ISO, OP_PREVIEW_ISO, OP_CONVERT_ISO,
   OP_PROBE_XMP, OP_PREVIEW_XMP, OP_CONVERT_XMP,
+  OP_PACKAGE,
   OP_COUNT
 };
 
@@ -57,7 +58,8 @@ static const char* const kOperationNames[OP_COUNT] = {
     "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)",
     "convert(HEIC, Adaptive HEIC + write-time verification)",
     "probe(ISO JPEG)","preview(ISO JPEG)","convert(ISO JPEG)",
-    "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)"};
+    "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)",
+    "package(gain-map JPEG from synthetic planes)"};
 
 typedef struct {
   int status;
@@ -238,6 +240,69 @@ static int exported_file(const char* directory, char* path, size_t capacity) {
 
 extern int e4_inspect_jpeg(const char* path, char** output);
 
+/* The packaging entry point takes planes rather than a photograph, so the only
+ * input it needs is synthetic: a small gradient base and a one-channel gain
+ * plane. Its output bytes are compared between the small and main threads like
+ * every other operation here. */
+#define PACKAGE_WIDTH 32
+#define PACKAGE_HEIGHT 24
+static float package_base[PACKAGE_WIDTH * PACKAGE_HEIGHT * 3];
+static float package_gain[PACKAGE_WIDTH * PACKAGE_HEIGHT];
+
+static int run_package(hyperdr_engine* engine, const char* root, Result* result) {
+  for (int y = 0; y < PACKAGE_HEIGHT; ++y) {
+    for (int x = 0; x < PACKAGE_WIDTH; ++x) {
+      const size_t pixel = (size_t)y * PACKAGE_WIDTH + (size_t)x;
+      const float u = (float)x / (PACKAGE_WIDTH - 1);
+      const float v = (float)y / (PACKAGE_HEIGHT - 1);
+      package_base[pixel * 3 + 0] = 0.10f + 0.70f * u;
+      package_base[pixel * 3 + 1] = 0.10f + 0.60f * v;
+      package_base[pixel * 3 + 2] = 0.10f + 0.50f * (1.0f - u);
+      package_gain[pixel] = 1.5f * u * v;
+    }
+  }
+  hyperdr_package_plane base = {0}, gain = {0};
+  base.data = package_base;
+  base.row_bytes = (size_t)PACKAGE_WIDTH * 3 * sizeof(float);
+  base.width = PACKAGE_WIDTH;
+  base.height = PACKAGE_HEIGHT;
+  base.channels = 3;
+  base.format = HYPERDR_PLANE_F32;
+  gain.data = package_gain;
+  gain.row_bytes = (size_t)PACKAGE_WIDTH * sizeof(float);
+  gain.width = PACKAGE_WIDTH;
+  gain.height = PACKAGE_HEIGHT;
+  gain.channels = 1;
+  gain.format = HYPERDR_PLANE_F32;
+  hyperdr_package_gain gain_map = {0};
+  gain_map.plane = gain;
+  gain_map.alternate_headroom = 1.5f;
+  char path[PATH_MAX];
+  const int length = snprintf(path, sizeof(path), "%s/package.jpg", root);
+  if (length <= 0 || (size_t)length >= sizeof(path)) return 1;
+  hyperdr_package_request request = {0};
+  request.output_path = path;
+  request.format = "iso-gainmap-jpeg";
+  request.parameters_json = "{\"overwrite\":true}";
+  request.sdr = &base;
+  request.gain = &gain_map;
+  char* report = NULL;
+  hyperdr_error* error = NULL;
+  const int status = hyperdr_package(engine, &request, &report, &error);
+  if (status != 0 || !report) {
+    report_error("package", error);
+    hyperdr_string_free(report);
+    hyperdr_error_free(error);
+    return 1;
+  }
+  hyperdr_string_free(report);
+  hyperdr_error_free(error);
+  result->status = status;
+  const int failure = read_file(path, result);
+  remove(path);
+  return failure;
+}
+
 static int run_convert(hyperdr_engine* engine, const char* arw, const char* output,
                        const char* encoding, int jpeg,
                        Result* result) {
@@ -331,6 +396,8 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
       if(length<=0 || (size_t)length>=sizeof(output))return 1;
       return run_convert(engine,source,output,"iso-gainmap-jpeg",1,result);
     }
+    case OP_PACKAGE:
+      return run_package(engine, root, result);
     case OP_COUNT:
       break;
   }

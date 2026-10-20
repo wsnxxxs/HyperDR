@@ -202,20 +202,6 @@ extension EDRCanvasUIView: UIGestureRecognizerDelegate {
     }
 }
 
-extension DisplayPair {
-    /// Render's display pair (R3) as the shared compositor takes it. A pair
-    /// covering its whole output is the preview; one with a smaller region is a
-    /// detail layer at that place.
-    init(_ pair: DisplayGainPair) {
-        let whole = CGRect(x: 0, y: 0, width: pair.outputSize.width, height: pair.outputSize.height)
-        self.init(base: pair.base, gain: pair.gain, coding: .log2,
-                  baseOffset: pair.baseOffset, alternateOffset: pair.alternateOffset,
-                  toGain: pair.p3ToGain, toP3: pair.gainToP3,
-                  baseHeadroom: Double(pair.baseHeadroom), alternateHeadroom: Double(pair.alternateHeadroom),
-                  region: pair.region == whole ? nil : pair.region)
-    }
-}
-
 /// SwiftUI wrapper of `EDRCanvasUIView`.
 struct EDRCanvas: UIViewRepresentable {
     var content: EDRCanvasUIView.Content?

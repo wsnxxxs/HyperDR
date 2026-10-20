@@ -33,7 +33,9 @@ public struct RecipeSourceRevision: Sendable, Codable, Equatable {
         self.sha256 = sha256; self.byteCount = byteCount; self.modificationTimeMilliseconds = Int64((modificationDate.timeIntervalSince1970 * 1000).rounded())
     }
     public init(session: PhotoSession) throws {
-        let values = try session.sourceURL.resourceValues(forKeys: [.contentModificationDateKey])
+        var url = session.sourceURL
+        url.removeAllCachedResourceValues()
+        let values = try url.resourceValues(forKeys: [.contentModificationDateKey])
         self.init(sha256: session.sha256, byteCount: session.byteCount,
                   modificationDate: values.contentModificationDate ?? .distantPast)
     }

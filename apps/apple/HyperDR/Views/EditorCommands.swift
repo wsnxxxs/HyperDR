@@ -34,6 +34,7 @@ struct EditorCommands: Commands {
             Button { ControlsGalleryWindow.shared.show() } label: { Text(verbatim: "Inspector Controls") }
             Button { M2ComponentsGalleryWindow.shared.show() } label: { Text(verbatim: "Inspector, Scope and Canvas Components") }
             Button { M3ComponentsGalleryWindow.shared.show() } label: { Text(verbatim: "Export, History and LUT Components") }
+            Button { AdjustmentsGalleryWindow.shared.show() } label: { Text(verbatim: "Generated Adjustment Controls") }
         }
         #endif
     }

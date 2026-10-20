@@ -54,10 +54,10 @@ public struct ParameterMaskLink {
 /// at once. A drag that ends where it began still brackets; the model
 /// records no step for an unchanged value.
 public struct ParameterSlider: View {
-    private let title: LocalizedStringKey
+    private let title: Text
     @Binding private var value: Double
     private let spec: ParameterSpec
-    private let help: LocalizedStringKey?
+    private let help: Text?
     private let mask: ParameterMaskLink?
     private let onReset: (() -> Void)?
     private let readoutHelp: Text?
@@ -68,6 +68,15 @@ public struct ParameterSlider: View {
 
     public init(_ title: LocalizedStringKey, value: Binding<Double>, spec: ParameterSpec,
                 help: LocalizedStringKey? = nil, mask: ParameterMaskLink? = nil, readoutHelp: Text? = nil,
+                onEditingChanged: @escaping (Bool) -> Void = { _ in }, onReset: (() -> Void)? = nil) {
+        self.init(Text(title), value: value, spec: spec, help: help.map { Text($0) }, mask: mask,
+                  readoutHelp: readoutHelp, onEditingChanged: onEditingChanged, onReset: onReset)
+    }
+
+    /// A row whose title and help are already `Text`s: from this package's
+    /// catalogue, as the generated adjustment controls are.
+    public init(_ title: Text, value: Binding<Double>, spec: ParameterSpec,
+                help: Text? = nil, mask: ParameterMaskLink? = nil, readoutHelp: Text? = nil,
                 onEditingChanged: @escaping (Bool) -> Void = { _ in }, onReset: (() -> Void)? = nil) {
         self.title = title
         _value = value
@@ -118,18 +127,18 @@ public struct ParameterSlider: View {
 /// The 12 pt title of a field (CSS `.field-title b`); the help text, if any,
 /// is its tooltip. A control with a mask carries a small mark after it.
 struct FieldTitle: View {
-    let title: LocalizedStringKey
-    let help: LocalizedStringKey?
+    let title: Text
+    let help: Text?
     var mask: ParameterMaskLink?
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         HStack(spacing: 5) {
-            let text = Text(title)
+            let text = title
                 .font(.hdr.caption)
                 .foregroundStyle(isEnabled ? Color.hdr.ink : Color.hdr.inkDisabled)
                 .lineLimit(1)
-            if let help { text.help(Text(help)) } else { text }
+            if let help { text.help(help) } else { text }
             if let mask {
                 Image(systemName: "square.dashed")
                     .font(.system(size: 10))
@@ -172,7 +181,7 @@ private struct AutoButton: View {
 /// tabular digits (`Font.hdr.readout`), right-aligned. In the Auto state it
 /// says "Auto" and, once focused, is empty with "Auto" as its placeholder.
 private struct ParameterReadout: View {
-    let title: LocalizedStringKey
+    let title: Text
     @Binding var value: Double
     let spec: ParameterSpec
     let help: Text?
@@ -242,7 +251,7 @@ private struct ParameterReadout: View {
                 return .handled
             }
             // labelsHidden() drops the label from accessibility too.
-            .accessibilityLabel(Text(title))
+            .accessibilityLabel(title)
             .accessibilityHint(Text("design.slider.valueHint", bundle: .module))
     }
 
@@ -251,9 +260,9 @@ private struct ParameterReadout: View {
                            set: { new in if new != draft { draft = new; typed = true } })
         if spec.automatic != nil {
             TextField(text: text, selection: $selection,
-                      prompt: Text("design.slider.auto", bundle: .module).foregroundStyle(Color.hdr.inkDisabled)) { Text(title) }
+                      prompt: Text("design.slider.auto", bundle: .module).foregroundStyle(Color.hdr.inkDisabled)) { title }
         } else {
-            TextField(text: text, selection: $selection) { Text(title) }
+            TextField(text: text, selection: $selection) { title }
         }
     }
 
@@ -299,12 +308,12 @@ private struct OptionalHelp: ViewModifier {
 /// the origin, a 13 pt thumb with a halo on hover and while dragging. In the
 /// Auto state it is a dashed line with neither fill nor thumb.
 private struct ParameterTrack: View {
-    let title: LocalizedStringKey
+    let title: Text
     @Binding var value: Double
     let spec: ParameterSpec
     /// What the parameter does: the title's tooltip for the pointer, and the
     /// slider's hint for VoiceOver (J-08).
-    let help: LocalizedStringKey?
+    let help: Text?
     let onReset: (() -> Void)?
     let onEditingChanged: (Bool) -> Void
 
@@ -399,9 +408,9 @@ private struct ParameterTrack: View {
             // From Auto a step lands on the resume value, as a key press does.
             Slider(value: Binding(get: { spec.isAutomatic(value) ? spec.range.lowerBound : value },
                                   set: { new in set(spec.isAutomatic(value) ? spec.resumeValue : spec.snapped(new)) }),
-                   in: spec.range, step: spec.step) { Text(title) }
+                   in: spec.range, step: spec.step) { title }
                 .accessibilityValue(Text(verbatim: spec.formatted(value, locale: locale)))
-                .modifier(OptionalHint(text: help.map { Text($0) }))
+                .modifier(OptionalHint(text: help))
                 .accessibilityAction(named: Text("design.slider.reset", bundle: .module)) { reset() }
                 .accessibilityActions {
                     if let automatic = spec.automatic {

@@ -23,6 +23,7 @@ struct PhotoCanvasScreen: View {
     @State private var loading = false
     @State private var failed = false
     @State private var headroom = HeadroomSnapshot()
+    @State private var showingAdjustments = false
 
     var body: some View {
         NavigationStack {
@@ -51,6 +52,9 @@ struct PhotoCanvasScreen: View {
             if case .success(let url) = result { request = Request(source: .file(url)) }
         }
         .task(id: request?.id) { await load(request?.source) }
+        #if DEBUG
+        .fullScreenCover(isPresented: $showingAdjustments) { AdjustmentsDebugScreen() }
+        #endif
     }
 
     private var emptyState: some View {
@@ -69,6 +73,11 @@ struct PhotoCanvasScreen: View {
             Button("ios.file.open") { importingFile = true }
                 .buttonStyle(.borderless)
                 .tint(.white)
+            #if DEBUG
+            Button { showingAdjustments = true } label: { Text(verbatim: "Adjustment controls (debug)") }
+                .buttonStyle(.borderless)
+                .tint(.white.opacity(0.6))
+            #endif
         }
         .padding(Space.s6)
     }
@@ -82,6 +91,11 @@ struct PhotoCanvasScreen: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }
+                #if DEBUG
+                Button { showingAdjustments = true } label: {
+                    Label { Text(verbatim: "Adjustment controls (debug)") } icon: { Image(systemName: "slider.horizontal.3") }
+                }
+                #endif
             } label: {
                 Label("ios.toolbar.more", systemImage: "ellipsis")
             }

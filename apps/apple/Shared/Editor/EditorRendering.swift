@@ -132,6 +132,10 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     var automaticValues: [String: Double] = [:]
 
     var size: HyperDRRender.PixelSize { request.size }
+
+    /// Whether this rendered frame carries extended range, independent of
+    /// the current recipe controls and the screen's available HDR headroom.
+    var hasHDRContent: Bool { max(display.baseHeadroom, display.alternateHeadroom) > 0 }
 }
 
 /// Where a parameter acts, for the frame rendered from `request`.

@@ -177,20 +177,6 @@ actor RenderSession: EditorRendering {
                            automaticValues: automatic)
     }
 
-    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        try await mapped { try await renderMask(request, parameterID: parameterID) }
-    }
-
-    private func renderMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        let prepared = try await prepare(request)
-        let mask = try await engine.effectMask(prepared.source, recipe: request.recipe, parameterID: parameterID,
-                                               lut: prepared.lut, modelGain: prepared.modelGain, options: prepared.options,
-                                               size: request.size, region: request.region)
-        try Task.checkCancellation()
-        try checkCurrent(prepared.generation)
-        return mask
-    }
-
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
         try await engine.sdrThumbnail(frame.planes, maximumSize: maximumSize)
     }

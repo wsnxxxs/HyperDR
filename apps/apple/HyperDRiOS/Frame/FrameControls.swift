@@ -23,8 +23,9 @@ struct FrameDock: View {
         let stack = axis == .horizontal ? AnyLayout(VStackLayout(spacing: large ? Space.s4 : Space.s3))
             : AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s3))
         stack {
-            FrameStyleNote(settings: settings, misfits: misfits)
-                .frame(maxWidth: .infinity, minHeight: 32)
+            if settings.isEnabled && misfits {
+                FrameMisfitNote().frame(maxWidth: .infinity)
+            }
             ScrollView(axis == .horizontal ? .horizontal : .vertical, showsIndicators: false) {
                 let tiles = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s3))
                     : AnyLayout(VStackLayout(spacing: Space.s2))
@@ -105,7 +106,7 @@ struct FramePanel: View {
             } header: {
                 Text("ios.frame.style")
             } footer: {
-                FrameStyleNote(settings: settings, misfits: misfits, alignment: .leading)
+                if settings.isEnabled && misfits { FrameMisfitNote(alignment: .leading) }
             }
             Section {
                 FrameTones(settings: $settings)
@@ -170,28 +171,17 @@ struct FrameCaptionSections: View {
     }
 }
 
-/// What the chosen style is, or why it is not drawn.
-struct FrameStyleNote: View {
-    let settings: FrameSettings
-    let misfits: Bool
+/// Why the chosen style is not drawn: the engine refuses it for this photo.
+struct FrameMisfitNote: View {
     var alignment: TextAlignment = .center
 
     var body: some View {
-        Group {
-            if !settings.isEnabled {
-                Text("ios.frame.none.note")
-            } else if misfits {
-                Label("ios.frame.misfit", systemImage: "exclamationmark.triangle").foregroundStyle(Color.hdr.warn)
-            } else {
-                Text(settings.style.note)
-            }
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(alignment)
-        .lineLimit(2)
-        .fixedSize(horizontal: false, vertical: true)
-        .contentTransition(.opacity)
+        Label("ios.frame.misfit", systemImage: "exclamationmark.triangle")
+            .foregroundStyle(Color.hdr.warn)
+            .font(.footnote)
+            .multilineTextAlignment(alignment)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -304,16 +294,6 @@ extension FrameStyle {
         case .story: "ios.frame.style.story"
         case .instant: "ios.frame.style.instant"
         case .hairline: "ios.frame.style.hairline"
-        }
-    }
-
-    var note: LocalizedStringKey {
-        switch self {
-        case .gallery: "ios.frame.style.gallery.note"
-        case .label: "ios.frame.style.label.note"
-        case .story: "ios.frame.style.story.note"
-        case .instant: "ios.frame.style.instant.note"
-        case .hairline: "ios.frame.style.hairline.note"
         }
     }
 }

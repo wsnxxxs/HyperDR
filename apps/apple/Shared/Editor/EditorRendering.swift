@@ -26,11 +26,6 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
-    /// Where the parameter `parameterID` acts (R6, `declaration.mask`), for the
-    /// request's recipe, size and region: R32Float in 0…1, top-down, drawn
-    /// over the canvas while the parameter is dragged.
-    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask
-
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
 
@@ -108,7 +103,7 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     var isInteractive = false
 
     /// Whether the two render the same picture of the same photo, whatever
-    /// their size, region or pacing: a detail or a mask belongs to a frame
+    /// their size, region or pacing: a detail belongs to a frame
     /// only while this holds.
     func rendersSame(as other: EditorRenderRequest) -> Bool {
         sourceID == other.sourceID && recipe == other.recipe && bypassedGroups == other.bypassedGroups
@@ -136,13 +131,6 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     /// Whether this rendered frame carries extended range, independent of
     /// the current recipe controls and the screen's available HDR headroom.
     var hasHDRContent: Bool { max(display.baseHeadroom, display.alternateHeadroom) > 0 }
-}
-
-/// Where a parameter acts, for the frame rendered from `request`.
-nonisolated struct EditorMask: @unchecked Sendable {
-    let parameterID: String
-    let request: EditorRenderRequest
-    let mask: RenderMask
 }
 
 extension Recipe {

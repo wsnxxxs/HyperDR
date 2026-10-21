@@ -8,7 +8,7 @@ import UIKit
 /// Display P3 drawn by the shared `DisplayCompositor`, pinch to zoom, drag to
 /// pan, double tap to switch between fit and actual pixels, and a press of
 /// 240 ms to see the original (p7-adjustments §5.4). The photo can be shown
-/// edited, original or split, with detail tiles and an effect mask over it
+/// edited, original or split, with detail tiles
 /// (step 6); every change of geometry is reported through `onTransform`, for
 /// the overlays and the editor's viewport. Headroom is read from
 /// the window's `UIScreen` on every display tick; when it moves only the
@@ -32,7 +32,6 @@ final class EDRCanvasUIView: UIView {
         /// `.original` and `.compare` need `original`; without it the edit shows.
         var mode: DisplayComposition.Mode = .edited
         var splitRatio = 0.5
-        var mask: DisplayMask?
         var previewsAsSDR = false
         /// The photo's full oriented size, for actual pixels and detail regions.
         var imageSize: CGSize
@@ -140,7 +139,6 @@ final class EDRCanvasUIView: UIView {
         if let content, let compositor {
             var composition = DisplayComposition(edited: content.edited, headroom: Double(max(1, headroom.current)))
             composition.editedDetail = content.editedDetail
-            composition.effectMask = content.mask
             composition.previewsAsSDR = content.previewsAsSDR
             composition.splitRatio = content.splitRatio
             if let original = content.original {
@@ -269,9 +267,8 @@ struct EDRCanvas: UIViewRepresentable {
         func same(_ x: DisplayPair?, _ y: DisplayPair?) -> Bool {
             x.flatMap { left in y.map { left.hasSameContent(as: $0) } } ?? (x == nil && y == nil)
         }
-        let masks = a.mask.flatMap { left in b.mask.map { left.hasSameContent(as: $0) } } ?? (a.mask == nil && b.mask == nil)
         return a.edited.hasSameContent(as: b.edited) && same(a.original, b.original)
-            && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail) && masks
+            && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail)
             && a.mode == b.mode && a.splitRatio == b.splitRatio && a.previewsAsSDR == b.previewsAsSDR
             && a.imageSize == b.imageSize
     }

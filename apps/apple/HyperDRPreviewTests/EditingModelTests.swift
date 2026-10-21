@@ -150,23 +150,6 @@ import XCTest
         model.closeDocument()
     }
 
-    /// The mask follows the control being dragged and goes with the drag.
-    func testTheMaskFollowsTheDrag() async {
-        let model = await opened()
-        let strength = Adjustments.declaration("hdr.strength")!
-        let changes = Mutex(0)
-        withObservationTracking { _ = model.maskKey } onChange: { changes.withLock { $0 += 1 } }
-        model.editor.editingChanged(strength, true)
-        await eventually { model.maskKey == "hdr.strength" }
-        XCTAssertEqual(changes.withLock { $0 }, 1)
-        model.editor.editingChanged(strength, false)
-        await eventually { model.maskKey == nil }
-        model.editor.editingChanged(exposure, true)
-        await settle()
-        XCTAssertNil(model.maskKey, "a control without a mask shows none")
-        model.editor.editingChanged(exposure, false)
-        model.closeDocument()
-    }
 }
 
 @MainActor private final class TextUndoDelegate: NSObject, NSTextViewDelegate {

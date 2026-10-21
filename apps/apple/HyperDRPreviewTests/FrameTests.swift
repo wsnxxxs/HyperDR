@@ -329,10 +329,6 @@ import UniformTypeIdentifiers
         XCTAssertNil(FrameStyle.instant.bodySize(variant: "wide"))
     }
 
-    func testInstantHasItsOwnNoteForPanoramas() {
-        XCTAssertNotNil(FrameStyle.instant.variantNote("wide"))
-    }
-
     /// No line of the instant card's text leaves the band in a wide card,
     /// whichever text is on, and the two columns do not meet.
     func testInstantWideCaptionLinesStayInsideTheBand() throws {
@@ -598,7 +594,6 @@ import UniformTypeIdentifiers
         XCTAssertEqual(plan.layout.variant, "wide")
         XCTAssertGreaterThan(plan.layout.width, plan.layout.height)
         XCTAssertNotNil(plan.overlayPNG)
-        XCTAssertNotNil(FrameStyle.story.variantNote("wide"))
         // A canvas past the engine's size limit is still refused.
         XCTAssertThrowsError(try FrameExportPlan.make(settings: story, facts: sony,
                                                       photoSize: PixelSize(width: 60000, height: 1000)))

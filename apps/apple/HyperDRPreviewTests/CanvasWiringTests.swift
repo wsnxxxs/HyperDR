@@ -21,19 +21,18 @@ import HyperDRDesign
         XCTAssertFalse(shows(edited: false))
     }
 
-    func testLegendNamesTheMaskAndShowsZebrasOnlyWithoutTheInspector() {
-        func rows(mask: String? = nil, hot: Bool = false, cold: Bool = false, inspector: Bool = true,
+    func testLegendShowsZebrasOnlyWithoutTheInspector() {
+        func rows(hot: Bool = false, cold: Bool = false, inspector: Bool = true,
                   mode: ViewMode = .edited, peeking: Bool = false) -> Int {
-            CanvasAdornments.legendRows(maskName: mask.map { Text($0) }, highlightZebra: hot, shadowZebra: cold,
+            CanvasAdornments.legendRows(highlightZebra: hot, shadowZebra: cold,
                                         showsInspector: inspector, viewMode: mode, isPeeking: peeking).count
         }
-        XCTAssertEqual(rows(mask: "Strength"), 1)
+        XCTAssertEqual(rows(), 0)
         XCTAssertEqual(rows(hot: true, cold: true), 0, "the inspector's own switches are the legend")
         XCTAssertEqual(rows(hot: true, cold: true, inspector: false), 2)
-        XCTAssertEqual(rows(mask: "Strength", hot: true, inspector: false), 2)
-        XCTAssertEqual(rows(mask: "Strength", mode: .original), 0)
-        XCTAssertEqual(rows(mask: "Strength", peeking: true), 0)
-        XCTAssertEqual(rows(mask: "Strength", mode: .compare), 1)
+        XCTAssertEqual(rows(hot: true, inspector: false, mode: .original), 0)
+        XCTAssertEqual(rows(hot: true, inspector: false, peeking: true), 0)
+        XCTAssertEqual(rows(hot: true, inspector: false, mode: .compare), 1)
     }
 
     // MARK: Hints

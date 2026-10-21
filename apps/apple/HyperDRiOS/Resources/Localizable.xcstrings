@@ -811,13 +811,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Back to your photo library"
+            "value" : "Into your photo library, as a new photo"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "存回照片图库"
+            "value" : "存入照片图库，作为一张新照片"
           }
         }
       }
@@ -1375,6 +1375,42 @@
         }
       }
     },
+    "ios.export.photosDenied" : {
+      "comment" : "HyperDR may not add photos to the library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR can’t add photos. Allow it in Settings › Privacy & Security › Photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 没有添加照片的权限。请在“设置 › 隐私与安全性 › 照片”中允许。"
+          }
+        }
+      }
+    },
+    "ios.export.photosFailed" : {
+      "comment" : "The photo library did not take the export.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo couldn’t be added to Photos. Save it to Files or share it instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能存入相册。可以改为存储到文件或分享。"
+          }
+        }
+      }
+    },
     "ios.export.qualityLabel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1445,6 +1481,24 @@
         }
       }
     },
+    "ios.export.saveToPhotos" : {
+      "comment" : "Adds the export to the photo library as a new photo.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save to Photos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储到相册"
+          }
+        }
+      }
+    },
     "ios.export.saved" : {
       "comment" : "The export was saved with the Files sheet.",
       "extractionState" : "manual",
@@ -1459,6 +1513,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已存储到文件"
+          }
+        }
+      }
+    },
+    "ios.export.savedToPhotos" : {
+      "comment" : "The export was added to the photo library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved to Photos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存储到相册"
+          }
+        }
+      }
+    },
+    "ios.export.savingToPhotos" : {
+      "comment" : "The export is being added to the photo library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在存储…"
           }
         }
       }
@@ -1726,23 +1816,6 @@
         }
       }
     },
-    "ios.frame.none.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No frame. Choose a style to present the photo on paper."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不加边框。选一种样式，把照片放在相纸上展示。"
-          }
-        }
-      }
-    },
     "ios.frame.output" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1862,23 +1935,6 @@
         }
       }
     },
-    "ios.frame.style.gallery.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Even mats with the exposure and gear centred below. Suits most photographs."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "均匀留白，参数与器材居中。适合大多数作品。"
-          }
-        }
-      }
-    },
     "ios.frame.style.hairline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1892,23 +1948,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "细边"
-          }
-        }
-      }
-    },
-    "ios.frame.style.hairline.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A 2% line and nothing else. The quietest frame."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "2% 细边，不放文字。最克制的一种。"
           }
         }
       }
@@ -1930,23 +1969,6 @@
         }
       }
     },
-    "ios.frame.style.instant.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Narrow sides and a deep base: signature on the left, exposure on the right."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "窄边厚底：署名在左，参数在右。"
-          }
-        }
-      }
-    },
     "ios.frame.style.label" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1964,23 +1986,6 @@
         }
       }
     },
-    "ios.frame.style.label.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wide mats and a label aligned to the print, like a gallery wall."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "宽边与左对齐展签，像美术馆墙上的说明牌。"
-          }
-        }
-      }
-    },
     "ios.frame.style.story" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1994,23 +1999,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "竖幅"
-          }
-        }
-      }
-    },
-    "ios.frame.style.story.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A fixed 9:16 canvas with the photograph high, for phones and sharing."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "固定 9:16 画布，照片偏上，适合手机分享与壁纸。"
           }
         }
       }

@@ -41,8 +41,6 @@ actor FakeEditorRendering: EditorRendering {
     /// Predictions held, as Render keys them: source, model and development.
     private var made: Set<String> = []
     private var loadedDevelopment: String?
-    /// The parameter of every mask asked for.
-    private(set) var masks: [String] = []
     private(set) var installedLUTs: Set<String> = []
 
     private var current: EditorSource?
@@ -130,13 +128,6 @@ actor FakeEditorRendering: EditorRendering {
         let wantsModel = request.recipe.hdrSource.usesModel && request.recipe.conditionValue("hdr.enabled")?.boolValue != false
         return EditorFrame(request: request, planes: planes, display: display,
                            modelGainPending: wantsModel && !(request.usesModelGain && made.contains(Self.family(request))))
-    }
-
-    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        masks.append(parameterID)
-        guard let current, current.id == request.sourceID else { throw EditorRenderingError.staleSource }
-        let planes = try makePlanes(size: request.size, region: request.region)
-        return RenderMask(texture: planes.gain, region: planes.region, outputSize: request.size)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {

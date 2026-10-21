@@ -809,11 +809,15 @@ struct ExportPlanGapTests {
 
 @Suite("Typed export facts")
 struct TypedExportFactsTests {
-    @Test func photosIsBlockedUntilASaveModeIsVerified() {
+    @Test func photosAddsANewPhotoUntilReplacementIsVerified() {
         let value = plan(ExportPlanRequest(choice: .destination(.photos), source: source(), edit: .init(peakStops: 2)))
-        #expect(value.blockers.contains(.photosNotAvailable(.notVerified)))
-        #expect(value.library?.selected == nil)
-        #expect(value.library?.options.allSatisfy { $0.unavailableReason == .notVerified } == true)
+        #expect(value.blockers.isEmpty)
+        #expect(value.library?.selected == .newPhoto)
+        #expect(value.library?.replace?.unavailableReason == .notVerified)
+        let unverified = plan(ExportPlanRequest(choice: .destination(.photos), source: source(), edit: .init(peakStops: 2),
+                                                library: ExportLibraryFacts(verifiedModes: [])))
+        #expect(unverified.blockers.contains(.photosNotAvailable(.notVerified)))
+        #expect(unverified.library?.selected == nil)
     }
     @Test func transparencyAndCeilingsAreFacts() {
         let value = plan(ExportPlanRequest(choice: .destination(.web),

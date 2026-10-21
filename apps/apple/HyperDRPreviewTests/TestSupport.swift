@@ -254,9 +254,6 @@ nonisolated final class ScriptedRendering: EditorRendering, @unchecked Sendable 
         guard let image = await handler(frame, maximumSize) else { throw ScriptedFailure() }
         return image
     }
-    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        try await fake.effectMask(request, parameterID: parameterID)
-    }
     func predictModelGain(_ request: EditorRenderRequest) async throws { try await fake.predictModelGain(request) }
     func installLUT(_ lut: ColorLUT) async { await fake.installLUT(lut) }
     func close() async { await fake.close() }

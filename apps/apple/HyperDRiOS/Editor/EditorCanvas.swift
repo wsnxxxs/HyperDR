@@ -6,8 +6,8 @@ import SwiftUI
 /// How the canvas shows the photo (p7-adjustments §5.4).
 enum Comparison: Hashable, CaseIterable { case edited, original, split }
 
-/// The live EDR canvas with what goes over it: the split divider, the mask
-/// legend, the status capsules, and at the photo's top right the badge the
+/// The live EDR canvas with what goes over it: the split divider, the
+/// status capsules, and at the photo's top right the badge the
 /// Mac canvas carries (HDR on the edited photo, Original on the original). With `framed` the
 /// photo sits on its frame: the mat and caption are SDR views around the
 /// canvas, so on an HDR display they stay at reference white while the photo
@@ -146,12 +146,11 @@ struct EditorCanvas: View {
                                        editedDetail: editor.shownDetail.map { DisplayPair($0.display) },
                                        originalDetail: originalDetail.map { DisplayPair($0.display) },
                                        mode: mode, splitRatio: splitRatio,
-                                       mask: editor.shownMask.map { DisplayMask($0.mask) },
                                        previewsAsSDR: editor.previewsAsSDR,
                                        imageSize: CGSize(width: size.width, height: size.height))
     }
 
-    /// The split divider and the mask legend, in the canvas's coordinates.
+    /// The split divider and the badge, in the canvas's coordinates.
     @ViewBuilder private var adornments: some View {
         if let transform, transform.imageFrame.width > 0 {
             let image = transform.imageFrame
@@ -173,15 +172,6 @@ struct EditorCanvas: View {
                         .position(x: visible.midX, y: visible.midY)
                         .allowsHitTesting(false)
                         .transition(.opacity)
-                }
-                if let mask = editor.shownMask, mode != .original, !visible.isNull,
-                   let declaration = Adjustments.declaration(mask.parameterID) {
-                    CanvasLegend(rows: [.mask(controlName: AdjustmentText.label(declaration))])
-                        .padding(Space.s3)
-                        .frame(width: visible.width, height: visible.height,
-                               alignment: mode == .compare ? .bottomTrailing : .bottomLeading)
-                        .position(x: visible.midX, y: visible.midY)
-                        .allowsHitTesting(false)
                 }
             }
             .animation(.smooth(duration: 0.2), value: mode)

@@ -1547,23 +1547,6 @@
         }
       }
     },
-    "frame.style.gallery.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Even mats with the exposure and gear centred below. Suits most photographs."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "均匀留白，参数与器材居中。适合大多数作品。"
-          }
-        }
-      }
-    },
     "frame.style.hairline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1577,23 +1560,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "细边"
-          }
-        }
-      }
-    },
-    "frame.style.hairline.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A 2% line and nothing else. The quietest frame."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "2% 细边，不放文字。最克制的一种。"
           }
         }
       }
@@ -1615,23 +1581,6 @@
         }
       }
     },
-    "frame.style.instant.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Narrow sides and a deep base: signature on the left, exposure on the right."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "窄边厚底：署名在左，参数在右。"
-          }
-        }
-      }
-    },
     "frame.style.label" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1649,23 +1598,6 @@
         }
       }
     },
-    "frame.style.label.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wide mats and a label aligned to the print, like a gallery wall."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "宽边与左对齐展签，像美术馆墙上的说明牌。"
-          }
-        }
-      }
-    },
     "frame.style.story" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1679,23 +1611,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "竖幅"
-          }
-        }
-      }
-    },
-    "frame.style.story.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A fixed 9:16 canvas with the photograph high, for phones and sharing."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "固定 9:16 画布，照片偏上，适合手机分享与壁纸。"
           }
         }
       }
@@ -3328,57 +3243,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此样式不适用于这张照片，因此不显示边框。请换一种样式。"
-          }
-        }
-      }
-    },
-    "frame.style.variant.wide" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Panoramas use a landscape card."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全景照片使用横向卡片。"
-          }
-        }
-      }
-    },
-    "frame.style.instant.variant.wide" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "On panoramas the margins and text follow the width, so they stay readable."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全景照片的留白与文字按宽度排，保持可读。"
-          }
-        }
-      }
-    },
-    "frame.style.variant.tall" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Very tall photos get no side margins."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "长图不加左右留白。"
           }
         }
       }
@@ -9401,6 +9265,96 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "长边（px）"
+          }
+        }
+      }
+    },
+    "export.action.saveToPhotos" : {
+      "comment" : "Adds the finished export to the photo library as a new photo.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save to Photos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储到相册"
+          }
+        }
+      }
+    },
+    "export.action.savingToPhotos" : {
+      "comment" : "The export is being added to the photo library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在存储…"
+          }
+        }
+      }
+    },
+    "export.action.savedToPhotos" : {
+      "comment" : "The export was added to the photo library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved to Photos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存储到相册"
+          }
+        }
+      }
+    },
+    "export.photos.denied" : {
+      "comment" : "HyperDR may not add photos to the library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR can’t add photos. Allow it in System Settings › Privacy & Security › Photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 没有添加照片的权限。请在“系统设置 › 隐私与安全性 › 照片”中允许。"
+          }
+        }
+      }
+    },
+    "export.photos.failed" : {
+      "comment" : "The photo library did not take the export.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo couldn’t be added to Photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能存入相册。"
           }
         }
       }

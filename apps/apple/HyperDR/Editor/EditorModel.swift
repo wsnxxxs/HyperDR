@@ -208,11 +208,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored var renderOutstanding = false
     /// The last render failure already reported.
     @ObservationIgnored private var reportedFailure: String?
-    /// The editor's detail layers and effect mask the canvas last drew.
+    /// The editor's detail layers the canvas last drew.
     @ObservationIgnored private var shownLayers: [ObjectIdentifier?] = []
-    /// The control whose effect mask the canvas tints, while it is dragged.
-    private(set) var maskKey: String?
-    func setMaskKey(_ value: String?) { if value != maskKey { maskKey = value; bumpFrameRevision() } }
     var showsHighlightZebra = false { didSet { if showsHighlightZebra != oldValue { bumpFrameRevision() } } }
     var showsShadowZebra = false { didSet { if showsShadowZebra != oldValue { bumpFrameRevision() } } }
     var previewsAsSDR = false { didSet { if previewsAsSDR != oldValue { bumpFrameRevision() } } }
@@ -660,8 +657,7 @@ import UniformTypeIdentifiers
                 // Everything the model mirrors; `editorChanged` reads the values again.
                 (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure,
                  editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
-                 editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request,
-                 editor.effectMask?.request)
+                 editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request)
             }) {
                 guard let self, !Task.isCancelled else { return }
                 editorChanged()
@@ -673,7 +669,6 @@ import UniformTypeIdentifiers
     /// follows a frame. Frames of a photo still opening are left alone.
     func editorChanged() {
         guard let source = editor.source, source.id == committedSource, photo != nil else { return }
-        setMaskKey(editor.shownMask?.parameterID)
         let recipe = editor.recipe
         if recipe != mirroredRecipe {
             mirroredRecipe = recipe
@@ -681,8 +676,8 @@ import UniformTypeIdentifiers
             pendingExportToken = nil
             refreshExportMetadata()
         }
-        let layers = [editor.shownDetail?.display.base, editor.shownOriginalDetail?.display.base,
-                      editor.shownMask?.mask.texture].map { $0.map { ObjectIdentifier($0) } }
+        let layers = [editor.shownDetail?.display.base, editor.shownOriginalDetail?.display.base]
+            .map { $0.map { ObjectIdentifier($0) } }
         if layers != shownLayers {
             shownLayers = layers
             frameRevision &+= 1

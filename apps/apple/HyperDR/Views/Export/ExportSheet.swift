@@ -465,6 +465,8 @@ private struct ExportResultView: View {
 
     @Environment(\.locale) private var locale
     @Environment(\.openSettings) private var openSettings
+    /// Adding the shown version to Photos, by version.
+    @State private var photos: (version: String, state: PhotosSave)?
 
     var body: some View {
         let stale = model.export.isResultStale
@@ -482,24 +484,71 @@ private struct ExportResultView: View {
                                                                                thumbnail: model.export.thumbnail,
                                                                                name: result.saved?.fileName ?? result.fileName)))
                     ExportTransferNotice(model: model)
+                    if case .failed(let key) = photosState(result.export) {
+                        Text(LocalizedStringKey(key)).font(.hdr.caption).foregroundStyle(Color.hdr.warn)
+                    }
                 }
             }
             .padding(Space.s5)
             Divider()
-            HStack {
+            // Every button at the same height and at least one width, Photos
+            // apart on the leading side.
+            HStack(spacing: Space.s2) {
+                if let version = model.export.result?.export { photosButton(version) }
                 Spacer()
                 if stale {
-                    Button("export.action.close", action: close).buttonStyle(.hdrSecondary).keyboardShortcut(.cancelAction)
-                    Button("export.action.exportNew", action: begin).buttonStyle(.hdrPrimary).keyboardShortcut(.defaultAction)
+                    Button(action: close) { barLabel("export.action.close") }
+                        .buttonStyle(.hdrSecondary).keyboardShortcut(.cancelAction)
+                    Button(action: begin) { barLabel("export.action.exportNew") }
+                        .buttonStyle(.hdrPrimary).keyboardShortcut(.defaultAction)
                 } else {
-                    Button("export.action.again", action: again).buttonStyle(.hdrSecondary)
-                    Button("export.action.done", action: close).buttonStyle(.hdrPrimary)
+                    Button(action: again) { barLabel("export.action.again") }.buttonStyle(.hdrSecondary)
+                    Button(action: close) { barLabel("export.action.done") }.buttonStyle(.hdrPrimary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(.horizontal, Space.s5)
             .padding(.vertical, Space.s3)
         }
+    }
+
+    private static let barButtonWidth: CGFloat = 96
+
+    private func barLabel(_ key: LocalizedStringKey) -> some View {
+        Text(key).lineLimit(1).frame(minWidth: Self.barButtonWidth)
+    }
+
+    private func photosState(_ version: String) -> PhotosSave {
+        photos?.version == version ? photos!.state : .idle
+    }
+
+    private func photosButton(_ version: String) -> some View {
+        let state = photosState(version)
+        return Button {
+            photos = (version, .saving)
+            Task {
+                let outcome = await model.addToPhotos(version)
+                if photos?.version == version { photos = (version, outcome) }
+            }
+        } label: {
+            HStack(spacing: Space.s1) {
+                switch state {
+                case .saving:
+                    ProgressView().controlSize(.small)
+                    Text("export.action.savingToPhotos")
+                case .saved:
+                    Image(systemName: "checkmark")
+                    Text("export.action.savedToPhotos")
+                case .idle, .failed:
+                    Image(systemName: "photo.badge.plus")
+                    Text("export.action.saveToPhotos")
+                }
+            }
+            .lineLimit(1)
+            .frame(minWidth: Self.barButtonWidth)
+        }
+        .buttonStyle(.hdrSecondary)
+        .disabled(state == .saving || state == .saved || model.transferItem(for: version) == nil)
     }
 
     private func facts(_ result: ExportResult) -> [ExportFact] {

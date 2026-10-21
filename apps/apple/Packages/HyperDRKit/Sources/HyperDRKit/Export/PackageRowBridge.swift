@@ -14,19 +14,38 @@ final class PackageRowBridge: @unchecked Sendable {
     private(set) var callbackSeconds: Double = 0
     private var progressEnd = 0
     private var progressPass = 1
+    /// The writer's sequential passes for this encoding; nil when unknown.
+    private var passes: Int?
+    private let encoding: ExportEncoding?
+    private var gainIsZero = true
     private var nextThumbnailRow = 0
     private var sums: [SIMD3<Double>]
     private var counts: [Int]
 
-    init(source: any ExportRowSource, frame: FrameSnapshot?,
+    init(source: any ExportRowSource, frame: FrameSnapshot?, encoding: ExportEncoding? = nil,
          progress: @escaping @Sendable (RecipeExportProgress) -> Void = { _ in }) {
-        self.progress = progress
+        self.progress = progress; self.encoding = encoding
+        // `package_image_rows`: gain encodings scan the gain for its extrema
+        // first; gain maps then write the base and the gain as two pictures,
+        // PQ/HLG reconstruct both in one; SDR writes the base once.
+        passes = encoding.map { encoding in
+            switch encoding {
+            case .adaptive, .isoGainMapJPEG: 3
+            case .pq, .hlg: 2
+            case .sdrJPEG, .sdrTIFF, .avifPq, .avifHlg: 1
+            }
+        }
         self.source = source; self.frame = frame
         width = source.report.canvasSize.width; height = source.report.canvasSize.height
         let scale = min(1, 256 / Double(max(width, height)))
         thumbnailWidth = max(1, Int(Double(width) * scale)); thumbnailHeight = max(1, Int(Double(height) * scale))
         sums = .init(repeating: .zero, count: thumbnailWidth * thumbnailHeight)
         counts = .init(repeating: 0, count: sums.count)
+    }
+
+    /// Where encoding starts, before the writer's first row.
+    var started: RecipeExportProgress {
+        .init(stage: .encoding, completedRows: 0, totalRows: height, includesRendering: true, rowPass: 1, rowPasses: passes)
     }
 
     func read(y: Int, count: Int, base: UnsafeMutableBufferPointer<Float>,
@@ -80,8 +99,13 @@ final class PackageRowBridge: @unchecked Sendable {
         if y == 0 && progressEnd == height { progressPass += 1; progressEnd = 0 }
         if y <= progressEnd && y + count > progressEnd {
             progressEnd = y + count
+            if progressPass == 1 && gainIsZero { gainIsZero = stripe.gain.allSatisfy { $0 == 0 } }
+            // An all-zero gain map is written without reading the rows again.
+            if progressPass == 1 && progressEnd == height && gainIsZero && encoding?.writesGainMap == true {
+                passes = passes.map { $0 - 1 }
+            }
             progress(.init(stage: .encoding, completedRows: progressEnd, totalRows: height,
-                           includesRendering: true, rowPass: progressPass))
+                           includesRendering: true, rowPass: progressPass, rowPasses: passes))
         }
     }
 

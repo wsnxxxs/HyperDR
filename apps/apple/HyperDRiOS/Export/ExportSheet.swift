@@ -408,11 +408,11 @@ struct ExportSheet: View {
 
     // MARK: - Running, result, failure
 
+    /// One ring for the whole export (every pass of the writer, then checking
+    /// and saving the file), filled once, over Kit's words for the stage.
     private func running(_ progress: RecipeExportProgress?) -> some View {
-        let fraction: Double? = progress.flatMap { progress in
-            guard let done = progress.completedRows, let total = progress.totalRows, total > 0 else { return nil }
-            return Double(done) / Double(total)
-        }
+        let fraction = model.fraction
+        let progress = progress ?? RecipeExportProgress(stage: .preparing)
         return VStack(spacing: Space.s5) {
             Spacer(minLength: 0)
             ZStack {
@@ -432,7 +432,7 @@ struct ExportSheet: View {
             }
             .frame(width: 96, height: 96)
             VStack(spacing: Space.s2) {
-                Text(verbatim: (progress ?? RecipeExportProgress(stage: .preparing)).stageMessage.localized(locale: locale))
+                Text(verbatim: progress.stageMessage.localized(locale: locale))
                     .font(.headline)
                     .contentTransition(.opacity)
                 Text("ios.export.stayInApp")

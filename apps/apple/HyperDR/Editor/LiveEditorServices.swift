@@ -285,17 +285,19 @@ extension LiveEditorServices {
     }
 
     /// Kit's stages as the progress view shows them, in Kit's words (the row
-    /// path's encoding says it renders too); rendering carries the rows done.
+    /// path's encoding says it renders too); rendering carries the rows done,
+    /// and every stage Kit's measure of the whole export.
     /// Preparing is the panel's own phase.
     nonisolated private static func event(_ progress: RecipeExportProgress) -> EditorExportEvent? {
         switch progress.stage {
         case .preparing: nil
         case .model, .developing, .encoding, .verifying:
-            .progress(stage: progress.stage.rawValue, fraction: 0, at: Date(), message: progress.stageMessage)
+            .progress(stage: progress.stage.rawValue, fraction: 0, at: Date(), message: progress.stageMessage,
+                      overall: progress.fraction)
         case .rendering:
             .progress(stage: progress.stage.rawValue, fraction: progress.totalRows.map { total in
                 total > 0 ? Double(progress.completedRows ?? 0) / Double(total) : 0 } ?? 0, at: Date(),
-                message: progress.stageMessage)
+                message: progress.stageMessage, overall: progress.fraction)
         case .publishing: .finishing
         case .delivering: .saving
         }

@@ -192,8 +192,12 @@ extension ExportPresentation {
     /// "Encoding · 0:21 elapsed · about 10 s left": the stage, the time since
     /// the export began and the estimate, in `locale`.
     static func statusLine(_ parts: StatusParts, elapsed: Double, locale: Locale) -> String {
-        var pieces = [parts.stage.text(locale: locale)]
-        pieces.append(AppStrings.format("export.elapsed %@", locale: locale, elapsedText(elapsed)))
+        [parts.stage.text(locale: locale), timeLine(parts, elapsed: elapsed, locale: locale)].joined(separator: " · ")
+    }
+
+    /// "<elapsed> · <estimate>", the status line without its stage.
+    static func timeLine(_ parts: StatusParts, elapsed: Double, locale: Locale) -> String {
+        var pieces = [AppStrings.format("export.elapsed %@", locale: locale, elapsedText(elapsed))]
         if let remaining = remainingText(parts.remaining, locale: locale) { pieces.append(remaining) }
         return pieces.joined(separator: " · ")
     }

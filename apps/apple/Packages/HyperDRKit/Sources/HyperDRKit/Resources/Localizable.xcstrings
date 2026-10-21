@@ -97,34 +97,18 @@
         }
       }
     },
-    "export.stage.verifying": {
+    "export.stage.finishing": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verifying"
+            "value": "Finishing up"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "校验中"
-          }
-        }
-      }
-    },
-    "export.stage.publishing": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saving export"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "保存导出"
+            "value": "正在收尾"
           }
         }
       }

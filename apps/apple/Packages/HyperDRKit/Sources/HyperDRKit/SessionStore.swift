@@ -89,6 +89,15 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     }
 }
 
+/// One retained version in the app-wide history (`SessionStore.exportHistory`).
+public struct ExportHistoryEntry: Sendable, Equatable, Identifiable {
+    public let session: SessionID
+    /// The photo's file name as last opened.
+    public let photoName: String
+    public let record: ExportRecord
+    public var id: ExportID { record.id }
+}
+
 public enum SessionResource: String, Sendable, Codable {
     case luts
 }
@@ -1044,6 +1053,36 @@ public actor SessionStore {
             let id = SessionID(rawValue: directory.lastPathComponent)
             return id.isValid ? loadExportRecords(id) : []
         }.sorted { $0.createdAt == $1.createdAt ? $0.id.rawValue > $1.id.rawValue : $0.createdAt > $1.createdAt }.prefix(exportHistoryLimit).map { $0 }
+    }
+
+    /// Every retained version with the photo it was written from, newest first:
+    /// the set `trimExportHistory` keeps, for an app-wide history. A version
+    /// still being written is left out.
+    public func exportHistory() -> [ExportHistoryEntry] {
+        guard let root = try? sessionsRoot(), let directories = try? fileManager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+        var entries: [ExportHistoryEntry] = []
+        for directory in directories {
+            let id = SessionID(rawValue: directory.lastPathComponent)
+            guard id.isValid else { continue }
+            let photoName = (try? loadStored(id))?.displayName ?? ""
+            for record in loadExportRecords(id) where exporting[id]?.contains(record.id) != true {
+                entries.append(ExportHistoryEntry(session: id, photoName: photoName, record: record))
+            }
+        }
+        return entries.sorted {
+            if $0.record.createdAt != $1.record.createdAt { return $0.record.createdAt > $1.record.createdAt }
+            return $0.record.id.rawValue > $1.record.id.rawValue
+        }.prefix(exportHistoryLimit).map { $0 }
+    }
+
+    /// Removes one retained version and its file. A version still being
+    /// written is not touched.
+    public func removeExportVersion(_ id: SessionID, export: ExportID) throws {
+        guard exporting[id]?.contains(export) != true else {
+            throw HyperDRError(code: "export_busy", message: "The version is still being written")
+        }
+        try removeExportDirectory(id, export: export)
     }
 
     public func markSaved(_ id: SessionID, export: ExportID, saved: SavedMark) throws {

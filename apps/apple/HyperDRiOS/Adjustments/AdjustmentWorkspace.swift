@@ -40,7 +40,7 @@ struct EditorDock<Frame: View>: View {
     @ViewBuilder let frame: () -> Frame
 
     var body: some View {
-        let groups = panel.groups(for: recipe)
+        let groups = DockGroup.tabs(panel.groups(for: recipe))
         let tabs = EditorTabs(groups: groups, pane: $pane, frameOn: frameOn, axis: axis, large: large,
                               onBypass: onBypass)
         if axis == .horizontal {
@@ -64,15 +64,15 @@ struct EditorDock<Frame: View>: View {
         }
     }
 
-    @ViewBuilder private func content(_ groups: [AdjustmentGroupState]) -> some View {
+    @ViewBuilder private func content(_ groups: [DockGroup]) -> some View {
         switch pane {
         case .frame:
             frame()
         case .group(let group):
-            if let state = groups.first(where: { $0.group == group }) ?? groups.first {
-                AdjustmentControls(recipe: $recipe, panel: panel, state: state, axis: axis, large: large,
+            if let tab = groups.first(where: { $0.contains(group) }) ?? groups.first {
+                AdjustmentControls(recipe: $recipe, panel: panel, group: tab, axis: axis, large: large,
                                    onEditingChanged: onEditingChanged, onReset: onReset, onLUTLibrary: onLUTLibrary)
-                    .id(state.group)
+                    .id(tab.id)
             }
         }
     }

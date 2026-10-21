@@ -379,6 +379,96 @@
         }
       }
     },
+    "ios.adjust.hdrOff" : {
+      "comment" : "Dock: beside the HDR switch while HDR is off.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR off · exports write SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 已关闭 · 导出 SDR 版本"
+          }
+        }
+      }
+    },
+    "ios.adjust.lightColor" : {
+      "comment" : "Dock tab: the light and colour groups together.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light & Color"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "光线与颜色"
+          }
+        }
+      }
+    },
+    "ios.adjust.more" : {
+      "comment" : "Dock: the button at the end of the ring row with a group's other settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
+    },
+    "ios.adjust.off" : {
+      "comment" : "Accessibility value of a switch in the dock.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关"
+          }
+        }
+      }
+    },
+    "ios.adjust.on" : {
+      "comment" : "Accessibility value of a switch in the dock.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开"
+          }
+        }
+      }
+    },
     "ios.adjust.resetAll.confirm" : {
       "comment" : "Confirmation before Reset All in the More menu.",
       "extractionState" : "manual",
@@ -393,24 +483,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重置所有调整？"
-          }
-        }
-      }
-    },
-    "ios.adjust.settings" : {
-      "comment" : "Button at the start of the adjustment bar's control row: the group's switches and choices.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Options"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选项"
           }
         }
       }
@@ -840,6 +912,24 @@
         }
       }
     },
+    "ios.export.encoding" : {
+      "comment" : "Export settings row: how the chosen format writes HDR.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encoding"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编码"
+          }
+        }
+      }
+    },
     "ios.export.error.busy" : {
       "comment" : "Export failure.",
       "extractionState" : "manual",
@@ -966,6 +1056,78 @@
         }
       }
     },
+    "ios.export.family.avif" : {
+      "comment" : "Export strip: under the AVIF tile, what it is good for.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modern web"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现代网页"
+          }
+        }
+      }
+    },
+    "ios.export.family.heic" : {
+      "comment" : "Export strip: under the HEIC tile, what it is good for.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compact"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体积小"
+          }
+        }
+      }
+    },
+    "ios.export.family.jpeg" : {
+      "comment" : "Export strip: under the JPEG tile, what it is good for.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Universal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通用"
+          }
+        }
+      }
+    },
+    "ios.export.family.tiff" : {
+      "comment" : "Export strip: under the TIFF tile, what it is good for.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lossless"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无损"
+          }
+        }
+      }
+    },
     "ios.export.finished" : {
       "comment" : "The export finished and was verified.",
       "extractionState" : "manual",
@@ -1001,23 +1163,6 @@
         }
       }
     },
-    "ios.export.frameNote" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exports carry the frame chosen in the editor’s Frame tab."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出会带上编辑器“边框”中选择的边框。"
-          }
-        }
-      }
-    },
     "ios.export.gamut" : {
       "comment" : "Custom format: color space picker.",
       "extractionState" : "manual",
@@ -1032,6 +1177,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "色域"
+          }
+        }
+      }
+    },
+    "ios.export.group.use" : {
+      "comment" : "Export strip: the label over the destination tiles.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用途"
           }
         }
       }
@@ -1068,6 +1231,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "长边（px）"
+          }
+        }
+      }
+    },
+    "ios.export.longEdge.other" : {
+      "comment" : "Export size menu: type a long edge in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other Size…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他尺寸…"
           }
         }
       }
@@ -1176,42 +1357,6 @@
         }
       }
     },
-    "ios.export.page.custom" : {
-      "comment" : "Export page: choose the format by hand.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom Format"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义格式"
-          }
-        }
-      }
-    },
-    "ios.export.page.destination" : {
-      "comment" : "Export page: choose where the photo goes.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Destination"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目的地"
-          }
-        }
-      }
-    },
     "ios.export.peak %@" : {
       "comment" : "Will write: the HDR peak in stops, e.g. 2.4.",
       "extractionState" : "manual",
@@ -1314,24 +1459,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已存储到文件"
-          }
-        }
-      }
-    },
-    "ios.export.sdrNote" : {
-      "comment" : "Custom format: an SDR encoding is chosen.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Writes the SDR version."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将写出 SDR 版本。"
           }
         }
       }
@@ -1460,20 +1587,38 @@
         }
       }
     },
-    "ios.export.useCustom" : {
-      "comment" : "Switches to the custom format page, carrying the destination's settings.",
+    "ios.export.variant.gainMap" : {
+      "comment" : "Export encoding menu: JPEG with an ISO gain map.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Use Custom Format…"
+            "value" : "Gain map HDR"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "改用自定义格式…"
+            "value" : "增益图 HDR"
+          }
+        }
+      }
+    },
+    "ios.export.variant.sdr" : {
+      "comment" : "Export encoding menu: the SDR version only.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR"
           }
         }
       }
@@ -2057,6 +2202,276 @@
         }
       }
     },
+    "ios.history.adjustments" : {
+      "comment" : "Export history detail: the section of adjustments.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adjustments"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调整"
+          }
+        }
+      }
+    },
+    "ios.history.date" : {
+      "comment" : "Export history detail: when the version was written.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exported"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出时间"
+          }
+        }
+      }
+    },
+    "ios.history.delete" : {
+      "comment" : "Export history detail: removes the version.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "ios.history.delete.confirm" : {
+      "comment" : "Export history detail: confirmation title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete This Version?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这个版本？"
+          }
+        }
+      }
+    },
+    "ios.history.delete.message" : {
+      "comment" : "Export history detail: confirmation message.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It leaves HyperDR's history. Copies you saved or shared are not affected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它会从 HyperDR 的历史中移除，已存储或分享出去的副本不受影响。"
+          }
+        }
+      }
+    },
+    "ios.history.empty" : {
+      "comment" : "Export history: nothing exported yet.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Exports Yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有导出的照片"
+          }
+        }
+      }
+    },
+    "ios.history.empty.detail" : {
+      "comment" : "Export history: under the empty title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos you export stay here, ready to share or save again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出的照片会留在这里，随时可以再次分享或存储。"
+          }
+        }
+      }
+    },
+    "ios.history.file" : {
+      "comment" : "Export history detail: the file name and size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件"
+          }
+        }
+      }
+    },
+    "ios.history.fileMissing" : {
+      "comment" : "Export history detail: the retained file cannot be read.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This version's file is gone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个版本的文件已不在。"
+          }
+        }
+      }
+    },
+    "ios.history.noAdjustments" : {
+      "comment" : "Export history detail: the version was written without adjustments.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No adjustments"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有调整"
+          }
+        }
+      }
+    },
+    "ios.history.photo" : {
+      "comment" : "Export history detail: the photo the version was written from.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        }
+      }
+    },
+    "ios.history.title" : {
+      "comment" : "The export history: its title and the library's button.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exports"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出记录"
+          }
+        }
+      }
+    },
+    "ios.history.today" : {
+      "comment" : "Export history: the day heading.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
+          }
+        }
+      }
+    },
+    "ios.history.written" : {
+      "comment" : "Export history detail: the section with what was written.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出"
+          }
+        }
+      }
+    },
+    "ios.history.yesterday" : {
+      "comment" : "Export history: the day heading.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yesterday"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨天"
+          }
+        }
+      }
+    },
     "ios.home.unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2274,6 +2689,215 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择其他照片…"
+          }
+        }
+      }
+    },
+    "ios.settings.about" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关于"
+          }
+        }
+      }
+    },
+    "ios.settings.acknowledgements" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acknowledgements"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第三方许可"
+          }
+        }
+      }
+    },
+    "ios.settings.editing" : {
+      "comment" : "Settings: section with the LUT library.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑"
+          }
+        }
+      }
+    },
+    "ios.settings.history.clear" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Exports"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除导出记录"
+          }
+        }
+      }
+    },
+    "ios.settings.history.clear.confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear all exports?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除全部导出记录？"
+          }
+        }
+      }
+    },
+    "ios.settings.history.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR keeps your recent exports so you can save or share them again. Clearing them doesn’t touch files you’ve already saved or shared."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 会保留最近导出的版本，方便再次存储或分享。清除不会影响已经存储或分享出去的文件。"
+          }
+        }
+      }
+    },
+    "ios.settings.history.kept %@ %@" : {
+      "comment" : "Settings: how many export versions are kept and their size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ versions · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 个版本 · %2$@"
+          }
+        }
+      }
+    },
+    "ios.settings.history.none" : {
+      "comment" : "Settings: no export versions are kept.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无"
+          }
+        }
+      }
+    },
+    "ios.settings.privacy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos are processed on this device. HyperDR reads only the photos you pick through the system photo picker and doesn’t need access to your whole library."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片只在这台设备上处理。HyperDR 通过系统的照片选择器读取你选中的照片，不需要访问整个照片图库。"
+          }
+        }
+      }
+    },
+    "ios.settings.tagline" : {
+      "comment" : "Settings: the line under the app's name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR photo editing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 照片编辑"
+          }
+        }
+      }
+    },
+    "ios.settings.title" : {
+      "comment" : "Settings: its title and the library's top trailing button.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置"
+          }
+        }
+      }
+    },
+    "ios.settings.version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本"
           }
         }
       }

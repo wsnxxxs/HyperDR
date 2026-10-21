@@ -6,12 +6,12 @@ import SwiftUI
 
 /// The editor, over the library while a photo is open: the EDR canvas, the
 /// controls laid out by `EditorLayout`, and a toolbar of Liquid Glass
-/// buttons. Close leads, then undo and redo, view and more, and Export, the
-/// one prominent button. Undo steps go to the scene's undo manager, so the
-/// three-finger swipe and ⌘Z work too.
+/// buttons laid out as in Photos: close, undo and redo lead; More (with the
+/// comparison) and Export, the one prominent button, trail. Undo steps go to
+/// the scene's undo manager, so the three-finger swipe and ⌘Z work too.
 ///
-/// Comparison follows §5.4: holding the canvas shows the original, and the
-/// view menu switches between Adjusted, Original and Split. Zoomed in, the
+/// Comparison follows §5.4: holding the canvas shows the original, and More
+/// switches between Adjusted, Original and Split. Zoomed in, the
 /// editor adds full-size detail tiles; while a parameter with a mask is
 /// dragged, its mask is tinted over the edit. The Frame pane shows the
 /// export's frame around the photo.
@@ -144,6 +144,24 @@ struct EditorScreen: View {
             }
     }
 
+    private var undoButton: some View {
+        Button {
+            editor.commitDrag()
+            undoManager?.undo()
+        } label: {
+            Label("ios.toolbar.undo", systemImage: "arrow.uturn.backward")
+        }
+    }
+
+    private var redoButton: some View {
+        Button {
+            editor.commitDrag()
+            undoManager?.redo()
+        } label: {
+            Label("ios.toolbar.redo", systemImage: "arrow.uturn.forward")
+        }
+    }
+
     private var inspector: some View {
         VStack(spacing: 0) {
             Picker(selection: Binding(get: { pane == .frame }, set: { pane = $0 ? .frame : .group(.hdr) })) {
@@ -219,31 +237,20 @@ struct EditorScreen: View {
     // MARK: - Toolbar
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        // As in Photos: close, then undo and redo on the left; more and
+        // Export on the right.
         ToolbarItem(placement: .topBarLeading) {
             Button(role: .close) { requestClose() }
                 .disabled(session.exports.isRunning)
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+        ToolbarSpacer(.fixed, placement: .topBarLeading)
+        ToolbarItemGroup(placement: .topBarLeading) {
             // Read with the recipe, so the buttons follow every step.
             let _ = editor.recipe
-            Button {
-                editor.commitDrag()
-                undoManager?.undo()
-            } label: {
-                Label("ios.toolbar.undo", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(undoManager?.canUndo != true || session.exports.isRunning)
-            Button {
-                editor.commitDrag()
-                undoManager?.redo()
-            } label: {
-                Label("ios.toolbar.redo", systemImage: "arrow.uturn.forward")
-            }
-            .disabled(undoManager?.canRedo != true || session.exports.isRunning)
+            undoButton.disabled(undoManager?.canUndo != true || session.exports.isRunning)
+            redoButton.disabled(undoManager?.canRedo != true || session.exports.isRunning)
         }
-        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            viewMenu
+        ToolbarItem(placement: .topBarTrailing) {
             moreMenu
         }
         ToolbarSpacer(.fixed, placement: .topBarTrailing)
@@ -257,6 +264,7 @@ struct EditorScreen: View {
                 Label("ios.toolbar.export", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.glassProminent)
+            .tint(Color.hdr.accentFill)
             .disabled(!session.exports.isSettled(editor))
         }
         if layout == .inspector {
@@ -268,26 +276,24 @@ struct EditorScreen: View {
         }
     }
 
-    /// Adjusted, Original or Split (§5.4).
-    private var viewMenu: some View {
-        Menu {
-            Picker(selection: $comparison) {
-                Label("ios.view.edited", systemImage: "wand.and.sparkles").tag(Comparison.edited)
-                Label("ios.view.original", systemImage: "photo").tag(Comparison.original)
-                Label("ios.view.split", systemImage: "rectangle.split.2x1").tag(Comparison.split)
-                    .disabled(pane == .frame)
-            } label: {
-                Text("ios.compare.button")
-            }
-            .pickerStyle(.inline)
+    /// Adjusted, Original or Split (§5.4), as a submenu of More that names
+    /// the current choice.
+    private var comparisonMenu: some View {
+        Picker(selection: $comparison) {
+            Label("ios.view.edited", systemImage: "wand.and.sparkles").tag(Comparison.edited)
+            Label("ios.view.original", systemImage: "photo").tag(Comparison.original)
+            Label("ios.view.split", systemImage: "rectangle.split.2x1").tag(Comparison.split)
+                .disabled(pane == .frame)
         } label: {
-            Label("ios.compare.button", systemImage: comparison == .edited ? "square.split.2x1" : "square.split.2x1.fill")
+            Label("ios.compare.button", systemImage: "square.split.2x1")
         }
+        .pickerStyle(.menu)
         .disabled(!hasOriginal)
     }
 
     private var moreMenu: some View {
         Menu {
+            Section { comparisonMenu }
             Section {
                 Button("ios.menu.choosePhoto", systemImage: "photo.on.rectangle") { pickingPhoto = true }
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }

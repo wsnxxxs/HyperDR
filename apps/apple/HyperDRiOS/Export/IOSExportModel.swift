@@ -52,7 +52,14 @@ nonisolated struct ExportStack: Sendable {
 ///   composites it (`FrameExportPlan`). The Photos destination is shown but
 ///   not available yet.
 @MainActor @Observable final class IOSExportModel {
-    enum Page: Hashable { case destination, custom }
+    enum Page: String, Hashable, Codable { case destination, custom }
+
+    /// The choice as it is kept between launches.
+    private struct SavedChoice: Codable {
+        var page: Page
+        var destination: ExportDestination
+        var custom: CustomExportFormat
+    }
 
     /// What the frame is laid out from: the user's settings and the photo's Exif.
     struct Framing: Equatable {
@@ -106,9 +113,14 @@ nonisolated struct ExportStack: Sendable {
         let task: Task<Opened, any Error>
     }
 
-    var page = Page.destination
-    var destination = ExportDestination.web
-    var custom = CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)
+    // The last choice is kept, so the next export starts from it.
+    var page = Page.destination { didSet { saveChoice() } }
+    var destination = ExportDestination.web { didSet { saveChoice() } }
+    var custom = CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90) { didSet { saveChoice() } }
+    /// Each format tile's last encoding, so going back to a tile restores it.
+    @ObservationIgnored private var familyEncodings: [ExportFamily: ExportEncoding] = [:]
+    @ObservationIgnored private let defaults: UserDefaults?
+    static let choiceKey = "HyperDRExportChoice"
     private(set) var phase = Phase.choosing {
         didSet { UIApplication.shared.isIdleTimerDisabled = isRunning }
     }
@@ -146,10 +158,24 @@ nonisolated struct ExportStack: Sendable {
     @ObservationIgnored private var waitingForSource = false
 
     /// The stack is made at once: the LUT library is read at launch.
-    init(makeStack: @escaping @Sendable () async throws -> ExportStack = { try await ExportStack.live() }) {
+    /// `defaults` keeps the last choice; nil keeps nothing.
+    init(defaults: UserDefaults? = .standard,
+         makeStack: @escaping @Sendable () async throws -> ExportStack = { try await ExportStack.live() }) {
         let stack = Task { try await makeStack() }
         self.stack = stack
+        self.defaults = defaults
         luts = IOSLUTLibrary { Task { try await stack.value.luts } }
+        if let data = defaults?.data(forKey: Self.choiceKey),
+           let saved = try? JSONDecoder().decode(SavedChoice.self, from: data) {
+            var format = saved.custom
+            // A long edge that is not a preset was that photo's (typed, or
+            // the memory budget's); Photos is not open yet.
+            if let edge = format.longEdge, !ExportLongEdge.presets.contains(edge) { format.longEdge = nil }
+            page = saved.page
+            destination = saved.destination == .photos ? .web : saved.destination
+            custom = format
+            familyEncodings[ExportFamily(format.encoding)] = format.encoding
+        }
         Task { [weak self] in
             if let capabilities = try? await stack.value.capabilities { self?.capabilities = capabilities }
         }
@@ -288,7 +314,38 @@ nonisolated struct ExportStack: Sendable {
     /// A custom encoding; an SDR one offers sRGB and Display P3 only (F2).
     func select(_ encoding: ExportEncoding) {
         custom.encoding = encoding
+        familyEncodings[ExportFamily(encoding)] = encoding
         normalizeGamut()
+    }
+
+    /// The format the settings rows show: the custom one, or what the
+    /// destination writes.
+    func shownFormat(_ plan: ExportPlan?) -> CustomExportFormat {
+        page == .destination ? plan?.customCarryingSettings ?? custom : custom
+    }
+
+    /// A format tile: its last encoding, else its first one this photo can
+    /// be written in. The custom size and quality stay.
+    func select(_ family: ExportFamily, _ editor: RecipeEditor) {
+        let candidates = (familyEncodings[family].map { [$0] } ?? []) + family.encodings
+        page = .custom
+        select(candidates.first { unavailableReason($0, editor) == nil } ?? candidates[0])
+    }
+
+    /// A settings row changed. On a destination the row starts a custom
+    /// format from the destination's settings: a destination is a starting point.
+    func edit(from plan: ExportPlan?, _ change: (inout CustomExportFormat) -> Void) {
+        if page == .destination { useCustomFormat(from: plan) }
+        var format = custom
+        change(&format)
+        custom = format
+        select(format.encoding)
+    }
+
+    private func saveChoice() {
+        guard let defaults, let data = try? JSONEncoder().encode(SavedChoice(page: page, destination: destination, custom: custom))
+        else { return }
+        defaults.set(data, forKey: Self.choiceKey)
     }
 
     private func normalizeGamut() {
@@ -478,6 +535,30 @@ nonisolated struct ExportStack: Sendable {
                               suggestedLongEdge: failure.suggestedLongEdge)
         }
         phase = .failed(failure)
+    }
+
+    // MARK: - History
+
+    /// The versions HyperDR keeps, across photos, newest first.
+    func history() async -> [ExportHistoryEntry] {
+        guard let stack = try? await stack.value else { return [] }
+        return await stack.sessions.exportHistory()
+    }
+
+    /// The small SDR picture written with the version.
+    func thumbnail(_ entry: ExportHistoryEntry) async -> UIImage? {
+        guard let stack = try? await stack.value,
+              let data = await stack.sessions.exportThumbnail(entry.session, export: entry.id) else { return nil }
+        return UIImage(data: data)
+    }
+
+    /// A copy of the version's file to share or save; the version stays.
+    func stage(_ entry: ExportHistoryEntry) async throws -> URL {
+        try await stack.value.sessions.stageExportForTransfer(entry.session, export: entry.id)
+    }
+
+    func remove(_ entry: ExportHistoryEntry) async throws {
+        try await stack.value.sessions.removeExportVersion(entry.session, export: entry.id)
     }
 
     // MARK: - Memory, in MiB for reporting

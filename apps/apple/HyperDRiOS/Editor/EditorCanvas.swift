@@ -7,7 +7,8 @@ import SwiftUI
 enum Comparison: Hashable, CaseIterable { case edited, original, split }
 
 /// The live EDR canvas with what goes over it: the split divider, the mask
-/// legend, the status capsules and the headroom readout. With `framed` the
+/// legend, the status capsules, and at the photo's top right the badge the
+/// Mac canvas carries (HDR on the edited photo, Original on the original). With `framed` the
 /// photo sits on its frame: the mat and caption are SDR views around the
 /// canvas, so on an HDR display they stay at reference white while the photo
 /// keeps its highlights, which is what the export looks like.
@@ -53,7 +54,6 @@ struct EditorCanvas: View {
             .animation(.smooth(duration: 0.35), value: placement)
         }
         .overlay(alignment: .top) { status.padding(.top, Space.s2) }
-        .overlay(alignment: .bottomLeading) { headroomBadge }
     }
 
     // MARK: Frame
@@ -161,10 +161,18 @@ struct EditorCanvas: View {
                     SplitOverlay(ratio: splitRatio, imageFrame: image,
                                  visibleRect: CGRect(origin: .zero, size: transform.viewport),
                                  originalLabel: Text("ios.view.original"), editedLabel: Text("ios.view.edited"),
-                                 showsHDRBadge: false, hitWidth: SplitGeometry.touchHitWidth,
+                                 showsHDRBadge: showsHDR, hitWidth: SplitGeometry.touchHitWidth,
                                  onDrag: { splitRatio = $0 },
                                  onNudge: { splitRatio = min(max(splitRatio + $0, SplitGeometry.ratioRange.lowerBound),
                                                              SplitGeometry.ratioRange.upperBound) })
+                }
+                if !visible.isNull, let badge {
+                    badge
+                        .padding(Space.s3)
+                        .frame(width: visible.width, height: visible.height, alignment: .topTrailing)
+                        .position(x: visible.midX, y: visible.midY)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
                 if let mask = editor.shownMask, mode != .original, !visible.isNull,
                    let declaration = Adjustments.declaration(mask.parameterID) {
@@ -176,6 +184,31 @@ struct EditorCanvas: View {
                         .allowsHitTesting(false)
                 }
             }
+            .animation(.smooth(duration: 0.2), value: mode)
+        }
+    }
+
+    /// The edited photo carries HDR: the HDR group is on and the canvas is
+    /// not showing the SDR version while a base parameter is dragged.
+    private var showsHDR: Bool {
+        editor.recipe.conditionValue("hdr.enabled")?.boolValue != false && !editor.previewsAsSDR
+    }
+
+    /// As on the Mac canvas (PhotoBadgeKind): "HDR" over the edited photo,
+    /// "Original" while Original is chosen; none while the original is held
+    /// (the capsule says it) or on the frame, which previews the export.
+    private var badge: AnyView? {
+        guard !framed else { return nil }
+        switch mode {
+        case .edited where showsHDR:
+            return AnyView(HDRBadge()
+                .accessibilityLabel(headroom.potential > 1.01
+                    ? Text("ios.display.edr \(Self.headroom(headroom.current)) \(Self.headroom(headroom.potential))")
+                    : Text(verbatim: "HDR")))
+        case .original where !holdingOriginal:
+            return AnyView(Text("ios.view.original").hdrOverlayChip())
+        default:
+            return nil
         }
     }
 
@@ -210,24 +243,6 @@ struct EditorCanvas: View {
         .padding(.vertical, Space.s2)
         .glassEffect(.regular, in: .capsule)
         .transition(.move(edge: .top).combined(with: .opacity))
-    }
-
-    /// The display's headroom now and at most, when it has any.
-    @ViewBuilder private var headroomBadge: some View {
-        if headroom.potential > 1.01, !framed {
-            HStack(spacing: 4) {
-                Text(verbatim: "HDR").font(.caption2.weight(.bold))
-                Text(verbatim: Self.headroom(headroom.current)).font(.caption2.monospacedDigit())
-            }
-            .foregroundStyle(Color.hdr.amber.opacity(0.9))
-            .padding(.horizontal, Space.s2)
-            .padding(.vertical, 3)
-            .background(.black.opacity(0.35), in: .capsule)
-            .padding(Space.s3)
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("ios.display.edr \(Self.headroom(headroom.current)) \(Self.headroom(headroom.potential))"))
-        }
     }
 
     static func headroom(_ value: CGFloat) -> String {

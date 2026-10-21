@@ -9,7 +9,7 @@ extension EditorModel {
     var showsHDRBadge: Bool {
         _ = frameRevision
         guard hasEditedFrame, !previewsAsSDR, !editor.previewsAsSDR else { return false }
-        if let editedPair { return max(editedPair.baseHeadroom, editedPair.alternateHeadroom) > 0 }
+        if let editedFrame { return editedFrame.hasHDRContent }
         // SwiftUI preview scenarios have display facts without GPU frames.
         return document?.source?.domain == .hdr || document?.source?.domain == .dual || display.gainWeight != nil
     }

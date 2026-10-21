@@ -188,10 +188,10 @@ struct EditorCanvas: View {
         }
     }
 
-    /// The edited photo carries HDR: the HDR group is on and the canvas is
-    /// not showing the SDR version while a base parameter is dragged.
+    /// Follow the rendered photo, including zero strength and group bypass,
+    /// rather than controls whose replacement frame may still be rendering.
     private var showsHDR: Bool {
-        editor.recipe.conditionValue("hdr.enabled")?.boolValue != false && !editor.previewsAsSDR
+        editor.frame?.hasHDRContent == true && !editor.previewsAsSDR
     }
 
     /// As on the Mac canvas (PhotoBadgeKind): "HDR" over the edited photo,

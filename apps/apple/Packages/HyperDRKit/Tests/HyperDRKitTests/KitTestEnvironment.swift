@@ -170,6 +170,24 @@ private final class BlockingJobGate: @unchecked Sendable {
         await env.sessions.discardExport(a.id, export: pending.id)
     }
 
+    @Test func appWideHistoryNamesEachVersionsPhotoAndRemovesOne() async throws {
+        let env = try JobEnvironment(historyLimit: 3), a = try await env.photo("a.png"), b = try await env.photo("b.png")
+        let first = try await publish(env, a)
+        let second = try await publish(env, b)
+        let third = try await publish(env, a)
+        let pending = try await env.sessions.prepareExport(b.id, options: [:], key: ExportKey(rawValue: "fixture"))
+        var history = await env.sessions.exportHistory()
+        #expect(history.map(\.id) == [third.id, second.id, first.id])
+        #expect(history.map(\.session) == [a.id, b.id, a.id])
+        #expect(history.map(\.photoName) == ["a.png", "b.png", "a.png"])
+        #expect(await failureCode { try await env.sessions.removeExportVersion(b.id, export: pending.id) } == "export_busy")
+        try await env.sessions.removeExportVersion(b.id, export: second.id)
+        history = await env.sessions.exportHistory()
+        #expect(history.map(\.id) == [third.id, first.id])
+        #expect(await env.sessions.exports(for: b.id).isEmpty)
+        await env.sessions.discardExport(b.id, export: pending.id)
+    }
+
     @Test func retainedSessionsSurviveTTLAndCanReopenButLaunchRestoreStillExpires() async throws {
         let env = try JobEnvironment(historyLimit: 1), a = try await env.photo("a.png")
         _ = try await publish(env, a)

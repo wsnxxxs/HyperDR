@@ -11,6 +11,7 @@
 		77EAB2BDAC6C640A77408A49 /* HyperDRDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 729F262074F70F9D9EC00DD7 /* HyperDRDesign */; };
 		A20000000000000000000003 /* HyperDRKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000000000000000000002 /* HyperDRKit */; };
 		AB0100000000000000000002 /* ../../THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000001 /* ../../THIRD_PARTY_NOTICES.md */; };
+		AB0100000000000000000003 /* ../../THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000001 /* ../../THIRD_PARTY_NOTICES.md */; };
 		C10000000000000000000A05 /* HyperDRDesign in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000A04 /* HyperDRDesign */; };
 		C10000000000000000000A0F /* HyperDRRecipe in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000A0E /* HyperDRRecipe */; };
 		C10000000000000000000A12 /* HyperDRRender in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000A11 /* HyperDRRender */; };
@@ -266,6 +267,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB0100000000000000000003 /* ../../THIRD_PARTY_NOTICES.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

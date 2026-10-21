@@ -3,12 +3,14 @@ import HyperDRKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The iOS export sheet (P7-3b-U; p7-adjustments §4.1, §4.4): what will be
-/// written at the top, then Destination | Custom Format with the destination
-/// rows or the encodings and their settings, the frame, and the main button at
-/// the foot. Once started the sheet is the progress, then the result with
-/// Save to Files and Share, or the failure. While it runs the sheet cannot be
-/// swiped away, which keeps the editor locked.
+/// The iOS export sheet (P7-3b-U; p7-adjustments §4.1, §4.4). One strip of
+/// tiles answers "what for": the destinations first, then the four file
+/// formats. Under it, only the settings that apply to that choice, each one
+/// tap away in a menu, and at the foot what will be written above the main
+/// button. Changing a setting on a destination starts a custom format from
+/// the destination's settings. Once started the sheet is the progress, then
+/// the result with Save to Files and Share, or the failure. While it runs the
+/// sheet cannot be swiped away, which keeps the editor locked.
 struct ExportSheet: View {
     @Bindable var model: IOSExportModel
     let editor: RecipeEditor
@@ -17,6 +19,13 @@ struct ExportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var detent = PresentationDetent.large
+    @State private var typingLongEdge = false
+    @State private var longEdgeDraft = ""
+
+    /// The quality menu's steps; the current value joins them when it is none.
+    private static let qualities = [100, 95, 90, 85, 80, 70, 60]
+    /// The strip's destinations: Photos last while it is not open.
+    private static let destinations: [ExportDestination] = [.web, .social, .photos]
 
     var body: some View {
         NavigationStack {
@@ -70,116 +79,90 @@ struct ExportSheet: View {
     // MARK: - Choosing
 
     private func choosing(_ plan: ExportPlan?) -> some View {
-        Form {
-            if let plan { willWrite(plan) }
-            Section {
-                Picker(selection: $model.page) {
-                    Text("ios.export.page.destination").tag(IOSExportModel.Page.destination)
-                    Text("ios.export.page.custom").tag(IOSExportModel.Page.custom)
-                } label: {
-                    Text("ios.export.title")
+        let format = model.shownFormat(plan)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: Space.s5) {
+                strip(format)
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    hint(format)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Space.s5)
+                    settings(format, plan)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
+                messages(plan)
             }
-            if model.page == .destination {
-                destinations
-                Section {
-                    Button("ios.export.useCustom") { model.useCustomFormat(from: plan) }
-                }
-            } else {
-                encodings
-                if let plan { customControls(plan) }
-            }
-            frameSection
-            if model.sessionFailure != nil {
-                Text("ios.export.unavailable").foregroundStyle(.secondary)
-            }
+            .padding(.top, Space.s2)
+            .padding(.bottom, Space.s4)
+            .animation(.smooth(duration: 0.25), value: format)
         }
-        .contentMargins(.top, Space.s2, for: .scrollContent)
+        .scrollBounceBehavior(.basedOnSize)
         .tint(Color.hdr.accent)
-        .safeAreaInset(edge: .bottom) {
-            Button { model.start(editor) } label: {
-                primaryLabel(plan)
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Space.s1)
+        .safeAreaInset(edge: .bottom) { footer(plan) }
+        .sensoryFeedback(.selection, trigger: model.choice)
+        .alert(Text("ios.export.longEdge.custom"), isPresented: $typingLongEdge) {
+            TextField(text: $longEdgeDraft, prompt: Text("ios.export.originalSize")) { Text("ios.export.longEdge.custom") }
+                .keyboardType(.numberPad)
+            Button("ios.adjust.cancel", role: .cancel) {}
+            Button("ios.adjust.apply") {
+                let photo = model.photoLongEdge(editor)
+                model.edit(from: plan) { $0.longEdge = ExportLongEdge.normalized(Int(longEdgeDraft), photo: photo) }
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .disabled(!model.canStart(plan, editor))
-            .padding(.horizontal, Space.s4)
-            .padding(.bottom, Space.s2)
         }
     }
 
-    /// "Will write": the encoding large, then size · colour space · peak,
-    /// then the plan's notes and anything that blocks the export.
-    private func willWrite(_ plan: ExportPlan) -> some View {
-        Section {
-            HStack(alignment: .center, spacing: Space.s3) {
-                Image(systemName: plan.peakStops == nil ? "photo" : "sun.max.fill")
-                    .font(.title2)
-                    .foregroundStyle(plan.peakStops == nil ? Color.secondary : Color.hdr.amber)
-                    .frame(width: 44, height: 44)
-                    .background(Color.white.opacity(0.08), in: .rect(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(LocalizedStringKey(plan.encoding.labelKey)).font(.headline)
-                    Text(verbatim: summary(plan)).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            ForEach(plan.notices, id: \.self) { notice in
-                Label { Text(verbatim: notice.phrase.text(locale: locale)) } icon: { Image(systemName: "info.circle") }
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            if let look = model.luts.missingLook(editor) {
-                Label { Text("ios.export.lutMissing \(look.name)") } icon: { Image(systemName: "exclamationmark.triangle") }
-                    .font(.footnote).foregroundStyle(Color.hdr.warn)
-            }
-            if model.frameMisfits(editor) {
-                Label { Text("ios.frame.misfit") } icon: { Image(systemName: "exclamationmark.triangle") }
-                    .font(.footnote).foregroundStyle(Color.hdr.warn)
-            }
-            ForEach(plan.blockers, id: \.self) { blocker in
-                Label { Text(verbatim: blocker.phrase.text(locale: locale)) } icon: { Image(systemName: "exclamationmark.triangle") }
-                    .font(.footnote).foregroundStyle(Color.hdr.warn)
-                if let edge = blocker.suggestedLongEdge {
-                    Button { model.useLongEdge(edge, from: plan) } label: {
-                        Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+    // MARK: Tiles
+
+    /// "For" (the destinations) over "Format" (the containers): two rows of
+    /// tiles that share the width, so every choice is in sight at once.
+    private func strip(_ format: CustomExportFormat) -> some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            tileRow(Text("ios.export.group.use")) {
+                ForEach(Self.destinations, id: \.self) { destination in
+                    // The plan says which destination cannot be chosen yet (Photos
+                    // before its saving is verified, p7-3c-export §1.3 F).
+                    let unavailable = model.unavailableReason(destination, editor)?.destinationShortPhrase
+                    FormatTile(selected: model.page == .destination && model.destination == destination,
+                               detail: Text(Self.name(destination))) {
+                        Image(systemName: Self.icon(destination)).font(.system(size: 19))
+                    } action: {
+                        model.destination = destination
+                        model.page = .destination
                     }
+                    .disabled(unavailable != nil)
+                    .accessibilityHint(unavailable.map { Text(verbatim: $0.text(locale: locale)) } ?? Text(Self.hint(destination)))
                 }
             }
-        } header: {
-            Text("ios.export.willWrite")
+            tileRow(Text("ios.export.format")) {
+                ForEach(ExportFamily.allCases, id: \.self) { family in
+                    // A tile none of whose encodings this photo can take stays visible, disabled (K6).
+                    let open = family.encodings.contains { model.unavailableReason($0, editor) == nil }
+                    FormatTile(selected: model.page == .custom && ExportFamily(format.encoding) == family,
+                               detail: Text(family.caption)) {
+                        Text(verbatim: family.name).font(.system(size: 16, weight: .semibold, design: .rounded))
+                    } action: {
+                        model.select(family, editor)
+                    }
+                    .disabled(!open)
+                }
+            }
+        }
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func tileRow(_ title: Text, @ViewBuilder tiles: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            title
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.leading, Space.s1)
+            HStack(spacing: Space.s2) { tiles() }
         }
     }
 
-    private func summary(_ plan: ExportPlan) -> String {
-        let written = model.outputSize(plan, editor)
-        let size = "\(written.width) × \(written.height)"
-        let peak = plan.peakStops.map { String(localized: "ios.export.peak \(ExportPlanText.stops($0))") }
-            ?? String(localized: "ios.export.sdrOnly")
-        return [size, String(localized: String.LocalizationValue(plan.gamut.labelKey)), peak].joined(separator: " · ")
-    }
-
-    private var destinations: some View {
-        Section {
-            ForEach(ExportDestination.allCases, id: \.self) { destination in
-                // The plan says which destination cannot be chosen yet (Photos
-                // before its saving is verified, p7-3c-export §1.3 F).
-                let unavailable = model.unavailableReason(destination, editor)?.destinationShortPhrase
-                ChoiceRow(symbol: Self.icon(destination), title: Text(Self.name(destination)),
-                          detail: unavailable.map { Text(verbatim: $0.text(locale: locale)) } ?? Text(Self.hint(destination)),
-                          selected: model.destination == destination) {
-                    model.destination = destination
-                }
-                .disabled(unavailable != nil)
-            }
-        }
+    /// One line on what the choice is for.
+    private func hint(_ format: CustomExportFormat) -> Text {
+        model.page == .destination ? Text(Self.hint(model.destination)) : Text(LocalizedStringKey(format.encoding.hintKey))
     }
 
     private static func name(_ destination: ExportDestination) -> LocalizedStringKey {
@@ -206,107 +189,212 @@ struct ExportSheet: View {
         }
     }
 
-    private var encodings: some View {
-        Section {
-            ForEach(ExportEncoding.allCases, id: \.self) { encoding in
-                let selected = model.custom.encoding == encoding
-                // The plan's answer for this encoding here (K6).
-                let reason = model.unavailableReason(encoding, editor)
-                ChoiceRow(symbol: encoding.isSDR ? "photo" : "sun.max", symbolTint: encoding.isSDR ? nil : Color.hdr.amber,
-                          title: Text(LocalizedStringKey(encoding.labelKey)),
-                          detail: reason.map { Text(verbatim: $0.phrase.text(locale: locale)) } ?? Text(LocalizedStringKey(encoding.hintKey)),
-                          detailIsWarning: reason != nil, selected: selected) {
-                    model.select(encoding)
-                }
-                .disabled(reason != nil && !selected)
-            }
-        } header: {
-            Text("ios.export.format")
-        } footer: {
-            if model.custom.encoding.isSDR { Text("ios.export.sdrNote") }
-        }
-    }
+    // MARK: Settings
 
-    private func customControls(_ plan: ExportPlan) -> some View {
-        Section {
-            // SDR: sRGB or Display P3. Gain maps write Display P3 and
-            // BT.2100 Rec. 2020; the format fixes it (F2).
-            if plan.gamutIsFixedByFormat || !model.custom.encoding.isSDR {
-                LabeledContent {
-                    Text(LocalizedStringKey(plan.gamut.labelKey))
-                } label: {
-                    Text("ios.export.gamut")
-                }
-            } else {
-                Picker(selection: $model.custom.gamut) {
-                    ForEach([ExportColorGamut.srgb, .p3], id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
-                } label: {
-                    Text("ios.export.gamut")
-                }
+    /// Only what applies: the encoding when the format has more than one,
+    /// the colour space when it is free (SDR, F2), the size, the quality
+    /// (not TIFF), and the frame.
+    private func settings(_ format: CustomExportFormat, _ plan: ExportPlan?) -> some View {
+        let family = ExportFamily(format.encoding)
+        return VStack(spacing: 0) {
+            if family.encodings.count > 1 {
+                encodingRow(format, family, plan)
+                Divider().padding(.leading, Space.s4)
             }
-            longEdge
-            if model.custom.encoding != .sdrTIFF {
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    LabeledContent {
-                        Text(verbatim: String(model.custom.quality)).monospacedDigit()
+            if format.encoding.isSDR, plan?.gamutIsFixedByFormat == false {
+                menuRow(Text("ios.export.gamut"), value: Text(LocalizedStringKey(format.gamut.labelKey))) {
+                    Picker(selection: Binding(get: { format.gamut }, set: { gamut in model.edit(from: plan) { $0.gamut = gamut } })) {
+                        ForEach([ExportColorGamut.srgb, .p3], id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
+                    } label: {
+                        Text("ios.export.gamut")
+                    }
+                }
+                Divider().padding(.leading, Space.s4)
+            }
+            sizeRow(format, plan)
+            if format.encoding != .sdrTIFF {
+                Divider().padding(.leading, Space.s4)
+                menuRow(Text("ios.export.qualityLabel"), value: Text(verbatim: String(format.quality))) {
+                    Picker(selection: Binding(get: { format.quality }, set: { quality in model.edit(from: plan) { $0.quality = quality } })) {
+                        ForEach(Array(Set(Self.qualities + [format.quality])).sorted(by: >), id: \.self) {
+                            Text(verbatim: String($0)).tag($0)
+                        }
                     } label: {
                         Text("ios.export.qualityLabel")
                     }
-                    Slider(value: Binding(get: { Double(model.custom.quality) },
-                                          set: { model.custom.quality = Int($0.rounded()) }), in: 0...100, step: 1)
                 }
+            }
+            Divider().padding(.leading, Space.s4)
+            frameRow
+        }
+        .background(Color.primary.opacity(0.06), in: .rect(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func encodingRow(_ format: CustomExportFormat, _ family: ExportFamily, _ plan: ExportPlan?) -> some View {
+        menuRow(Text("ios.export.encoding"), value: format.encoding.variantName) {
+            // Toggles, not a picker: a menu shows a toggle's second line, which
+            // says what each encoding is for.
+            ForEach(family.encodings, id: \.self) { encoding in
+                // The plan's answer for this encoding here (K6).
+                let reason = model.unavailableReason(encoding, editor)
+                Toggle(isOn: Binding(get: { format.encoding == encoding },
+                                     set: { if $0 { model.edit(from: plan) { $0.encoding = encoding } } })) {
+                    encoding.variantName
+                    if let reason { Text(verbatim: reason.phrase.text(locale: locale)) } else { Text(LocalizedStringKey(encoding.hintKey)) }
+                }
+                .disabled(reason != nil && encoding != format.encoding)
             }
         }
     }
 
     /// Original size or a long edge: the presets smaller than the photo, or
     /// a typed number (p7-3c-export §1.3 B).
-    @ViewBuilder private var longEdge: some View {
+    private func sizeRow(_ format: CustomExportFormat, _ plan: ExportPlan?) -> some View {
         let photo = model.photoLongEdge(editor)
-        Picker(selection: Binding(get: { model.custom.longEdge }, set: { model.setLongEdge($0, photo: photo) })) {
-            ForEach(ExportLongEdge.choices(photo: photo, current: model.custom.longEdge), id: \.self) { edge in
-                if let edge {
-                    Text("ios.export.longEdge.pixels \(String(edge))").tag(Int?.some(edge))
-                } else {
-                    Text("ios.export.originalSize").tag(Int?.none)
+        // A limit at or above the photo's own long edge keeps the original size.
+        let edge = ExportLongEdge.normalized(format.longEdge, photo: photo)
+        let value = edge.map { Text("ios.export.longEdge.pixels \(String($0))") } ?? Text("ios.export.originalSize")
+        return menuRow(Text("ios.export.longEdge"), value: value) {
+            Picker(selection: Binding(get: { edge },
+                                      set: { edge in model.edit(from: plan) { $0.longEdge = ExportLongEdge.normalized(edge, photo: photo) } })) {
+                ForEach(ExportLongEdge.choices(photo: photo, current: edge), id: \.self) { edge in
+                    if let edge {
+                        Text("ios.export.longEdge.pixels \(String(edge))").tag(Int?.some(edge))
+                    } else {
+                        Text("ios.export.originalSize").tag(Int?.none)
+                    }
                 }
+            } label: {
+                Text("ios.export.longEdge")
             }
-        } label: {
-            Text("ios.export.longEdge")
-        }
-        LabeledContent {
-            TextField(value: Binding(get: { model.custom.longEdge }, set: { model.setLongEdge($0, photo: photo) }),
-                      format: .number.grouping(.never), prompt: Text("ios.export.originalSize")) {
-                Text("ios.export.longEdge.custom")
+            Button("ios.export.longEdge.other", systemImage: "number") {
+                longEdgeDraft = edge.map(String.init) ?? ""
+                typingLongEdge = true
             }
-            // Has a Return key, which commits the number.
-            .keyboardType(.numbersAndPunctuation)
-            .multilineTextAlignment(.trailing)
-            .frame(maxWidth: 140)
-        } label: {
-            Text("ios.export.longEdge.custom")
         }
     }
 
     /// The frame goes with the export while it is on; the switch here is the
     /// editor's own, so turning it off here turns it off there too.
-    private var frameSection: some View {
-        Section {
-            Toggle(isOn: $frame.isEnabled) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("ios.frame.title")
-                        if frame.isEnabled {
-                            Text(frame.style.title).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                } icon: {
-                    Image(systemName: "photo.artframe")
+    private var frameRow: some View {
+        Toggle(isOn: $frame.isEnabled) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ios.frame.title")
+                if frame.isEnabled {
+                    Text(frame.style.title).font(.footnote).foregroundStyle(.secondary)
                 }
             }
-        } footer: {
-            Text("ios.export.frameNote")
         }
+        .tint(Color.hdr.accentFill)
+        .padding(.horizontal, Space.s4)
+        .frame(minHeight: 52)
+    }
+
+    /// A row whose value opens a menu of choices.
+    private func menuRow(_ title: Text, value: Text, @ViewBuilder menu: () -> some View) -> some View {
+        Menu {
+            menu()
+        } label: {
+            HStack(spacing: Space.s2) {
+                title.foregroundStyle(.primary)
+                Spacer(minLength: Space.s3)
+                value.foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, Space.s4)
+            .frame(minHeight: 52)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Notes and the foot
+
+    /// The plan's notes and anything that blocks the export, under the settings.
+    @ViewBuilder private func messages(_ plan: ExportPlan?) -> some View {
+        let notices = plan?.notices ?? []
+        let blockers = plan?.blockers ?? []
+        let lutMissing = model.luts.missingLook(editor)
+        let misfits = model.frameMisfits(editor)
+        if !notices.isEmpty || !blockers.isEmpty || lutMissing != nil || misfits || model.sessionFailure != nil {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                ForEach(notices, id: \.self) { notice in
+                    note(Text(verbatim: notice.phrase.text(locale: locale)), symbol: "info.circle", warning: false)
+                }
+                if let look = lutMissing {
+                    note(Text("ios.export.lutMissing \(look.name)"), symbol: "exclamationmark.triangle", warning: true)
+                }
+                if misfits {
+                    note(Text("ios.frame.misfit"), symbol: "exclamationmark.triangle", warning: true)
+                }
+                ForEach(blockers, id: \.self) { blocker in
+                    note(Text(verbatim: blocker.phrase.text(locale: locale)), symbol: "exclamationmark.triangle", warning: true)
+                    if let edge = blocker.suggestedLongEdge {
+                        Button { model.useLongEdge(edge, from: plan) } label: {
+                            Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.leading, 26)
+                    }
+                }
+                if model.sessionFailure != nil {
+                    note(Text("ios.export.unavailable"), symbol: "exclamationmark.triangle", warning: true)
+                }
+            }
+            .padding(.horizontal, Space.s5)
+        }
+    }
+
+    private func note(_ text: Text, symbol: String, warning: Bool) -> some View {
+        Label { text } icon: { Image(systemName: symbol) }
+            .font(.footnote)
+            .foregroundStyle(warning ? Color.hdr.warn : Color.secondary)
+    }
+
+    /// What will be written, then the main button.
+    private func footer(_ plan: ExportPlan?) -> some View {
+        VStack(spacing: Space.s3) {
+            if let plan {
+                HStack(spacing: Space.s1) {
+                    if plan.peakStops != nil {
+                        Image(systemName: "sun.max.fill").foregroundStyle(Color.hdr.amber)
+                    }
+                    Text(verbatim: summary(plan)).monospacedDigit()
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text("ios.export.willWrite") + Text(verbatim: " " + summary(plan)))
+            }
+            Button { model.start(editor) } label: {
+                primaryLabel(plan)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Space.s1)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(Color.hdr.accentFill)
+            .controlSize(.large)
+            .disabled(!model.canStart(plan, editor))
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s2)
+    }
+
+    /// The encoding, then size · colour space · peak.
+    private func summary(_ plan: ExportPlan) -> String {
+        let written = model.outputSize(plan, editor)
+        let size = "\(written.width) × \(written.height)"
+        let peak = plan.peakStops.map { String(localized: "ios.export.peak \(ExportPlanText.stops($0))") }
+            ?? String(localized: "ios.export.sdrOnly")
+        return [String(localized: String.LocalizationValue(plan.encoding.labelKey)), size,
+                String(localized: String.LocalizationValue(plan.gamut.labelKey)), peak].joined(separator: " · ")
     }
 
     private func primaryLabel(_ plan: ExportPlan?) -> Text {
@@ -385,10 +473,12 @@ struct ExportSheet: View {
                         Label("ios.export.saveToFiles", systemImage: "folder").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glass)
+                    .foregroundStyle(.primary)
                     ShareLink(item: finished.file) {
                         Label("ios.export.share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
+                    .tint(Color.hdr.accentFill)
                 }
                 .controlSize(.large)
             }
@@ -425,10 +515,12 @@ struct ExportSheet: View {
                 if failure.restartable {
                     Button { model.start(editor) } label: { Text("ios.export.restart").frame(maxWidth: .infinity) }
                         .buttonStyle(.glassProminent)
+                        .tint(Color.hdr.accentFill)
                     Button("ios.export.done") { model.reset() }
                 } else {
                     Button { model.reset() } label: { Text("ios.export.retry").frame(maxWidth: .infinity) }
                         .buttonStyle(.glassProminent)
+                        .tint(Color.hdr.accentFill)
                 }
             }
             .controlSize(.large)
@@ -438,37 +530,35 @@ struct ExportSheet: View {
     }
 }
 
-/// A selectable row: a symbol, a name and a line under it, a checkmark when chosen.
-private struct ChoiceRow: View {
-    let symbol: String
-    var symbolTint: Color? = nil
-    let title: Text
-    let detail: Text
-    var detailIsWarning = false
+/// A tile of the export strip: a mark (a symbol or the format's name) and
+/// a word under it. The chosen tile is lit and outlined.
+private struct FormatTile<Mark: View>: View {
     let selected: Bool
+    let detail: Text
+    @ViewBuilder let mark: Mark
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         Button(action: action) {
-            HStack(spacing: Space.s3) {
-                Image(systemName: symbol)
-                    .font(.title3)
-                    .foregroundStyle(symbolTint ?? Color.secondary)
-                    .frame(width: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    title.font(.body.weight(.medium)).foregroundStyle(.primary)
-                    detail.font(.footnote).foregroundStyle(detailIsWarning ? Color.hdr.warn : Color.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .opacity(selected ? 1 : 0)
+            VStack(spacing: 6) {
+                mark
+                    .frame(height: 24)
+                    .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.8))
+                detail
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .frame(minHeight: 52)
-            .contentShape(.rect)
-            .opacity(isEnabled ? 1 : 0.45)
+            .padding(.horizontal, Space.s1)
+            .frame(maxWidth: .infinity)
+            .frame(height: 68)
+            .background(shape.fill(Color.primary.opacity(selected ? 0.16 : 0.05)))
+            .overlay(shape.strokeBorder(Color.primary.opacity(selected ? 0.6 : 0.08), lineWidth: selected ? 1.5 : 1))
+            .opacity(isEnabled ? 1 : 0.4)
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

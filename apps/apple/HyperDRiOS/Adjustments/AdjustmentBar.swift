@@ -8,13 +8,45 @@ enum EditorPane: Hashable {
     case frame
 }
 
+/// One tab of the dock: an adjustment group, or light and colour together.
+/// The two are used side by side, so one tab with both rows of rings keeps
+/// the tab bar short; the recipe's groups stay as they are.
+struct DockGroup: Identifiable {
+    /// The groups that share a tab, in display order.
+    static let merged: [AdjustmentGroupID] = [.light, .color]
+
+    let states: [AdjustmentGroupState]
+    var id: AdjustmentGroupID { states[0].group }
+    var isModified: Bool { states.contains { $0.isModified } }
+    var isMerged: Bool { states.count > 1 }
+
+    func contains(_ group: AdjustmentGroupID) -> Bool { states.contains { $0.group == group } }
+
+    func isModified(_ group: AdjustmentGroupID) -> Bool {
+        states.first { $0.group == group }?.isModified ?? false
+    }
+
+    static func tabs(_ groups: [AdjustmentGroupState]) -> [DockGroup] {
+        var tabs: [DockGroup] = []
+        for state in groups {
+            if merged.contains(state.group), let index = tabs.firstIndex(where: { merged.contains($0.id) }) {
+                tabs[index] = DockGroup(states: tabs[index].states + [state])
+            } else {
+                tabs.append(DockGroup(states: [state]))
+            }
+        }
+        return tabs
+    }
+}
+
 /// The tabs at the foot of the dock (p7-adjustments §5.3): the adjustment
-/// groups in one glass capsule and the frame in a glass circle of its own,
-/// since it shapes the export rather than the photo. A dot marks a group with
-/// changes and the frame while one is on. Holding a group's tab shows the
+/// groups (light and colour sharing one, `DockGroup`) in one glass capsule and
+/// the frame in a capsule of its own, since it shapes the export rather than
+/// the photo. Every tab carries its name under the symbol, so none has to be
+/// guessed. A dot marks a group with changes and the frame while one is on. Holding a group's tab shows the
 /// photo without that group, until it is let go (§5.4).
 struct EditorTabs: View {
-    let groups: [AdjustmentGroupState]
+    let groups: [DockGroup]
     @Binding var pane: EditorPane
     let frameOn: Bool
     var axis: Axis = .horizontal
@@ -28,14 +60,15 @@ struct EditorTabs: View {
             stack {
                 let inner = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 inner {
-                    ForEach(groups) { state in
-                        tab(.group(state.group), symbol: AdjustmentSymbols.group(state.group),
-                            label: AdjustmentText.group(state.group), marked: state.isModified,
-                            mark: state.group == .hdr ? Color.hdr.amber : Color.hdr.accent)
+                    ForEach(groups) { tab in
+                        self.tab(.group(tab.id), symbol: AdjustmentSymbols.group(tab.id),
+                                 label: tab.isMerged ? Text("ios.adjust.lightColor") : AdjustmentText.group(tab.id),
+                                 marked: tab.isModified, mark: tab.id == .hdr ? Color.hdr.amber : Color.hdr.accent,
+                                 isCurrent: { if case .group(let group) = $0 { tab.contains(group) } else { false } })
                             .onLongPressGesture(minimumDuration: 0.35) {
-                                onBypass(state.group, true)
+                                for state in tab.states { onBypass(state.group, true) }
                             } onPressingChanged: { pressing in
-                                if !pressing { onBypass(state.group, false) }
+                                if !pressing { for state in tab.states { onBypass(state.group, false) } }
                             }
                     }
                 }
@@ -50,20 +83,24 @@ struct EditorTabs: View {
         .sensoryFeedback(.selection, trigger: pane)
     }
 
-    private func tab(_ target: EditorPane, symbol: String, label: Text, marked: Bool, mark: Color) -> some View {
-        let isCurrent = pane == target
+    private func tab(_ target: EditorPane, symbol: String, label: Text, marked: Bool, mark: Color,
+                     isCurrent: (EditorPane) -> Bool = { _ in false }) -> some View {
+        let isCurrent = pane == target || isCurrent(pane)
         return Button {
             // The controls change at once; only the highlight slides.
             pane = target
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: symbol)
-                    .font(.system(size: large ? 18 : 17, weight: isCurrent ? .semibold : .regular))
+                    .font(.system(size: large ? 18 : 16, weight: isCurrent ? .semibold : .regular))
                     .symbolVariant(isCurrent ? .fill : .none)
-                if large { label.font(.system(size: 11, weight: .medium)).lineLimit(1) }
+                label
+                    .font(.system(size: large ? 11 : 10, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
-            .frame(width: large ? 64 : 46, height: large ? 50 : 40)
+            .frame(width: large ? 64 : 58, height: large ? 50 : 46)
             .background {
                 if isCurrent {
                     Capsule().fill(.white.opacity(0.14)).matchedGeometryEffect(id: "tab", in: selection)
@@ -71,7 +108,7 @@ struct EditorTabs: View {
             }
             .overlay(alignment: .topTrailing) {
                 if marked {
-                    Circle().fill(mark).frame(width: 5, height: 5).padding(large ? 9 : 7)
+                    Circle().fill(mark).frame(width: 5, height: 5).padding(large ? 9 : 8)
                 }
             }
             .contentShape(.capsule)
@@ -86,9 +123,9 @@ struct EditorTabs: View {
 /// time. The ring row chooses a control, the ruler sets its value.
 ///
 /// - Everything comes from `AdjustmentPanel`: the groups, which controls are
-///   visible, their values and the edits. Numbers get a ring; switches,
-///   choices and references go in the options card at the start of the row,
-///   except the group's first choice (the HDR source), which sits above it.
+///   visible, their values and the edits. Numbers get a ring and switches
+///   a filled circle; other choices and references wait behind "More" at the
+///   end of the row. HDR's own switch and its source sit above the row.
 /// - The look group's row lists the LUTs instead of rings ("None" first, the
 ///   library last); the ruler then sets the strength.
 /// - Rings: empty at the default, clockwise for positive and anticlockwise for
@@ -98,7 +135,7 @@ struct EditorTabs: View {
 struct AdjustmentControls: View {
     @Binding var recipe: Recipe
     let panel: AdjustmentPanel
-    let state: AdjustmentGroupState
+    let group: DockGroup
     var axis: Axis = .horizontal
     var large = false
     var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
@@ -115,18 +152,32 @@ struct AdjustmentControls: View {
     @State private var resets = 0
 
     var body: some View {
-        let layout = BarLayout(state)
-        let current = layout.rings.first { $0.id == selected[state.group] } ?? layout.rings.first
+        let actual = BarLayout(group)
+        let off = actual.isSwitchedOff
+        // Switched off, the group's controls stay in place, grey and locked.
+        let layout = off ? switchedOnLayout(actual) ?? actual : actual
+        let current = layout.rings.first { $0.id == selected[group.id] } ?? layout.rings.first
         let stack = axis == .horizontal ? AnyLayout(VStackLayout(spacing: large ? Space.s3 : Space.s2))
             : AnyLayout(VStackLayout(alignment: .center, spacing: Space.s2))
         stack {
-            if let lead = layout.leadChoice { leadChoice(lead).padding(.horizontal, Space.s4) }
-            if let current {
+            if actual.power != nil || layout.leadChoice != nil {
+                headline(power: actual.power, lead: layout.leadChoice, off: off).padding(.horizontal, Space.s4)
+            }
+            if off {
+                // In the readout's place: what the switch being off means.
+                Text("ios.adjust.hdrOff")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(minHeight: 28)
+            } else if let current {
                 readout(current)
             } else {
                 Color.clear.frame(height: 28)
             }
             row(layout, current)
+                .locked(off)
             if let current {
                 AdjustmentRuler(control: current,
                                 write: { panel.set(current.id, number: $0, in: &recipe) },
@@ -135,37 +186,51 @@ struct AdjustmentControls: View {
                     .id(current.id)
                     .frame(height: large ? 52 : 40)
                     .disabled(!current.isAvailable)
+                    .locked(off)
             }
         }
+        .animation(.smooth(duration: 0.2), value: off)
         .sensoryFeedback(.impact(weight: .light), trigger: resets)
         .alert(current.map { AdjustmentText.label($0.declaration) } ?? Text(verbatim: ""), isPresented: $typing) {
             if let current { typingActions(current) }
         }
     }
 
-    /// The HDR source above the ring row: segments, or a line when the photo
-    /// brings its own HDR.
+    /// Above the ring row: the group's switch (HDR on or off) in plain sight,
+    /// then the HDR source, or what switching it off means.
+    private func headline(power: AdjustmentControl?, lead: AdjustmentControl?, off: Bool) -> some View {
+        HStack(spacing: Space.s2) {
+            if let power {
+                PowerSwitch(control: power) { panel.set(power.id, isOn: $0, in: &recipe) }
+            }
+            if let lead {
+                leadChoice(lead).frame(maxWidth: .infinity).locked(off)
+            }
+        }
+        .frame(maxWidth: 420)
+    }
+
+    /// The group as it reads with its switch on: the panel hides the
+    /// controls of a switched-off group, the dock shows them locked.
+    private func switchedOnLayout(_ actual: BarLayout) -> BarLayout? {
+        guard let power = actual.power else { return nil }
+        var on = recipe
+        panel.set(power.id, isOn: true, in: &on)
+        let states = group.states.compactMap { panel.group(group: $0.group, in: on) }
+        return states.isEmpty ? nil : BarLayout(DockGroup(states: states))
+    }
+
+    /// The HDR source: segments, or a line when the photo brings its own HDR.
     @ViewBuilder private func leadChoice(_ control: AdjustmentControl) -> some View {
         if control.options.count > 1 {
-            VStack(spacing: Space.s1) {
-                // Segments a photo cannot take (AI without a model) stay visible, disabled.
-                ParameterSegmented(AdjustmentText.label(control.declaration),
-                                   selection: Binding(get: { control.selectedOption ?? "" },
-                                                      set: { panel.set(control.id, option: $0, in: &recipe) }),
-                                   choices: control.options.map {
-                                       SegmentedChoice(AdjustmentText.option($0), value: $0.id,
-                                                       isEnabled: !control.disabledOptions.contains($0.id))
-                                   })
-                    .frame(maxWidth: 420)
-                if let note = AdjustmentText.note(for: control) {
-                    note.font(.caption2).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
-                }
-            }
+            // No note under it: a line that comes and goes would move the row.
+            SourceSegments(control: control) { panel.set(control.id, option: $0, in: &recipe) }
         } else if let only = control.options.first {
             AdjustmentText.option(only)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+                .frame(minHeight: 36)
         }
     }
 
@@ -173,33 +238,49 @@ struct AdjustmentControls: View {
         ScrollView(axis == .horizontal ? .horizontal : .vertical, showsIndicators: false) {
             let stack = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s2)) : AnyLayout(VStackLayout(spacing: Space.s1))
             stack {
-                if !layout.settings.isEmpty { optionsButton(layout.settings) }
                 if let lut = layout.lut {
                     LUTSwatches(control: lut, luts: panel.context.luts, onLibrary: onLUTLibrary) {
                         panel.set(lut.id, reference: $0, in: &recipe)
                     }
                 } else {
-                    ForEach(layout.rings) { control in
+                    ForEach(Array(layout.rings.enumerated()), id: \.element.id) { index, control in
+                        // A hairline where light's rings end and colour's begin.
+                        if index > 0, layout.rings[index - 1].group != control.group {
+                            Capsule()
+                                .fill(Color.white.opacity(0.14))
+                                .frame(width: axis == .horizontal ? 1 : 28, height: axis == .horizontal ? 28 : 1)
+                                .padding(axis == .horizontal ? .bottom : .trailing, axis == .horizontal ? 16 : 0)
+                        }
                         ring(control, isCurrent: control.id == current?.id)
                     }
                 }
+                // Switches read as switches, after the numbers; anything
+                // else waits behind "More" at the end of the row.
+                ForEach(layout.switches) { control in
+                    SwitchRing(control: control, tint: group.id == .hdr ? Color.hdr.amber : Color.hdr.accent) {
+                        panel.set(control.id, isOn: $0, in: &recipe)
+                    }
+                }
+                if !layout.more.isEmpty { moreButton(layout.more) }
             }
             .padding(.horizontal, Space.s4)
             .frame(minWidth: axis == .horizontal ? nil : 0)
         }
         .scrollClipDisabled()
-        .defaultScrollAnchor(.center)
+        // Centred when the rings fit; otherwise the row opens at its first ring.
+        .defaultScrollAnchor(.center, for: .alignment)
+        .defaultScrollAnchor(axis == .horizontal ? .leading : .top, for: .initialOffset)
         .frame(maxHeight: axis == .vertical ? .infinity : nil)
     }
 
-    private func optionsButton(_ controls: [AdjustmentControl]) -> some View {
+    private func moreButton(_ controls: [AdjustmentControl]) -> some View {
         Button { showingOptions = true } label: {
             VStack(spacing: 4) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 16))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .semibold))
                     .frame(width: 44, height: 44)
                     .background(Circle().fill(Color.white.opacity(0.08)))
-                Text("ios.adjust.settings").font(.system(size: 10)).lineLimit(1)
+                Text("ios.adjust.more").font(.system(size: 10)).lineLimit(1)
             }
             .frame(width: 60)
             .foregroundStyle(.secondary)
@@ -220,13 +301,13 @@ struct AdjustmentControls: View {
     }
 
     private func ring(_ control: AdjustmentControl, isCurrent: Bool) -> some View {
-        AdjustmentRing(control: control, isCurrent: isCurrent, tint: state.group == .hdr ? Color.hdr.amber : Color.hdr.accent)
+        AdjustmentRing(control: control, isCurrent: isCurrent, tint: group.id == .hdr ? Color.hdr.amber : Color.hdr.accent)
             .onTapGesture(count: 2) {
                 panel.reset(control.id, in: &recipe)
                 resets += 1
             }
             .onTapGesture {
-                withAnimation(.smooth(duration: 0.2)) { selected[state.group] = control.id }
+                withAnimation(.smooth(duration: 0.2)) { selected[group.id] = control.id }
             }
             .contextMenu {
                 Button { panel.reset(control.id, in: &recipe) } label: {
@@ -240,11 +321,12 @@ struct AdjustmentControls: View {
                     .disabled(control.isAutomatic)
                 }
                 Button {
-                    if let onReset { onReset(.group(state.group)) } else { panel.reset(group: state.group, in: &recipe) }
+                    // The control's own group: on the shared tab, light or colour.
+                    if let onReset { onReset(.group(control.group)) } else { panel.reset(group: control.group, in: &recipe) }
                 } label: {
                     Label { AdjustmentText.command(.resetGroup) } icon: { Image(systemName: "arrow.counterclockwise") }
                 }
-                .disabled(!state.isModified)
+                .disabled(!group.isModified(control.group))
             }
     }
 
@@ -286,6 +368,109 @@ struct AdjustmentControls: View {
     }
 }
 
+/// The HDR source as segments in a glass capsule, drawn like the tabs under
+/// it: the chosen one lit, the highlight sliding between them. Segments a
+/// photo cannot take (AI without a model) stay visible, disabled.
+private struct SourceSegments: View {
+    let control: AdjustmentControl
+    let choose: (String) -> Void
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(control.options, id: \.id) { option in
+                let isCurrent = control.selectedOption == option.id
+                Button { choose(option.id) } label: {
+                    AdjustmentText.option(option)
+                        .font(.footnote.weight(isCurrent ? .semibold : .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .background {
+                            if isCurrent {
+                                Capsule().fill(.white.opacity(0.14)).matchedGeometryEffect(id: "segment", in: highlight)
+                            }
+                        }
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .disabled(control.disabledOptions.contains(option.id))
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .glassEffect(.regular, in: .capsule)
+        .animation(.smooth(duration: 0.25), value: control.selectedOption)
+        .sensoryFeedback(.selection, trigger: control.selectedOption)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(AdjustmentText.label(control.declaration))
+    }
+}
+
+private extension View {
+    /// Grey and out of reach while the group's switch is off.
+    func locked(_ locked: Bool) -> some View {
+        disabled(locked)
+            .allowsHitTesting(!locked)
+            .saturation(locked ? 0 : 1)
+            .opacity(locked ? 0.35 : 1)
+    }
+}
+
+/// The group's on/off switch: a glass circle with the power symbol, lit in
+/// the group's colour while on.
+private struct PowerSwitch: View {
+    let control: AdjustmentControl
+    let set: (Bool) -> Void
+
+    var body: some View {
+        Button { set(!control.isOn) } label: {
+            Image(systemName: "power")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(control.isOn ? Color.hdr.amber : Color.secondary)
+                .frame(width: 36, height: 36)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: .circle)
+        .sensoryFeedback(.impact(weight: .light), trigger: control.isOn)
+        .accessibilityLabel(AdjustmentText.label(control.declaration))
+        .accessibilityValue(Text(control.isOn ? "ios.adjust.on" : "ios.adjust.off"))
+        .accessibilityAddTraits(.isToggle)
+    }
+}
+
+/// An on/off control in the ring row: its symbol in a circle, filled while on.
+private struct SwitchRing: View {
+    let control: AdjustmentControl
+    let tint: Color
+    let set: (Bool) -> Void
+
+    var body: some View {
+        Button { set(!control.isOn) } label: {
+            VStack(spacing: 4) {
+                Image(systemName: AdjustmentSymbols.control(control.declaration))
+                    .font(.system(size: 16, weight: control.isOn ? .semibold : .regular))
+                    .foregroundStyle(control.isOn ? tint : Color.secondary)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(control.isOn ? tint.opacity(0.18) : .clear))
+                    .overlay(Circle().stroke(Color.white.opacity(0.14), lineWidth: 2))
+                AdjustmentText.label(control.declaration)
+                    .font(.system(size: 10, weight: control.isOn ? .semibold : .regular))
+                    .foregroundStyle(control.isOn ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 62)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!control.isAvailable)
+        .sensoryFeedback(.selection, trigger: control.isOn)
+        .accessibilityValue(Text(control.isOn ? "ios.adjust.on" : "ios.adjust.off"))
+        .accessibilityAddTraits(.isToggle)
+    }
+}
+
 /// How one group's controls split across the bar.
 private struct BarLayout {
     /// Numbers, each with a ring and the ruler.
@@ -294,18 +479,27 @@ private struct BarLayout {
     let leadChoice: AdjustmentControl?
     /// The LUT reference, drawn as swatches in place of the rings.
     let lut: AdjustmentControl?
-    /// Everything else, behind the options button: the header switch first.
-    let settings: [AdjustmentControl]
+    /// The group's own switch (HDR on or off), beside the source.
+    let power: AdjustmentControl?
+    /// The switch is off: the group's other controls are hidden.
+    var isSwitchedOff: Bool { power.map { !$0.isOn } ?? false }
+    /// Other on/off controls, as switches at the end of the row.
+    let switches: [AdjustmentControl]
+    /// Everything else (the AI model, the LUT's input and output), behind "More".
+    let more: [AdjustmentControl]
 
-    init(_ state: AdjustmentGroupState) {
-        rings = state.controls.filter { $0.spec != nil }
-        let others = state.controls.filter { $0.spec == nil }
+    init(_ group: DockGroup) {
+        let controls = group.states.flatMap(\.controls)
+        rings = controls.filter { $0.spec != nil }
+        let others = controls.filter { $0.spec == nil }
         let lead = others.first { $0.id == Recipe.hdrSourceID }
         let lut = others.first { $0.id == Recipe.lookID }
         leadChoice = lead
         self.lut = lut
-        settings = (state.headerToggle.map { [$0] } ?? [])
-            + others.filter { $0.id != lead?.id && $0.id != lut?.id }
+        power = group.states.lazy.compactMap(\.headerToggle).first
+        let rest = others.filter { $0.id != lead?.id && $0.id != lut?.id }
+        switches = rest.filter { $0.kind == .bool }
+        more = rest.filter { $0.kind != .bool }
     }
 }
 

@@ -157,7 +157,8 @@ and a later identical-recipe RAW comparison differed by up to 9 decoded codes.
 Its cause remains unresolved; do not claim universal pixel repeatability.
 No further optimization is scheduled. The iOS/iPadOS UI was redesigned on
 2026-10-21 (library, editor, frame, export, LUT library; see the `HyperDRiOS` row). Then: P7-3e (saving to the photo library, after the user's Photos
-Lab run on `wip/photos-lab`), the iOS background host and the hands-on checks
+Lab run using `prototypes/photos-lab/PhotosLab.xcodeproj`, merged into this
+branch), the iOS background host and the hands-on checks
 in `docs/design/user-acceptance.md`.
 `.github/workflows/ci.yml` runs only for `main`; its sanitizer job runs the
 C ABI lifecycle and package tests through `ctest`. Run the test scripts with

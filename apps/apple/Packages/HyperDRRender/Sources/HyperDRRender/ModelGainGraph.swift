@@ -14,16 +14,20 @@ extension RenderEngine {
     /// prediction through render(recipe:modelGain:). Before it arrives, aiPending is true.
     public func predictModelGain(_ source: RenderSource, provider: CoreMLModelGainProvider) async throws -> ModelGainPrediction {
         guard source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
-        let key = ModelPredictionKey(source:source.id,model:provider.modelID)
+        // Log look changes the developed texture, not the photograph the model sees.
+        let key = ModelPredictionKey(source:source.modelSourceID,model:provider.modelID)
         if let cached = modelPredictionCache[key] {
             modelPredictionOrder.removeAll { $0 == key }; modelPredictionOrder.append(key)
             return cached
         }
-        let source = try fixedAnalysisSource(source)
+        let input = try modelInputSource(source)
         let prediction: ModelGainPrediction
-        if source.domain == .sdr { prediction = try await provider.predict(source:source) }
-        else {
-            prediction = try await provider.prediction(forSDRBase:sdrBase(source),sourceID:source.id,size:source.size)
+        if input.domain == .sdr && input.id == key.source {
+            prediction = try await provider.predict(source:input)
+        } else if input.domain == .sdr {
+            prediction = try await provider.prediction(forSDRBase:input.hdrImage,sourceID:key.source,size:input.size)
+        } else {
+            prediction = try await provider.prediction(forSDRBase:sdrBase(input),sourceID:key.source,size:input.size)
         }
         try Task.checkCancellation()
         guard prediction.sourceID == key.source, prediction.modelID == key.model else { throw RenderError.invalidAdjustment }
@@ -49,12 +53,12 @@ extension RenderEngine {
     func filteredModelGain(_ source: RenderSource, edit: RenderAdjustments) throws -> (gain: any MTLTexture, peak: Float)? {
         guard (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel,
               edit.hdr.enabled, let prediction = edit.hdr.modelGain else { return nil }
-        guard prediction.sourceID == source.id, prediction.gain.pixelFormat == .r32Float else { throw RenderError.invalidAdjustment }
-        let key = ModelFilterKey(prediction:ModelPredictionKey(source:source.id,model:prediction.modelID),start:edit.hdr.expansionStart)
+        guard prediction.sourceID == source.modelSourceID, prediction.gain.pixelFormat == .r32Float else { throw RenderError.invalidAdjustment }
+        let key = ModelFilterKey(prediction:ModelPredictionKey(source:source.modelSourceID,model:prediction.modelID),start:edit.hdr.expansionStart)
         if let cache = modelFilterCache, cache.key == key { return (cache.gain,cache.peak) }
         // Guide and inference both describe the untouched photograph. Tone/LUT
         // edits cannot rerun inference or change this guided reconstruction.
-        let analysis = try self.analysis(source)
+        let analysis = try self.analysis(modelInputSource(source))
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let node = nodeContext(domain:source.domain,buffer:command)
         let w = analysis.size.width, h = analysis.size.height

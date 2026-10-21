@@ -128,10 +128,16 @@ extension RenderEngine {
 
     static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
         guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
-        // AE-2 G2: leave file baselineExposure and boostShadowAmount untouched.
-        filter.boostAmount = 1
+        // AE-2 G2: leave file baselineExposure untouched. Apple's boost is a tone
+        // curve (2026-10-22: scene 0.18 lands near 0.385, ratio ~1.29 at 0.90), so a
+        // log look develops at boost 0 and keeps that baseline. Measured on Sony,
+        // Canon and Leica: boostShadowAmount does not move pixels while boost is 0;
+        // it is still cleared so the record matches the scene-linear development.
+        filter.boostAmount = options.sceneLinear ? 0 : 1
+        if options.sceneLinear { filter.boostShadowAmount = 0 }
         filter.exposure = 0
         filter.extendedDynamicRangeAmount = 1
+        // Stays on. With it on, extendedLinearDisplayP3 has no channel below 1e-4.
         filter.isGamutMappingEnabled = true
         filter.isDraftModeEnabled = false
         let rotated = filter.orientation.rawValue >= 5

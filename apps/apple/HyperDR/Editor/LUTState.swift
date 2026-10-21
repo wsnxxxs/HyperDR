@@ -2,9 +2,32 @@ import Foundation
 import Observation
 import HyperDRKit
 
-nonisolated enum LUTColorSpace: String, CaseIterable, Sendable {
-    case srgb, p3, rec709, hlg, pq
-    case slog3SGamut3Cine = "slog3-sgamut3cine"
+/// A library LUT's input or output space: Kit's, named apart from
+/// HyperDRRender's `LUTSpace`, which most editor files also import. (This
+/// file imports Kit alone, so `LUTSpace` here is Kit's.)
+typealias LUTColorSpace = LUTSpace
+
+extension LUTSpace {
+    /// The spaces as the library's menus list them: display, HDR, then the
+    /// cameras' Log encodings, which only a RAW photo's look can take as input.
+    var family: LUTSpaceFamily {
+        switch self {
+        case .srgb, .p3, .rec709: .display
+        case .hlg, .pq: .hdr
+        default: .log
+        }
+    }
+}
+
+nonisolated enum LUTSpaceFamily: CaseIterable, Sendable {
+    case display, hdr, log
+    var titleKey: String {
+        switch self {
+        case .display: "lut.space.family.display"
+        case .hdr: "lut.space.family.hdr"
+        case .log: "lut.space.family.log"
+        }
+    }
 }
 nonisolated struct LUTItem: Identifiable, Equatable, Sendable {
     var id: String; var name: String; var input: LUTColorSpace; var output: LUTColorSpace
@@ -14,7 +37,6 @@ nonisolated struct LUTItem: Identifiable, Equatable, Sendable {
     var library: [LUTItem] = []
     var selection: LUTItem?
     var isEnabled = true
-    var spaceIssueKey: String?
     var isBusy = false
     var importBlocker: String? { importBlockerKey }
     var importBlockerKey: String?

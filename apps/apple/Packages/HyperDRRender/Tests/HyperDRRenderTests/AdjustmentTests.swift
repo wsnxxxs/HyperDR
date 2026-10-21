@@ -38,6 +38,20 @@ private func cube(swap: Bool = false) -> String {
     }}}
     return text
 }
+/// Identity over codes in [-2, 2], so a negative log toe is not clamped.
+private func wideIdentity() -> String {
+    var text = "LUT_3D_SIZE 2\nDOMAIN_MIN -2 -2 -2\nDOMAIN_MAX 2 2 2\n"
+    for b in [-2, 2] { for g in [-2, 2] { for r in [-2, 2] { text += "\(r) \(g) \(b)\n" } } }
+    return text
+}
+/// Halves every code. Fitted and unfitted encodings therefore leave the LUT apart.
+private func wideHalf() -> String {
+    var text = "LUT_3D_SIZE 2\nDOMAIN_MIN -2 -2 -2\nDOMAIN_MAX 2 2 2\n"
+    for b in [-2.0, 2.0] { for g in [-2.0, 2.0] { for r in [-2.0, 2.0] {
+        text += "\(r * 0.5) \(g * 0.5) \(b * 0.5)\n"
+    } } }
+    return text
+}
 
 @Suite(.serialized) struct AdjustmentTests {
     @Test func sdrExposureContractAndDefaultIdentity() async throws {
@@ -85,7 +99,7 @@ private func cube(swap: Bool = false) -> String {
         let raw = try await engine.source(image:image,domain:.rawEDR)
         // One pixel/LUT/strength; use RAW only when S-Log3 input requires it.
         for input in Adjustments.declaration("look.input")!.options {
-            let source = input.id == "slog3-sgamut3cine" ? raw : sdr
+            let source = input.domains.contains(.sdr) ? sdr : raw
             for output in Adjustments.declaration("look.output")!.options {
                 let recipe = Recipe(inputDomain:source.domain,look:LUTReference(contentHash:lut.contentHash,name:"Identity"),values:[
                     "look.input":.string(input.id),"look.output":.string(output.id),"hdr.range":.number(4),"hdr.coverage":.number(0)])
@@ -408,6 +422,82 @@ private func cube(swap: Bool = false) -> String {
         let displayMilliseconds = Double(DispatchTime.now().uptimeNanoseconds-displayStart)/1e6
         print("P7-2b normalize 2560x1707 ms=\(displayMilliseconds)")
         print("P7-1a cached 2560x1707 median_ms=\(timings.sorted()[1]) min_ms=\(timings.min()!) max_ms=\(timings.max()!) analysis_ms=\(analysisMilliseconds)")
+    }
+
+    @Test func logCurvesMatchWhitePaperAndRoundTrip() {
+        let spaces: [(LUTSpace, Double, Double)] = [
+            (.sLog3, 420.0/1023, 95.0/1023),
+            (.slog3SGamut3, 420.0/1023, 95.0/1023),
+            (.vlogVGamut, 0.4233114488, 0.125),
+            (.flog2FGamut, 0.3910072419, 0.092864),
+            (.logC3AWG3, 0.3910068320, 0.092809),
+            (.logC4AWG4, 0.2783958365, 95.0/1023),
+            (.clog3CinemaGamut, 0.3433893704, 0.12512219)]
+        let samples = [-0.2, -0.02, 0, 0.001, 0.01125, 0.05, 0.18, 0.9, 1, 4]
+        let color = SIMD3<Double>(-0.15, 0.4, 1.1)
+        for (space, gray, black) in spaces {
+            let encodedGray = DoubleReference.encodeLUT(SIMD3(repeating: 0.18), space: space).x
+            let encodedBlack = DoubleReference.encodeLUT(.zero, space: space).x
+            #expect(abs(encodedGray - gray) < 1e-6, "space \(space.rawValue) 18%")
+            #expect(abs(encodedBlack - black) < 1e-6, "space \(space.rawValue) black")
+            for sample in samples {
+                let back = DoubleReference.decodeLUT(DoubleReference.encodeLUT(SIMD3(repeating: sample), space: space), space: space)
+                #expect(back.x.isFinite && abs(back.x - sample) < 1e-5, "space \(space.rawValue) \(sample)")
+            }
+            let back = DoubleReference.decodeLUT(DoubleReference.encodeLUT(color, space: space), space: space)
+            #expect(back.x.isFinite && back.y.isFinite && back.z.isFinite)
+            for c in 0..<3 { #expect(abs(back[c] - color[c]) < 1e-4, "space \(space.rawValue) chromatic") }
+        }
+        // S-Log3 and S-Gamut3 share the curve; only the primaries differ, and neutrals are preserved.
+        let cine = DoubleReference.encodeLUT(SIMD3(0.2, 0.5, 0.1), space: .sLog3)
+        let gamut = DoubleReference.encodeLUT(SIMD3(0.2, 0.5, 0.1), space: .slog3SGamut3)
+        #expect(cine != gamut)
+    }
+
+    @Test func logInputSkipsP3FitUntilAfterTheMix() async throws {
+        let names = ["srgb","p3","rec709","hlg","pq","slog3-sgamut3cine","slog3-sgamut3","vlog-vgamut","flog2-fgamut","logc3-awg3","logc4-awg4","clog3-cinemagamut"]
+        let lut = try ColorLUT(cube: cube())
+        for (index, name) in names.enumerated() {
+            let domain: InputDomain = index >= 5 ? .rawEDR : .sdr
+            let recipe = Recipe(inputDomain: domain, look: LUTReference(contentHash: lut.contentHash, name: "Identity"), values: [
+                "look.input": .string(name), "look.output": .string(name)])
+            let edit = try RenderAdjustments(recipe: recipe, lut: lut)
+            #expect(edit.look.input.rawValue == UInt32(index) && edit.look.input.isLog == (index >= 5))
+        }
+        #expect(throws: RenderError.self) {
+            _ = try RenderAdjustments(recipe: Recipe(inputDomain: .sdr, look: LUTReference(contentHash: lut.contentHash, name: "Identity"), values: [
+                "look.input": .string("flog2-fgamut"), "look.output": .string("srgb")]), lut: lut)
+        }
+
+        let outside = SIMD3<Double>(-0.3, 0.25, 1.4)
+        let inside = SIMD3<Double>(0.2, 0.45, 0.7)
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap([outside, inside], width: 2, height: 1), domain: .rawEDR)
+        let identity = try ColorLUT(cube: wideIdentity())
+        let half = try ColorLUT(cube: wideHalf())
+        let spaces: [LUTSpace] = [.sLog3, .slog3SGamut3, .vlogVGamut, .flog2FGamut, .logC3AWG3, .logC4AWG4, .clog3CinemaGamut]
+        for space in spaces {
+            var edit = RenderAdjustments()
+            edit.look.lut = half
+            edit.look.input = space
+            edit.look.output = space
+            edit.look.strength = 1
+            let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+            compare(pixels, [outside, inside].map { DoubleReference.prepare($0, settings: edit, sdr: false) })
+            #expect(pixels.baseRGBA.allSatisfy { $0 >= -1e-4 }, "space \(space.rawValue) output stays non-negative")
+            let fitted = DoubleReference.fitP3(outside, upper: max(1, outside.x, outside.y, outside.z))
+            let skipped = DoubleReference.prepare(outside, settings: edit, sdr: false)
+            let crushed = DoubleReference.prepare(fitted, settings: edit, sdr: false)
+            let skippedHDR = skipped.base * exp2(skipped.gain)
+            let crushedHDR = crushed.base * exp2(crushed.gain)
+            #expect((0..<3).contains { abs(skippedHDR[$0] - crushedHDR[$0]) > 0.01 }, "space \(space.rawValue) log input kept the unfitted pixel")
+
+            edit.look.lut = identity
+            edit.look.strength = 1
+            let round = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+            compare(round, [outside, inside].map { DoubleReference.prepare($0, settings: edit, sdr: false) })
+            #expect(round.baseRGBA.allSatisfy { $0 >= -1e-4 })
+        }
     }
 }
 private final class StripeCollector: @unchecked Sendable {

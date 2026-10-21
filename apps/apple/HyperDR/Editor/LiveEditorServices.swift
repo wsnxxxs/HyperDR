@@ -419,8 +419,7 @@ extension LiveEditorServices {
     }
     private func item(_ entry: LUTEntry) -> LUTItem {
         LUTItem(id: entry.id.rawValue, name: entry.name,
-            input: LUTColorSpace(rawValue: entry.input.rawValue) ?? .srgb,
-            output: LUTColorSpace(rawValue: entry.output.rawValue) ?? .srgb, byteCount: entry.byteCount)
+            input: entry.input, output: entry.output, byteCount: entry.byteCount)
     }
     func lutEntries() async -> [LUTItem] {
         guard let kit = try? await requireKit() else { return [] }
@@ -436,7 +435,7 @@ extension LiveEditorServices {
         return item(try await requireKit().luts.apply(LUTID(rawValue: id), to: session))
     }
     func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem {
-        item(try await requireKit().luts.update(LUTID(rawValue: id), input: LUTSpace(rawValue: input.rawValue)!, output: LUTSpace(rawValue: output.rawValue)!))
+        item(try await requireKit().luts.update(LUTID(rawValue: id), input: input, output: output))
     }
     func removeLUT(_ id: String) async throws { try await requireKit().luts.remove(LUTID(rawValue: id)) }
     func recipeLUT(_ photo: EditorPhoto, contentHash: String) async throws -> ColorLUT {

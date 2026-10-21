@@ -1,8 +1,11 @@
 import Foundation
 import CryptoKit
 
+/// Append-only. The raw value is the shader space index; log spaces start at `sLog3`.
 public enum LUTSpace: UInt32, Hashable, Sendable {
     case sRGB, displayP3, rec709, hlg, pq, sLog3
+    case slog3SGamut3, vlogVGamut, flog2FGamut, logC3AWG3, logC4AWG4, clog3CinemaGamut
+    public var isLog: Bool { rawValue >= LUTSpace.sLog3.rawValue }
     public var isSDR: Bool { rawValue <= LUTSpace.rec709.rawValue }
 }
 

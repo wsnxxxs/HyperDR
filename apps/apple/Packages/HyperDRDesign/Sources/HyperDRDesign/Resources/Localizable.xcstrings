@@ -1062,11 +1062,39 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扩展" } }
       }
     },
+    "look.input.clog3-cinemagamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } }
+      }
+    },
+    "look.input.flog2-fgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } }
+      }
+    },
     "look.input.hlg" : {
       "comment" : "LUT colour space option (look.input).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } }
+      }
+    },
+    "look.input.logc3-awg3" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } }
+      }
+    },
+    "look.input.logc4-awg4" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } }
       }
     },
     "look.input.p3" : {
@@ -1090,6 +1118,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } }
       }
     },
+    "look.input.slog3-sgamut3" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } }
+      }
+    },
     "look.input.slog3-sgamut3cine" : {
       "comment" : "LUT colour space option (look.input).",
       "localizations" : {
@@ -1104,6 +1139,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } }
       }
     },
+    "look.input.vlog-vgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } }
+      }
+    },
     "look.lut.none" : {
       "comment" : "LUT menu and swatch: no LUT.",
       "localizations" : {
@@ -1111,11 +1153,39 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
       }
     },
+    "look.output.clog3-cinemagamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } }
+      }
+    },
+    "look.output.flog2-fgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } }
+      }
+    },
     "look.output.hlg" : {
       "comment" : "LUT colour space option (look.output).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } }
+      }
+    },
+    "look.output.logc3-awg3" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } }
+      }
+    },
+    "look.output.logc4-awg4" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } }
       }
     },
     "look.output.p3" : {
@@ -1139,6 +1209,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } }
       }
     },
+    "look.output.slog3-sgamut3" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } }
+      }
+    },
     "look.output.slog3-sgamut3cine" : {
       "comment" : "LUT colour space option (look.output).",
       "localizations" : {
@@ -1151,6 +1228,34 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } }
+      }
+    },
+    "look.output.vlog-vgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } }
+      }
+    },
+    "look.space.display" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示" } }
+      }
+    },
+    "look.space.hdr" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } }
+      }
+    },
+    "look.space.log" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Camera Log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "相机 Log" } }
       }
     },
     "undo.color.saturation" : {

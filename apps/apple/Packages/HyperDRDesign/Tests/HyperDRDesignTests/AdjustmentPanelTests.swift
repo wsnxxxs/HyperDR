@@ -121,6 +121,55 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(AdjustmentText.summary(panel.group(group: .look, in: recipe)!, locale: english) == "Kodak 2383")
     let input = panel.control("look.input", in: recipe)
     #expect(input?.options.contains { $0.id == "slog3-sgamut3cine" } == false, "S-Log3 input is RAW only")
+    #expect(input?.options.contains { AdjustmentText.LookSpaceFamily($0.id) == .log } == false, "Log input is RAW only")
+}
+
+@Test func choosingALUTStartsItsSpacesFromTheLibrary() {
+    let panel = AdjustmentPanel(context: AdjustmentContext(
+        luts: [LUTReference(contentHash: "sha256:01", name: "Kodak 2383"),
+               LUTReference(contentHash: "sha256:02", name: "Venice"),
+               LUTReference(contentHash: "sha256:03", name: "Unrecorded")],
+        lookSpaces: ["sha256:01": AdjustmentLookSpaces(input: "p3", output: "hlg"),
+                     "sha256:02": AdjustmentLookSpaces(input: "slog3-sgamut3", output: "rec709")]))
+
+    var sdr = Recipe(inputDomain: .sdr)
+    panel.set("look.lut", reference: "sha256:01", in: &sdr)
+    #expect(sdr.conditionValue("look.input") == .string("p3"))
+    #expect(sdr.conditionValue("look.output") == .string("hlg"))
+
+    // A Log input is RAW only: outside RAW the input goes back to its default,
+    // and the output is still the library's.
+    panel.set("look.lut", reference: "sha256:02", in: &sdr)
+    #expect(sdr.look?.name == "Venice")
+    #expect(sdr.value(for: "look.input") == nil && sdr.conditionValue("look.input") == .string("srgb"))
+    #expect(sdr.conditionValue("look.output") == .string("rec709"))
+
+    var raw = Recipe(inputDomain: .rawEDR)
+    panel.set("look.lut", reference: "sha256:02", in: &raw)
+    #expect(raw.conditionValue("look.input") == .string("slog3-sgamut3"))
+
+    // A LUT the library records no spaces for, and removing the LUT, leave them alone.
+    panel.set("look.lut", reference: "sha256:03", in: &raw)
+    #expect(raw.look?.name == "Unrecorded" && raw.conditionValue("look.input") == .string("slog3-sgamut3"))
+    panel.set("look.lut", reference: nil, in: &raw)
+    #expect(raw.look == nil && raw.conditionValue("look.output") == .string("rec709"))
+}
+
+@Test func lutSpaceMenusGroupDisplayHDRAndLog() {
+    var raw = Recipe(inputDomain: .rawEDR)
+    panel.set("look.lut", reference: "sha256:01", in: &raw)
+    let input = panel.control("look.input", in: raw)!
+    let sections = AdjustmentText.optionSections(input)
+    #expect(sections.map(\.family) == [.display, .hdr, .log])
+    #expect(sections[0].options.map(\.id) == ["srgb", "p3", "rec709"])
+    #expect(sections[1].options.map(\.id) == ["hlg", "pq"])
+    #expect(sections.flatMap(\.options).count == input.options.count)
+    // Outside RAW the input has no Log section; the output keeps all three.
+    var sdr = Recipe(inputDomain: .sdr)
+    panel.set("look.lut", reference: "sha256:01", in: &sdr)
+    #expect(AdjustmentText.optionSections(panel.control("look.input", in: sdr)!).map(\.family) == [.display, .hdr])
+    #expect(AdjustmentText.optionSections(panel.control("look.output", in: sdr)!).map(\.family) == [.display, .hdr, .log])
+    #expect(AdjustmentText.optionSections(panel.control("hdr.source", in: sdr)!).map(\.family) == [nil])
 }
 
 // MARK: Edits and reset
@@ -236,7 +285,8 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 @Test func everyDeclaredKeyIsInTheCatalogueInBothLanguages() {
     let keys = AdjustmentText.declaredKeys
-    #expect(keys.count == Adjustments.all.count * 3 + 6 + 12 + 5)
+    // `12 * 2`: the twelve LUT spaces, for look.input and look.output.
+    #expect(keys.count == Adjustments.all.count * 3 + 6 + 12 * 2 + 5)
     for locale in [english, Locale(identifier: "zh-Hans")] {
         for key in keys.sorted() {
             #expect(DesignStrings.string(key, locale: locale) != key, "\(key) missing in \(locale.identifier)")

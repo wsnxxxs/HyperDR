@@ -99,6 +99,49 @@ public enum AdjustmentText {
         }
     }
 
+    /// A menu's options under headings. The LUT spaces (`look.input`,
+    /// `look.output`) read as display, HDR and camera Log spaces; any other
+    /// choice is one section without a heading.
+    public struct OptionSection: Identifiable, Sendable {
+        /// Nil for a choice that is not divided.
+        public let family: LookSpaceFamily?
+        public let options: [ParameterOption]
+        public var id: String { family?.rawValue ?? "all" }
+    }
+
+    public static func optionSections(_ control: AdjustmentControl) -> [OptionSection] {
+        guard control.group == .look, control.kind == .choice else {
+            return [OptionSection(family: nil, options: control.options)]
+        }
+        return LookSpaceFamily.allCases.compactMap { family in
+            let options = control.options.filter { LookSpaceFamily($0.id) == family }
+            return options.isEmpty ? nil : OptionSection(family: family, options: options)
+        }
+    }
+
+    /// The kinds of LUT space, in menu order.
+    public enum LookSpaceFamily: String, CaseIterable, Sendable {
+        case display, hdr, log
+
+        /// Every space that is neither a display nor an HDR encoding is a
+        /// camera's Log encoding.
+        public init(_ id: String) {
+            switch id {
+            case "srgb", "p3", "rec709": self = .display
+            case "hlg", "pq": self = .hdr
+            default: self = .log
+            }
+        }
+
+        public var title: Text {
+            switch self {
+            case .display: return Text("look.space.display", bundle: .module)
+            case .hdr: return Text("look.space.hdr", bundle: .module)
+            case .log: return Text("look.space.log", bundle: .module)
+            }
+        }
+    }
+
     /// Every key the declarations produce: what the catalogue must hold.
     /// Group keys for groups with no parameter (the reserved local group) are left out.
     public static var declaredKeys: Set<String> {

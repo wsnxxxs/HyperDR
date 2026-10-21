@@ -75,12 +75,18 @@ public struct Recipe: Equatable, Sendable {
     // MARK: - Values
 
     /// A different photo replaces the source; the HDR source falls back to the new
-    /// domain's default when it no longer applies. Stored values are kept: a value
-    /// that does not apply to the new domain is simply not visible.
+    /// domain's default when it no longer applies. A camera Log look input falls
+    /// back to the declaration's default outside RAW. Other stored values are
+    /// kept: a value that does not apply to the new domain is simply not visible.
     public mutating func setInputDomain(_ domain: InputDomain) {
         inputDomain = domain
         if !hdrSource.domains.contains(domain) {
             hdrSource = HDRSource.defaultSource(for: domain)
+        }
+        if let input = values["look.input"]?.stringValue,
+           let option = Adjustments.declaration("look.input")?.options.first(where: { $0.id == input }),
+           !option.domains.contains(domain) {
+            setValue(nil, for: "look.input")
         }
     }
 

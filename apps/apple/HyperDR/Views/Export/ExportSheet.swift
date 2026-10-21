@@ -290,7 +290,7 @@ private struct ExportSummaryColumn: View {
             VStack(alignment: .leading, spacing: Space.s2) {
                 FactRow(label: Text("export.summary.processing"), value: processing)
                 FactRow(label: Text("export.color"), value: Text(LocalizedStringKey(model.export.gamut.labelKey)))
-                FactRow(label: Text("export.summary.lut"), value: lut, tone: model.lut.spaceIssueKey != nil && model.lut.selection != nil ? .warn : .normal)
+                FactRow(label: Text("export.summary.lut"), value: lut)
                 frameRow
             }
             Spacer(minLength: 0)
@@ -331,7 +331,7 @@ private struct ExportSummaryColumn: View {
 
     private var lut: Text {
         guard let selection = model.lut.selection else { return Text("export.summary.none") }
-        if model.lut.spaceIssueKey != nil || !model.lut.isEnabled {
+        if !model.lut.isEnabled {
             return Text("export.summary.lutInactive \(selection.name)")
         }
         return Text(verbatim: selection.name)

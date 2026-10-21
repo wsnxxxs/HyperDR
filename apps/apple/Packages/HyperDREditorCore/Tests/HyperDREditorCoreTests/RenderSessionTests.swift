@@ -170,6 +170,34 @@ import UniformTypeIdentifiers
         #expect(back.modelGainPending == false)
     }
 
+    /// Log look redevelops scene-linear, but AI stays on the Apple-boost photograph.
+    @Test func logLookReusesThePrediction() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
+            .appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")
+        try #require(FileManager.default.fileExists(atPath: url.path), "Run scripts/fetch_test_fixtures.py")
+        let session = try RenderSession()
+        let size = PixelSize(width: 64, height: 64)
+        let source = try await session.open(url, previewSize: size)
+        var recipe = Recipe(inputDomain: source.domain)
+        recipe.setHDRSource(.capturedAI)
+        func render(_ recipe: Recipe) async throws -> EditorFrame {
+            var request = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size)
+            request.usesModelGain = true
+            return try await session.render(request)
+        }
+        try await session.predictModelGain(try await render(recipe).request)
+        let apple = try await render(recipe)
+        #expect(apple.modelGainPending == false)
+        let lut = try ColorLUT(cube: "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
+        await session.installLUT(lut)
+        var log = recipe
+        log.look = LUTReference(contentHash: lut.contentHash, name: "Identity")
+        log.setValue(.string("slog3-sgamut3cine"), for: "look.input")
+        log.setValue(.string("rec709"), for: "look.output")
+        #expect(try await render(log).modelGainPending == false)
+    }
+
     /// R23-001: a file replaced after opening is refused as `sourceChanged`.
     @Test func aReplacedFileIsReportedAsChanged() async throws {
         let session = try RenderSession()

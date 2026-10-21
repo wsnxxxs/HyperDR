@@ -154,7 +154,7 @@ private struct Adjustments: View {
                 automaticValues: editor.automaticValues,
                 capabilities: editor.source?.capabilities ?? [],
                 unavailableOptions: editor.unavailableOptions,
-                luts: model.lutChoices)),
+                luts: model.lutChoices, lookSpaces: model.lutSpaces)),
             style: .pointer,
             onEditingChanged: { editor.editingChanged($0, $1) },
             onReset: { reset in

@@ -725,6 +725,7 @@ import Observation
     /// The prediction a recipe needs: by photo, model and the development the
     /// renderer predicts on (a new RAW development is a new source for
     /// Render, so its prediction is a new one; preview and full size share it).
+    /// Log look is not in `development`: AI stays on the Apple-boost photograph.
     private func modelKey(_ recipe: Recipe, bypassed: Set<ParameterGroup>) -> ModelKey? {
         guard wantsModel(recipe), let source else { return nil }
         return ModelKey(source: source.id, model: modelID(recipe), development: recipe.development, bypassed: bypassed)

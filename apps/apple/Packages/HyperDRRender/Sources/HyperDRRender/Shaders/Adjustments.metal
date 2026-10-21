@@ -68,10 +68,72 @@ float3 p3to2020(float3 x) { return float3(dot(x,float3(.753833f,.198597f,.047570
 float3 toP3from2020(float3 x) { return float3(dot(x,float3(1.3435783f,-.2821797f,-.0613986f)),dot(x,float3(-.0652975f,1.0757879f,-.0104905f)),dot(x,float3(.0028218f,-.0195985f,1.0167767f))); }
 float3 p3toCine(float3 x) { return float3(dot(x,float3(.77815155f,.11728624f,.10456221f)),dot(x,float3(.07226832f,.75994794f,.16778375f)),dot(x,float3(.02346043f,.06084114f,.91569844f))); }
 float3 cineToP3(float3 x) { return float3(dot(x,float3(1.30640907f,-.19250497f,-.11390411f)),dot(x,float3(-.11858463f,1.35294405f,-.23435942f)),dot(x,float3(-.02559149f,-.08496073f,1.11055222f))); }
+// Same 8-decimal NPM as the Swift reference. Space 5 is S-Gamut3.Cine; 6 S-Gamut3;
+// 7 V-Gamut; 8 F-Gamut (Rec.2020); 9 AWG3; 10 AWG4; 11 Cinema Gamut.
+float3 p3toSG3(float3 x) { return float3(dot(x,float3(.67716998f,.22268083f,.10014919f)),dot(x,float3(.05823254f,.80559897f,.13616849f)),dot(x,float3(.00574488f,.03981469f,.95444043f))); }
+float3 sg3ToP3(float3 x) { return float3(dot(x,float3(1.51312381f,-.41331979f,-.09980402f)),dot(x,float3(-.10860213f,1.27979248f,-.17119035f)),dot(x,float3(-.00457729f,-.05089900f,1.05547629f))); }
+float3 p3toVG(float3 x) { return float3(dot(x,float3(.70145111f,.19732955f,.10121935f)),dot(x,float3(.05979648f,.82841649f,.11178703f)),dot(x,float3(.00617097f,.04603128f,.94779775f))); }
+float3 vgToP3(float3 x) { return float3(dot(x,float3(1.45564245f,-.34032783f,-.11531462f)),dot(x,float3(-.10447649f,1.23951197f,-.13503547f)),dot(x,float3(-.00440341f,-.05798302f,1.06238642f))); }
+float3 p3toFGamut(float3 x) { return float3(dot(x,float3(.75383303f,.19859737f,.04756960f)),dot(x,float3(.04574385f,.94177722f,.01247893f)),dot(x,float3(-.00121034f,.01760172f,.98360862f))); }
+float3 fgamutToP3(float3 x) { return float3(dot(x,float3(1.34357825f,-.28217967f,-.06139858f)),dot(x,float3(-.06529745f,1.07578792f,-.01049046f)),dot(x,float3(.00282179f,-.01959849f,1.01677671f))); }
+float3 p3toAWG3(float3 x) { return float3(dot(x,float3(.76001934f,.13248356f,.10749710f)),dot(x,float3(.00840830f,.80472802f,.18686368f)),dot(x,float3(-.00135534f,.08556969f,.91578565f))); }
+float3 awg3ToP3(float3 x) { return float3(dot(x,float3(1.31782216f,-.20495324f,-.11286893f)),dot(x,float3(-.01453774f,1.27247685f,-.25793911f)),dot(x,float3(.00330873f,-.11920173f,1.11589300f))); }
+float3 p3toAWG4(float3 x) { return float3(dot(x,float3(.67695999f,.21998630f,.10305371f)),dot(x,float3(.07251887f,.81542700f,.11205413f)),dot(x,float3(0.f,.04142423f,.95857577f))); }
+float3 awg4ToP3(float3 x) { return float3(dot(x,float3(1.52050240f,-.40429866f,-.11620373f)),dot(x,float3(-.13603158f,1.26984798f,-.13381640f)),dot(x,float3(.00587852f,-.05487566f,1.04899714f))); }
+float3 p3toCinema(float3 x) { return float3(dot(x,float3(.66516377f,.20889950f,.12593674f)),dot(x,float3(.06595013f,.75819764f,.17585223f)),dot(x,float3(.01650097f,.16958652f,.81391252f))); }
+float3 cinemaToP3(float3 x) { return float3(dot(x,float3(1.54602980f,-.39137139f,-.15465841f)),dot(x,float3(-.13366788f,1.41972914f,-.28606126f)),dot(x,float3(-.00349265f,-.28787973f,1.29137238f))); }
+float3 toLogPrimaries(float3 x,uint space) {
+    if(space==5) return p3toCine(x);
+    if(space==6) return p3toSG3(x);
+    if(space==7) return p3toVG(x);
+    if(space==8) return p3toFGamut(x);
+    if(space==9) return p3toAWG3(x);
+    if(space==10) return p3toAWG4(x);
+    return p3toCinema(x);
+}
+float3 fromLogPrimaries(float3 x,uint space) {
+    if(space==5) return cineToP3(x);
+    if(space==6) return sg3ToP3(x);
+    if(space==7) return vgToP3(x);
+    if(space==8) return fgamutToP3(x);
+    if(space==9) return awg3ToP3(x);
+    if(space==10) return awg4ToP3(x);
+    return cinemaToP3(x);
+}
 float pqEncode(float x) { float z=pow(clamp(x*.0203f,0.f,1.f),2610.f/16384); return pow((3424.f/4096+2413.f/128*z)/(1+2392.f/128*z),2523.f/32); }
 float pqDecode(float x) { float z=pow(clamp(x,0.f,1.f),32.f/2523); return pow(max(z-3424.f/4096,0.f)/max(2413.f/128-2392.f/128*z,1e-6f),16384.f/2610)/.0203f; }
+// Below each knee, including negatives, the white-paper linear segment is used.
+float logEncode(float v,uint space) {
+    if(space<=6) return v>=.01125f ? (420+261.5f*log10((v+.01f)/.19f))/1023 : (v*(171.2102946929f-95)/.01125f+95)/1023;
+    if(space==7) return v<.01f ? 5.6f*v+.125f : .241514f*log10(v+.00873f)+.598206f;
+    if(space==8) return v<.000889f ? 8.799461f*v+.092864f : .245281f*log10(5.555556f*v+.064829f)+.384316f;
+    if(space==9) return v>.010591f ? .247190f*log10(5.555556f*v+.052272f)+.385537f : 5.367655f*v+.092809f;
+    if(space==10) {
+        float a=2231.826309067688f,b=.9071358748778103f,c=.09286412512218964f,s=.1135972086105891f,t=-.01805699611991131f;
+        return v>=t ? (log2(a*v+64.f)-6.f)/14.f*b+c : (v-t)/s;
+    }
+    float x=v/.9f;
+    if(x<-.014f) return -.36726845f*log10(-x*14.98325f+1.f)+.12783901f;
+    if(x<=.014f) return 1.9754798f*x+.12512219f;
+    return .36726845f*log10(x*14.98325f+1.f)+.12240537f;
+}
+float logDecode(float v,uint space) {
+    if(space<=6) return v>=171.2102946929f/1023 ? pow(10.f,(v*1023-420)/261.5f)*.19f-.01f : (v*1023-95)*.01125f/(171.2102946929f-95);
+    if(space==7) return v<.181f ? (v-.125f)/5.6f : pow(10.f,(v-.598206f)/.241514f)-.00873f;
+    if(space==8) return v<.100686685370811f ? (v-.092864f)/8.799461f : (pow(10.f,(v-.384316f)/.245281f)-.064829f)/5.555556f;
+    if(space==9) { float knee=5.367655f*.010591f+.092809f; return v>knee ? (pow(10.f,(v-.385537f)/.247190f)-.052272f)/5.555556f : (v-.092809f)/5.367655f; }
+    if(space==10) {
+        float a=2231.826309067688f,b=.9071358748778103f,c=.09286412512218964f,s=.1135972086105891f,t=-.01805699611991131f;
+        return v>=0.f ? (pow(2.f,14.f*((v-c)/b)+6.f)-64.f)/a : v*s+t;
+    }
+    float x;
+    if(v<.097465473f) x=-(pow(10.f,(.12783901f-v)/.36726845f)-1.f)/14.98325f;
+    else if(v<=.15277891f) x=(v-.12512219f)/1.9754798f;
+    else x=(pow(10.f,(v-.12240537f)/.36726845f)-1.f)/14.98325f;
+    return x*.9f;
+}
 float3 lutEncode(float3 x,uint space) {
-    if (space == 5) x=p3toCine(x);
+    if (space >= 5) x=toLogPrimaries(x,space);
     else if (space == 3 || space == 4) x=p3to2020(x);
     else if (space != 1) {
         // Fit the 709 cube at constant luminance before applying its matrix.
@@ -91,7 +153,7 @@ float3 lutEncode(float3 x,uint space) {
     }
     for(uint c=0;c<3;c++) {
         float v=x[c];
-        if(space==5) x[c]=v>=.01125f ? (420+261.5f*log10((v+.01f)/.19f))/1023 : (v*(171.2102946929f-95)/.01125f+95)/1023;
+        if(space>=5) x[c]=logEncode(v,space);
         else if(space==4) x[c]=pqEncode(v);
         else if(space==2) x[c]=pow(max(v,0.f),1.f/2.4f);
         else x[c]=v<=.0031308f ? 12.92f*v : 1.055f*pow(v,1.f/2.4f)-.055f;
@@ -104,12 +166,12 @@ float3 lutDecode(float3 x,uint space) {
         x*=pow(abs(dot(x,float3(.2627f,.6780f,.0593f))),.2f)/.203f;
     } else for(uint c=0;c<3;c++) {
         float v=x[c];
-        if(space==5) x[c]=v>=171.2102946929f/1023 ? pow(10.f,(v*1023-420)/261.5f)*.19f-.01f : (v*1023-95)*.01125f/(171.2102946929f-95);
+        if(space>=5) x[c]=logDecode(v,space);
         else if(space==4) x[c]=pqDecode(v);
         else if(space==2) x[c]=pow(max(v,0.f),2.4f);
         else x[c]=v<=.04045f ? v/12.92f : pow((v+.055f)/1.055f,2.4f);
     }
-    if(space==5) return cineToP3(x);
+    if(space>=5) return fromLogPrimaries(x,space);
     if(space==3 || space==4) return toP3from2020(x);
     if(space!=1) return toP3from709(x);
     return x;
@@ -135,8 +197,12 @@ WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,ac
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,4,p.tone1.x,false);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
-    rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
+    // Log input keeps out-of-P3 negatives through the primary matrix. Fit after the
+    // strength mix so the gain split never sees a negative component.
+    bool logLook=p.flags.z && p.lutInfo.z>=5;
+    if(!logLook) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
+    if(logLook) rgb=fit(rgb,max(1.f,maximum(rgb)));
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
     if(p.flags.y) {

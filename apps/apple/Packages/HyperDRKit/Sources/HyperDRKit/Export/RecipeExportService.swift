@@ -168,7 +168,7 @@ public actor RecipeExportService: RecipeExportServicing {
                     }
                     model = try await renderEngine.predictModelGain(source, provider: provider)
                 }
-                guard !identity.isEmpty, model?.sourceID == source.id, model?.modelID == identity,
+                guard !identity.isEmpty, model?.sourceID == source.modelSourceID, model?.modelID == identity,
                       snapshot.expectedModelIdentity == nil || snapshot.expectedModelIdentity == identity else {
                     throw RecipeExportError.missingModel
                 }

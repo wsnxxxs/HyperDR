@@ -134,6 +134,15 @@ ROI rows and calls the synchronous package row reader. The engine contains
 writers, image/container readers, VideoToolbox codecs, bounded verification,
 capability probing and frame layout; it has no CLI or image-processing graph.
 InputFormats owns the input vocabulary; HyperDRRecipe owns adjustment declarations.
+LUT looks: Kit's library records each LUT's input and output space, and choosing a
+LUT writes them into `look.input` / `look.output` in the same undo step (a space the
+photo's domain does not allow falls back to the declared default). Log spaces
+(S-Log3 with S-Gamut3.Cine or S-Gamut3, V-Log, F-Log2, LogC3 EI800, LogC4, Canon
+Log 3) are RAW-only inputs; they enter the LUT without the P3 fit, and an active
+Log-input look develops the RAW scene-linear (`SourceOptions.sceneLinear`: boost 0,
+the file's baseline exposure kept) so 18% grey lands on the curve's middle grey.
+AI gain always infers from the Apple-boost development (`RenderSource.modelSourceID`),
+so a Log look does not change it.
 CustomExportFormat / ExportEncoding own export choices. E-07 (fast HEIC export)
 is removed; HEVC uses the calibrated quality route (tests/quality).
 

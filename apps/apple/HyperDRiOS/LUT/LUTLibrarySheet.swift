@@ -1,5 +1,6 @@
 import HyperDRDesign
 import HyperDRKit
+import HyperDRRecipe
 import SwiftUI
 
 /// The LUT library (F8) as a sheet from the editor: the list in its own
@@ -61,6 +62,9 @@ struct LUTLibraryList: View {
                                 Text(verbatim: entry.name)
                                 Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file))
                                     .font(.caption).foregroundStyle(.secondary)
+                                LUTSpacesMenu(entry: entry,
+                                              setInput: { library.update(entry.id, input: $0) },
+                                              setOutput: { library.update(entry.id, output: $0) })
                             }
                             Spacer(minLength: 0)
                             if editor.recipe.activeLook?.contentHash == entry.contentHash {
@@ -102,6 +106,58 @@ struct LUTLibraryList: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task { await library.importLUTs(urls, into: editor) }
+        }
+    }
+}
+
+/// A library LUT's input and output spaces, as a menu under its name. They
+/// are where the look's own spaces start when the LUT is chosen; a camera Log
+/// input only takes effect on a RAW photo (elsewhere the look's input stays
+/// at its default). Names are the look group's (`look.input`, `look.output`).
+private struct LUTSpacesMenu: View {
+    let entry: LUTEntry
+    /// Each side is set alone; the library keeps the other as it is now.
+    let setInput: (LUTSpace) -> Void
+    let setOutput: (LUTSpace) -> Void
+
+    var body: some View {
+        Menu {
+            picker("look.input", selection: entry.input, choose: setInput)
+            picker("look.output", selection: entry.output, choose: setOutput)
+        } label: {
+            HStack(spacing: 4) {
+                name("look.input", entry.input)
+                Image(systemName: "arrow.right").imageScale(.small)
+                name("look.output", entry.output)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func option(_ id: String, _ space: LUTSpace) -> ParameterOption? {
+        HyperDRRecipe.Adjustments.declaration(id)?.options.first { $0.id == space.rawValue }
+    }
+
+    private func name(_ id: String, _ space: LUTSpace) -> Text {
+        option(id, space).map(AdjustmentText.option) ?? Text(verbatim: space.rawValue)
+    }
+
+    @ViewBuilder private func picker(_ id: String, selection: LUTSpace, choose: @escaping (LUTSpace) -> Void) -> some View {
+        if let declaration = HyperDRRecipe.Adjustments.declaration(id) {
+            Picker(selection: Binding(get: { selection }, set: choose)) {
+                ForEach(AdjustmentText.LookSpaceFamily.allCases, id: \.self) { family in
+                    Section {
+                        ForEach(LUTSpace.allCases.filter { AdjustmentText.LookSpaceFamily($0.rawValue) == family }, id: \.self) { space in
+                            name(id, space).tag(space)
+                        }
+                    } header: {
+                        family.title
+                    }
+                }
+            } label: {
+                AdjustmentText.label(declaration)
+            }
+            .pickerStyle(.menu)
         }
     }
 }

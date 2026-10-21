@@ -94,7 +94,7 @@ extension RenderEngine: ExportStripeRendering {
         var edit = try RenderAdjustments(recipe:recipe,lut:lut)
         edit.hdr.modelGain = modelGain
         if edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel {
-            guard let modelGain, modelGain.sourceID == source.id else { throw RenderError.aiNotAvailable }
+            guard let modelGain, modelGain.sourceID == source.modelSourceID else { throw RenderError.aiNotAvailable }
         }
         var automatic = try resolvedAutomatic(source,recipe:recipe,lut:lut,modelGain:modelGain)
         let naturalRange = edit.hdr.range ?? Float(automatic["hdr.range"] ?? 0)

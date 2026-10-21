@@ -84,6 +84,37 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.recipe == Recipe(inputDomain: .sdr))
     }
 
+    /// Choosing a library LUT writes the look and the spaces the library
+    /// records for it at once (`AdjustmentPanel.set(_:reference:in:)`): one
+    /// step, named for the LUT, that undoes all three.
+    @Test func choosingALUTWithItsSpacesIsOneStep() async throws {
+        let h = Harness(undo: true)
+        try await h.open(.rawEDR, name: "a.arw")
+        h.step {
+            var recipe = h.editor.recipe
+            recipe.look = LUTReference(contentHash: "sha256:01", name: "Kodak 2383")
+            recipe.setValue(.string("p3"), for: "look.input")
+            recipe.setValue(.string("hlg"), for: "look.output")
+            h.editor.setRecipe(recipe)
+        }
+        h.step {
+            var recipe = h.editor.recipe
+            recipe.look = LUTReference(contentHash: "sha256:02", name: "Venice")
+            recipe.setValue(.string("slog3-sgamut3"), for: "look.input")
+            recipe.setValue(.string("rec709"), for: "look.output")
+            h.editor.setRecipe(recipe)
+        }
+        #expect(h.undoManager.undoActionName == "undo.look.lut")
+        h.undoManager.undo()
+        #expect(h.editor.recipe.look?.name == "Kodak 2383")
+        #expect(h.editor.recipe.value(for: "look.input") == .string("p3"))
+        #expect(h.editor.recipe.value(for: "look.output") == .string("hlg"))
+        #expect(h.undoManager.undoActionName == "undo.look.lut")
+        h.undoManager.undo()
+        #expect(h.editor.recipe == Recipe(inputDomain: .rawEDR))
+        #expect(!h.undoManager.canUndo)
+    }
+
     @Test func aDiscreteEditEndsAnOpenDragFirst() async throws {
         let h = Harness(undo: true)
         try await h.open()

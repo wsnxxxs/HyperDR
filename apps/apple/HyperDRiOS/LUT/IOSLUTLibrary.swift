@@ -1,4 +1,5 @@
 import Foundation
+import HyperDRDesign
 import HyperDREngine
 import HyperDRKit
 import HyperDRRecipe
@@ -27,6 +28,10 @@ import Observation
     private(set) var isBusy = false
     /// References of the installed entries, by library id.
     private var references: [String: LUTReference] = [:]
+    /// The latest space write of each LUT; the next one waits for it.
+    @ObservationIgnored private var writes: [LUTID: Task<Void, Never>] = [:]
+    /// Counts each LUT's space changes, so a failed write knows whether a later one is queued.
+    @ObservationIgnored private var writeRevisions: [LUTID: Int] = [:]
     /// Whether `entries` has been read once.
     private var loaded = false
     @ObservationIgnored private let library: () -> Task<LUTLibrary, any Error>
@@ -37,6 +42,13 @@ import Observation
 
     /// The look group's choices, in library order.
     var choices: [LUTReference] { entries.compactMap { references[$0.id.rawValue] } }
+
+    /// The spaces the library records for each LUT, by content hash: choosing
+    /// a LUT in the look group starts the look's spaces from them.
+    var spaces: [String: AdjustmentLookSpaces] {
+        Dictionary(entries.map { ($0.contentHash, AdjustmentLookSpaces(input: $0.input.rawValue, output: $0.output.rawValue)) },
+                   uniquingKeysWith: { first, _ in first })
+    }
 
     /// The recipe's look when its LUT is not in the library (or, for a look
     /// in effect, not yet in the editor): the export is blocked with this
@@ -50,7 +62,16 @@ import Observation
     /// Reads the library and installs what the editor does not have yet.
     func refresh(into editor: RecipeEditor) async {
         guard let library = try? await library().value else { return }
-        entries = await library.entries()
+        let read = await library.entries()
+        // A LUT whose spaces are being written keeps the spaces shown, which
+        // are what the pending write will store.
+        entries = read.map { entry in
+            guard writes[entry.id] != nil, let shown = entries.first(where: { $0.id == entry.id }) else { return entry }
+            var kept = entry
+            kept.input = shown.input
+            kept.output = shown.output
+            return kept
+        }
         loaded = true
         let missing = entries.filter { references[$0.id.rawValue] == nil }
             .map { LibraryLUT(id: $0.id.rawValue, name: $0.name) }
@@ -79,6 +100,49 @@ import Observation
             failures.append(Failure(name: "", detail: Self.detail(error)))
         }
         await refresh(into: editor)
+    }
+
+    /// Records one of a LUT's spaces: `input` or `output`, whichever is
+    /// given. The recipe's own spaces are the look group's; this only changes
+    /// where a later choice starts. The list shows the change at once; writes
+    /// for one LUT run one after another, each with the other side as the
+    /// list holds it when the write starts, so a quick second change never
+    /// puts back the first one's old value.
+    func update(_ id: LUTID, input: LUTSpace? = nil, output: LUTSpace? = nil) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        if let input { entries[index].input = input }
+        if let output { entries[index].output = output }
+        let previous = writes[id]
+        writeRevisions[id, default: 0] &+= 1
+        let revision = writeRevisions[id]
+        let write = Task { [weak self] in
+            await previous?.value
+            guard let self, let entry = entries.first(where: { $0.id == id }) else { return }
+            do {
+                let updated = try await library().value.update(id, input: entry.input, output: entry.output)
+                // A newer change made while this one was on disk stays shown.
+                if let index = entries.firstIndex(where: { $0.id == id }),
+                   entries[index].input == updated.input, entries[index].output == updated.output {
+                    entries[index] = updated
+                }
+            } catch {
+                failures = [Failure(name: entry.name, detail: Self.detail(error))]
+                // Show what is on disk again, unless a later change is queued:
+                // that write stores the latest spaces, or rolls back itself.
+                guard writeRevisions[id] == revision else { return }
+                if let library = try? await library().value,
+                   let stored = await library.entries().first(where: { $0.id == id }),
+                   writeRevisions[id] == revision,
+                   let index = entries.firstIndex(where: { $0.id == id }) {
+                    entries[index] = stored
+                }
+            }
+        }
+        writes[id] = write
+        Task { [weak self] in
+            await write.value
+            if self?.writes[id] == write { self?.writes[id] = nil }
+        }
     }
 
     /// Removes a LUT from the library. The editor keeps it until relaunch,

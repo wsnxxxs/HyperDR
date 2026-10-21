@@ -199,7 +199,7 @@ struct EditorScreen: View {
         AdjustmentPanel(context: AdjustmentContext(
             sourceValues: editor.source?.sourceValues ?? [:], automaticValues: editor.automaticValues,
             capabilities: editor.source?.capabilities ?? [], unavailableOptions: editor.unavailableOptions,
-            luts: session.exports.luts.choices))
+            luts: session.exports.luts.choices, lookSpaces: session.exports.luts.spaces))
     }
 
     private var photoSize: (width: Int, height: Int)? {

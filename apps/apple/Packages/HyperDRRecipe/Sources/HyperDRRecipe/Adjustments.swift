@@ -135,7 +135,9 @@ public enum Adjustments {
 
     // MARK: - Color
 
-    private static let lookSpaces = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"]
+    private static let lookSpaces = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
+    // Append-only, matching Render's LUTSpace raw values. Log input is scene data.
+    private static let logLookSpaces: Set<String> = ["slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
 
     private static let color: [ParameterDeclaration] = [
         // RAW white balance is a development parameter, not a matrix (p7-adjustments §2.5).
@@ -167,7 +169,7 @@ public enum Adjustments {
             default: .constant(.string("srgb")),
             options: lookSpaces.map {
                 ParameterOption($0, of: "look.input",
-                                domains: $0 == "slog3-sgamut3cine" ? [.rawEDR] : Set(InputDomain.allCases))
+                                domains: logLookSpaces.contains($0) ? [.rawEDR] : Set(InputDomain.allCases))
             },
             visibleWhen: .isSet("look.lut")),
         ParameterDeclaration(id: "look.output", group: .look, kind: .choice,

@@ -8,6 +8,25 @@ import HyperDRRecipe
 /// One serialized GPU service per editor/export context, independent of UI frameworks.
 /// Task cancellation is checked before/after decode and each GPU stripe; already
 /// submitted GPU work is allowed to finish, and its cancelled result is discarded.
+/// Path, revision and development. Preview size is omitted. `sceneLinear` is part of
+/// the source id and not of the AI identity: pass `sceneLinear: false` for the latter.
+func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, sceneLinear: Bool? = nil) -> UUID {
+    func number(_ value: Float?) -> String {
+        value.map { String(($0 == 0 ? Float(0) : $0).bitPattern,radix:16) } ?? "source"
+    }
+    let r = options.raw
+    let linear = sceneLinear ?? options.sceneLinear
+    let fields = ["hyperdr.source/v2",url.path,String(revision.size ?? -1),
+        revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
+        options.kind.rawValue,String(options.lensCorrection),String(linear),
+        number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+    let data = try! JSONSerialization.data(withJSONObject:fields)
+    var bytes = Array(SHA256.hash(data:data).prefix(16))
+    bytes[6] = (bytes[6] & 15) | 0x80; bytes[8] = (bytes[8] & 63) | 0x80
+    return UUID(uuid:(bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7],
+                      bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15]))
+}
+
 public actor RenderEngine {
     // Explicit executor also permits a prepared export's synchronous entry to
     // enter the same isolation domain without waiting for an async actor hop.
@@ -42,23 +61,7 @@ public actor RenderEngine {
         let url: URL
         let revision: SourceRevision
         var options: SourceOptions
-        var stableID: UUID {
-            // Values are already in engine units; normalize signed zero and omit
-            // preview size. Swift Hasher is intentionally randomized, so use SHA256.
-            func number(_ value: Float?) -> String {
-                value.map { String(($0 == 0 ? Float(0) : $0).bitPattern,radix:16) } ?? "source"
-            }
-            let r = options.raw
-            let fields = ["hyperdr.source/v1",url.path,String(revision.size ?? -1),
-                revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
-                options.kind.rawValue,String(options.lensCorrection),number(r.temperature),number(r.tint),
-                number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
-            let data = try! JSONSerialization.data(withJSONObject:fields)
-            var bytes = Array(SHA256.hash(data:data).prefix(16))
-            bytes[6] = (bytes[6] & 15) | 0x80; bytes[8] = (bytes[8] & 63) | 0x80
-            return UUID(uuid:(bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7],
-                              bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15]))
-        }
+        var stableID: UUID { sourceIdentity(url:url,revision:revision,options:options) }
     }
     private struct OutputKey: Equatable {
         let source: UUID
@@ -143,13 +146,38 @@ public actor RenderEngine {
         if let cached = analysisSource, cached.id == source.id { return cached }
         try origin.revision.validate(origin.url)
         var options = origin.options
-        let scale = min(1,1024/Double(max(source.nativeSize.width,source.nativeSize.height)))
-        options.resolution = .preview(maximumSize:PixelSize(width:max(1,Int((Double(source.nativeSize.width)*scale).rounded(.up))),
-                                                          height:max(1,Int((Double(source.nativeSize.height)*scale).rounded(.up)))))
+        options.resolution = Self.analysisResolution(native:source.nativeSize)
         let result = try materialize(Self.open(origin.url,options:options),id:source.id,origin:origin)
         try origin.revision.validate(origin.url)
         analysisSource = result
         return result
+    }
+
+    /// Model input long edge. Matches `fixedAnalysisSource` and `ModelGain.analysisLongSide`.
+    static func analysisResolution(native: PixelSize) -> SourceResolution {
+        let scale = min(1,1024/Double(max(native.width,native.height)))
+        return .preview(maximumSize:PixelSize(width:max(1,Int((Double(native.width)*scale).rounded(.up))),
+                                              height:max(1,Int((Double(native.height)*scale).rounded(.up)))))
+    }
+
+    /// The photograph the model was trained against: Apple boost, analysis scale.
+    /// A log look's scene-linear source is not that photograph. Opening it does not
+    /// go through `load`, which would evict the live preview family. The decoder
+    /// graph is dropped after the 1024 texture is bound (EXPORT_MEMORY.md: a reduced
+    /// CIRAWFilter can still briefly hold native decode storage; it is not retained).
+    func modelInputSource(_ source: RenderSource) throws -> RenderSource {
+        guard source.domain == .rawEDR, source.origin?.options.sceneLinear == true,
+              let origin = source.origin else { return try fixedAnalysisSource(source) }
+        try origin.revision.validate(origin.url)
+        return try autoreleasepool {
+            var options = origin.options
+            options.sceneLinear = false
+            options.resolution = Self.analysisResolution(native:source.nativeSize)
+            let opened = try Self.open(origin.url,options:options)
+            let result = try materialize(opened,id:source.modelSourceID)
+            try origin.revision.validate(origin.url)
+            return result
+        }
     }
 
     /// Synthetic/test and already-decoded source boundary. CI coordinates are

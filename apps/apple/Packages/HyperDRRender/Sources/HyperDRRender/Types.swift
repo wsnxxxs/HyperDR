@@ -148,8 +148,15 @@ struct SourceRevision: Hashable {
 /// retained for one asset/development family. Clients account for other retained sources.
 public struct RenderSource: @unchecked Sendable {
     /// Stable across engines and preview/full: path + file revision + normalized
-    /// development parameters. Decoded-only sources receive a fresh identity.
+    /// development parameters, including whether the log look developed scene-linear.
+    /// Decoded-only sources receive a fresh identity.
     public let id: UUID
+    /// The photo's AI identity: the same development with Apple's boost left on.
+    /// Log look does not change it, so one prediction serves both developments.
+    public var modelSourceID: UUID {
+        guard let origin else { return id }
+        return sourceIdentity(url:origin.url,revision:origin.revision,options:origin.options,sceneLinear:false)
+    }
     /// A decoded variant has its own GPU cache identity; source/model identity is shared.
     let renderID: UUID
     /// Reopen at the fixed analysis scale, including when shared with another engine.
@@ -236,15 +243,20 @@ public struct SourceOptions: Hashable, Sendable {
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()
     public var resolution: SourceResolution
+    /// Develop RAW without Apple's tone curve. Set when a log look is in effect,
+    /// so the curve sees scene-linear reflectance. Part of the cache key: preview
+    /// and export reopen the source when it changes.
+    public var sceneLinear: Bool
     public var rawResolution: RAWResolution {
         get { resolution }
         set { resolution = newValue }
     }
-    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments(), rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full) {
+    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments(), rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full, sceneLinear: Bool = false) {
         self.kind = kind
         self.lensCorrection = lensCorrection ?? RenderParameter.defaultBool("develop.lensCorrection")
         self.raw = raw
         self.resolution = rawResolution ?? resolution
+        self.sceneLinear = sceneLinear
     }
 }
 

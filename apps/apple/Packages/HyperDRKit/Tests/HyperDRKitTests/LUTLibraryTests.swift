@@ -72,7 +72,7 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
             #expect(throws: HyperDRError.self) { _ = try LUTID(rawValue: raw) }
             #expect(throws: HyperDRError.self) { _ = try JSONDecoder().decode(LUTID.self, from: JSONEncoder().encode(raw)) }
         }
-        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"].sorted())
+        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"].sorted())
         #expect(LUTSpace(rawValue: "linear") == nil)
     }
     @Test func calibrationInvalidUTF8AndWrongExtensionsAreRejected() async throws {
@@ -130,13 +130,22 @@ extension LUTLibraryTests {
 
 }
 
-@Suite struct LUTCompatibilityTests {
-    @Test func onlySLog3InputRequiresRAW() {
-        for input in LUTSpace.allCases { for output in LUTSpace.allCases {
-            #expect(LUTCompatibility.issue(input: input, output: output, isRAW: true) == nil)
-            #expect((LUTCompatibility.issue(input: input, output: output, isRAW: false) == nil)
-                    == (input != .slog3SGamut3Cine))
-        } }
+extension LUTLibraryTests {
+    @Test func newLogSpacesRoundTripThroughLibraryMetadata() async throws {
+        let env = try LUTEnvironment()
+        let entry = try await env.luts.importLUT(env.source())
+        let updated = try await env.luts.update(entry.id, input: .logC4AWG4, output: .clog3CinemaGamut)
+        #expect(updated.input == .logC4AWG4 && updated.output == .clog3CinemaGamut)
+        let stored = try #require(await env.luts.entries().first)
+        #expect(stored.input == .logC4AWG4 && stored.output == .clog3CinemaGamut)
+        let again = try await env.luts.update(entry.id, input: .slog3SGamut3Cine, output: .vlogVGamut)
+        #expect(again.input.rawValue == "slog3-sgamut3cine" && again.output.rawValue == "vlog-vgamut")
+        for space in [LUTSpace.slog3SGamut3, .flog2FGamut, .logC3AWG3] {
+            let data = try JSONEncoder().encode(space)
+            #expect(try JSONDecoder().decode(LUTSpace.self, from: data) == space)
+            #expect(String(data: data, encoding: .utf8)?.contains(space.rawValue) == true)
+        }
+        #expect(LUTSpace(rawValue: "slog3-sgamut3cine") == .slog3SGamut3Cine)
     }
 
     @Test func aByteOrderMarkedCubeKeepsOneIdentityFromLibraryToSession() async throws {

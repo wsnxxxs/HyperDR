@@ -65,10 +65,109 @@ extension DoubleReference {
     static let from2020 = [RGB(1.3435783,-0.2821797,-0.0613986),RGB(-0.0652975,1.0757879,-0.0104905),RGB(0.0028218,-0.0195985,1.0167767)]
     static let toCine = [RGB(0.77815155,0.11728624,0.10456221),RGB(0.07226832,0.75994794,0.16778375),RGB(0.02346043,0.06084114,0.91569844)]
     static let fromCine = [RGB(1.30640907,-0.19250497,-0.11390411),RGB(-0.11858463,1.35294405,-0.23435942),RGB(-0.02559149,-0.08496073,1.11055222)]
+    // Display P3 linear (D65) to each log primary, 8 decimals, the same NPM as toCine
+    // (xy primaries, white 0.3127/0.3290). Inverses are the rounded exact inverses.
+    // S-Gamut3: Sony Technical Summary, xy 0.730/0.280, 0.140/0.855, 0.100/-0.050.
+    static let toSG3 = [RGB(0.67716998,0.22268083,0.10014919),RGB(0.05823254,0.80559897,0.13616849),RGB(0.00574488,0.03981469,0.95444043)]
+    static let fromSG3 = [RGB(1.51312381,-0.41331979,-0.09980402),RGB(-0.10860213,1.27979248,-0.17119035),RGB(-0.00457729,-0.05089900,1.05547629)]
+    // V-Gamut: Panasonic VARICAM V-Log/V-Gamut, xy 0.730/0.280, 0.165/0.840, 0.100/-0.030.
+    static let toVG = [RGB(0.70145111,0.19732955,0.10121935),RGB(0.05979648,0.82841649,0.11178703),RGB(0.00617097,0.04603128,0.94779775)]
+    static let fromVG = [RGB(1.45564245,-0.34032783,-0.11531462),RGB(-0.10447649,1.23951197,-0.13503547),RGB(-0.00440341,-0.05798302,1.06238642)]
+    // F-Gamut is Rec.2020 (Fujifilm F-Log2 Data Sheet). Eight decimals; HLG/PQ keep the
+    // existing six-decimal to2020.
+    static let toFGamut = [RGB(0.75383303,0.19859737,0.04756960),RGB(0.04574385,0.94177722,0.01247893),RGB(-0.00121034,0.01760172,0.98360862)]
+    static let fromFGamut = [RGB(1.34357825,-0.28217967,-0.06139858),RGB(-0.06529745,1.07578792,-0.01049046),RGB(0.00282179,-0.01959849,1.01677671)]
+    // AWG3: ARRI, xy 0.6840/0.3130, 0.2210/0.8480, 0.0861/-0.1020.
+    static let toAWG3 = [RGB(0.76001934,0.13248356,0.10749710),RGB(0.00840830,0.80472802,0.18686368),RGB(-0.00135534,0.08556969,0.91578565)]
+    static let fromAWG3 = [RGB(1.31782216,-0.20495324,-0.11286893),RGB(-0.01453774,1.27247685,-0.25793911),RGB(0.00330873,-0.11920173,1.11589300)]
+    // AWG4: ARRI LogC4 specification, xy 0.7347/0.2653, 0.1424/0.8576, 0.0991/-0.0308.
+    static let toAWG4 = [RGB(0.67695999,0.21998630,0.10305371),RGB(0.07251887,0.81542700,0.11205413),RGB(0,0.04142423,0.95857577)]
+    static let fromAWG4 = [RGB(1.52050240,-0.40429866,-0.11620373),RGB(-0.13603158,1.26984798,-0.13381640),RGB(0.00587852,-0.05487566,1.04899714)]
+    // Cinema Gamut: Canon, xy 0.740/0.270, 0.170/1.140, 0.080/-0.100.
+    static let toCinema = [RGB(0.66516377,0.20889950,0.12593674),RGB(0.06595013,0.75819764,0.17585223),RGB(0.01650097,0.16958652,0.81391252)]
+    static let fromCinema = [RGB(1.54602980,-0.39137139,-0.15465841),RGB(-0.13366788,1.41972914,-0.28606126),RGB(-0.00349265,-0.28787973,1.29137238)]
+
+    static func logMatrix(_ x: RGB, space: LUTSpace, inverse: Bool) -> RGB {
+        switch space {
+        case .sLog3: return matrix(x, inverse ? fromCine : toCine)
+        case .slog3SGamut3: return matrix(x, inverse ? fromSG3 : toSG3)
+        case .vlogVGamut: return matrix(x, inverse ? fromVG : toVG)
+        case .flog2FGamut: return matrix(x, inverse ? fromFGamut : toFGamut)
+        case .logC3AWG3: return matrix(x, inverse ? fromAWG3 : toAWG3)
+        case .logC4AWG4: return matrix(x, inverse ? fromAWG4 : toAWG4)
+        case .clog3CinemaGamut: return matrix(x, inverse ? fromCinema : toCinema)
+        default: return x
+        }
+    }
+
+    /// Scene-linear (0.18 = 18% reflectance) to the normalized code. Values below
+    /// each white paper's knee, including negatives, use that linear segment so
+    /// the log is never fed a non-positive argument.
+    static func encodeLog(_ v: Double, space: LUTSpace) -> Double {
+        switch space {
+        case .sLog3, .slog3SGamut3:
+            // Sony Technical Summary for S-Gamut3.Cine/S-Log3 and S-Gamut3/S-Log3. Same curve.
+            return v >= 0.01125 ? (420+261.5*log10((v+0.01)/0.19))/1023 : (v*(171.2102946929-95)/0.01125+95)/1023
+        case .vlogVGamut:
+            // Panasonic VARICAM V-Log/V-Gamut: cut1 0.01, b 0.00873, c 0.241514, d 0.598206.
+            return v < 0.01 ? 5.6*v+0.125 : 0.241514*log10(v+0.00873)+0.598206
+        case .flog2FGamut:
+            // Fujifilm F-Log2 Data Sheet Ver.1.0. cut1 0.000889.
+            return v < 0.000889 ? 8.799461*v+0.092864 : 0.245281*log10(5.555556*v+0.064829)+0.384316
+        case .logC3AWG3:
+            // ARRI Alexa Log C, SUP 3.x, EI 800, linear scene exposure factor.
+            return v > 0.010591 ? 0.247190*log10(5.555556*v+0.052272)+0.385537 : 5.367655*v+0.092809
+        case .logC4AWG4:
+            // ARRI LogC4 specification (Cooper & Brendel, 2022). t is negative; the
+            // log is defined for every non-negative scene value, and below t the
+            // linear extension is (v-t)/s, which reaches code 0 at t.
+            let a = 2231.826309067688, b = 0.9071358748778103, c = 0.09286412512218964
+            let s = 0.1135972086105891, t = -0.01805699611991131
+            return v >= t ? (log2(a*v+64)-6)/14*b+c : (v-t)/s
+        case .clog3CinemaGamut:
+            // Canon Log 3 v1.2 (legal-range constants). Reflection is divided by 0.9
+            // before the curve, which is what places 18% gray at ~0.343. The negative
+            // log is the white paper's negative branch and is defined for every x < 0.
+            let x = v/0.9
+            if x < -0.014 { return -0.36726845*log10(-x*14.98325+1)+0.12783901 }
+            if x <= 0.014 { return 1.9754798*x+0.12512219 }
+            return 0.36726845*log10(x*14.98325+1)+0.12240537
+        default:
+            preconditionFailure("Not a log space")
+        }
+    }
+
+    static func decodeLog(_ v: Double, space: LUTSpace) -> Double {
+        switch space {
+        case .sLog3, .slog3SGamut3:
+            return v >= 171.2102946929/1023 ? pow(10,(v*1023-420)/261.5)*0.19-0.01 : (v*1023-95)*0.01125/(171.2102946929-95)
+        case .vlogVGamut:
+            // cut2 0.181 is the code at the knee.
+            return v < 0.181 ? (v-0.125)/5.6 : pow(10,(v-0.598206)/0.241514)-0.00873
+        case .flog2FGamut:
+            // Code at cut1, from the F-Log2 datasheet constants.
+            return v < 0.100686685370811 ? (v-0.092864)/8.799461 : (pow(10,(v-0.384316)/0.245281)-0.064829)/5.555556
+        case .logC3AWG3:
+            let knee = 5.367655*0.010591+0.092809
+            return v > knee ? (pow(10,(v-0.385537)/0.247190)-0.052272)/5.555556 : (v-0.092809)/5.367655
+        case .logC4AWG4:
+            let a = 2231.826309067688, b = 0.9071358748778103, c = 0.09286412512218964
+            let s = 0.1135972086105891, t = -0.01805699611991131
+            return v >= 0 ? (pow(2,14*((v-c)/b)+6)-64)/a : v*s+t
+        case .clog3CinemaGamut:
+            let x: Double
+            if v < 0.097465473 { x = -(pow(10,(0.12783901-v)/0.36726845)-1)/14.98325 }
+            else if v <= 0.15277891 { x = (v-0.12512219)/1.9754798 }
+            else { x = (pow(10,(v-0.12240537)/0.36726845)-1)/14.98325 }
+            return x*0.9
+        default:
+            preconditionFailure("Not a log space")
+        }
+    }
 
     public static func encodeLUT(_ source: RGB, space: LUTSpace) -> RGB {
         var x = source
-        if space == .sLog3 { x = matrix(x,toCine) }
+        if space.isLog { x = logMatrix(x,space:space,inverse:false) }
         else if space == .hlg || space == .pq { x = matrix(x,to2020) }
         else if space != .displayP3 {
             let native = matrix(x,to709), y = min(1,max(0,luma(x)))
@@ -94,8 +193,8 @@ extension DoubleReference {
         }
         for c in 0..<3 {
             let v = x[c]
+            if space.isLog { x[c] = encodeLog(v,space:space); continue }
             switch space {
-            case .sLog3: x[c] = v >= 0.01125 ? (420+261.5*log10((v+0.01)/0.19))/1023 : (v*(171.2102946929-95)/0.01125+95)/1023
             case .pq:
                 let p = pow(min(1,max(0,v*0.0203)),2610/16384)
                 x[c] = pow((3424/4096+(2413/128)*p)/(1+(2392/128)*p),2523/32)
@@ -117,8 +216,8 @@ extension DoubleReference {
         } else {
             for c in 0..<3 {
                 let v = x[c]
+                if space.isLog { x[c] = decodeLog(v,space:space); continue }
                 switch space {
-                case .sLog3: x[c] = v >= 171.2102946929/1023 ? pow(10,(v*1023-420)/261.5)*0.19-0.01 : (v*1023-95)*0.01125/(171.2102946929-95)
                 case .pq:
                     let p = pow(min(1,max(0,v)),32/2523)
                     x[c] = pow(max(p-3424/4096,0)/max(2413/128-(2392/128)*p,1e-6),16384/2610)/0.0203
@@ -127,7 +226,7 @@ extension DoubleReference {
                 }
             }
         }
-        if space == .sLog3 { return matrix(x,fromCine) }
+        if space.isLog { return logMatrix(x,space:space,inverse:true) }
         if space == .hlg || space == .pq { return matrix(x,from2020) }
         return space == .displayP3 ? x : matrix(x,from709)
     }
@@ -165,9 +264,13 @@ extension DoubleReference {
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
             (.shadows,settings.tone.shadows),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
         for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
-        x = fitP3(x,upper:max(1,x.x,x.y,x.z))
         let active = !settings.look.isIdentity
+        // A log look keeps linear-P3 negatives through the primary matrix. Fit after
+        // the strength mix so the gain split never sees a negative component.
+        let logLook = active && settings.look.input.isLog
+        if !logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         if active && !settings.look.input.isSDR { x = look(x,settings:settings.look) }
+        if logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
         var base = fitP3(x*exp2(-g))
         if active && settings.look.input.isSDR {

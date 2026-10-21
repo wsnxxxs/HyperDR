@@ -1,6 +1,7 @@
 import Foundation
 import HyperDRKit
 import XCTest
+@testable import HyperDR
 
 /// The catalogue keys that are built from a prefix and a name at run time,
 /// which `scripts/check_apple_i18n.py` cannot see in the Swift and so
@@ -65,6 +66,15 @@ final class LocalizationCoverageTests: XCTestCase {
         assertTranslated(controlKeys, in: catalogue)
         assertTranslated(choiceKeys, in: catalogue)
         assertTranslated(Self.captureFields.map { "field.\($0)" }, in: catalogue)
+    }
+
+    /// The library's space menus name every space Kit records, and head
+    /// every family they group them under.
+    func testEveryLUTSpaceIsNamed() throws {
+        let catalogue = try catalogue()
+        assertTranslated(LUTColorSpace.allCases.flatMap { ["choice.lutInput.\($0.rawValue)", "choice.lutOutput.\($0.rawValue)"] },
+                         in: catalogue)
+        assertTranslated(LUTSpaceFamily.allCases.map(\.titleKey), in: catalogue)
     }
 
     func testEveryExportFormatHasItsCardText() throws {

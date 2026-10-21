@@ -1,4 +1,5 @@
 import Foundation
+import HyperDRDesign
 import HyperDRKit
 import HyperDREngine
 import HyperDRRecipe
@@ -18,11 +19,18 @@ extension EditorModel {
             ?? LUTItem(id: look.contentHash, name: look.name, input: .srgb, output: .srgb)
         if lut.selection != item { lut.selection = item }
         lut.isEnabled = editor.recipe.conditionValue("look.enabled")?.boolValue ?? true
-        lut.spaceIssueKey = nil
     }
 
     /// The library's LUTs as the inspector offers them, in library order.
     var lutChoices: [LUTReference] { lut.library.compactMap { lutReferences[$0.id] } }
+
+    /// The spaces the library records for each LUT, by content hash: choosing
+    /// a LUT in the inspector starts the look's spaces from them.
+    var lutSpaces: [String: AdjustmentLookSpaces] {
+        Dictionary(lut.library.compactMap { item in
+            lutReferences[item.id].map { ($0.contentHash, AdjustmentLookSpaces(input: item.input.rawValue, output: item.output.rawValue)) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
 
     /// Hands every library LUT the renderer does not have yet to it, so the
     /// inspector can choose any of them (the renderer finds a LUT by its

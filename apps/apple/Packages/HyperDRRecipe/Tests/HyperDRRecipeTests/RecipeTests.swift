@@ -123,6 +123,26 @@ import Testing
     #expect(restored.value(for: "future.mask") == .bool(true))
 }
 
+@Test func restoringALogLookToANonRAWPhotoFallsBackToTheDefaultInput() throws {
+    let look = LUTReference(contentHash: "sha256:" + String(repeating: "ab", count: 32), name: "Log")
+    let inputs = try #require(Adjustments.declaration("look.input")).options.filter { $0.domains == [.rawEDR] }
+    for input in inputs {
+        let original = Recipe(inputDomain: .rawEDR, look: look, values: [
+            "look.input": .string(input.id), "look.output": .string("rec709"), "tone.exposure": .number(1)])
+        var raw = original
+        raw.setInputDomain(.rawEDR)
+        #expect(raw == original)
+        for domain in [InputDomain.sdr, .hdr, .dual] {
+            var restored = try Recipe.decode(original.encoded())
+            restored.setInputDomain(domain)
+            #expect(restored.conditionValue("look.input") == .string("srgb"))
+            #expect(restored.value(for: "look.input") == nil)
+            #expect(restored.look == look && restored.conditionValue("look.output") == .string("rec709"))
+            #expect(restored.conditionValue("tone.exposure") == .number(1))
+        }
+    }
+}
+
 @Test func domainsAndConditionsFilterVisibleParameters() throws {
     let ids = { (domain: InputDomain) in Adjustments.visible(in: domain).map(\.id) }
 
@@ -206,6 +226,21 @@ private extension ParameterDefault {
     #expect(contrast.scale == .contrast)
     #expect(contrast.engineValue(0) == 1)
     #expect(abs(contrast.engineValue(100) - 1.6) < 1e-12)
+}
+
+@Test func logLookSpacesAreAppendedAndRawOnly() throws {
+    let ids = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3",
+               "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
+    let input = try #require(Adjustments.declaration("look.input"))
+    let output = try #require(Adjustments.declaration("look.output"))
+    #expect(input.options.map(\.id) == ids)
+    #expect(output.options.map(\.id) == ids)
+    let logs: Set<String> = ["slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut",
+                             "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
+    for option in input.options {
+        #expect(option.domains == (logs.contains(option.id) ? [.rawEDR] : Set(InputDomain.allCases)))
+    }
+    #expect(output.options.allSatisfy { $0.domains == Set(InputDomain.allCases) })
 }
 
 @Test func rangeCeilingAppliesToGeneratedHDROnly() throws {

@@ -188,7 +188,9 @@ actor RenderSession: EditorRendering {
     private func predict(_ request: EditorRenderRequest) async throws {
         let prepared = try await prepare(request, needsLUT: false)
         let generation = prepared.generation
-        let key = PredictionKey(source: prepared.source.id, model: Self.modelID(request.recipe))
+        // AI belongs to the photograph, not the log look. Both developments
+        // share modelSourceID; the new stable id must not force a second prediction.
+        let key = PredictionKey(source: prepared.source.modelSourceID, model: Self.modelID(request.recipe))
         if predictions[key] != nil { return }
         let provider: CoreMLModelGainProvider
         if let loaded = self.provider { provider = loaded } else {
@@ -216,8 +218,8 @@ actor RenderSession: EditorRendering {
 
     /// The prediction for the recipe's model, if it was made for this source.
     private func prediction(for recipe: Recipe, source: RenderSource) -> ModelGainPrediction? {
-        guard let prediction = predictions[PredictionKey(source: source.id, model: Self.modelID(recipe))],
-              prediction.sourceID == source.id, prediction.modelID == provider?.modelID else { return nil }
+        guard let prediction = predictions[PredictionKey(source: source.modelSourceID, model: Self.modelID(recipe))],
+              prediction.sourceID == source.modelSourceID, prediction.modelID == provider?.modelID else { return nil }
         return prediction
     }
 

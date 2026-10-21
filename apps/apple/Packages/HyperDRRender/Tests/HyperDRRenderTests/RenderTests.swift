@@ -319,6 +319,114 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         if adjusted.supportsSharpness { #expect(adjusted.sharpness == 0.2) }
     }
 
+    @Test func logLookSelectsSceneLinearDevelopment() throws {
+        let look = LUTReference(contentHash: "sha256:" + String(repeating: "ab", count: 32), name: "Log")
+        let active = Recipe(inputDomain: .rawEDR, look: look, values: ["look.input": .string("slog3-sgamut3cine")])
+        #expect(try SourceOptions(recipe: active).sceneLinear)
+        for id in ["slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"] {
+            let recipe = Recipe(inputDomain: .rawEDR, look: look, values: ["look.input": .string(id)])
+            #expect(try SourceOptions(recipe: recipe).sceneLinear)
+        }
+        let disabled = Recipe(inputDomain: .rawEDR, look: look, values: [
+            "look.input": .string("slog3-sgamut3"), "look.enabled": .bool(false)])
+        let zero = Recipe(inputDomain: .rawEDR, look: look, values: [
+            "look.input": .string("vlog-vgamut"), "look.strength": .number(0)])
+        let display = Recipe(inputDomain: .rawEDR, look: look, values: ["look.input": .string("p3")])
+        let absent = Recipe(inputDomain: .rawEDR, values: ["look.input": .string("slog3-sgamut3cine")])
+        #expect(try !SourceOptions(recipe: disabled).sceneLinear)
+        #expect(try !SourceOptions(recipe: zero).sceneLinear)
+        #expect(try !SourceOptions(recipe: display).sceneLinear)
+        #expect(try !SourceOptions(recipe: absent).sceneLinear)
+        #expect(try !SourceOptions(recipe: active, options: RenderOptions(bypassedGroups: [.look])).sceneLinear)
+    }
+
+    @Test func logLookKeepsSceneMiddleGrayOnTheSLog3Code() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let fixture = root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")
+        guard FileManager.default.fileExists(atPath: fixture.path) else { throw FixtureError.missingRAW }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ARW")
+        try FileManager.default.copyItem(at: fixture, to: temporary)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let look = LUTReference(contentHash: "sha256:" + String(repeating: "cd", count: 32), name: "Log")
+        let active = Recipe(inputDomain: .rawEDR, look: look, values: [
+            "look.input": .string("slog3-sgamut3cine"), "look.output": .string("rec709")])
+        let idle = Recipe(inputDomain: .rawEDR)
+        let preview = SourceResolution.preview(maximumSize: PixelSize(width: 320, height: 320))
+        let engine = try RenderEngine()
+        let scene = try await engine.load(temporary, options: try SourceOptions(recipe: active, resolution: preview))
+        let apple = try await engine.load(temporary, options: try SourceOptions(recipe: idle, resolution: preview))
+        let sceneSettings = try #require(scene.rawSettings)
+        let appleSettings = try #require(apple.rawSettings)
+        #expect(sceneSettings.boost == 0 && sceneSettings.boostShadow == 0)
+        #expect(appleSettings.boost == 1 && appleSettings.boostShadow != 0)
+        #expect(sceneSettings.baselineExposure == appleSettings.baselineExposure)
+        let scenePixels = RenderEngine.readTexture(scene.texture)
+        let applePixels = RenderEngine.readTexture(apple.texture)
+        #expect(scenePixels.count == applePixels.count)
+        var codes: [Double] = [], lifted: [Double] = []
+        for index in stride(from: 0, to: scenePixels.count, by: 4) {
+            for channel in 0..<3 {
+                let linear = Double(scenePixels[index + channel])
+                guard abs(linear - 0.18) <= 0.008 else { continue }
+                codes.append(DoubleReference.encodeLUT(SIMD3(repeating: linear), space: .sLog3).x)
+                lifted.append(Double(applePixels[index + channel]) / linear)
+            }
+        }
+        #expect(codes.count > 30)
+        let sortedCodes = codes.sorted(), sortedLift = lifted.sorted()
+        let medianCode = sortedCodes[sortedCodes.count / 2]
+        let medianLift = sortedLift[sortedLift.count / 2]
+        #expect(abs(medianCode - 420.0 / 1023) < 10.0 / 1023)
+        #expect(medianLift > 1.9 && medianLift < 2.4)
+    }
+
+    @Test func logLookKeepsAIOnTheAppleBoostPhotograph() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let fixture = root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")
+        guard FileManager.default.fileExists(atPath: fixture.path) else { throw FixtureError.missingRAW }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ARW")
+        try FileManager.default.copyItem(at: fixture, to: temporary)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let preview = SourceResolution.preview(maximumSize: PixelSize(width: 128, height: 128))
+        let appleOptions = SourceOptions(lensCorrection: false, resolution: preview)
+        let linearOptions = SourceOptions(lensCorrection: false, resolution: preview, sceneLinear: true)
+        let engine = try RenderEngine()
+        let apple = try await engine.load(temporary, options: appleOptions)
+        let linear = try await engine.load(temporary, options: linearOptions)
+        #expect(apple.id != linear.id)
+        #expect(linear.modelSourceID == apple.id && apple.modelSourceID == apple.id)
+        #expect(try await RenderEngine().load(temporary, options: linearOptions).id == linear.id)
+
+        let provider = try CoreMLModelGainProvider(computeUnits: .cpuOnly, analysisLongSide: 32)
+        let fromLinear = try await engine.predictModelGain(linear, provider: provider)
+        let fromApple = try await engine.predictModelGain(apple, provider: provider)
+        #expect(fromLinear.sourceID == apple.id && fromLinear.gain === fromApple.gain)
+        let exported = try await RenderEngine().predictModelGain(linear, provider: provider)
+        let previewed = try await RenderEngine().predictModelGain(apple, provider: provider)
+        #expect(exported.sourceID == previewed.sourceID)
+        #expect(RenderEngine.readTexture(exported.gain) == RenderEngine.readTexture(previewed.gain))
+
+        var edit = RenderAdjustments()
+        edit.hdr.source = .capturedAI
+        edit.hdr.modelGain = fromLinear
+        edit.hdr.expansionStart = 0.5
+        // Separate engines avoid the shared prediction key hiding a guide made
+        // from the wrong development. Gating and smoothing must use Apple boost too.
+        func filtered(_ engine: isolated RenderEngine, _ source: RenderSource, _ edit: RenderAdjustments) throws -> [Float] {
+            let result = try engine.filteredModelGain(source, edit: edit)
+            return RenderEngine.readTexture(try #require(result).gain)
+        }
+        let linearFilter = try await filtered(RenderEngine(), linear, edit)
+        let appleFilter = try await filtered(RenderEngine(), apple, edit)
+        let guideDifference = zip(linearFilter, appleFilter)
+            .map { abs($0 - $1) }.max() ?? 0
+        #expect(guideDifference < 0.00001)
+        #expect(try await engine.render(linear, adjustments: edit).aiPending == false)
+        #expect(try await engine.render(apple, adjustments: edit).aiPending == false)
+    }
+
     @Test func threeChannelOffsetsReferenceAndCancellation() async throws {
         let base = SIMD3<Double>(0.1, 0.3, 0.6)
         let offset = SIMD3<Double>(repeating: 1 / 64)

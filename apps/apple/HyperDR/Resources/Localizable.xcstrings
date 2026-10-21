@@ -4046,6 +4046,108 @@
         }
       }
     },
+    "choice.lutInput.slog3-sgamut3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S-Log3 · S-Gamut3"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S-Log3 · S-Gamut3"
+          }
+        }
+      }
+    },
+    "choice.lutInput.vlog-vgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "V-Log · V-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "V-Log · V-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.flog2-fgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2 · F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2 · F-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.logc3-awg3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC3 · ARRI Wide Gamut 3"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC3 · ARRI Wide Gamut 3"
+          }
+        }
+      }
+    },
+    "choice.lutInput.logc4-awg4" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC4 · ARRI Wide Gamut 4"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC4 · ARRI Wide Gamut 4"
+          }
+        }
+      }
+    },
+    "choice.lutInput.clog3-cinemagamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 3 · Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 3 · Cinema Gamut"
+          }
+        }
+      }
+    },
     "choice.lutOutput.srgb" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4144,6 +4246,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "S-Log3 · S-Gamut3.Cine"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.slog3-sgamut3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S-Log3 · S-Gamut3"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S-Log3 · S-Gamut3"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.vlog-vgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "V-Log · V-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "V-Log · V-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.flog2-fgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2 · F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2 · F-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.logc3-awg3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC3 · ARRI Wide Gamut 3"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC3 · ARRI Wide Gamut 3"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.logc4-awg4" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC4 · ARRI Wide Gamut 4"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LogC4 · ARRI Wide Gamut 4"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.clog3-cinemagamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 3 · Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 3 · Cinema Gamut"
           }
         }
       }
@@ -6660,6 +6864,60 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅 RAW"
+          }
+        }
+      }
+    },
+    "lut.space.family.display" : {
+      "comment" : "Heading in the LUT library's space menus.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Display"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示"
+          }
+        }
+      }
+    },
+    "lut.space.family.hdr" : {
+      "comment" : "Heading in the LUT library's space menus.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR"
+          }
+        }
+      }
+    },
+    "lut.space.family.log" : {
+      "comment" : "Heading in the LUT library's space menus.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera Log"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相机 Log"
           }
         }
       }

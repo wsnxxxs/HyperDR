@@ -172,8 +172,9 @@ enum LUTSpaces {
 }
 
 /// The popover that sets a library look's input and output spaces (M3
-/// §12.3). S-Log3 input is for RAW photos only; other photos see it dimmed.
-/// The recipe's own spaces are the inspector's (`look.input`, `look.output`).
+/// §12.3). A camera's Log input applies to RAW photos only. Library metadata
+/// can be edited with any photo open. Choosing the look starts the recipe's spaces
+/// (`look.input`, `look.output`) from these; after that they are the inspector's.
 struct LUTSpacesPopover: View {
     let model: EditorModel
     let id: String
@@ -191,13 +192,14 @@ struct LUTSpacesPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // A setter reads the model's expected spaces when it runs, not the
                 // ones this body saw, so two quick changes keep both choices.
+                // A Log input most often feeds a Rec. 709 look.
                 row("lut.space.input", selection: Binding(get: { item.input }, set: { newInput in
                     let live = self.item ?? item
                     model.setLibraryLUTSpaces(id, input: newInput,
-                                              output: newInput == .slog3SGamut3Cine ? .rec709 : live.output)
+                                              output: newInput.family == .log && live.input.family != .log ? .rec709 : live.output)
                 })) { space in
                     let name = AppStrings.string("choice.lutInput.\(space.rawValue)", locale: locale)
-                    return Text(verbatim: space == .slog3SGamut3Cine && !isRAW
+                    return Text(verbatim: space.family == .log && !isRAW
                                 ? name + " · " + AppStrings.string("lut.space.rawOnly", locale: locale) : name)
                 }
                 row("lut.space.output", selection: Binding(get: { item.output }, set: {
@@ -205,7 +207,7 @@ struct LUTSpacesPopover: View {
                 })) { Text(verbatim: AppStrings.string("choice.lutOutput.\($0.rawValue)", locale: locale)) }
             }
             .padding(Space.s4)
-            .frame(width: 290)
+            .frame(width: 320)
             .disabled(model.isEditingLocked)
         }
     }
@@ -216,9 +218,12 @@ struct LUTSpacesPopover: View {
             Text(title).font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
             Spacer()
             Picker(title, selection: selection) {
-                ForEach(LUTColorSpace.allCases, id: \.self) { space in
-                    label(space).tag(space)
-                        .disabled(space == .slog3SGamut3Cine && !isRAW && selection.wrappedValue != space)
+                ForEach(LUTSpaceFamily.allCases, id: \.self) { family in
+                    Section(LocalizedStringKey(family.titleKey)) {
+                        ForEach(LUTColorSpace.allCases.filter { $0.family == family }, id: \.self) { space in
+                            label(space).tag(space)
+                        }
+                    }
                 }
             }
             .labelsHidden()

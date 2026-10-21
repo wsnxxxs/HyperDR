@@ -209,9 +209,15 @@ struct AdjustmentChoiceRow: View {
                 }
             } else {
                 Picker(selection: selection) {
-                    ForEach(control.options, id: \.id) { option in
-                        AdjustmentText.option(option).tag(option.id)
-                            .disabled(control.disabledOptions.contains(option.id))
+                    ForEach(AdjustmentText.optionSections(control)) { section in
+                        Section {
+                            ForEach(section.options, id: \.id) { option in
+                                AdjustmentText.option(option).tag(option.id)
+                                    .disabled(control.disabledOptions.contains(option.id))
+                            }
+                        } header: {
+                            section.family?.title
+                        }
                     }
                 } label: {
                     AdjustmentText.label(declaration).font(.hdr.caption)

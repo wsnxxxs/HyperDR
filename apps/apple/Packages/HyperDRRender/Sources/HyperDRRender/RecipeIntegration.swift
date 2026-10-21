@@ -54,7 +54,8 @@ private struct RecipeValues {
         return result
     }
     func space(_ id: String) throws -> LUTSpace {
-        let names = ["srgb","p3","rec709","hlg","pq","slog3-sgamut3cine"]
+        // Index is LUTSpace.rawValue. Append only; the shader and Kit use the same order.
+        let names = ["srgb","p3","rec709","hlg","pq","slog3-sgamut3cine","slog3-sgamut3","vlog-vgamut","flog2-fgamut","logc3-awg3","logc4-awg4","clog3-cinemagamut"]
         guard let name = value(id)?.stringValue, let index = names.firstIndex(of:name),
               let result = LUTSpace(rawValue:UInt32(index)) else { throw RenderError.invalidAdjustment }
         return result
@@ -99,7 +100,8 @@ extension RenderAdjustments {
 
 extension SourceOptions {
     public init(recipe: Recipe, rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full, options: RenderOptions = RenderOptions()) throws {
-        self.init(rawResolution:rawResolution, resolution:resolution)
+        self.init(rawResolution:rawResolution, resolution:resolution,
+                  sceneLinear:Self.sceneLinearDevelopment(recipe:recipe,options:options))
         let values = RecipeValues(recipe:recipe,options:options)
         lensCorrection = try values.bool("develop.lensCorrection")
         raw.temperature = try values.optionalNumber("develop.temperature")
@@ -107,6 +109,18 @@ extension SourceOptions {
         raw.luminanceNR = try values.optionalNumber("develop.luminanceNR")
         raw.colorNR = try values.optionalNumber("develop.colorNR")
         raw.sharpness = try values.optionalNumber("develop.sharpness")
+    }
+
+    /// A log look that will actually be applied (the recipe has a LUT, it is
+    /// enabled, and its strength is not zero). A bypassed look group reads as
+    /// the sRGB default, so the comparison original stays on Apple's curve.
+    static func sceneLinearDevelopment(recipe: Recipe, options: RenderOptions) -> Bool {
+        guard recipe.look != nil else { return false }
+        let values = RecipeValues(recipe:recipe,options:options)
+        guard (try? values.bool("look.enabled")) == true,
+              let strength = try? values.number("look.strength"), strength != 0,
+              let space = try? values.space("look.input"), space.isLog else { return false }
+        return true
     }
 }
 

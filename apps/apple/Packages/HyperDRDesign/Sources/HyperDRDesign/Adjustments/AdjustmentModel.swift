@@ -29,18 +29,34 @@ public struct AdjustmentContext: Equatable, Sendable {
     public var unavailableOptions: [String: Set<String>]
     /// The LUT library, for `look.lut`.
     public var luts: [LUTReference]
+    /// The spaces the library records for each LUT, by content hash: choosing
+    /// a LUT starts its `look.input` and `look.output` from them.
+    public var lookSpaces: [String: AdjustmentLookSpaces]
     /// Models for `hdr.model`: id and display name.
     public var models: [AdjustmentModelChoice]
 
     public init(sourceValues: [String: Double] = [:], automaticValues: [String: Double] = [:],
                 capabilities: Set<String> = [], unavailableOptions: [String: Set<String>] = [:],
-                luts: [LUTReference] = [], models: [AdjustmentModelChoice] = []) {
+                luts: [LUTReference] = [], lookSpaces: [String: AdjustmentLookSpaces] = [:],
+                models: [AdjustmentModelChoice] = []) {
         self.sourceValues = sourceValues
         self.automaticValues = automaticValues
         self.capabilities = capabilities
         self.unavailableOptions = unavailableOptions
         self.luts = luts
+        self.lookSpaces = lookSpaces
         self.models = models
+    }
+}
+
+/// A library LUT's input and output spaces, as `look.input` / `look.output`
+/// option ids ("srgb", "slog3-sgamut3").
+public struct AdjustmentLookSpaces: Equatable, Sendable {
+    public var input: String
+    public var output: String
+    public init(input: String, output: String) {
+        self.input = input
+        self.output = output
     }
 }
 
@@ -325,13 +341,28 @@ public struct AdjustmentPanel: Sendable {
     }
 
     /// Chooses a LUT from the library (`look.lut`) or a model (`hdr.model`);
-    /// nil removes the LUT.
+    /// nil removes the LUT. A LUT's spaces start from what the library
+    /// records for it (`AdjustmentContext.lookSpaces`), in the same write, so
+    /// the choice is one undo step. A space this photo cannot use (a Log
+    /// input outside RAW) goes back to its default instead, so the recipe
+    /// never names a space Render would refuse. Removing the LUT leaves the
+    /// spaces alone; they are hidden without one.
     public func set(_ id: String, reference: String?, in recipe: inout Recipe) {
         if id == Recipe.lookID {
             recipe.look = reference.flatMap { hash in context.luts.first { $0.contentHash == hash } }
+            if let look = recipe.look, let spaces = context.lookSpaces[look.contentHash] {
+                setLookSpace(spaces.input, id: "look.input", in: &recipe)
+                setLookSpace(spaces.output, id: "look.output", in: &recipe)
+            }
         } else {
             recipe.setValue(reference.map(ParameterValue.string), for: id)
         }
+    }
+
+    private func setLookSpace(_ space: String, id: String, in recipe: inout Recipe) {
+        guard let control = control(id, in: recipe) else { return }
+        let offered = control.options.contains { $0.id == space } && !control.disabledOptions.contains(space)
+        recipe.setValue(offered ? .string(space) : nil, for: id)
     }
 
     /// Back to Auto (a `floatOrAuto` parameter whose default is Auto).

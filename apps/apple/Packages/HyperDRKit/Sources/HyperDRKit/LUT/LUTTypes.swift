@@ -22,6 +22,12 @@ public struct LUTID: Sendable, Hashable, Codable, CustomStringConvertible {
 public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
     case srgb, p3, rec709, hlg, pq
     case slog3SGamut3Cine = "slog3-sgamut3cine"
+    case slog3SGamut3 = "slog3-sgamut3"
+    case vlogVGamut = "vlog-vgamut"
+    case flog2FGamut = "flog2-fgamut"
+    case logC3AWG3 = "logc3-awg3"
+    case logC4AWG4 = "logc4-awg4"
+    case clog3CinemaGamut = "clog3-cinemagamut"
     public var renderSpace: HyperDRRender.LUTSpace {
         switch self {
         case .srgb: .sRGB
@@ -30,6 +36,12 @@ public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
         case .hlg: .hlg
         case .pq: .pq
         case .slog3SGamut3Cine: .sLog3
+        case .slog3SGamut3: .slog3SGamut3
+        case .vlogVGamut: .vlogVGamut
+        case .flog2FGamut: .flog2FGamut
+        case .logC3AWG3: .logC3AWG3
+        case .logC4AWG4: .logC4AWG4
+        case .clog3CinemaGamut: .clog3CinemaGamut
         }
     }
 }

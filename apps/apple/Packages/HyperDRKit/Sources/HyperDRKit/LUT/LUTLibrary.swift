@@ -77,16 +77,15 @@ public actor LUTLibrary {
         _ = try LUTFiles.install(source, in: destination.descriptor, expected: entry.id)
         return result
     }
-    /// The `.cube` text of a library LUT, for a renderer that parses it itself.
-    public func cube(_ id: LUTID) throws -> String {
+    /// The `.cube` bytes of a library LUT, as installed, for a renderer that
+    /// parses it itself (`ColorLUT(data:)`, whose hash is then `"sha256:" + id`).
+    public func cube(_ id: LUTID) throws -> Data {
         let directory = try LUTFiles.directory(root)
         defer { Darwin.close(directory) }
         let file = try LUTFiles.file(id.rawValue + ".cube", in: directory)
         let handle = FileHandle(fileDescriptor: file, closeOnDealloc: true)
-        guard let data = try handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
-            throw LUTFiles.invalid("Expected UTF-8 .cube")
-        }
-        return text
+        guard let data = try handle.readToEnd(), !data.isEmpty else { throw LUTFiles.invalid() }
+        return data
     }
     public func update(_ id: LUTID, input: LUTSpace, output: LUTSpace) throws -> LUTEntry {
         let directory = try LUTFiles.directory(root)

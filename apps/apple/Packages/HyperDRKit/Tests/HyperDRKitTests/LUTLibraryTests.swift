@@ -138,4 +138,16 @@ extension LUTLibraryTests {
                     == (input != .slog3SGamut3Cine))
         } }
     }
+
+    @Test func aByteOrderMarkedCubeKeepsOneIdentityFromLibraryToSession() async throws {
+        let env = try LUTEnvironment()
+        let marked = Data([0xEF, 0xBB, 0xBF]) + creativeCube
+        let entry = try await env.luts.importLUT(env.source("Marked.cube", data: marked))
+        let bytes = try await env.luts.cube(entry.id)
+        // The editor parses these bytes with `ColorLUT(data:)`, which hashes them as they are.
+        #expect(bytes == marked)
+        let photo = try await env.photo()
+        _ = try await env.luts.apply(entry.id, to: photo.id)
+        #expect(try await env.sessions.recipeLUT(entry.contentHash, for: photo.id).contentHash == entry.contentHash)
+    }
 }

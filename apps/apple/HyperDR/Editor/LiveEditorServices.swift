@@ -426,7 +426,7 @@ extension LiveEditorServices {
         guard let kit = try? await requireKit() else { return [] }
         return await kit.luts.entries().map(item)
     }
-    func lutCube(_ id: String) async throws -> String {
+    func lutCube(_ id: String) async throws -> Data {
         do { return try await requireKit().luts.cube(LUTID(rawValue: id)) }
         catch { throw UserFacingError.service(error) }
     }

@@ -1,5 +1,6 @@
 import Foundation
 import CoreImage
+import CryptoKit
 import ImageIO
 import Metal
 import Testing
@@ -134,6 +135,16 @@ private func cube(swap: Bool = false) -> String {
             _ = try RenderAdjustments(recipe:recipe,lut:ColorLUT(cube:cube()))
             Issue.record("Mismatched LUT contents accepted")
         } catch RenderError.invalidLUT {}
+    }
+
+    @Test func lutContentHashIsTheFileBytesIncludingAByteOrderMark() throws {
+        let body = Data("LUT_1D_SIZE 2\r\n0 0 0\r\n1 .9 .8\r\n".utf8)
+        let marked = Data([0xEF,0xBB,0xBF]) + body
+        func sha(_ data: Data) -> String { "sha256:" + SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined() }
+        let lut = try ColorLUT(data:marked)
+        #expect(lut.contentHash == sha(marked))
+        #expect(lut.contentHash != (try ColorLUT(data:body)).contentHash)
+        #expect(lut.values == (try ColorLUT(data:body)).values)
     }
 
     @Test func pointNodesAgainstDoubleAndToneAnchors() async throws {

@@ -56,8 +56,8 @@ import UniformTypeIdentifiers
     func aboutInformation() async -> AboutInformation
     func diagnostics() async -> String
     func lutEntries() async -> [LUTItem]
-    /// The `.cube` text of a library LUT, for the renderer.
-    func lutCube(_ id: String) async throws -> String
+    /// The `.cube` bytes of a library LUT, for the renderer.
+    func lutCube(_ id: String) async throws -> Data
     func importLUT(_ url: URL) async throws -> LUTItem
     func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem
     func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem
@@ -301,10 +301,10 @@ extension FakeEditorServices {
     }
     func lutEntries() async -> [LUTItem] { if let lutEntriesHandler { return await lutEntriesHandler() }; return library }
     /// A 2³ identity cube whose title is the id, so each library item has its own hash.
-    func lutCube(_ id: String) async throws -> String {
+    func lutCube(_ id: String) async throws -> Data {
         guard library.contains(where: { $0.id == id }) else { throw UserFacingError(code: "lut_invalid") }
-        return "TITLE \"\(id)\"\nLUT_3D_SIZE 2\n" + (0..<8).map { i in
-            "\(i & 1) \((i >> 1) & 1) \(i >> 2)" }.joined(separator: "\n") + "\n"
+        return Data(("TITLE \"\(id)\"\nLUT_3D_SIZE 2\n" + (0..<8).map { i in
+            "\(i & 1) \((i >> 1) & 1) \(i >> 2)" }.joined(separator: "\n") + "\n").utf8)
     }
     func importLUT(_ url: URL) async throws -> LUTItem {
         guard let importedLUT else { throw UserFacingError(code: "lut_invalid") }

@@ -12,8 +12,9 @@ import Observation
 /// - `fileImporter` URLs go to Kit as they are: `LUTLibrary.importLUT` holds
 ///   the security scope for the copy itself.
 /// - An export applies the look's LUT from the library into the photo's
-///   session first; a look whose LUT is not in the library blocks the export
-///   before it starts (`missingLook`).
+///   session first, even when the look is off: Kit keeps every look the
+///   recipe names with the version. A look whose LUT is not in the library
+///   blocks the export before it starts (`missingLook`).
 @MainActor @Observable final class IOSLUTLibrary {
     /// One file that could not be imported, or a LUT that could not be read.
     struct Failure: Hashable {
@@ -37,10 +38,11 @@ import Observation
     /// The look group's choices, in library order.
     var choices: [LUTReference] { entries.compactMap { references[$0.id.rawValue] } }
 
-    /// The recipe's look when its LUT is not in the library (or not yet in
-    /// the editor): the export is blocked with this reason.
+    /// The recipe's look when its LUT is not in the library (or, for a look
+    /// in effect, not yet in the editor): the export is blocked with this
+    /// reason. A look that is off counts too, since the export copies it.
     func missingLook(_ editor: RecipeEditor) -> LUTReference? {
-        guard let look = editor.recipe.activeLook else { return nil }
+        guard let look = editor.recipe.look else { return nil }
         if let missing = editor.missingLook { return missing }
         return loaded && !entries.contains(where: { Self.hash($0.id) == look.contentHash }) ? look : nil
     }
@@ -92,7 +94,7 @@ import Observation
     }
 
     /// The library id of a content hash (`sha256:<hex>`): Kit names a LUT
-    /// by the SHA-256 of its file, which is what `ColorLUT` hashes too.
+    /// by the SHA-256 of its file, which is what `ColorLUT(data:)` hashes too.
     static func libraryID(_ contentHash: String) throws -> LUTID {
         try LUTID(rawValue: contentHash.hasPrefix("sha256:") ? String(contentHash.dropFirst(7)) : contentHash)
     }

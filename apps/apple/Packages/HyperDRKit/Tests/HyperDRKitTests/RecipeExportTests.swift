@@ -778,6 +778,28 @@ struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).first?.recipeSnapshot?.lutContentHash == lut.contentHash)
     }
 
+    @Test func aLookThatIsOffStillNeedsTheSessionCopy() async throws {
+        // Hosts copy the LUT of any look the recipe names, in effect or not:
+        // the version keeps the look, and the service reads it from the session.
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let cube = "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+        let url = env.root.appendingPathComponent("off.cube")
+        try Data(cube.utf8).write(to: url)
+        let library = LUTLibrary(configuration: env.configuration, sessions: env.sessions)
+        let entry = try await library.importLUT(url)
+        var recipe = Recipe(); recipe.look = .init(contentHash: entry.contentHash, name: "Off")
+        recipe.setValue(.bool(false), for: "look.enabled")
+        let snapshot = try env.snapshot(recipe: recipe)
+        #expect(snapshot.lutContentHash == entry.contentHash)
+        do {
+            _ = try await env.service().export(session: env.session.id, snapshot: snapshot, request: env.request(.sdrTIFF))
+            Issue.record("A look without its session copy exported")
+        } catch {}
+        _ = try await library.apply(entry.id, to: env.session.id)
+        _ = try await env.service().export(session: env.session.id, snapshot: snapshot, request: env.request(.sdrTIFF))
+        #expect(await env.sessions.exports(for: env.session.id).first?.recipeSnapshot?.lutContentHash == entry.contentHash)
+    }
+
     @Test func aFailedDeliveryRetainsTheVerifiedVersion() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let destination = env.root.appendingPathComponent("chosen.jpg")

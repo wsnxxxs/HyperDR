@@ -456,8 +456,9 @@ nonisolated struct ExportStack: Sendable {
                 try Task.checkCancellation()
                 self?.sourceReady(run: run)
                 // The look's LUT goes from the library into the photo's
-                // session, where the service reads it.
-                if let look = capture.recipe.activeLook {
+                // session, where the service reads it: any look the recipe
+                // names, in effect or not (`lutContentHash`).
+                if let look = capture.recipe.look {
                     do { _ = try await stack.luts.apply(try IOSLUTLibrary.libraryID(look.contentHash), to: opened.session) }
                     catch where !Self.isCancellation(error) { throw RecipeExportError.missingLUT }
                 }

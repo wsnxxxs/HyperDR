@@ -37,12 +37,7 @@ secrets/
 __pycache__/
 *.pyc
 /.pytest_cache/
-/hdr-workspace/
 /output/
-/.playwright-cli/
-/dist/
-/dist-release-*/
-/release-stage/
 /.workbuddy/
 
 # Resume sidecars and decode caches live beside conversion output.

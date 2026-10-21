@@ -307,6 +307,7 @@
 		5A8C91857F674E16E2724F47 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = HyperDR;
 				CODE_SIGN_ENTITLEMENTS = Config/HyperDR.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -368,6 +369,7 @@
 		C10000000000000000000A0A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = HyperDR;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3D3SBL7PSV;
@@ -400,6 +402,7 @@
 		C10000000000000000000A0B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = HyperDR;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3D3SBL7PSV;
@@ -448,6 +451,7 @@
 		E9B2E96ABC5F6856F2BE79CF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = HyperDR;
 				CODE_SIGN_ENTITLEMENTS = Config/HyperDR.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;

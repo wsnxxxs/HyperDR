@@ -1,0 +1,129 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "extended-srgb:0.13333,0.12941,0.12157,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "extended-srgb:0.05490,0.05490,0.05098,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "glint",
+          "image-name": "glint.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.56078,0.52941,0.47843,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "sun",
+          "image-name": "sun.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:1.00000,0.96471,0.90196,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "sea",
+          "image-name": "sea.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.10980,0.10196,0.09412,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "sky",
+          "image-name": "sky.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.04706,0.04314,0.03922,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "card",
+          "image-name": "card.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.85098,0.83922,0.81176,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "back",
+          "image-name": "back.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.49412,0.47843,0.45098,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

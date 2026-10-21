@@ -24,7 +24,7 @@ struct ExportSheet: View {
 
     /// The quality menu's steps; the current value joins them when it is none.
     private static let qualities = [100, 95, 90, 85, 80, 70, 60]
-    /// The strip's destinations: Photos last while it is not open.
+    /// The strip's destinations: Photos last.
     private static let destinations: [ExportDestination] = [.web, .social, .photos]
 
     var body: some View {
@@ -401,7 +401,7 @@ struct ExportSheet: View {
         switch plan?.handling {
         case .file: Text("ios.export.saveToFiles")
         case .share: Text("ios.export.share")
-        case .photoLibrary: Text(verbatim: ExportReasonPhrase.notYetAvailable.text(locale: locale))
+        case .photoLibrary: Text("ios.export.saveToPhotos")
         case nil: Text("ios.export.start")
         }
     }
@@ -466,25 +466,48 @@ struct ExportSheet: View {
             }
             if finished.savedToFiles { Label("ios.export.saved", systemImage: "folder.fill").font(.subheadline) }
             if finished.deliveryFailed { Text("ios.export.deliveryFailed").font(.footnote).foregroundStyle(Color.hdr.warn) }
+            if case .failed(let key) = finished.photos {
+                Text(LocalizedStringKey(key)).font(.footnote).foregroundStyle(Color.hdr.warn).multilineTextAlignment(.center)
+            }
             Spacer(minLength: 0)
+            // One height for every button, the choice page's main button's:
+            // Photos across the width, Files and Share halves under it.
             GlassEffectContainer {
-                HStack(spacing: Space.s3) {
-                    Button { model.presentingFileExporter = true } label: {
-                        Label("ios.export.saveToFiles", systemImage: "folder").frame(maxWidth: .infinity)
+                VStack(spacing: Space.s2) {
+                    photosButton(finished.photos)
+                    HStack(spacing: Space.s2) {
+                        Button { model.presentingFileExporter = true } label: {
+                            ResultButtonLabel(title: "ios.export.saveToFiles", symbol: "folder")
+                        }
+                        .buttonStyle(.glass)
+                        .foregroundStyle(.primary)
+                        ShareLink(item: finished.file) {
+                            ResultButtonLabel(title: "ios.export.share", symbol: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.glass)
+                        .foregroundStyle(.primary)
                     }
-                    .buttonStyle(.glass)
-                    .foregroundStyle(.primary)
-                    ShareLink(item: finished.file) {
-                        Label("ios.export.share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(Color.hdr.accentFill)
                 }
                 .controlSize(.large)
             }
         }
-        .padding(Space.s5)
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s5)
+        .padding(.bottom, Space.s2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func photosButton(_ state: IOSExportModel.PhotosSave) -> some View {
+        Button { model.saveToPhotos() } label: {
+            switch state {
+            case .idle, .failed: ResultButtonLabel(title: "ios.export.saveToPhotos", symbol: "photo.badge.plus")
+            case .saving: ResultButtonLabel(title: "ios.export.savingToPhotos", symbol: nil)
+            case .saved: ResultButtonLabel(title: "ios.export.savedToPhotos", symbol: "checkmark")
+            }
+        }
+        .buttonStyle(.glassProminent)
+        .tint(Color.hdr.accentFill)
+        .disabled(state == .saving || state == .saved)
     }
 
     private func failed(_ failure: IOSExportModel.Failure) -> some View {
@@ -527,6 +550,23 @@ struct ExportSheet: View {
         }
         .padding(Space.s5)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A result button's label: a symbol (or a spinner) and one line of text,
+/// as tall as the choice page's main button.
+private struct ResultButtonLabel: View {
+    let title: LocalizedStringKey
+    let symbol: String?
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            if let symbol { Image(systemName: symbol) } else { ProgressView() }
+            Text(title).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .font(.headline)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.s1)
     }
 }
 

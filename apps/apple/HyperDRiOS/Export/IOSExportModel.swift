@@ -49,8 +49,9 @@ nonisolated struct ExportStack: Sendable {
 ///   can be saved or shared again.
 /// - The presentation frame the user chose goes with every export: Kit lays
 ///   it out around the photo at the size the choice writes, and Render
-///   composites it (`FrameExportPlan`). The Photos destination is shown but
-///   not available yet.
+///   composites it (`FrameExportPlan`). The Photos destination adds the
+///   verified file to the library as a new photo; any finished export can
+///   be added the same way.
 @MainActor @Observable final class IOSExportModel {
     enum Page: String, Hashable, Codable { case destination, custom }
 
@@ -81,6 +82,14 @@ nonisolated struct ExportStack: Sendable {
         var savedToFiles = false
         /// A save to Files that failed (not a cancelled one).
         var deliveryFailed = false
+        var photos = PhotosSave.idle
+    }
+
+    /// Adding the finished file to the photo library.
+    enum PhotosSave: Equatable {
+        case idle, saving, saved
+        /// An `ios.*` catalogue key: access refused, or the library's error.
+        case failed(String)
     }
 
     struct Failure {
@@ -169,10 +178,10 @@ nonisolated struct ExportStack: Sendable {
            let saved = try? JSONDecoder().decode(SavedChoice.self, from: data) {
             var format = saved.custom
             // A long edge that is not a preset was that photo's (typed, or
-            // the memory budget's); Photos is not open yet.
+            // the memory budget's).
             if let edge = format.longEdge, !ExportLongEdge.presets.contains(edge) { format.longEdge = nil }
             page = saved.page
-            destination = saved.destination == .photos ? .web : saved.destination
+            destination = saved.destination
             custom = format
             familyEncodings[ExportFamily(format.encoding)] = format.encoding
         }
@@ -502,6 +511,29 @@ nonisolated struct ExportStack: Sendable {
         phase = .finished(finished)
     }
 
+    /// Adds the finished file to the photo library as a new photo, asking
+    /// for add-only access the first time.
+    func saveToPhotos() {
+        guard case .finished(var finished) = phase, finished.photos != .saving, finished.photos != .saved else { return }
+        finished.photos = .saving
+        phase = .finished(finished)
+        let file = finished.file, run = self.run
+        Task { [weak self] in
+            let outcome: PhotosSave
+            do {
+                _ = try await PhotoLibrarySaver().addPhoto(file)
+                outcome = .saved
+            } catch let error as HyperDRError where error.code == "photos_permission_denied" {
+                outcome = .failed("ios.export.photosDenied")
+            } catch {
+                outcome = .failed("ios.export.photosFailed")
+            }
+            guard let self, run == self.run, case .finished(var current) = self.phase, current.file == file else { return }
+            current.photos = outcome
+            self.phase = .finished(current)
+        }
+    }
+
     private func sourceReady(run: Int) {
         if run == self.run { waitingForSource = false }
     }
@@ -516,8 +548,13 @@ nonisolated struct ExportStack: Sendable {
         task = nil
         endBackgroundTask()
         phase = .finished(finished)
-        // The web destination is "Save to Files…": the save sheet follows.
-        if finished.result.resolved.selection == .destination(.web) { presentingFileExporter = true }
+        // The web destination is "Save to Files…": the save sheet follows;
+        // the Photos destination goes into the library.
+        switch finished.result.resolved.selection {
+        case .destination(.web): presentingFileExporter = true
+        case .destination(.photos): saveToPhotos()
+        default: break
+        }
     }
 
     private func failed(_ error: any Error, run: Int, memory: ExportMemoryDiagnostic? = nil) {

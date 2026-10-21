@@ -85,8 +85,7 @@ struct CanvasAdornments: View {
     /// The legend now, for the model's state: what `adornments` draws, and
     /// what the hint gives way to.
     static func legendRows(model: EditorModel, showsInspector: Bool) -> [CanvasLegendRow] {
-        legendRows(maskName: model.maskKey.flatMap { Adjustments.declaration($0) }.map { AdjustmentText.label($0) },
-                   highlightZebra: model.showsHighlightZebra, shadowZebra: model.showsShadowZebra,
+        legendRows(highlightZebra: model.showsHighlightZebra, shadowZebra: model.showsShadowZebra,
                    showsInspector: showsInspector, viewMode: model.viewMode, isPeeking: model.isPeekingOriginal)
     }
 
@@ -96,10 +95,10 @@ struct CanvasAdornments: View {
         viewMode == .compare && !isPeeking && hasReference && hasEdited
     }
 
-    /// The legend's rows: the mask of the control being adjusted, and the
-    /// zebras only while the inspector, whose switches already say it, is
-    /// hidden. Nothing over the original, or while it is held.
-    static func legendRows(maskName: Text?, highlightZebra: Bool, shadowZebra: Bool, showsInspector: Bool,
+    /// The legend's rows: the zebras only while the inspector, whose
+    /// switches already say it, is hidden. Nothing over the original, or
+    /// while it is held.
+    static func legendRows(highlightZebra: Bool, shadowZebra: Bool, showsInspector: Bool,
                            viewMode: ViewMode, isPeeking: Bool) -> [CanvasLegendRow] {
         guard viewMode != .original, !isPeeking else { return [] }
         var rows: [CanvasLegendRow] = []
@@ -107,7 +106,6 @@ struct CanvasAdornments: View {
             if highlightZebra { rows.append(.highlightZebra) }
             if shadowZebra { rows.append(.shadowZebra) }
         }
-        if let maskName { rows.append(.mask(controlName: maskName)) }
         return rows
     }
 }

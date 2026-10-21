@@ -28,8 +28,7 @@ import Observation
 ///   comes back without the gain it asks for starts the missing prediction.
 /// - Canvas layers (step 6): when the host's `CanvasViewport` shows the photo
 ///   with more pixels than a frame has, a full-size render of the visible part
-///   follows once the canvas has been still for `detailIdle`; while a
-///   parameter with a mask is dragged, its `effectMask` follows the frames.
+///   follows once the canvas has been still for `detailIdle`.
 @MainActor @Observable final class RecipeEditor {
     enum AIStatus: Equatable, Sendable {
         case idle
@@ -70,8 +69,6 @@ import Observation
     /// read them through `shownDetail` and `shownOriginalDetail`.
     private(set) var detailFrame: EditorFrame?
     private(set) var originalDetailFrame: EditorFrame?
-    /// Where the dragged parameter acts; read it through `shownMask`.
-    private(set) var effectMask: EditorMask?
 
     /// Groups switched off to see their effect: a render option, never in the
     /// recipe and never undone. A new photo clears it.
@@ -113,14 +110,6 @@ import Observation
         guard let originalDetailFrame, let originalFrame,
               originalDetailFrame.request.rendersSame(as: originalFrame.request) else { return nil }
         return originalDetailFrame
-    }
-
-    /// The mask of the parameter being dragged, for the photo shown. It may be
-    /// a frame or two behind the drag.
-    var shownMask: EditorMask? {
-        guard let effectMask, effectMask.parameterID == editingParameter,
-              effectMask.request.sourceID == frame?.request.sourceID else { return nil }
-        return effectMask
     }
 
     /// While a parameter that changes only the SDR base is dragged the canvas
@@ -183,9 +172,6 @@ import Observation
     @ObservationIgnored private var viewport: CanvasViewport?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
     @ObservationIgnored private var detailGeneration = 0
-    @ObservationIgnored private var maskTask: Task<Void, Never>?
-    /// The last mask asked for, so a failed one is not asked again for the same frame.
-    @ObservationIgnored private var maskAttempt: (parameterID: String, request: EditorRenderRequest)?
 
     init(renderer: any EditorRendering, frameClock: any EditorFrameClock = ContinuousFrameClock(),
          detailIdle: Duration = .milliseconds(250)) {
@@ -362,7 +348,6 @@ import Observation
             drag = (declaration.id, recipe)
             editingParameter = declaration.id
             detailTask?.cancel()
-            updateMask()
         }
     }
 
@@ -398,7 +383,6 @@ import Observation
         guard let drag else { return false }
         self.drag = nil
         editingParameter = nil
-        updateMask()
         var registered = false
         if recipe != drag.start {
             register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
@@ -417,7 +401,6 @@ import Observation
     private func restore(_ value: Recipe) {
         drag = nil
         editingParameter = nil
-        updateMask()
         let old = recipe
         recipe = value
         recipeDidChange(from: old)
@@ -519,7 +502,6 @@ import Observation
             }
             renderFailure = nil
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
-            updateMask()
             frameLacksModelGain(rendered)
         case .failure(let error):
             if !(error is CancellationError) { renderFailure = String(describing: error) }
@@ -588,14 +570,6 @@ import Observation
             request.usesModelGain = false
         }
         return request
-    }
-
-    /// Where `parameterID` acts in the current recipe (R6), at `size`.
-    func effectMask(parameterID: String, size: HyperDRRender.PixelSize, region: CGRect? = nil) async throws -> RenderMask {
-        guard let request = request(for: recipe, size: size, region: region, interactive: false) else {
-            throw EditorRenderingError.noSource
-        }
-        return try await renderer.effectMask(request, parameterID: parameterID)
     }
 
     /// An SDR thumbnail of the shown frame, or of `frame`.
@@ -727,38 +701,6 @@ import Observation
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
-    /// Follows the dragged parameter's mask: one at a time, then again for the
-    /// newest frame if it moved on meanwhile.
-    private func updateMask() {
-        guard let id = editingParameter, Adjustments.declaration(id)?.mask != nil,
-              let frame, frame.request.sourceID == source?.id else {
-            maskTask?.cancel()
-            maskTask = nil
-            maskAttempt = nil
-            effectMask = nil
-            return
-        }
-        guard maskTask == nil else { return }
-        var request = frame.request
-        request.region = nil
-        request.isInteractive = false
-        if let attempt = maskAttempt, attempt.parameterID == id, attempt.request.rendersSame(as: request) { return }
-        maskAttempt = (id, request)
-        let renderer = self.renderer
-        maskTask = Task { [weak self] in
-            var mask: RenderMask?
-            do { mask = try await renderer.effectMask(request, parameterID: id) } catch {
-                if !Task.isCancelled { self?.noteFailure(error) }
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.maskTask = nil
-            if let mask, self.editingParameter == id {
-                self.effectMask = EditorMask(parameterID: id, request: request, mask: mask)
-            }
-            self.updateMask()
-        }
-    }
-
     private func noteFailure(_ error: any Error) {
         if case EditorRenderingError.sourceChanged = error { sourceChanged = true }
     }
@@ -768,10 +710,6 @@ import Observation
         detailTask = nil
         detailFrame = nil
         originalDetailFrame = nil
-        maskTask?.cancel()
-        maskTask = nil
-        maskAttempt = nil
-        effectMask = nil
     }
 
     // MARK: - AI
@@ -893,7 +831,6 @@ import Observation
             if let flight = inFlight { await flight.task.value; await Task.yield(); continue }
             if let flight = originalFlight { await flight.task.value; await Task.yield(); continue }
             if let modelTask { await modelTask.value; await Task.yield(); continue }
-            if let maskTask { await maskTask.value; await Task.yield(); continue }
             if let detailTask { await detailTask.value; await Task.yield(); continue }
             if pending != nil { submitPending(); await Task.yield(); continue }
             return

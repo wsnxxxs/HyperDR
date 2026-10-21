@@ -1,5 +1,7 @@
 import CoreTransferable
 import Foundation
+import HyperDREngine
+import HyperDRKit
 import UniformTypeIdentifiers
 
 /// One export version, as something another app can take: dragged out of the
@@ -54,6 +56,13 @@ struct ExportTransferItem: Transferable {
     }
 }
 
+/// Adding a version to the photo library, as the result shows it.
+enum PhotosSave: Equatable {
+    case idle, saving, saved
+    /// A catalogue key: access refused, or the library's error.
+    case failed(String)
+}
+
 extension EditorModel {
     /// Nil when the version's file is gone (then it cannot be dragged or
     /// shared) or the photo is.
@@ -68,6 +77,20 @@ extension EditorModel {
         return ExportTransferItem(version: version, fileName: name) { [weak self] in
             guard let self else { throw UserFacingError(code: "source_missing") }
             return try await self.stageTransfer(version, fileName: name, photo: photo)
+        }
+    }
+
+    /// Adds a version to the photo library as a new photo, from a staged
+    /// copy like a share, asking for add-only access the first time.
+    func addToPhotos(_ version: String) async -> PhotosSave {
+        guard let item = transferItem(for: version) else { return .failed("export.photos.failed") }
+        do {
+            _ = try await PhotoLibrarySaver().addPhoto(try await item.stage())
+            return .saved
+        } catch let error as HyperDRError where error.code == "photos_permission_denied" {
+            return .failed("export.photos.denied")
+        } catch {
+            return .failed("export.photos.failed")
         }
     }
 

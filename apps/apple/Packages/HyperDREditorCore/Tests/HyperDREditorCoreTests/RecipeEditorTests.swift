@@ -571,24 +571,11 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(original.request.recipe == h.editor.recipe.original)
     }
 
-    @Test func aMaskFollowsADragOfAMaskedParameter() async throws {
+    @Test func onlyAnSDROnlyDragPreviewsSDR() async throws {
         let h = Harness()
         try await h.open()
-        let highlights = declaration("tone.highlights")
-        h.editor.editingChanged(highlights, true)
-        h.editor.setRecipe(setting(h.editor.recipe, "tone.highlights", -0.4))
-        await h.editor.settle()
-        let mask = try #require(h.editor.shownMask)
-        #expect(mask.parameterID == "tone.highlights")
-        #expect(mask.request.rendersSame(as: h.editor.frame!.request))
-        h.editor.editingChanged(highlights, false)
-        #expect(h.editor.shownMask == nil)
-
-        // Exposure acts everywhere: no mask; the SDR-only rolloff previews SDR instead.
-        let asked = await h.fake.masks.count
         h.editor.editingChanged(declaration("tone.exposure"), true)
         await h.editor.settle()
-        #expect(await h.fake.masks.count == asked)
         #expect(!h.editor.previewsAsSDR)
         h.editor.editingChanged(declaration("hdr.sdrRolloff"), true)
         #expect(h.editor.previewsAsSDR)

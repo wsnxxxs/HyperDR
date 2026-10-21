@@ -294,22 +294,10 @@ struct FrameSettingsPanel: View {
                                   selected: settings.style == style)
                     }
                     .buttonStyle(.plain)
-                    .help(Text(style.note))
                     .accessibilityAddTraits(settings.style == style ? .isSelected : [])
                 }
             }
-            if let layout = EditorModel.frameLayout(for: settings.style, photoSize: photoSize) {
-                Text(settings.style.note)
-                    .font(Font.hdr.caption)
-                    .foregroundStyle(Color.hdr.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let variant = layout.variant, let note = settings.style.variantNote(variant) {
-                    Text(note)
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
+            if EditorModel.frameLayout(for: settings.style, photoSize: photoSize) == nil {
                 // The engine refused this style for the photograph (a hand-written
                 // spec or an extreme proportion): no frame is drawn.
                 Label("frame.style.unavailable", systemImage: "exclamationmark.triangle")
@@ -432,18 +420,6 @@ extension EditorModel {
     }
 }
 
-extension FrameStyle {
-    /// The line under the style when the engine laid it out as a variant.
-    func variantNote(_ variant: String) -> LocalizedStringKey? {
-        switch (self, variant) {
-        case (.instant, "wide"): "frame.style.instant.variant.wide"
-        case (_, "wide"): "frame.style.variant.wide"
-        case (_, "tall"): "frame.style.variant.tall"
-        default: nil
-        }
-    }
-}
-
 // MARK: - Names
 
 extension FrameStyle {
@@ -454,16 +430,6 @@ extension FrameStyle {
         case .story: "frame.style.story"
         case .instant: "frame.style.instant"
         case .hairline: "frame.style.hairline"
-        }
-    }
-
-    var note: LocalizedStringKey {
-        switch self {
-        case .gallery: "frame.style.gallery.note"
-        case .label: "frame.style.label.note"
-        case .story: "frame.style.story.note"
-        case .instant: "frame.style.instant.note"
-        case .hairline: "frame.style.hairline.note"
         }
     }
 }

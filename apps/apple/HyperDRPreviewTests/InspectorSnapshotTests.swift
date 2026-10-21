@@ -128,12 +128,11 @@ import HyperDRRender
         return pictures
     }
 
-    func testHDRManualWithMask() async throws {
+    func testHDRManualWhileDragging() async throws {
         let model = await open()
-        // The mask mark shows on the control being dragged.
         let strength = try XCTUnwrap(Adjustments.declaration("hdr.strength"))
         model.editor.editingChanged(strength, true)
-        await eventually { model.maskKey == "hdr.strength" }
+        await model.editor.settle()
         _ = try snapshots("hdr-manual", model: model) { _ in }
         model.editor.editingChanged(strength, false)
         model.closeDocument()

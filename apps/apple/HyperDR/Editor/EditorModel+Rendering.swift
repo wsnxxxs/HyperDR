@@ -14,7 +14,7 @@ extension EditorModel {
         return document?.source?.domain == .hdr || document?.source?.domain == .dual || display.gainWeight != nil
     }
 
-    /// The HDR ceiling the overlays and the mask measure against: what the
+    /// The HDR ceiling the overlays measure against: what the
     /// edit's alternate rendition reaches, in stops.
     var outputCeilingStops: Double {
         _ = frameRevision
@@ -31,16 +31,13 @@ extension EditorModel {
             headroom: display.currentHeadroom,
             overlays: CanvasOverlays(highlights: showsHighlightZebra, shadows: showsShadowZebra,
                                      hdrRange: Float(outputCeilingStops)),
-            effectMask: effectMask, previewsAsSDR: previewsAsSDR || editor.previewsAsSDR)
+            previewsAsSDR: previewsAsSDR || editor.previewsAsSDR)
     }
 
     /// The full-size renders of the visible part (the editor's detail
     /// layers), while they are of the frames shown.
     var editedDetailPair: DisplayPair? { editor.shownDetail.map { DisplayPair($0.display) } }
     var originalDetailPair: DisplayPair? { editor.shownOriginalDetail.map { DisplayPair($0.display) } }
-
-    /// Where the dragged parameter acts, tinted over the edited side.
-    var effectMask: DisplayMask? { editor.shownMask.map { DisplayMask($0.mask) } }
 
     /// No detail layers until the canvas is next reported.
     func invalidateDetails() { editor.setViewport(nil) }

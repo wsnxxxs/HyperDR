@@ -162,7 +162,6 @@ extension EditorModel {
     /// No photo: the inspector shows the welcome.
     func endEditing() {
         invalidateDetails()
-        setMaskKey(nil)
         source = PhotoSource()
         setSplitRatioValue(0.5)
         setPeeking(false)

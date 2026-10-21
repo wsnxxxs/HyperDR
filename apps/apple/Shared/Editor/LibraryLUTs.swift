@@ -9,20 +9,20 @@ nonisolated struct LibraryLUT: Sendable, Hashable {
 }
 
 /// Library LUTs into the editor, for the Mac and iOS hosts: read the `.cube`
-/// text, parse it, hand it to the editor (which keeps it for exports, see
+/// bytes, parse it, hand it to the editor (which keeps it for exports, see
 /// `exportCapture`) and name it for the controls.
 extension RecipeEditor {
-    /// Installs `items` in order. `cube` reads a LUT's text by library id;
+    /// Installs `items` in order. `cube` reads a LUT's bytes by library id;
     /// `installed` hears each LUT's reference as soon as it is in. Returns
     /// the names of the LUTs that could not be read or parsed. Stops early
     /// when the task is cancelled.
-    func installLibraryLUTs(_ items: [LibraryLUT], cube: (String) async throws -> String,
+    func installLibraryLUTs(_ items: [LibraryLUT], cube: (String) async throws -> Data,
                             installed: (String, LUTReference) -> Void) async -> [String] {
         var failures: [String] = []
         for item in items {
             guard !Task.isCancelled else { break }
             do {
-                let lut = try ColorLUT(cube: try await cube(item.id))
+                let lut = try ColorLUT(data: try await cube(item.id))
                 await installLUT(lut)
                 installed(item.id, LUTReference(contentHash: lut.contentHash, name: item.name))
             } catch {

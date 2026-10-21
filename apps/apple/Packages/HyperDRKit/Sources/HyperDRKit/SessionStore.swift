@@ -880,8 +880,7 @@ public actor SessionStore {
         try LUTFiles.identities.verify(file, in: directory.descriptor, id: lutID)
         guard lseek(file, 0, SEEK_SET) == 0 else { throw RecipeExportError.missingLUT }
         let bytes = try FileHandle(fileDescriptor: file, closeOnDealloc: false).readToEnd() ?? Data()
-        guard let text = String(data: bytes, encoding: .utf8) else { throw RecipeExportError.missingLUT }
-        return try HyperDRRender.ColorLUT(cube: text)
+        return try HyperDRRender.ColorLUT(data: bytes)
     }
 
     public func prepareExport(_ id: SessionID, options: [String: JSONValue],

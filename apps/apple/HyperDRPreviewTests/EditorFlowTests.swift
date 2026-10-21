@@ -51,7 +51,7 @@ import XCTest
         return await withCheckedContinuation { factsWaiters[photo.url] = $0 }
     }
     func close(_ photo: EditorPhoto) async { closed.append(photo) }
-    func lutCube(_ id: String) async throws -> String { throw CocoaError(.fileNoSuchFile) }
+    func lutCube(_ id: String) async throws -> Data { throw CocoaError(.fileNoSuchFile) }
     var relinkHandler: ((URL) async throws -> EditorPhoto)?
     func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto {
         guard let relinkHandler else { throw UserFacingError(code: "source_different") }

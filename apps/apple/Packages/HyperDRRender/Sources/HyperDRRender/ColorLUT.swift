@@ -22,7 +22,10 @@ public struct ColorLUT: Hashable, Sendable {
 
     public init(cube: String) throws { try self.init(data:Data(cube.utf8)) }
 
-    private init(data: Data) throws {
+    /// The file's bytes as they are: `contentHash` is their SHA-256, the same
+    /// identity Kit gives the file. Decoding to `String` first would drop a
+    /// UTF-8 byte order mark and hash different bytes.
+    public init(data: Data) throws {
         guard let cube = String(data:data,encoding:.utf8) else { throw RenderError.invalidLUT("Expected UTF-8 .cube") }
         var title = "", size = 0, is3D = true
         var low = SIMD3<Float>(repeating: 0), high = SIMD3<Float>(repeating: 1)

@@ -1,20 +1,24 @@
 import SwiftUI
 import HyperDRDesign
 
-/// The window toolbar. It replaces the web header: the wordmark becomes the
-/// window title, the theme toggle follows the system appearance, preferences
-/// move to the Settings scene and the caption buttons are the system's.
-/// Items that would overflow a narrow window fold into the toolbar's own
-/// overflow menu.
+/// The canvas column's part of the window toolbar. It replaces the web
+/// header: the wordmark becomes the window title, the theme toggle follows the
+/// system appearance, preferences move to the Settings scene and the caption
+/// buttons are the system's. Items that would overflow a narrow window fold
+/// into the toolbar's own overflow menu.
 ///
-/// Open, the LUT library, the original / edited / compare views, undo and
-/// redo, export history, the frame, export and the inspector. Export's
-/// button carries the export's progress and opens the panel; every other
-/// reason it cannot start is told by the panel itself.
+/// Open and the LUT library lead; undo and redo, then the original / edited /
+/// compare views, end the column at the canvas's top right. The rest
+/// (`DocumentToolbar`) stands above the inspector; the system keeps it in the
+/// window's corner while the inspector is hidden.
 struct MainToolbar: ToolbarContent {
     let model: EditorModel
     let window: EditorWindowState
-    @Binding var showsInspector: Bool
+    /// A narrow window's column has no room for the three views and undo
+    /// and redo, and the system would fold some of the views into its
+    /// overflow menu: the views become one pull-down, and undo and redo stay
+    /// in the Edit menu and on ⌘Z and ⇧⌘Z.
+    var isNarrow = false
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
@@ -24,40 +28,33 @@ struct MainToolbar: ToolbarContent {
         }
 
         if model.workspace == .editing {
+            if !isNarrow {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("edit.undo", systemImage: "arrow.uturn.backward") { model.undo() }
+                        .help("edit.undo")
+                        .disabled(!model.canUndo)
+                    Button("edit.redo", systemImage: "arrow.uturn.forward") { model.redo() }
+                        .help("edit.redo")
+                        .disabled(!model.canRedo)
+                }
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+
             // Buttons rather than a segmented Picker or toggles: in the toolbar
             // a Picker shows unavailable segments (and a wholly disabled
             // picker) exactly like available ones, and toggle buttons (alone
             // or in a ControlGroup) have no accessibility name.
-            ToolbarItemGroup(placement: .principal) {
-                ForEach(ViewMode.allCases, id: \.self) { mode in
-                    ViewModeButton(mode: mode, model: model)
+            if isNarrow {
+                ToolbarItem(placement: .primaryAction) {
+                    ViewModeMenu(model: model)
+                }
+            } else {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    ForEach(ViewMode.allCases, id: \.self) { mode in
+                        ViewModeButton(mode: mode, model: model)
+                    }
                 }
             }
-
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button("edit.undo", systemImage: "arrow.uturn.backward") { model.undo() }
-                    .help("edit.undo")
-                    .disabled(!model.canUndo)
-                Button("edit.redo", systemImage: "arrow.uturn.forward") { model.redo() }
-                    .help("edit.redo")
-                    .disabled(!model.canRedo)
-                HistoryButton(model: model, window: window)
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                Button("frame.toolbar", systemImage: "photo.artframe") { window.isFraming = true }
-                    .help("frame.toolbar.help")
-                    .disabled(!model.hasEditedFrame)
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                ExportButton(model: model, window: window)
-            }
-        }
-
-        ToolbarItem(placement: .primaryAction) {
-            Button("mac.toolbar.inspector", systemImage: "sidebar.trailing") { showsInspector.toggle() }
-                .help(showsInspector ? "mac.toolbar.hideInspector" : "mac.toolbar.showInspector")
         }
     }
 
@@ -73,8 +70,40 @@ struct MainToolbar: ToolbarContent {
 
 }
 
-/// One of Original / Edited / Compare: an accent-filled capsule while shown,
-/// dimmed while unavailable, and announced as shown.
+/// Above the inspector: export history, the frame, export and the
+/// inspector's own toggle. Export's button carries the export's progress and
+/// opens the panel; every other reason it cannot start is told by the panel
+/// itself.
+struct DocumentToolbar: ToolbarContent {
+    let model: EditorModel
+    let window: EditorWindowState
+    @Binding var showsInspector: Bool
+    var body: some ToolbarContent {
+        // Over the inspector the items would start at its leading edge.
+        ToolbarSpacer(.flexible)
+        if model.workspace == .editing {
+            ToolbarItemGroup(placement: .primaryAction) {
+                HistoryButton(model: model, window: window)
+                Button("frame.toolbar", systemImage: "photo.artframe") { window.isFraming = true }
+                    .help("frame.toolbar.help")
+                    .disabled(!model.hasEditedFrame)
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                ExportButton(model: model, window: window)
+            }
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button("mac.toolbar.inspector", systemImage: "sidebar.trailing") { showsInspector.toggle() }
+                .help(showsInspector ? "mac.toolbar.hideInspector" : "mac.toolbar.showInspector")
+        }
+    }
+}
+
+/// One of Original / Edited / Compare: a selected segment's capsule while
+/// shown (not the accent fill, which belongs to Export), dimmed while
+/// unavailable, and announced as shown.
 private struct ViewModeButton: View {
     let mode: ViewMode
     let model: EditorModel
@@ -84,11 +113,11 @@ private struct ViewModeButton: View {
         let available = model.isAvailable(mode)
         Button { model.viewMode = mode } label: {
             Text(mode.label)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color.hdr.accentInk : available ? Color.hdr.ink : Color.hdr.inkDisabled)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(selected ? Color.hdr.accentFill : Color.clear, in: .capsule)
+                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.hdr.selectedInk : available ? Color.hdr.ink : Color.hdr.inkDisabled)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(selected ? Color.hdr.selectedBackground : Color.clear, in: .capsule)
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -96,6 +125,24 @@ private struct ViewModeButton: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         // The trait does not reach AppKit from a toolbar item; say it.
         .accessibilityValue(selected ? Text("mac.toolbar.shown") : Text(verbatim: ""))
+    }
+}
+
+/// The views in a narrow window: the one shown, opening a menu of all three
+/// with the shown one checked and the unavailable ones off.
+private struct ViewModeMenu: View {
+    let model: EditorModel
+
+    var body: some View {
+        Menu {
+            ForEach(ViewMode.allCases, id: \.self) { mode in
+                Toggle(mode.label, isOn: Binding(get: { model.viewMode == mode },
+                                                 set: { if $0 { model.viewMode = mode } }))
+                    .disabled(!model.isAvailable(mode))
+            }
+        } label: {
+            Text(model.viewMode.label)
+        }
     }
 }
 

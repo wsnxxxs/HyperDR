@@ -2,9 +2,9 @@ import SwiftUI
 import HyperDRDesign
 import HyperDRRecipe
 
-/// The trailing inspector: the scopes on top, then the photograph's facts,
-/// the AI status and the adjustment groups. Without a photograph it shows the
-/// three steps instead.
+/// The trailing inspector: the scopes on top, then a decode warning when
+/// there is one, the AI status and the adjustment groups. Without a
+/// photograph it shows the three steps instead.
 ///
 /// The controls are generated from the recipe's declarations
 /// (`AdjustmentInspector`) and write the editor's recipe; the editor makes
@@ -39,8 +39,7 @@ struct InspectorContent: View {
                 Divider()
                 ExportLockRegion(model: model, window: window) {
                     VStack(alignment: .leading, spacing: 0) {
-                        PhotoInfoSection(document: document)
-                        Divider()
+                        DecodeWarning(document: document)
                         AIStatusLine(editor: model.editor)
                         Adjustments(model: model)
                             .disabled(model.isEditingLocked)
@@ -56,60 +55,31 @@ struct InspectorContent: View {
 
 // MARK: - Photo
 
-/// What M1 knows about the open photograph: the file's own facts, then what
-/// the decoder reported with the reference frame. A fact not known yet reads
-/// as a dash.
-private struct PhotoInfoSection: View {
+/// When the decoder could not use all of the photograph (its HDR rendition,
+/// say), what it fell back to. The photograph's size and format are in the
+/// window's subtitle and its kind in the status bar.
+private struct DecodeWarning: View {
     let document: DocumentState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            SectionHeading("mac.info.title")
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Space.s4, verticalSpacing: Space.s2) {
-                row("mac.info.dimensions", dimensions.map { Text(verbatim: $0) })
-                row("mac.info.format", Text(verbatim: document.formatLabel))
-                row("mac.info.size", fileSize.map { Text(verbatim: $0) })
-                row("mac.info.type", document.source.map { Text($0.domain.label) })
-                row("mac.info.color", document.source.flatMap { $0.colorName.isEmpty ? nil : Text(verbatim: $0.colorName) })
+        if let reasons = document.source?.degradationReasons, let sentence = DecodeDegradation.text(reasons) {
+            Label {
+                Text(sentence)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
             }
-            if let reasons = document.source?.degradationReasons, let sentence = DecodeDegradation.text(reasons) {
-                Label {
-                    Text(sentence)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .font(Font.hdr.caption)
-                .foregroundStyle(Color.hdr.warn)
-            }
+            .font(Font.hdr.caption)
+            .foregroundStyle(Color.hdr.warn)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Layout.panelPadding)
+            .padding(.vertical, Space.s3)
+            Divider()
         }
-        .padding(20)
-    }
-
-    private func row(_ title: LocalizedStringKey, _ value: Text?) -> some View {
-        GridRow {
-            Text(title)
-                .font(Font.hdr.caption)
-                .foregroundStyle(Color.hdr.inkMuted)
-            (value ?? Text(verbatim: "—"))
-                .font(Font.hdr.readout)
-                .foregroundStyle(Color.hdr.ink)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-        }
-    }
-
-    private var dimensions: String? {
-        document.pixelSize.map { "\($0.width) × \($0.height)" }
-    }
-
-    private var fileSize: String? {
-        document.byteCount > 0 ? document.byteCount.formatted(.byteCount(style: .file)) : nil
     }
 }
 
 extension InputDomain {
-    /// The photograph's kind as the status bar and inspector name it.
+    /// The photograph's kind as the status bar names it.
     var label: LocalizedStringKey {
         switch self {
         case .sceneReferred: "stage.input.scene"

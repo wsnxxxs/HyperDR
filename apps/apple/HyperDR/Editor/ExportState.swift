@@ -99,7 +99,8 @@ nonisolated struct RecipeExportJob: Sendable {
 nonisolated enum EditorExportEvent: Sendable {
     /// `message` is Kit's words for the stage (`RecipeExportProgress.stageMessage`),
     /// which can say more than `stage` (rendering and encoding on the row path).
-    case progress(stage: String, fraction: Double, at: Date, message: ExportMessage? = nil)
+    /// `overall` is Kit's measure of the whole export (`RecipeExportProgress.fraction`).
+    case progress(stage: String, fraction: Double, at: Date, message: ExportMessage? = nil, overall: Double? = nil)
     case log(String)
     case finishing, saving
     case finished(result: ExportResult?, failure: UserFacingError?)
@@ -174,6 +175,21 @@ nonisolated enum ExportETA {
         return ExportEstimate(fraction: min(0.99, max(fractionFloor, fraction)),
             remaining: .seconds(remaining), isOverdue: remaining <= 0)
     }
+    /// The export as Kit measures it (`overall`, first seen as `first` at
+    /// `firstAt`), filling the bar from `base`, where it stood when Kit began
+    /// measuring, so a first export fills too and a slow one is never shown as
+    /// overdue while its rows still advance. The time left comes from the rate
+    /// since then, once a twentieth of the export has passed.
+    static func measured(at: Date, overall: Double?, base: Double, first: Double, firstAt: Date?) -> ExportEstimate? {
+        guard let overall, overall.isFinite, overall > 0 else { return nil }
+        let base = min(0.99, max(0, base))
+        var remaining: Duration?
+        if let firstAt, overall - first >= 0.05 {
+            let rate = (overall - first) / max(0.001, at.timeIntervalSince(firstAt))
+            remaining = .seconds(max(0, (1 - overall) / rate))
+        }
+        return ExportEstimate(fraction: min(0.99, base + (1 - base) * min(1, overall)), remaining: remaining, isOverdue: false)
+    }
 }
 nonisolated extension Duration {
     var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
@@ -215,17 +231,36 @@ nonisolated extension Duration {
     @ObservationIgnored var durations: [Double]?
     @ObservationIgnored var fractionFloor = 0.0
     @ObservationIgnored var fractionAt: Date?
+    /// Kit's measure of the whole export, never moving back, where it began,
+    /// and how full the bar was then.
+    @ObservationIgnored var overall: Double?
+    @ObservationIgnored var overallFirst = 0.0
+    @ObservationIgnored var overallFirstAt: Date?
+    @ObservationIgnored var overallBase = 0.0
     var isInFlight: Bool { [.preparing, .running, .finishing, .saving].contains(phase) }
     func estimate(at date: Date) -> ExportEstimate? {
         guard isInFlight || phase == .succeeded, let startedAt else { return nil }
-        return ExportETA.estimate(at: date, startedAt: startedAt, stageAt: stageAt ?? startedAt,
+        let timed = ExportETA.estimate(at: date, startedAt: startedAt, stageAt: stageAt ?? startedAt,
             stage: stage, durations: durations, fractionFloor: fractionFloor, fraction: fraction, fractionAt: fractionAt,
             saving: phase == .saving || phase == .finishing, completed: phase == .succeeded)
+        guard phase == .running, let measured = ExportETA.measured(at: date, overall: overall, base: overallBase,
+                                                                     first: overallFirst, firstAt: overallFirstAt) else { return timed }
+        return ExportEstimate(fraction: measured.fraction,
+            remaining: measured.remaining ?? timed.flatMap { $0.isOverdue ? nil : $0.remaining }, isOverdue: false)
     }
-    func progress(stage newStage: String, fraction: Double, at date: Date, message: ExportMessage? = nil) {
+    func progress(stage newStage: String, fraction: Double, at date: Date, message: ExportMessage? = nil, overall: Double? = nil) {
         let span = ExportETA.span(newStage)
         if let current = ExportETA.span(stage), let span, span < current { return }
         stageMessage = message ?? ExportMessage(key: "export.stage." + newStage)
+        if let overall, overall.isFinite, overall >= (self.overall ?? 0) {
+            if self.overall == nil {
+                // Reading the photo is the smaller part of an export; a
+                // history that is already overdue says nothing of the rows.
+                overallBase = min(0.5, estimate(at: date)?.fraction ?? 0)
+                overallFirst = overall; overallFirstAt = date
+            }
+            self.overall = overall
+        }
         fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
         if newStage != stage {
             // The AI model runs inside the photo's reading span: its clock goes on.
@@ -247,6 +282,7 @@ nonisolated extension Duration {
         phase = .idle; startedAt = nil; stage = nil; stageMessage = nil; fraction = nil; lastLine = nil
         failure = nil; saveFailure = nil; transferFailure = nil; result = nil; isResultStale = false
         destination = nil; isStopping = false; isStoppingToQuit = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
+        overall = nil; overallFirst = 0; overallFirstAt = nil; overallBase = 0
     }
 }
 nonisolated struct TransferFailure: Equatable {

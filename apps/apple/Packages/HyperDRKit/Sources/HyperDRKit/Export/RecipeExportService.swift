@@ -61,9 +61,9 @@ public actor RecipeExportService: RecipeExportServicing {
         var stage = RecipeExportStage.preparing
         let operationStart = ContinuousClock.now
         var stageStart = Date()
-        func emit(_ next: RecipeExportStage) {
+        func emit(_ next: RecipeExportStage, _ event: RecipeExportProgress? = nil) {
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)
-            stage = next; stageStart = Date(); progress(.init(stage: next))
+            stage = next; stageStart = Date(); progress(event ?? .init(stage: next))
         }
         progress(.init(stage: .preparing))
         do {
@@ -245,8 +245,8 @@ public actor RecipeExportService: RecipeExportServicing {
                         baseHeadroom: Double(report.gain?.baseHeadroom ?? 0)).supported else { throw RecipeExportError.invalidStripes }
                 try validateRevision(try await sessions.session(session), snapshot: snapshot)
                 try await checkMemory(plan, residentBytes: resident, request: actualRequest)
-                let bridge = PackageRowBridge(source: rows, frame: frozenFrame, progress: progress)
-                emit(.encoding)
+                let bridge = PackageRowBridge(source: rows, frame: frozenFrame, encoding: plan.encoding, progress: progress)
+                emit(.encoding, bridge.started)
                 let metadata = report.gain.map {
                     PackageGainMetadata(baseOffsets: [$0.baseOffset.x, $0.baseOffset.y, $0.baseOffset.z],
                         alternateOffsets: [$0.alternateOffset.x, $0.alternateOffset.y, $0.alternateOffset.z],

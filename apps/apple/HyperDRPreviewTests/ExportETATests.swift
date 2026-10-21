@@ -135,4 +135,30 @@ import HyperDRRecipe
         XCTAssertEqual(state.stage, "encoding")
         XCTAssertLessThanOrEqual(try XCTUnwrap(state.estimate(at: start+1000)).fraction, 0.99)
     }
+    func testKitsMeasureFillsAFirstExportAndOvertakesAnOverdueHistory() throws {
+        let start = Date(timeIntervalSince1970: 100)
+        // A first export: no history, Kit's rows alone.
+        let first = ExportState(); first.startedAt = start; first.stageAt = start; first.phase = .running
+        first.progress(stage: "developing", fraction: 0, at: start)
+        XCTAssertNil(first.estimate(at: start+5), "nothing measured yet")
+        first.progress(stage: "encoding", fraction: 0, at: start+5, overall: 0)
+        first.progress(stage: "encoding", fraction: 0, at: start+15, overall: 0.3)
+        let measured = try XCTUnwrap(first.estimate(at: start+15))
+        XCTAssertEqual(measured.fraction, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(measured.remaining).seconds, 10 * 0.7 / 0.3, accuracy: 1e-6)
+        XCTAssertFalse(measured.isOverdue)
+        first.progress(stage: "encoding", fraction: 0, at: start+16, overall: 0.2)
+        XCTAssertEqual(try XCTUnwrap(first.estimate(at: start+16)).fraction, 0.3, accuracy: 1e-9, "never moves back")
+        // A history that thought it would be done by now: the rows still run.
+        let late = ExportState(); late.startedAt = start; late.stageAt = start; late.durations = [1, 1, 1, 1]; late.phase = .running
+        late.progress(stage: "encoding", fraction: 0, at: start, overall: 0)
+        late.progress(stage: "encoding", fraction: 0, at: start+20, overall: 0.5)
+        let ahead = try XCTUnwrap(late.estimate(at: start+20))
+        XCTAssertFalse(ahead.isOverdue)
+        XCTAssertGreaterThan(ahead.fraction, 0.5 - 1e-9)
+        XCTAssertNotNil(ahead.remaining)
+        // Saving still holds at 99%.
+        late.phase = .saving
+        XCTAssertEqual(late.estimate(at: start+21)?.fraction, 0.99)
+    }
 }

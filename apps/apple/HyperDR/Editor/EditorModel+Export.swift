@@ -167,8 +167,10 @@ extension EditorModel {
                 for await event in services.exportEvents(ticket.job) {
                     guard !Task.isCancelled, self.photo == photo else { break }
                     switch event {
-                    case .progress(let stage, let fraction, let at, let message):
-                        if !["complete", "error"].contains(stage) { export.progress(stage: stage, fraction: fraction, at: at, message: message) }
+                    case .progress(let stage, let fraction, let at, let message, let overall):
+                        if !["complete", "error"].contains(stage) {
+                            export.progress(stage: stage, fraction: fraction, at: at, message: message, overall: overall)
+                        }
                     case .log(let line): export.lastLine = line
                     case .finishing: export.phase = .finishing
                     case .saving: export.phase = .saving

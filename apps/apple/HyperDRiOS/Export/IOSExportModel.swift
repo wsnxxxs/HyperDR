@@ -133,6 +133,9 @@ nonisolated struct ExportStack: Sendable {
     private(set) var phase = Phase.choosing {
         didSet { UIApplication.shared.isIdleTimerDisabled = isRunning }
     }
+    /// How far the running export has come, as one ring that fills once:
+    /// Kit's overall fraction, never moving back. Nil until the first row.
+    private(set) var fraction: Double?
     /// `fileExporter`'s binding.
     var presentingFileExporter = false
 
@@ -448,6 +451,7 @@ nonisolated struct ExportStack: Sendable {
         run += 1
         let run = self.run
         phase = .running(RecipeExportProgress(stage: .preparing))
+        fraction = nil
         waitingForSource = true
         task = Task { [weak self] in
             do {
@@ -542,6 +546,7 @@ nonisolated struct ExportStack: Sendable {
     private func progressed(_ progress: RecipeExportProgress, run: Int) {
         guard run == self.run, case .running = phase else { return }
         phase = .running(progress)
+        if let next = progress.fraction { fraction = max(fraction ?? 0, next) }
     }
 
     private func finished(_ finished: Finished, run: Int) {

@@ -137,7 +137,7 @@ import HyperDRKit
         XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: zh), "渲染中 · 已用 0:21 · 约 10 秒后完成")
         // Each of Kit's stages has Kit's words (RecipeExportProgress.stageMessage).
         for (stage, text) in [("developing", "Developing RAW"), ("model", "Predicting HDR"),
-                              ("encoding", "Encoding"), ("verifying", "Verifying")] {
+                              ("encoding", "Encoding"), ("verifying", "Finishing up")] {
             XCTAssertTrue(line(.running, stage, estimate: seconds, locale: en).hasPrefix(text + " · "), stage)
         }
         // The row path renders while it encodes, and says so.
@@ -146,7 +146,14 @@ import HyperDRKit
             estimate: seconds), elapsed: 21, locale: en).hasPrefix("Rendering and encoding · "))
         XCTAssertTrue(ExportPresentation.statusLine(ExportPresentation.statusParts(phase: .running, stage: rows.stageMessage,
             estimate: seconds), elapsed: 21, locale: zh).hasPrefix("渲染与编码 · "))
-        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: en).hasPrefix("Saving export · "))
+        // Checking and saving the file are one stage.
+        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: en).hasPrefix("Finishing up · "))
+        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: zh).hasPrefix("正在收尾 · "))
+        let lastRow = RecipeExportProgress(stage: .encoding, completedRows: 4000, totalRows: 4000, includesRendering: true,
+                                           rowPass: 3, rowPasses: 3)
+        XCTAssertEqual(lastRow.stageMessage.localized(locale: en), "Finishing up")
+        XCTAssertEqual(ExportPresentation.timeLine(ExportPresentation.statusParts(phase: .running, stage: lastRow.stageMessage,
+            estimate: seconds), elapsed: 21, locale: en), "0:21 elapsed · about 10 s left")
         XCTAssertEqual(line(.preparing, nil, estimate: nil, elapsed: 0, locale: en), "Preparing · 0:00 elapsed · first export, estimating the time")
         XCTAssertTrue(line(.running, "developing", estimate: ExportEstimate(fraction: 0.99, remaining: .zero, isOverdue: true), locale: en)
             .hasSuffix("almost done, a little longer than expected"))

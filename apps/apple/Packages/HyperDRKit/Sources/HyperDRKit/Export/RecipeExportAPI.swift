@@ -20,11 +20,53 @@ public struct RecipeExportProgress: Sendable {
     public let includesRendering: Bool
     /// One-based sequential replay pass; nil outside the row writer.
     public let rowPass: Int?
+    /// How many sequential passes the row writer makes over the rows (gain
+    /// extrema, base, gain); nil when unknown or outside the row writer.
+    public let rowPasses: Int?
+    /// Once every row is written, checking and saving the file are one
+    /// “Finishing up”, not stages of their own.
     public var stageMessage: ExportMessage {
-        .init(key: "export.stage." + (includesRendering ? "renderingEncoding" : stage.rawValue))
+        .init(key: "export.stage." + (isFinishing && stage != .delivering ? "finishing"
+            : includesRendering ? "renderingEncoding" : stage.rawValue))
     }
-    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil, includesRendering: Bool = false, rowPass: Int? = nil) {
-        self.includesRendering = includesRendering; self.rowPass = rowPass
+    /// The whole export's completion, 0...1, so one bar fills once instead of
+    /// once per pass: the rows (every pass of the row writer, or the stripes
+    /// rendered before a whole-plane encode) take it to `rowsShare`, checking
+    /// and saving the file the rest. Nil while the photo is still being read.
+    /// Stateless: a caller keeps the largest value it has shown.
+    public var fraction: Double? {
+        switch stage {
+        case .preparing, .model, .developing: return nil
+        case .rendering, .encoding:
+            guard let done = completedRows, let total = totalRows, total > 0 else {
+                // A whole-plane encode follows all of its rendered stripes.
+                return stage == .encoding && !includesRendering ? Self.wholePlaneRenderShare : nil
+            }
+            let rows = min(1, max(0, Double(done) / Double(total)))
+            guard let pass = rowPass else { return Self.wholePlaneRenderShare * rows }
+            let passes = max(pass, rowPasses ?? pass)
+            return Self.rowsShare * (Double(pass - 1) + rows) / Double(passes)
+        case .verifying: return Self.rowsShare
+        case .publishing: return 0.95
+        case .delivering: return 0.98
+        }
+    }
+    /// Every row is written: what is left is checking and saving the file
+    /// (the row writer checks its file before it returns).
+    public var isFinishing: Bool {
+        switch stage {
+        case .verifying, .publishing, .delivering: return true
+        case .encoding:
+            guard let pass = rowPass, let passes = rowPasses, let total = totalRows else { return false }
+            return pass >= passes && completedRows == total
+        case .preparing, .model, .developing, .rendering: return false
+        }
+    }
+    static let rowsShare = 0.9
+    static let wholePlaneRenderShare = 0.6
+    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil, includesRendering: Bool = false,
+                rowPass: Int? = nil, rowPasses: Int? = nil) {
+        self.includesRendering = includesRendering; self.rowPass = rowPass; self.rowPasses = rowPasses
         self.stage = stage; self.completedRows = completedRows; self.totalRows = totalRows
     }
 }

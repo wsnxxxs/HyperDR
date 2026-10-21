@@ -873,4 +873,40 @@ struct RowWriterProgressTests {
         #expect(actual.allSatisfy { $0.stage == .encoding && $0.includesRendering && $0.totalRows == 8 })
         _ = try bridge.thumbnail()
     }
+
+    @Test func passesFillOneOverallFractionOnce() throws {
+        let request = ExportRenderRequest(photoSize: .init(width: 8, height: 8), includesGain: false,
+            capabilities: .init(supportsThreeChannelGain: false, supportsSignedGain: true,
+                                requiresGainMaximumHeadroom: false))
+        let fake = StripeFake()
+        func run(_ encoding: ExportEncoding, _ ys: [Int]) throws -> (RecipeExportProgress, [RecipeExportProgress]) {
+            let events = Mutex<[RecipeExportProgress]>([])
+            let bridge = PackageRowBridge(source: FakeRows(fake: fake, request: request, report: fake.report(request)),
+                frame: nil, encoding: encoding, progress: { event in events.withLock { $0.append(event) } })
+            var base = [Float](repeating: 0, count: 8 * 4 * 3)
+            for y in ys { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
+            return (bridge.started, events.withLock { $0 })
+        }
+        // PQ: the gain's extrema, then one HDR picture.
+        let (started, pq) = try run(.pq, [0, 4, 0, 4])
+        #expect(started.fraction == 0 && started.rowPasses == 2 && !started.isFinishing)
+        let fractions = pq.compactMap(\.fraction)
+        #expect(fractions.count == 4 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
+        #expect(abs(fractions[1] - 0.45) < 1e-9 && abs(fractions[3] - 0.9) < 1e-9)
+        #expect(pq.map(\.isFinishing) == [false, false, false, true])
+        // A gain map whose gain is all zero is not read a third time.
+        let (_, zero) = try run(.adaptive, [0, 4, 0, 4])
+        #expect(zero.map(\.rowPasses) == [3, 2, 2, 2])
+        #expect(zero.last?.isFinishing == true && abs((zero.last?.fraction ?? 0) - 0.9) < 1e-9)
+        // SDR is a single pass.
+        let (_, sdr) = try run(.sdrJPEG, [0, 4])
+        #expect(sdr.last?.isFinishing == true && sdr.last?.fraction == 0.9)
+        // After the rows, checking and saving only move forward.
+        let tail = [RecipeExportStage.verifying, .publishing, .delivering].compactMap { RecipeExportProgress(stage: $0).fraction }
+        #expect(tail.count == 3 && tail[0] >= 0.9 && zip(tail, tail.dropFirst()).allSatisfy { $0 < $1 } && tail[2] < 1)
+        #expect(RecipeExportProgress(stage: .developing).fraction == nil)
+        // The whole-plane path: rendered stripes, then the encode.
+        #expect(RecipeExportProgress(stage: .rendering, completedRows: 4, totalRows: 8).fraction == 0.3)
+        #expect(RecipeExportProgress(stage: .encoding).fraction == 0.6)
+    }
 }

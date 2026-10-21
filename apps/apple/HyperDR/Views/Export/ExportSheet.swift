@@ -348,33 +348,42 @@ private struct ExportProgressView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: Space.s4) {
-                header
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    let estimate = model.export.estimate(at: model.now())
-                    let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stageMessage, estimate: estimate)
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        summary(estimate)
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let estimate = model.export.estimate(at: model.now())
+                let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stageMessage, estimate: estimate)
+                let elapsed = model.export.startedAt.map { model.now().timeIntervalSince($0) } ?? 0
+                VStack(alignment: .leading, spacing: Space.s4) {
+                    header(estimate)
+                    summary
+                    VStack(alignment: .leading, spacing: Space.s2) {
                         ExportProgressBar(progress: ExportPresentation.progressStyle(isStopping: model.export.isStopping,
                                                                                     estimate: estimate), height: 8)
-                        Text(verbatim: ExportPresentation.statusLine(
-                            parts, elapsed: model.export.startedAt.map { model.now().timeIntervalSince($0) } ?? 0,
-                            locale: locale))
-                            .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
+                        // The stage on the left, the time on the right.
+                        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+                            Text(verbatim: parts.stage.text(locale: locale))
+                                .font(Font.hdr.caption.weight(.medium)).foregroundStyle(Color.hdr.ink)
+                                .contentTransition(.opacity)
+                            Spacer(minLength: Space.s3)
+                            Text(verbatim: ExportPresentation.timeLine(parts, elapsed: elapsed, locale: locale))
+                                .font(Font.hdr.caption.monospacedDigit()).foregroundStyle(Color.hdr.inkMuted)
+                        }
+                        .lineLimit(1)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(verbatim: ExportPresentation.statusLine(parts, elapsed: elapsed, locale: locale)))
                     }
+                    if let line = model.export.lastLine, !line.isEmpty {
+                        Text(verbatim: line)
+                            .font(.hdr.mono(11))
+                            .foregroundStyle(Color.hdr.ink)
+                            .lineLimit(1).truncationMode(.tail)
+                            .padding(.horizontal, Space.s2).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
+                    }
+                    InspectorNotice(Text("export.progress.lockedNote"), style: .info)
                 }
-                if let line = model.export.lastLine, !line.isEmpty {
-                    Text(verbatim: line)
-                        .font(.hdr.mono(11))
-                        .foregroundStyle(Color.hdr.ink)
-                        .lineLimit(1).truncationMode(.tail)
-                        .padding(.horizontal, Space.s2).padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
-                }
-                InspectorNotice(Text("export.progress.lockedNote"), style: .info)
+                .padding(Space.s5)
             }
-            .padding(Space.s5)
             Divider()
             HStack {
                 Button(model.export.isStopping ? "export.progress.stopping" : "export.progress.stop") {
@@ -393,31 +402,32 @@ private struct ExportProgressView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    /// "Exporting" with the percentage across from it, once there is one.
+    private func header(_ estimate: ExportEstimate?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
             Text(model.export.isStopping ? "export.progress.stoppingTitle" : "export.progress.title")
                 .font(Font.hdr.title).foregroundStyle(Color.hdr.inkStrong)
-            Text("export.progress.destination \(ExportPresentation.fileName(for: model)) \(ExportPresentation.folderName(for: model))")
-                .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
-                .lineLimit(1).truncationMode(.middle)
-        }
-    }
-
-    private func summary(_ estimate: ExportEstimate?) -> some View {
-        HStack(alignment: .center, spacing: Space.s3) {
-            Thumbnail(model.export.thumbnail.content(), width: 72, height: 48)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: ExportPresentation.fileName(for: model))
-                    .font(.system(size: TypeScale.Size.control, weight: .semibold))
-                    .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.middle)
-                Text(verbatim: meta).font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(1)
-            }
             Spacer(minLength: Space.s3)
             if let percent = ExportPresentation.percent(estimate: estimate, isDone: false) {
                 Text(verbatim: ExportPresentation.percentText(percent, locale: locale))
                     .font(.system(size: 22, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Color.hdr.inkStrong)
+                    .contentTransition(.numericText())
             }
+        }
+    }
+
+    /// The picture, where it goes ("DSC04127.jpg → Exports") and how.
+    private var summary: some View {
+        HStack(alignment: .center, spacing: Space.s3) {
+            Thumbnail(model.export.thumbnail.content(), width: 72, height: 48)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("export.progress.destination \(ExportPresentation.fileName(for: model)) \(ExportPresentation.folderName(for: model))")
+                    .font(.system(size: TypeScale.Size.control, weight: .semibold))
+                    .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.middle)
+                Text(verbatim: meta).font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
     }
 

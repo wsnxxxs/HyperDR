@@ -139,10 +139,15 @@ private struct EditorWindow: View {
             }
             .navigationTitle(model.document?.name ?? "HyperDR")
             .navigationSubtitle(subtitle)
-            .toolbar { MainToolbar(model: model, window: window, showsInspector: $showsInspector) }
+            .toolbar {
+                MainToolbar(model: model, window: window, isNarrow: windowWidth < Layout.narrowBreakpoint)
+            }
             .inspector(isPresented: $showsInspector) {
                 InspectorView(model: model, window: window)
                     .inspectorColumnWidth(Layout.inspectorWidth(forWindowWidth: windowWidth))
+                    // Above the inspector's column, so the canvas column's
+                    // items end at the canvas.
+                    .toolbar { DocumentToolbar(model: model, window: window, showsInspector: $showsInspector) }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
             .frame(minWidth: 760, minHeight: 520)

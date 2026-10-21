@@ -43,8 +43,7 @@ struct CanvasAdornments: View {
             if comparing {
                 SplitOverlay(ratio: model.splitRatio, imageFrame: image, visibleRect: visible,
                              originalLabel: Text("editor.original"), editedLabel: Text("editor.effect"),
-                             showsHDRBadge: PhotoBadgeKind.hasHDR(domain: model.document?.source?.domain,
-                                                                  gainWeight: model.display.gainWeight),
+                             showsHDRBadge: model.showsHDRBadge,
                              onDrag: { model.setSplitRatio($0) }, onEditingChanged: onSplitEditing,
                              onNudge: { model.nudgeSplit(by: $0) })
             }

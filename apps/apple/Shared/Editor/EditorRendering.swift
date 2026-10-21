@@ -142,11 +142,11 @@ nonisolated struct EditorMask: @unchecked Sendable {
 }
 
 extension Recipe {
-    /// The comparison recipe for "Original": the declared defaults, but the same
-    /// RAW development as `self`, because development belongs to the source
-    /// (p7-2b §5).
+    /// The comparison recipe retains the source's range and the same RAW
+    /// development. An SDR original must not acquire the default HDR expansion.
     nonisolated var original: Recipe {
         var original = Recipe(inputDomain: inputDomain)
+        if inputDomain == .sdr { original.setValue(.bool(false), for: "hdr.enabled") }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             original.setValue(value(for: declaration.id), for: declaration.id)
         }

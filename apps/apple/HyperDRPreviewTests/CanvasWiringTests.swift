@@ -305,10 +305,11 @@ import HyperDRDesign
     // MARK: Badge
 
     func testCompareHasNoBadgeOfItsOwnAndTheLabelSharesTheHDRRule() {
-        XCTAssertNil(PhotoBadgeKind(viewMode: .compare, originalAvailable: true, domain: .hdr, gainWeight: 1))
-        XCTAssertTrue(PhotoBadgeKind.hasHDR(domain: .hdr, gainWeight: nil))
-        XCTAssertTrue(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: 0))
-        XCTAssertFalse(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: nil))
+        let model = EditorModel.preview(.editingSDRDisplay)
+        XCTAssertTrue(model.showsHDRBadge, "HDR content remains HDR on an SDR screen")
+        XCTAssertNil(PhotoBadgeKind(viewMode: .compare, originalAvailable: true, hasHDR: model.showsHDRBadge))
+        model.previewsAsSDR = true
+        XCTAssertFalse(model.showsHDRBadge)
     }
 
     // MARK: Open commands

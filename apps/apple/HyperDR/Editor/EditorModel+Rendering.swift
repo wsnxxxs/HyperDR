@@ -4,6 +4,16 @@ import HyperDRRecipe
 import HyperDRRender
 
 extension EditorModel {
+    /// Describes the frame actually on the canvas, independently of how much
+    /// HDR the current screen can show. A pending edit keeps the old frame's badge.
+    var showsHDRBadge: Bool {
+        _ = frameRevision
+        guard hasEditedFrame, !previewsAsSDR, !editor.previewsAsSDR else { return false }
+        if let editedPair { return max(editedPair.baseHeadroom, editedPair.alternateHeadroom) > 0 }
+        // SwiftUI preview scenarios have display facts without GPU frames.
+        return document?.source?.domain == .hdr || document?.source?.domain == .dual || display.gainWeight != nil
+    }
+
     /// The HDR ceiling the overlays and the mask measure against: what the
     /// edit's alternate rendition reaches, in stops.
     var outputCeilingStops: Double {

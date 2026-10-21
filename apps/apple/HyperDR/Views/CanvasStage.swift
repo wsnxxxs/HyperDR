@@ -234,7 +234,7 @@ private struct PhotoBadge: View {
 
     private var badge: AnyView? {
         switch PhotoBadgeKind(viewMode: model.viewMode, originalAvailable: model.isAvailable(.original),
-                              domain: model.document?.source?.domain, gainWeight: model.display.gainWeight,
+                              hasHDR: model.showsHDRBadge,
                               isPeeking: model.isPeekingOriginal) {
         case .original:
             AnyView(Text("stage.badgeOriginal")
@@ -252,25 +252,17 @@ private struct PhotoBadge: View {
 enum PhotoBadgeKind: Equatable {
     case original, hdr
 
-    /// The source is HDR or has an HDR rendition, or the edited frame has
-    /// gain. The compare divider's right label carries the same badge.
-    static func hasHDR(domain: InputDomain?, gainWeight: Double?) -> Bool {
-        domain == .hdr || domain == .dual || gainWeight != nil
-    }
-
     /// "Original" while the original is shown. "HDR" over the edited photo
-    /// when the source is HDR or has an HDR rendition, or when the edited
-    /// frame has gain: `gainWeight` is non-nil exactly then, and may be 0 on
-    /// an SDR display or with no headroom left, which still counts. No badge
-    /// while the original is held: the label in the middle says it, and an
-    /// HDR badge would sit on an SDR picture.
-    init?(viewMode: ViewMode, originalAvailable: Bool, domain: InputDomain?, gainWeight: Double?,
+    /// when the shown effect frame carries HDR, even on an SDR screen. The
+    /// compare divider uses the same content fact. While held, the original
+    /// is named by the label in the middle instead.
+    init?(viewMode: ViewMode, originalAvailable: Bool, hasHDR: Bool,
           isPeeking: Bool = false) {
         guard !isPeeking else { return nil }
         switch viewMode {
         case .original where originalAvailable:
             self = .original
-        case .edited where Self.hasHDR(domain: domain, gainWeight: gainWeight):
+        case .edited where hasHDR:
             self = .hdr
         default:
             return nil

@@ -316,6 +316,17 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.frame?.request.recipe == Recipe(inputDomain: .sdr))
     }
 
+    @Test func theOriginalKeepsTheSourcesRange() {
+        for domain in InputDomain.allCases {
+            var recipe = Recipe(inputDomain: domain)
+            recipe.setValue(.bool(false), for: "hdr.enabled")
+            recipe.setValue(.number(1), for: "tone.exposure")
+            #expect(recipe.original.conditionValue("hdr.enabled") == .bool(domain != .sdr))
+            #expect(recipe.original.isDefault("tone.exposure"))
+            #expect(recipe.original.hdrSource == HDRSource.defaultSource(for: domain))
+        }
+    }
+
     @Test func theOriginalFollowsDevelopmentOnly() async throws {
         let h = Harness()
         try await h.open(.rawEDR, name: "c.dng")

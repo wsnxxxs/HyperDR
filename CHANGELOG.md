@@ -3,7 +3,20 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
-## Unreleased
+## 0.5.0 - 2026-10-22 (Apple pre-release)
+
+- Add measured film-stock looks with grain, halation and emulsion scatter.
+- Preview LUTs on the current photo; preserve their input/output spaces, camera
+  Log curves and undo, and blend look strength in linear light.
+- Preserve HDR colour and camera metadata in HEIC exports.
+- Prefer RAW decoder 9 when supported, keep its exact version in the recipe,
+  and retry the system default once for a new photo that decoder 9 cannot open.
+- Show embedded photo previews and opening stages; improve cancellation,
+  original comparison, RAW detail controls and the iOS adjustment ruler.
+- Distribute an ad-hoc-signed Apple Silicon Mac build (macOS 26+). iPhone and
+  iPad source is included; installation still requires Xcode signing.
+
+## Development history before the native Apple releases
 
 - Remove libheif and libde265. HEIC and HEIF inputs are parsed by HyperDR's own
   reader and decoded by VideoToolbox, and the write-time check of HEIC exports

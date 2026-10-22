@@ -1,6 +1,6 @@
 # Notes for coding agents
 
-Branch `refactor/multiplatform` is migrating HyperDR to native Apple apps. The
+The native Apple app migration was merged into `main` for 0.5.0. The
 planning documents live in `docs/`, which is ignored by Git, so they are not in
 this checkout. This file summarizes what they decide.
 

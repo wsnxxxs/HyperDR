@@ -6,4 +6,4 @@ apps/apple/README-iOS.md. The engine is linked statically through C ABI 5;
 there is no separate CLI distribution.
 
 Windows development is frozen at
-[`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a).
+[`6949167`](https://github.com/wsnxxxs/HyperDR/tree/6949167).

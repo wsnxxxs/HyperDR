@@ -10,7 +10,7 @@ this checkout. This file summarizes what they decide.
   replaces the earlier Mac-only scope). The Mac app stays native SwiftUI, not
   Mac Catalyst, on Apple Silicon. Core packages (edit recipe, GPU render
   graph, export planning) must not depend on AppKit or UIKit. Windows stopped
-  at commit `a43d46a` on `main`; Android is out of scope.
+  at commit `6949167` on `main`; Android is out of scope.
 - Direction approved on 2026-10-20 and 2026-10-21: image processing moves to a
   GPU render graph (Core Image plus our own Metal kernels) shared by preview
   and export; decoding moves to the system (ImageIO, `CIRAWFilter`); each
@@ -33,7 +33,7 @@ this checkout. This file summarizes what they decide.
   2026-10-20 (P3b-5); the app bundle embeds no dylibs and carries no LGPL code.
 - RAW is developed through `CIRAWFilter`; LibRaw is gone.
 - The Python panel, LAN server, web front end and Tauri shell were deleted on
-  2026-10-20 (last visible at `50f734c6`). P7-4 removes the CLI, schema,
+  2026-10-20 (last visible at `71933a32`). P7-4 removes the CLI, schema,
   panel-v1 adapter, C++ processing and ncnn; AI runs through Core ML in Render.
 - New code is Apple/POSIX only, with no `_WIN32` branches.
 

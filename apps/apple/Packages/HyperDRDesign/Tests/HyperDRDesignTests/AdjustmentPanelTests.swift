@@ -130,8 +130,10 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmGrain"])
     let film = try #require(panel.control(Recipe.filmID, in: recipe))
     let sections = AdjustmentText.optionSections(film)
-    #expect(sections.count == 1 && sections[0].family == nil, "film stocks are not LUT spaces")
-    #expect(sections[0].options.map(\.id) == Adjustments.filmStocks)
+    #expect(sections.allSatisfy { $0.family == nil }, "film stocks are not LUT spaces")
+    #expect(sections.map(\.filmFamily) == [nil, .negative, .slide, .cinema])
+    #expect(sections[0].options.map(\.id) == ["none"])
+    #expect(sections.flatMap { $0.options.map(\.id) } == Adjustments.filmStocks)
     panel.set(Recipe.filmID, option: "none", in: &recipe)
     #expect(ids(recipe, .look) == ["look.lut", "look.film"])
 }

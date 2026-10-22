@@ -251,3 +251,10 @@ private extension ParameterDefault {
     #expect(range.defaultValue(in: .hdr) == .auto)
     #expect(range.range == 0.5...4)
 }
+
+@Test func filmFamiliesCoverTheStocksInMenuOrder() {
+    #expect(Adjustments.filmStocks.first == "none")
+    #expect(Array(Adjustments.filmStocks.dropFirst()) == Adjustments.filmFamilies.flatMap(\.stocks))
+    #expect(Adjustments.filmFamilies.map(\.family) == FilmFamily.allCases)
+    #expect(Adjustments.filmFamily("none") == nil && Adjustments.filmFamily("velvia100") == .slide)
+}

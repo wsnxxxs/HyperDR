@@ -1,9 +1,10 @@
 import Foundation
+import Synchronization
 import Metal
 
-/// Option ids of Recipe's `look.film`, one bundled resource each.
+/// Option ids of Recipe's `look.film`, one bundled resource each, in its menu order.
 public enum FilmStockID: String, CaseIterable, Hashable, Sendable {
-    case portra400, velvia100
+    case portra400, gold200, velvia100, kodachrome64
     case vision3500T = "vision3-500t"
 }
 
@@ -51,34 +52,34 @@ public struct FilmStock: Sendable {
     let resource: FilmResource
     let spectralLUT: [SIMD3<Double>]
 
+    /// Loads a stock on first use and keeps it.
     public static func named(_ id: FilmStockID) throws -> FilmStock {
-        if let stock = loaded[id] { return stock }
-        throw RenderError.invalidAdjustment
+        try cache.withLock { stocks in
+            if let stock = stocks[id] { return stock }
+            guard let json = Bundle.module.url(forResource: id.rawValue, withExtension: "json", subdirectory: "Film"),
+                  let table = Bundle.module.url(forResource: id.rawValue, withExtension: "spectral", subdirectory: "Film")
+            else { throw RenderError.invalidAdjustment }
+            let stock = try FilmStock(id: id, data: Data(contentsOf: json), spectral: Data(contentsOf: table))
+            stocks[id] = stock
+            return stock
+        }
     }
 
-    private static let loaded: [FilmStockID: FilmStock] = {
-        var result: [FilmStockID: FilmStock] = [:]
-        for id in FilmStockID.allCases {
-            if let url = Bundle.module.url(forResource: id.rawValue, withExtension: "json", subdirectory: "Film"),
-               let data = try? Data(contentsOf: url), let stock = try? FilmStock(id: id, data: data) {
-                result[id] = stock
-            }
-        }
-        return result
-    }()
+    private static let cache = Mutex<[FilmStockID: FilmStock]>([:])
 
-    init(id: FilmStockID, data: Data) throws {
+    /// `spectral` is the chromaticity table: size × size × 3 little-endian float16.
+    init(id: FilmStockID, data: Data, spectral bytes: Data) throws {
         let resource = try JSONDecoder().decode(FilmResource.self, from: data)
         let lut = resource.filming.spectralLUT
         guard resource.schema == "hyperdr.film/v1", resource.id == id.rawValue,
-              let bytes = Data(base64Encoded: lut.float32), bytes.count == lut.size * lut.size * 12,
+              bytes.count == lut.size * lut.size * 6,
               Self.isUniformCurve(resource.filming.logExposure, resource.filming.densityCurves),
               Self.isUniformCurve(resource.filming.logExposure, resource.filming.densityCurvesBeforeCouplers),
               resource.printing.map({ Self.isUniformCurve($0.logExposure, $0.densityCurves) }) ?? true,
               resource.filming.channelDensity.count == Self.wavelengths, resource.scanning.illuminant.count == Self.wavelengths,
               resource.filming.grain.varianceArea.count == Self.curveSamples, resource.scanning.levels.count == 2
         else { throw RenderError.invalidAdjustment }
-        let floats = bytes.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }.map { Float(bitPattern: UInt32(littleEndian: $0.bitPattern)) }
+        let floats = bytes.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }.map { Float(Float16(bitPattern: UInt16(littleEndian: $0))) }
         self.id = id
         self.name = resource.name
         self.attribution = resource.attribution
@@ -295,7 +296,7 @@ public struct FilmStock: Sendable {
 }
 
 struct FilmResource: Decodable, Sendable {
-    struct SpectralLUT: Decodable, Sendable { let size: Int; let float32: String }
+    struct SpectralLUT: Decodable, Sendable { let size: Int }
     struct Grain: Decodable, Sendable {
         /// Density variance × pixel area (µm²), 256 samples from zero to each channel's maximum.
         let varianceArea: [[Double]]

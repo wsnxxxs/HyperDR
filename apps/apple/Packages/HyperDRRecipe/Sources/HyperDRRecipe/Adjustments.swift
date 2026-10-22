@@ -43,6 +43,12 @@ public enum HDRSource: String, Codable, CaseIterable, Sendable {
     public var usesModel: Bool { self == .ai || self == .capturedAI }
 }
 
+/// A film stock's kind. Negatives are printed on paper (motion-picture negatives
+/// on print film); slides are viewed directly. Ids are `look.film.family.<id>` keys.
+public enum FilmFamily: String, CaseIterable, Sendable {
+    case negative, slide, cinema
+}
+
 /// The adjustment declarations. This table is the single source for the inspector,
 /// undo names, localization keys and the GPU nodes (product-vision principle 4,
 /// p7-adjustments §2.2–§2.7). 32 parameters: 6 of them RAW-only.
@@ -193,8 +199,21 @@ public enum Adjustments {
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
     ]
 
-    /// `none` first, then the stocks Render bundles.
-    public static let filmStocks = ["none", "portra400", "velvia100", "vision3-500t"]
+    /// `none` first, then the stocks Render bundles, in menu order: colour negatives,
+    /// slides, motion-picture negatives. Ids are stable; the order is only the menu's.
+    /// A literal list: scripts/check_apple_i18n.py reads the option keys from it.
+    public static let filmStocks = ["none", "portra400", "gold200", "velvia100", "kodachrome64", "vision3-500t"]
+
+    /// The stocks of each kind, for menu sections; together, `filmStocks` after `none`.
+    public static let filmFamilies: [(family: FilmFamily, stocks: [String])] = [
+        (.negative, ["portra400", "gold200"]),
+        (.slide, ["velvia100", "kodachrome64"]),
+        (.cinema, ["vision3-500t"]),
+    ]
+
+    public static func filmFamily(_ stock: String) -> FilmFamily? {
+        filmFamilies.first { $0.stocks.contains(stock) }?.family
+    }
 
     // MARK: - Detail (RAW only)
 

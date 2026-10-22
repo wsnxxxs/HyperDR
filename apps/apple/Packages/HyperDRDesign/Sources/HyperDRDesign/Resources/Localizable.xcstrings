@@ -1118,6 +1118,41 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扩展" } }
       }
     },
+    "look.film.family.cinema" : {
+      "comment" : "Film menu heading: motion-picture negatives, printed on print film.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Motion Picture" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电影胶片" } }
+      }
+    },
+    "look.film.family.negative" : {
+      "comment" : "Film menu heading: colour negative films, printed on paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Colour Negative" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "彩色负片" } }
+      }
+    },
+    "look.film.family.slide" : {
+      "comment" : "Film menu heading: slide (reversal) films, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Slide" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "反转片" } }
+      }
+    },
+    "look.film.gold200" : {
+      "comment" : "Film stock option (look.film): a consumer colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Gold 200" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Gold 200" } }
+      }
+    },
+    "look.film.kodachrome64" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Kodachrome 64" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Kodachrome 64" } }
+      }
+    },
     "look.film.none" : {
       "comment" : "Film stock option (look.film).",
       "localizations" : {

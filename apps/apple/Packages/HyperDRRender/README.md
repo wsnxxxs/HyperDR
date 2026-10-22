@@ -148,11 +148,12 @@ old engine's Oklab input compression. LUT table/domain/transfer/linear-strength 
 
 ## Film emulation
 
-`look.film` (`FilmAdjustments`) emulates Kodak Portra 400 on Portra Endura paper, Fujifilm
-Velvia 100 (a slide, viewed directly) and Kodak Vision3 500T on Kodak 2383, from spektrafilm's
+`look.film` (`FilmAdjustments`) emulates Kodak Portra 400 and Gold 200 on Portra Endura paper,
+Fujifilm Velvia 100 and Kodak Kodachrome 64 (slides, viewed directly) and Kodak Vision3 500T on
+Kodak 2383, from spektrafilm's
 measured stocks (CC BY-SA 4.0, Andrea Volpato). `scripts/convert_spektrafilm_stocks.py` bakes
-each stock into `Resources/Film/<id>.json`: the Hanatos 2025 spectral upsampling as a 192×192
-chromaticity table of film exposure, the density curves (also before DIR couplers), the coupler
+each stock into `Resources/Film/<id>.json` and `<id>.spectral`: the Hanatos 2025 spectral
+upsampling as a 192×192 float16 chromaticity table of film exposure (within a 10-bit code), the density curves (also before DIR couplers), the coupler
 matrix, the 81-wavelength dye densities, enlarger and viewing light, the scanner's black and
 white levels, and the grain's variance. `Film.metal` evaluates per pixel: linear P3 → film
 exposure (Mitchell bicubic, as spektrafilm) → density with DIR couplers → grain → print exposure

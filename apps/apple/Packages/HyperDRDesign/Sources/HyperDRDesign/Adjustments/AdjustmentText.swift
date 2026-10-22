@@ -100,17 +100,36 @@ public enum AdjustmentText {
     }
 
     /// A menu's options under headings. The LUT spaces (`look.input`,
-    /// `look.output`) read as display, HDR and camera Log spaces; any other
-    /// choice, the film stock among them, is one section without a heading.
+    /// `look.output`) read as display, HDR and camera Log spaces; film stocks as
+    /// colour negatives, slides and motion-picture negatives, after "None"; any
+    /// other choice is one section without a heading.
     public struct OptionSection: Identifiable, Sendable {
         /// Nil for a choice that is not divided.
         public let family: LookSpaceFamily?
+        /// The film stocks' kind; nil for the leading "None" and other choices.
+        public var filmFamily: FilmFamily? = nil
         public let options: [ParameterOption]
-        public var id: String { family?.rawValue ?? "all" }
+        public var id: String { family?.rawValue ?? filmFamily.map { "film." + $0.rawValue } ?? "all" }
+        public var title: Text? { family?.title ?? filmFamily.map(AdjustmentText.filmFamily) }
+    }
+
+    public static func filmFamily(_ family: FilmFamily) -> Text {
+        switch family {
+        case .negative: return Text("look.film.family.negative", bundle: .module)
+        case .slide: return Text("look.film.family.slide", bundle: .module)
+        case .cinema: return Text("look.film.family.cinema", bundle: .module)
+        }
     }
 
     public static func optionSections(_ control: AdjustmentControl) -> [OptionSection] {
-        guard control.group == .look, control.kind == .choice, control.id != Recipe.filmID else {
+        if control.id == Recipe.filmID {
+            let loose = control.options.filter { Adjustments.filmFamily($0.id) == nil }
+            return [OptionSection(family: nil, options: loose)] + FilmFamily.allCases.compactMap { family in
+                let options = control.options.filter { Adjustments.filmFamily($0.id) == family }
+                return options.isEmpty ? nil : OptionSection(family: nil, filmFamily: family, options: options)
+            }
+        }
+        guard control.group == .look, control.kind == .choice else {
             return [OptionSection(family: nil, options: control.options)]
         }
         return LookSpaceFamily.allCases.compactMap { family in

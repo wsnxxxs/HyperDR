@@ -216,7 +216,7 @@ struct AdjustmentChoiceRow: View {
                                     .disabled(control.disabledOptions.contains(option.id))
                             }
                         } header: {
-                            section.family?.title
+                            section.title
                         }
                     }
                 } label: {

@@ -77,6 +77,7 @@ public struct RenderAdjustments: Hashable, Sendable {
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
         if let exposure = film.exposure { try RenderParameter.check(exposure,id:"look.filmExposure") }
         if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
+        guard look.isIdentity || film.isIdentity else { throw RenderError.invalidAdjustment }
         if !look.isIdentity {
             guard !look.input.isLog || domain == .rawEDR else { throw RenderError.invalidAdjustment }
         }

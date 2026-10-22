@@ -135,8 +135,8 @@ writers, image/container readers, VideoToolbox codecs, bounded verification,
 capability probing and frame layout; it has no CLI or image-processing graph.
 InputFormats owns the input vocabulary; HyperDRRecipe owns adjustment declarations.
 LUT looks: Kit's library records each LUT's input and output space, and choosing a
-LUT writes them into `look.input` / `look.output` in the same undo step (a space the
-photo's domain does not allow falls back to the declared default). The spaces are the
+LUT writes them into `look.input` / `look.output` in the same undo step. A LUT whose
+input the photo cannot supply is disabled, never relabelled as sRGB. The spaces are the
 LUT's own: set in the library they change the look in use on that LUT, and chosen on
 the look they are recorded in the library (`Shared/Editor/LibraryLUTs.swift`). Import
 names spaces a file name declares (`LUTSpace.guess`); one file imported with a photo
@@ -146,7 +146,13 @@ never develop the photo again, only while a picker is on screen). Log spaces
 (S-Log3 with S-Gamut3.Cine or S-Gamut3, V-Log, F-Log2, LogC3 EI800, LogC4, Canon
 Log 3) are RAW-only inputs; they enter the LUT without the P3 fit, and an active
 Log-input look develops the RAW scene-linear (`SourceOptions.sceneLinear`: boost 0,
-the file's baseline exposure kept) so 18% grey lands on the curve's middle grey.
+the file's baseline exposure kept, gamut mapping off) so 18% grey lands on the curve's
+middle grey and signed wide-gamut values reach the look. Built-in film and imported
+LUTs are alternative looks (user, 2026-10-22); selecting either removes the other in
+one undo step. Strength mixes the completed neutral/style SDR and HDR renditions in
+linear light; RGB gain preserves both, so HDR-only controls never move the base.
+Partial RAW Log/film looks also develop the Apple display endpoint, at preview/ROI
+size, with both decoder allowances priced by `Recipe.needsLookBaseline` in export.
 AI gain always infers from the Apple-boost development (`RenderSource.modelSourceID`),
 so a Log look does not change it.
 CustomExportFormat / ExportEncoding own export choices. E-07 (fast HEIC export)

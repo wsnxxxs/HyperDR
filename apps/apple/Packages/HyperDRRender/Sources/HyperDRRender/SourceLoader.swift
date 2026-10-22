@@ -137,8 +137,9 @@ extension RenderEngine {
         if options.sceneLinear { filter.boostShadowAmount = 0 }
         filter.exposure = 0
         filter.extendedDynamicRangeAmount = 1
-        // Stays on. With it on, extendedLinearDisplayP3 has no channel below 1e-4.
-        filter.isGamutMappingEnabled = true
+        // Extended linear P3 can carry colours outside P3 as signed components.
+        // Preserve them through the Log/film input transform; fit at the output.
+        filter.isGamutMappingEnabled = !options.sceneLinear
         filter.isDraftModeEnabled = false
         let rotated = filter.orientation.rawValue >= 5
         let native = filter.nativeSize

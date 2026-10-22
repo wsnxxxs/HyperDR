@@ -619,6 +619,7 @@ struct LUTSwatches: View {
             swatch(id: lut.contentHash, name: lut.name, isCurrent: control.reference == lut.contentHash) {
                 choose(lut.contentHash)
             }
+            .disabled(control.disabledOptions.contains(lut.contentHash))
         }
         Button(action: onLibrary) {
             VStack(spacing: 4) {

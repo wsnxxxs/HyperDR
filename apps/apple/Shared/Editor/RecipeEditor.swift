@@ -123,6 +123,9 @@ import Observation
     @ObservationIgnored let renderer: any EditorRendering
     /// Explicit space edits and their undo/redo, for the host's LUT library.
     /// Library adoption and LUT selection do not write domain fallbacks back.
+    // A library write can temporarily make the selected LUT incompatible. If
+    // persistence fails, restore only the untouched removal on the same photo.
+    @ObservationIgnored var incompatibleLookWrite: (source: UUID?, hash: String, before: Recipe, after: Recipe)?
     @ObservationIgnored var onLookSpacesChanged: ((Recipe, Recipe) -> Void)?
     @ObservationIgnored let undo: RecipeUndo
     @ObservationIgnored private let frameClock: any EditorFrameClock
@@ -320,6 +323,15 @@ import Observation
     /// spaces. It adds no undo step and never queues another library write.
     func reconcileLookSpaces(_ hash: String, attemptedInput: String, attemptedOutput: String,
                              input: String, output: String) {
+        if recipe.look == nil, let removed = incompatibleLookWrite,
+           removed.source == source?.id, removed.hash == hash, recipe == removed.after {
+            let old = recipe
+            recipe = removed.before
+            recipe.setLookSpaces(input: input, output: output)
+            incompatibleLookWrite = nil
+            recipeDidChange(from: old)
+            return
+        }
         guard recipe.look?.contentHash == hash else { return }
         var attempted = recipe
         attempted.setLookSpaces(input: attemptedInput, output: attemptedOutput)

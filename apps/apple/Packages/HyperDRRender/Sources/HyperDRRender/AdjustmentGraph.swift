@@ -178,7 +178,7 @@ extension RenderEngine {
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
         parameters.film.y = 0 // grain averages out in the cells
         try context.dispatch("graphCells", width: width, height: height,
-            textures: [input, cells, peaks, resources.texture, masks, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
+            textures: [input, cells, peaks, resources.texture, masks, film.texture, try lookBaseline(source, edit: edit)], buffers: [resources.buffer, film.buffer], value: &parameters)
         var halation: (any MTLTexture)? = nil
         if let stock = edit.film.stock, !edit.film.isIdentity, edit.film.halation > 0,
            let data = try? FilmStock.named(stock), data.halationStrength(edit.film).max() > 0 {
@@ -312,7 +312,10 @@ extension RenderEngine {
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
-        let gain = try context.texture(width: base.width, height: base.height, format: .r32Float)
+        let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
+        let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
+        let rgbGain = (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
+        let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
@@ -344,10 +347,10 @@ extension RenderEngine {
             else { throw RenderError.allocationFailed }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
             textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
-                       analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion],
+                       analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion, try lookBaseline(source, edit: edit)],
             buffers: [resources.buffer, film.buffer, grainKernel], value: &p)
         try finish(command)
-        return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,
+        return RenderPlanes(base: base, gain: gain, gainChannelCount: rgbGain ? 3 : 1, baseColorSpace: Self.workingColorSpace,
             provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,
             aiPending: edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel && model == nil)
     }

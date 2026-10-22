@@ -47,11 +47,12 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         #expect(editor.recipe.look == film)
     }
 
-    @Test func aLogInputOutsideRAWStaysAtItsDefault() async throws {
+    @Test func aLogLookOutsideRAWIsNotSelected() async throws {
         let (editor, _) = try await openEditor(.sdr)
         editor.chooseLook(film, input: "vlog-vgamut", output: "rec709")
-        #expect(editor.recipe.conditionValue("look.input")?.stringValue == "srgb")
-        #expect(editor.recipe.conditionValue("look.output")?.stringValue == "rec709")
+        #expect(editor.recipe.look == nil)
+        #expect(editor.recipe.value(for: "look.input") == nil)
+        #expect(editor.recipe.value(for: "look.output") == nil)
     }
 
     @Test func libraryChangesReachOnlyTheLookOnThatLUT() async throws {
@@ -62,6 +63,45 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         editor.adoptLookSpaces(film.contentHash, input: "rec709", output: "p3")
         #expect(editor.recipe.conditionValue("look.input")?.stringValue == "rec709")
         #expect(editor.recipe.conditionValue("look.output")?.stringValue == "p3")
+    }
+
+    @Test func incompatibleLibraryWriteRemovesTheLookAndFailureRestoresIt() async throws {
+        let (editor, _) = try await openEditor(.sdr)
+        editor.chooseLook(venice, input: "srgb", output: "rec709")
+        let before = editor.recipe
+        editor.adoptLookSpaces(venice.contentHash, input: "vlog-vgamut", output: "rec709")
+        #expect(editor.recipe.look == nil)
+        editor.reconcileLookSpaces(venice.contentHash, attemptedInput: "vlog-vgamut", attemptedOutput: "rec709", input: "srgb", output: "rec709")
+        #expect(editor.recipe == before)
+        editor.adoptLookSpaces(venice.contentHash, input: "vlog-vgamut", output: "rec709")
+        editor.chooseLook(film, input: "srgb", output: "srgb")
+        let newer = editor.recipe
+        editor.reconcileLookSpaces(venice.contentHash, attemptedInput: "vlog-vgamut", attemptedOutput: "rec709", input: "srgb", output: "rec709")
+        #expect(editor.recipe == newer)
+    }
+
+    @Test func changingBetweenBuiltInAndImportedLooksUndoesAsOneStep() async throws {
+        let undo = UndoManager()
+        let (editor, _) = try await openEditor(.rawEDR, undo: undo)
+        undo.beginUndoGrouping()
+        editor.apply(.parameter(Recipe.filmID)) { $0.setValue(.string("portra400"), for: Recipe.filmID) }
+        undo.endUndoGrouping()
+        let builtIn = editor.recipe
+        undo.beginUndoGrouping()
+        editor.chooseLook(venice, input: "slog3-sgamut3cine", output: "rec709")
+        undo.endUndoGrouping()
+        #expect(editor.recipe.look == venice)
+        #expect(editor.recipe.conditionValue(Recipe.filmID) == .string("none"))
+        undo.undo()
+        #expect(editor.recipe == builtIn)
+        undo.redo()
+        let imported = editor.recipe
+        undo.beginUndoGrouping()
+        editor.apply(.parameter(Recipe.filmID)) { $0.setValue(.string("gold200"), for: Recipe.filmID) }
+        undo.endUndoGrouping()
+        #expect(editor.recipe.look == nil)
+        undo.undo()
+        #expect(editor.recipe == imported)
     }
 
     @Test func onlyASpaceChosenOnTheSameLookIsRecorded() {
@@ -145,7 +185,7 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         }
     }
 
-    @Test func spaceEditsUndoAndRedoNotifyTheLibraryButDomainFallbackDoesNot() async throws {
+    @Test func spaceEditsUndoAndRedoNotifyTheLibraryButRejectedChoicesDoNot() async throws {
         let undo = UndoManager()
         let (editor, _) = try await openEditor(.sdr, undo: undo)
         var changes: [(String?, String?)] = []
@@ -155,8 +195,13 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
             }
         }
         editor.chooseLook(film, input: "vlog-vgamut", output: "rec709")
-        #expect(changes.isEmpty, "The SDR fallback must not overwrite the library's Log input")
+        #expect(changes.isEmpty, "A rejected choice cannot overwrite the library's Log input")
+        undo.beginUndoGrouping()
+        editor.chooseLook(film, input: "srgb", output: "rec709")
+        undo.endUndoGrouping()
+        undo.beginUndoGrouping()
         editor.adoptLookSpaces(film.contentHash, input: "srgb", output: "p3")
+        undo.endUndoGrouping()
         #expect(changes.isEmpty, "Adoption already has the library's spaces")
         undo.undo()
         #expect(changes.count == 1 && changes.last?.1 == "rec709")

@@ -77,6 +77,24 @@ request develops only its native ROI plus sampling support. It never calls
 changing RAW settings releases the previous detail graph before opening another.
 Only the newest edited/original detail outputs are held by the editor.
 
+## Partial RAW look crossfade (2026-10-22)
+
+Log LUTs and built-in film are alternative looks. Strength between zero and one
+requires the scene development and the neutral Apple display development to
+preserve both endpoints. `lookBaseline` materializes one matching preview/ROI;
+only its latest texture is cached, never a collection of visited tiles. Export
+uses the existing 4096 × 516 source bound. Partial looks can produce RGB gain;
+writers that require mono use the existing explicit reconstruction/resplit path.
+
+`Recipe.needsLookBaseline` travels through editor preflight and is recomputed
+from the frozen recipe by RecipeExportService. The row estimate reserves a second
+24 B/native-pixel decoder allowance; whole-plane fallback also charges its source
+texture. The conservative GPU tile bound includes one extra RGBAf source texture.
+The usual 110MP/4 GiB estimate below applies to a single development, **not** to
+a partial scene look. Zero/full strength and ordinary display-space LUTs keep the
+single-development allowance. No new physical-device timing or memory claim is
+made for this path.
+
 ## Render-owned export bounds
 
 - `PreparedExportRows.maximumReadRows` is **512**. Larger reads throw

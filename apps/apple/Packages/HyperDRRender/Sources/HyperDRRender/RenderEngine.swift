@@ -16,7 +16,7 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
     }
     let r = options.raw
     let linear = sceneLinear ?? options.sceneLinear
-    let fields = ["hyperdr.source/v2",url.path,String(revision.size ?? -1),
+    let fields = ["hyperdr.source/v3",url.path,String(revision.size ?? -1),
         revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
         options.kind.rawValue,String(options.lensCorrection),String(linear),
         number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
@@ -49,6 +49,7 @@ public actor RenderEngine {
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
     var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
     var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lookBaselineCache: (id: UUID, texture: any MTLTexture)?
     var filmMeterCache: (id: UUID, ev: Float)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
@@ -117,6 +118,7 @@ public actor RenderEngine {
         lutCache = nil
         filmCache = nil
         filmMeterCache = nil
+        lookBaselineCache = nil
         authorCache = nil
         displayMatrices.removeAll()
         context.clearCaches()
@@ -213,6 +215,35 @@ public actor RenderEngine {
             nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height), authoredGainMap: opened.gain,
             hdrImage: hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture)
+    }
+
+    func lookBaseline(_ source: RenderSource, edit: RenderAdjustments) throws -> any MTLTexture {
+        let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
+        guard weight > 0 && weight < 1, let origin = source.origin, origin.options.sceneLinear else {
+            lookBaselineCache = nil
+            return source.texture
+        }
+        if let cached = lookBaselineCache, cached.id == source.renderID { return cached.texture }
+        lookBaselineCache = nil
+        try origin.revision.validate(origin.url)
+        var options = origin.options
+        options.sceneLinear = false
+        options.resolution = .preview(maximumSize: PixelSize(width: source.texture.width, height: source.texture.height))
+        let opened = try Self.openRAW(origin.url, options: options)
+        let texture: any MTLTexture
+        if source.samplingRegion == CGRect(x: 0, y: 0, width: 1, height: 1) {
+            texture = try rasterizeRAWPreview(opened.image, size: PixelSize(width: source.texture.width, height: source.texture.height), space: Self.workingColorSpace)
+        } else {
+            let n = source.samplingRegion, e = opened.image.extent.integral
+            let rect = CGRect(x: e.minX + (n.minX * e.width).rounded(), y: e.minY + ((1-n.maxY) * e.height).rounded(),
+                              width: (n.width * e.width).rounded(), height: (n.height * e.height).rounded())
+            texture = try rasterize(opened.image.cropped(to: rect), space: Self.workingColorSpace,
+                                    maximumRows: PreparedExportRows.maximumSourceTileSize.height, opaque: true)
+        }
+        guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
+        try origin.revision.validate(origin.url)
+        lookBaselineCache = (source.renderID, texture)
+        return texture
     }
 
     func nodeContext(domain: InputDomain, buffer: any MTLCommandBuffer) -> RenderNodeContext {

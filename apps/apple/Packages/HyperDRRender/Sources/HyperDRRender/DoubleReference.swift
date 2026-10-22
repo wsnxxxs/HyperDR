@@ -5,7 +5,10 @@ public enum DoubleReference {
     public typealias RGB = SIMD3<Double>
     public struct Split: Sendable {
         public let base: RGB
-        public let gain: Double
+        public let gains: RGB
+        public var gain: Double { max(gains.x, gains.y, gains.z) }
+        public init(base: RGB, gain: Double) { self.base = base; self.gains = RGB(repeating: gain) }
+        public init(base: RGB, gains: RGB) { self.base = base; self.gains = gains }
     }
 
     public static func identity(_ rgb: RGB) -> RGB { rgb }

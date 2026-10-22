@@ -123,7 +123,7 @@ import Testing
     #expect(restored.value(for: "future.mask") == .bool(true))
 }
 
-@Test func restoringALogLookToANonRAWPhotoFallsBackToTheDefaultInput() throws {
+@Test func restoringALogLookToANonRAWPhotoRemovesTheIncompatibleLook() throws {
     let look = LUTReference(contentHash: "sha256:" + String(repeating: "ab", count: 32), name: "Log")
     let inputs = try #require(Adjustments.declaration("look.input")).options.filter { $0.domains == [.rawEDR] }
     for input in inputs {
@@ -135,9 +135,8 @@ import Testing
         for domain in [InputDomain.sdr, .hdr, .dual] {
             var restored = try Recipe.decode(original.encoded())
             restored.setInputDomain(domain)
-            #expect(restored.conditionValue("look.input") == .string("srgb"))
-            #expect(restored.value(for: "look.input") == nil)
-            #expect(restored.look == look && restored.conditionValue("look.output") == .string("rec709"))
+            #expect(restored.conditionValue("look.input") == .string(input.id))
+            #expect(restored.look == nil && restored.conditionValue("look.output") == .string("rec709"))
             #expect(restored.conditionValue("tone.exposure") == .number(1))
         }
     }
@@ -257,4 +256,38 @@ private extension ParameterDefault {
     #expect(Array(Adjustments.filmStocks.dropFirst()) == Adjustments.filmFamilies.flatMap(\.stocks))
     #expect(Adjustments.filmFamilies.map(\.family) == FilmFamily.allCases)
     #expect(Adjustments.filmFamily("none") == nil && Adjustments.filmFamily("velvia100") == .slide)
+}
+
+@Test func filmAndImportedLUTAreAlternativeLooks() throws {
+    var recipe = Recipe(inputDomain: .rawEDR)
+    recipe.setValue(.string("portra400"), for: Recipe.filmID)
+    let film = recipe
+    recipe.look = LUTReference(contentHash: "sha256:01", name: "Look")
+    #expect(recipe.conditionValue(Recipe.filmID) == .string("none"))
+    #expect(recipe.look != nil)
+    recipe.setValue(.string("portra400"), for: Recipe.filmID)
+    #expect(recipe == film)
+    #expect(try Recipe.decode(recipe.encoded()) == recipe)
+}
+
+@Test func onlyPartialRAWSceneLooksNeedTheSecondDevelopment() {
+    let look = LUTReference(contentHash: "sha256:01", name: "Log")
+    var recipe = Recipe(inputDomain: .rawEDR, look: look, values: [
+        "look.input": .string("logc4-awg4"), "look.output": .string("rec709")])
+    #expect(!recipe.needsLookBaseline)
+    recipe.setValue(.number(40), for: "look.strength")
+    #expect(recipe.needsLookBaseline)
+    recipe.setValue(.bool(false), for: "look.enabled")
+    #expect(!recipe.needsLookBaseline)
+    recipe.setValue(nil, for: "look.enabled")
+    recipe.setValue(.string("srgb"), for: "look.input")
+    #expect(!recipe.needsLookBaseline)
+    recipe.setValue(.string("portra400"), for: Recipe.filmID)
+    recipe.setValue(.number(40), for: "look.filmStrength")
+    #expect(recipe.needsLookBaseline)
+    recipe.setValue(.number(0), for: "look.filmStrength")
+    #expect(!recipe.needsLookBaseline)
+    recipe.setValue(.number(40), for: "look.filmStrength")
+    recipe.setInputDomain(.sdr)
+    #expect(!recipe.needsLookBaseline)
 }

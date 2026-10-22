@@ -50,18 +50,28 @@ extension RecipeEditor {
     /// one undo step. Nothing happens when the look is on another LUT.
     func adoptLookSpaces(_ contentHash: String, input: String, output: String) {
         guard recipe.look?.contentHash == contentHash else { return }
-        apply(.parameter("look.input")) { $0.setLookSpaces(input: input, output: output) }
+        let before = recipe
+        apply(.parameter("look.input")) { recipe in
+            if Adjustments.allowsLook(input: input, output: output, domain: recipe.inputDomain) {
+                recipe.setLookSpaces(input: input, output: output)
+            } else {
+                recipe.look = nil
+            }
+        }
+        if recipe.look == nil {
+            incompatibleLookWrite = (source?.id, contentHash, before, recipe)
+        } else {
+            incompatibleLookWrite = nil
+        }
     }
 }
 
 extension Recipe {
-    /// The look's spaces set to a library LUT's. A space this photo cannot
-    /// take (a camera Log input outside RAW) is left at its default.
+    /// Keep the library LUT's exact declared encodings, including when a stale
+    /// restored recipe is incompatible. Render must reject it, never relabel it.
     nonisolated mutating func setLookSpaces(input: String, output: String) {
         for (id, space) in [("look.input", input), ("look.output", output)] {
-            let offered = Adjustments.declaration(id)?.options
-                .first { $0.id == space }?.domains.contains(inputDomain) == true
-            setValue(offered ? .string(space) : nil, for: id)
+            setValue(.string(space), for: id)
         }
     }
 
@@ -83,8 +93,10 @@ extension RecipeEditor {
     /// Chooses a library LUT as the look, with its spaces, or none: one undo
     /// step, as the look picker makes it.
     func chooseLook(_ reference: LUTReference?, input: String, output: String) {
+        guard reference == nil || Adjustments.allowsLook(input: input, output: output, domain: recipe.inputDomain) else { return }
         apply(.parameter(Recipe.lookID)) { recipe in
             recipe.look = reference
+            if reference == nil { recipe.setValue(nil, for: Recipe.filmID) }
             if reference != nil { recipe.setLookSpaces(input: input, output: output) }
         }
     }

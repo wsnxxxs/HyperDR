@@ -526,6 +526,18 @@ struct ExportMemoryPlanTests {
         }
     }
 
+    @Test func partialRAWLookReservesBothDevelopments() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        var plain = request(.custom(.init(encoding: .adaptive)), source: source(.rawEDR, size: size))
+        let original = ExportPlanner.plan(plain, budget: FixedExportMemoryBudget(bytes: 8 << 30))
+        plain.edit.needsLookBaseline = true
+        let partial = ExportPlanner.plan(plain, budget: FixedExportMemoryBudget(bytes: 8 << 30))
+        #expect(partial.memory.estimate.decode - original.memory.estimate.decode == size.pixels * 24)
+        #expect(partial.memory.estimate.peak > original.memory.estimate.peak)
+        let constrained = ExportPlanner.plan(plain, budget: FixedExportMemoryBudget(bytes: original.memory.estimate.peak))
+        #expect(!constrained.blockers.isEmpty)
+    }
+
     @Test func rowOwnersFollowRenderReadLimitAndGainChannels() {
         let size = ExportPixelSize(width: 20017, height: 8600)
         func estimate(rows: Int, channels: Int) -> ExportMemoryEstimate {

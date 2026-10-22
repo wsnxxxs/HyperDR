@@ -21,7 +21,6 @@ attribution and notes that HyperDR converted it.
 from __future__ import annotations
 
 import argparse
-import base64
 import dataclasses
 import json
 from pathlib import Path
@@ -44,11 +43,14 @@ RENDER = ROOT / "apps/apple/Packages/HyperDRRender"
 RESOURCES = RENDER / "Sources/HyperDRRender/Resources/Film"
 FIXTURE = RENDER / "Tests/HyperDRRenderTests/Fixtures/film-reference.json"
 
-# id, display name, film profile, print profile (None: a reversal film viewed directly)
+# HyperDR id and spektrafilm profile, in menu order (Recipe's Adjustments.filmStocks).
+# Negatives print on the profile's target paper; slides are viewed directly.
 STOCKS = [
-    ("portra400", "Kodak Portra 400", "kodak_portra_400", "kodak_portra_endura"),
-    ("velvia100", "Fujifilm Velvia 100", "fujifilm_velvia_100", None),
-    ("vision3-500t", "Kodak Vision3 500T", "kodak_vision3_500t", "kodak_2383"),
+    ("portra400", "kodak_portra_400"),
+    ("gold200", "kodak_gold_200"),
+    ("velvia100", "fujifilm_velvia_100"),
+    ("kodachrome64", "kodak_kodachrome_64"),
+    ("vision3-500t", "kodak_vision3_500t"),
 ]
 
 ATTRIBUTION = ("Derived from spektrafilm by Andrea Volpato, https://github.com/andreavolpato/spektrafilm, "
@@ -108,14 +110,17 @@ def masked(illuminant, channel_density, base_density) -> np.ndarray:
 
 
 def rows(array) -> list:
-    return np.round(np.nan_to_num(np.asarray(array, dtype=float)), 12).tolist()
+    """Seven significant digits: float32 on the GPU, well inside the tests' tolerance."""
+    values = np.nan_to_num(np.asarray(array, dtype=float))
+    return np.vectorize(lambda v: float(f"{v:.7g}"))(values).tolist() if values.ndim else float(f"{values:.7g}")
 
 
-def floats_base64(array) -> str:
-    return base64.b64encode(np.ascontiguousarray(array, dtype="<f4").tobytes()).decode("ascii")
+def print_profile_for(film_name: str) -> str | None:
+    film = init_params(film_name).film
+    return None if film.is_positive else film.info.target_print
 
 
-def convert(identifier: str, name: str, film_name: str, print_name: str | None) -> tuple[dict, SimulationPipeline]:
+def convert(identifier: str, film_name: str, print_name: str | None) -> tuple[dict, SimulationPipeline, np.ndarray]:
     params = params_for(film_name, print_name)
     pipeline = SimulationPipeline(params)
     # One pixel through the pipeline resolves the scanner's black and white references.
@@ -140,14 +145,15 @@ def convert(identifier: str, name: str, film_name: str, print_name: str | None) 
     resource = {
         "schema": "hyperdr.film/v1",
         "id": identifier,
-        "name": name,
+        "name": film.info.name,
         "film": film_name,
         "print": print_name,
         "attribution": ATTRIBUTION,
         "filming": {
             "type": film.info.type,
             "p3ToReference": rows(p3_to_reference),
-            "spectralLUT": {"size": int(tc_lut.shape[0]), "float32": floats_base64(tc_lut)},
+            # <id>.spectral beside this file: size × size × 3 little-endian float16, first index outermost.
+            "spectralLUT": {"size": int(tc_lut.shape[0])},
             "logExposure": uniform_axis(film.data.log_exposure),
             "densityCurves": rows(normalized),
             "densityCurvesBeforeCouplers": rows(before),
@@ -197,7 +203,7 @@ def convert(identifier: str, name: str, film_name: str, print_name: str | None) 
         # Y' = clamp(slope * Y + offset, 0, 1), XYZ scaled by Y'/Y (spektrafilm's scanner correction).
         "levels": scanner_levels(references),
     }
-    return resource, pipeline
+    return resource, pipeline, tc_lut
 
 
 def scanner_levels(references) -> list[float]:
@@ -269,8 +275,12 @@ def main() -> None:
                         "off; and film density RMS of its grain on flat fields."),
                "inputs": rows(inputs), "outputs": {}, "grain": {}}
     RESOURCES.mkdir(parents=True, exist_ok=True)
-    for identifier, name, film_name, print_name in STOCKS:
-        resource, pipeline = convert(identifier, name, film_name, print_name)
+    if not arguments.check:
+        for old in list(RESOURCES.glob("*.json")) + list(RESOURCES.glob("*.spectral")):
+            old.unlink()
+    for identifier, film_name in STOCKS:
+        print_name = print_profile_for(film_name)
+        resource, pipeline, tc_lut = convert(identifier, film_name, print_name)
         output = pipeline.process(inputs[None, :, :])[0]
         fixture["outputs"][identifier] = rows(output)
         fixture["grain"][identifier] = grain_reference(film_name, print_name)
@@ -279,6 +289,7 @@ def main() -> None:
         if not arguments.check:
             text = json.dumps(resource, separators=(",", ":"), sort_keys=True)
             (RESOURCES / f"{identifier}.json").write_text(text + "\n")
+            (RESOURCES / f"{identifier}.spectral").write_bytes(np.ascontiguousarray(tc_lut, dtype="<f2").tobytes())
     if not arguments.check:
         FIXTURE.write_text(json.dumps(fixture, indent=1, sort_keys=True) + "\n")
 

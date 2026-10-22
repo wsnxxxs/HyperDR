@@ -463,8 +463,14 @@ private struct FilmMenu: View {
         let selected = control.options.first { $0.id == control.selectedOption } ?? control.options.first
         Menu {
             Picker(selection: Binding(get: { control.selectedOption ?? "" }, set: choose)) {
-                ForEach(control.options, id: \.id) { option in
-                    AdjustmentText.option(option).tag(option.id)
+                ForEach(AdjustmentText.optionSections(control)) { section in
+                    Section {
+                        ForEach(section.options, id: \.id) { option in
+                            AdjustmentText.option(option).tag(option.id)
+                        }
+                    } header: {
+                        section.title
+                    }
                 }
             } label: {
                 AdjustmentText.label(control.declaration)

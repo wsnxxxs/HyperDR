@@ -4,6 +4,8 @@ import SwiftUI
 @main
 struct HyperDRiOSApp: App {
     init() {
+        DiagnosticLog.shared.start()
+        MetricsCollector.shared.start()
         // No scene is open yet: copies from an earlier run are nobody's.
         ImportedPhoto.discardAll()
     }
@@ -28,7 +30,12 @@ struct StudioRoot: View {
                 if let editor = session.editor { EditorScreen(session: session, editor: editor) }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .background { session.exports.enteredBackground() }
+                if phase == .background {
+                    DiagnosticLog.notice("App", "Entered background; available to the app \(DeviceFacts.availableMemory)")
+                    session.exports.enteredBackground()
+                } else if phase == .active {
+                    DiagnosticLog.notice("App", "Active")
+                }
             }
             #if DEBUG
             .task { DebugLaunch.open(into: session) }

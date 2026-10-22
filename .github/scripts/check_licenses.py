@@ -5,7 +5,7 @@ Nothing HyperDR ships may be (L)GPL: every dependency is statically linked and
 permissively licensed, with no replaceable-library exception. An LGPL package
 is therefore a failure, as is any trace of libheif or libde265 (retired in
 P3b-5) in the link graph or in the Mach-O dependencies and undefined symbols
-of the CLI and the C ABI library.
+of the C ABI library.
 The checks follow installed metadata and the generated product graph; image
 codec dependencies have no separately fetched reference-codec exception list.
 
@@ -86,7 +86,7 @@ def main():
     parser.add_argument("--engine-archive", type=Path,
                         help="libHyperDREngineCore.a that the app links; also checked for retired symbols")
     parser.add_argument("--archive-only", action="store_true",
-                        help="check only --engine-archive (the Apple job has no CLI or dylib to inspect)")
+                        help="check only --engine-archive (the Apple job has no dylib to inspect)")
     args = parser.parse_args()
     if args.archive_only:
         if args.engine_archive is None:

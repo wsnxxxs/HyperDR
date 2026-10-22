@@ -267,6 +267,62 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用 LUT" } }
       }
     },
+    "ctrl.look.film.help" : {
+      "comment" : "Adjustment control help (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Emulates a film stock from its measured data: exposure, development and, for a negative, the print on paper. It changes the SDR base; HDR highlights are kept." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按胶片的实测数据模拟：曝光、显影，负片还会印放到相纸上。它改变 SDR 底图，HDR 高光保留。" } }
+      }
+    },
+    "ctrl.look.film.label" : {
+      "comment" : "Adjustment control name (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片" } }
+      }
+    },
+    "ctrl.look.filmExposure.help" : {
+      "comment" : "Adjustment control help (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "How much light the film receives. Auto meters the original photo centre-weighted to middle grey; the light adjustments still apply on top." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片接受的曝光量。自动会以中央加权方式对原图测光，使其落在中灰；光线调整仍叠加在其上。" } }
+      }
+    },
+    "ctrl.look.filmExposure.label" : {
+      "comment" : "Adjustment control name (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片曝光" } }
+      }
+    },
+    "ctrl.look.filmGrain.help" : {
+      "comment" : "Adjustment control help (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The film's grain, from its particle structure on a 35 mm frame. 100% is the stock's own grain; 0% is none." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片颗粒，按其在 35 mm 画幅上的颗粒结构计算。100% 为该胶片本身的颗粒；0% 为无颗粒。" } }
+      }
+    },
+    "ctrl.look.filmGrain.label" : {
+      "comment" : "Adjustment control name (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Grain" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颗粒" } }
+      }
+    },
+    "ctrl.look.filmStrength.help" : {
+      "comment" : "Adjustment control help (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blends the original and the film's result in linear light. 0% bypasses the film; 100% applies it fully." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在线性光中混合原图与胶片结果。0% 关闭胶片；100% 完全应用。" } }
+      }
+    },
+    "ctrl.look.filmStrength.label" : {
+      "comment" : "Adjustment control name (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片强度" } }
+      }
+    },
     "ctrl.look.input.help" : {
       "comment" : "Adjustment control help (look.input).",
       "localizations" : {
@@ -1062,6 +1118,34 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扩展" } }
       }
     },
+    "look.film.none" : {
+      "comment" : "Film stock option (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "None" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
+      }
+    },
+    "look.film.portra400" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } }
+      }
+    },
+    "look.film.velvia100" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Velvia 100" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Velvia 100" } }
+      }
+    },
+    "look.film.vision3-500t" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } }
+      }
+    },
     "look.input.clog3-cinemagamut" : {
       "comment" : "LUT colour space option (look.input).",
       "localizations" : {
@@ -1389,6 +1473,34 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch LUT" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开关 LUT" } }
+      }
+    },
+    "undo.look.film" : {
+      "comment" : "Undo action name (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Film" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择胶片" } }
+      }
+    },
+    "undo.look.filmExposure" : {
+      "comment" : "Undo action name (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Film Exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整胶片曝光" } }
+      }
+    },
+    "undo.look.filmGrain" : {
+      "comment" : "Undo action name (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Grain" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整颗粒" } }
+      }
+    },
+    "undo.look.filmStrength" : {
+      "comment" : "Undo action name (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Film Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整胶片强度" } }
       }
     },
     "undo.look.input" : {

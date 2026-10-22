@@ -61,6 +61,7 @@ struct GraphUniform {
     float4 lutMin, lutMax;
     uint4 region, mode;
     float4 inputRegion;
+    float4 film; // strength (0: no film), grain amount, 1/pixel area (µm⁻²), exposure factor
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -191,7 +192,8 @@ float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read
     return mix(rgb,changed,p.color.y);
 }
 struct WorkingPair { float3 base; float gain; float alpha; };
-WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
+WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,
+                        const device FilmData& film,texture2d<float,access::read> filmLUT,int2 site) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
@@ -205,6 +207,9 @@ WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,ac
     if(logLook) rgb=fit(rgb,max(1.f,maximum(rgb)));
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
+    // The film exposes the whole scene, highlights included; its print is the new
+    // base and the captured ratio stays (L1).
+    if(p.film.x>0) base=fit(mix(base,filmApply(rgb*p.film.w,film,filmLUT,p.film.yz,site),p.film.x),1.f);
     if(p.flags.y) {
         // L1: an SDR-input look changes the base, retaining the captured ratio.
         base=applyLUT(base,p,cube,table);
@@ -229,7 +234,9 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
                        texture2d<float,access::write> peaks [[texture(2)]],
                        texture3d<float,access::read> cube [[texture(3)]],
                        texture2d<float,access::write> masks [[texture(4)]],
+                       texture2d<float,access::read> filmLUT [[texture(5)]],
                        constant GraphUniform& p [[buffer(0)]],device const float4* table [[buffer(1)]],
+                       const device FilmData& film [[buffer(2)]],
                        uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=stats.get_width() || pos.y>=stats.get_height()) return;
     uint2 lo=pos*uint2(src.get_width(),src.get_height())/uint2(stats.get_width(),stats.get_height());
@@ -237,7 +244,7 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
     float4 sum=0,peak=0;
     for(uint y=lo.y;y<hi.y;y++)for(uint x=lo.x;x<hi.x;x++) {
         float4 original=src.read(uint2(x,y));
-        auto v=preparePair(original,p,cube,table);
+        auto v=preparePair(original,p,cube,table,film,filmLUT,int2(x,y));
         float l=lum(v.base), request=sm(p.hdr.x,1.f,l), z=clamp(log2(l+1e-6f),-8.f,8.f);
         sum+=float4(l,request,z,z*z);
         peak=max(peak,float4(maximum(v.base)*exp2(v.gain),maximum(v.base),v.gain,maximum(original.rgb)));
@@ -285,12 +292,14 @@ kernel void graphPeak(texture2d<float,access::read> peaks [[texture(0)]],texture
 kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],texture2d<float,access::write> base [[texture(1)]],
                         texture2d<float,access::write> gain [[texture(2)]],texture3d<float,access::read> cube [[texture(3)]],
                         texture2d<float,access::sample> expansion [[texture(4)]],texture2d<float,access::sample> model [[texture(5)]],
+                        texture2d<float,access::read> filmLUT [[texture(6)]],
                         constant GraphUniform& p [[buffer(0)]],
-                        device const float4* table [[buffer(1)]],uint2 pos [[thread_position_in_grid]]) {
+                        device const float4* table [[buffer(1)]],const device FilmData& film [[buffer(2)]],
+                        uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
     float2 uv=(float2(pos+p.region.zw)+.5f)/float2(p.region.xy);
-    auto pair=preparePair(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table);
+    auto pair=preparePair(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table,film,filmLUT,int2(pos+p.region.zw));
     float g=pair.gain;
     if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
     if(p.mode.y)g=max(g,model.sample(s,uv).x);

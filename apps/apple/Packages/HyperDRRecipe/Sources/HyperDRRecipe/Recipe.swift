@@ -52,6 +52,7 @@ public struct Recipe: Equatable, Sendable {
 
     public static let hdrSourceID = "hdr.source"
     public static let lookID = "look.lut"
+    public static let filmID = "look.film"
 
     public let version: Int
     public private(set) var inputDomain: InputDomain

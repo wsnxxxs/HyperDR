@@ -45,7 +45,7 @@ public enum HDRSource: String, Codable, CaseIterable, Sendable {
 
 /// The adjustment declarations. This table is the single source for the inspector,
 /// undo names, localization keys and the GPU nodes (product-vision principle 4,
-/// p7-adjustments §2.2–§2.7). 28 parameters: 6 of them RAW-only.
+/// p7-adjustments §2.2–§2.7). 32 parameters: 6 of them RAW-only.
 public enum Adjustments {
     /// Ceiling for HDR HyperDR generates itself: the analytic expansion on an `sdr`
     /// base and `rawEDR` (C1). Sources that already have HDR (`hdr`, `dual`) keep
@@ -176,7 +176,25 @@ public enum Adjustments {
             default: .constant(.string("srgb")),
             options: lookSpaces.map { ParameterOption($0, of: "look.output") },
             visibleWhen: .isSet("look.lut")),
+        // Film emulation from spektrafilm's measured stocks, evaluated by Render.
+        // Append-only option ids; Render bundles one resource per stock.
+        ParameterDeclaration(id: "look.film", group: .look, kind: .choice,
+            default: .constant(.string("none")),
+            options: filmStocks.map { ParameterOption($0, of: "look.film") }),
+        ParameterDeclaration(id: "look.filmStrength", group: .look, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
+        // Auto meters the original photo centre-weighted to 18.4 % grey, as spektrafilm's camera.
+        ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -3...3, step: 0.1,
+            default: .auto, format: .ev, scale: .direct,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
+        ParameterDeclaration(id: "look.filmGrain", group: .look, kind: .float, range: 0...200, step: 1,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
     ]
+
+    /// `none` first, then the stocks Render bundles.
+    public static let filmStocks = ["none", "portra400", "velvia100", "vision3-500t"]
 
     // MARK: - Detail (RAW only)
 

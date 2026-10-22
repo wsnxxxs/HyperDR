@@ -221,8 +221,11 @@ struct AdjustmentControls: View {
     }
 
     /// The HDR source: segments, or a line when the photo brings its own HDR.
+    /// The film stock: a menu, its names being too long for segments.
     @ViewBuilder private func leadChoice(_ control: AdjustmentControl) -> some View {
-        if control.options.count > 1 {
+        if control.id == Recipe.filmID {
+            FilmMenu(control: control) { panel.set(control.id, option: $0, in: &recipe) }
+        } else if control.options.count > 1 {
             // No note under it: a line that comes and goes would move the row.
             SourceSegments(control: control) { panel.set(control.id, option: $0, in: &recipe) }
         } else if let only = control.options.first {
@@ -241,6 +244,16 @@ struct AdjustmentControls: View {
                 if let lut = layout.lut {
                     LUTSwatches(control: lut, luts: panel.context.luts, onLibrary: onLUTLibrary) {
                         panel.set(lut.id, reference: $0, in: &recipe)
+                    }
+                    // The LUT's and the film's strengths, so the ruler can reach either.
+                    if !layout.rings.isEmpty {
+                        Capsule()
+                            .fill(Color.white.opacity(0.14))
+                            .frame(width: axis == .horizontal ? 1 : 28, height: axis == .horizontal ? 28 : 1)
+                            .padding(axis == .horizontal ? .bottom : .trailing, axis == .horizontal ? 16 : 0)
+                        ForEach(layout.rings) { control in
+                            ring(control, isCurrent: control.id == current?.id)
+                        }
                     }
                 } else {
                     ForEach(Array(layout.rings.enumerated()), id: \.element.id) { index, control in
@@ -440,6 +453,42 @@ private struct PowerSwitch: View {
     }
 }
 
+/// The look group's film stock, above its row: the chosen stock in a capsule that
+/// opens the list.
+private struct FilmMenu: View {
+    let control: AdjustmentControl
+    let choose: (String) -> Void
+
+    var body: some View {
+        let selected = control.options.first { $0.id == control.selectedOption } ?? control.options.first
+        Menu {
+            Picker(selection: Binding(get: { control.selectedOption ?? "" }, set: choose)) {
+                ForEach(control.options, id: \.id) { option in
+                    AdjustmentText.option(option).tag(option.id)
+                }
+            } label: {
+                AdjustmentText.label(control.declaration)
+            }
+        } label: {
+            HStack(spacing: Space.s2) {
+                Image(systemName: "film")
+                AdjustmentText.label(control.declaration).foregroundStyle(.secondary)
+                Spacer(minLength: Space.s1)
+                if let selected { AdjustmentText.option(selected).lineLimit(1) }
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+            }
+            .font(.footnote.weight(.medium))
+            .padding(.horizontal, Space.s3)
+            .frame(minHeight: 36)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AdjustmentText.label(control.declaration))
+        .disabled(!control.isAvailable)
+    }
+}
+
 /// An on/off control in the ring row: its symbol in a circle, filled while on.
 private struct SwitchRing: View {
     let control: AdjustmentControl
@@ -475,7 +524,8 @@ private struct SwitchRing: View {
 private struct BarLayout {
     /// Numbers, each with a ring and the ruler.
     let rings: [AdjustmentControl]
-    /// The HDR source, above the ring row (§5.3: the group's most important choice).
+    /// The HDR source or the film stock, above the ring row (§5.3: the group's most
+    /// important choice).
     let leadChoice: AdjustmentControl?
     /// The LUT reference, drawn as swatches in place of the rings.
     let lut: AdjustmentControl?
@@ -492,7 +542,7 @@ private struct BarLayout {
         let controls = group.states.flatMap(\.controls)
         rings = controls.filter { $0.spec != nil }
         let others = controls.filter { $0.spec == nil }
-        let lead = others.first { $0.id == Recipe.hdrSourceID }
+        let lead = others.first { $0.id == Recipe.hdrSourceID || $0.id == Recipe.filmID }
         let lut = others.first { $0.id == Recipe.lookID }
         leadChoice = lead
         self.lut = lut

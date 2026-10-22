@@ -146,6 +146,39 @@ Two intentional math changes from older implementations: contrast fixes the whit
 non-P3 SDR LUT input uses constant-Y straight gamut compression to Rec.709 rather than the
 old engine's Oklab input compression. LUT table/domain/transfer/linear-strength semantics remain.
 
+## Film emulation
+
+`look.film` (`FilmAdjustments`) emulates Kodak Portra 400 on Portra Endura paper, Fujifilm
+Velvia 100 (a slide, viewed directly) and Kodak Vision3 500T on Kodak 2383, from spektrafilm's
+measured stocks (CC BY-SA 4.0, Andrea Volpato). `scripts/convert_spektrafilm_stocks.py` bakes
+each stock into `Resources/Film/<id>.json`: the Hanatos 2025 spectral upsampling as a 192×192
+chromaticity table of film exposure, the density curves (also before DIR couplers), the coupler
+matrix, the 81-wavelength dye densities, enlarger and viewing light, the scanner's black and
+white levels, and the grain's variance. `Film.metal` evaluates per pixel: linear P3 → film
+exposure (Mitchell bicubic, as spektrafilm) → density with DIR couplers → grain → print exposure
+and paper density (negatives) → viewed XYZ → scanner levels (paper white near display white) →
+linear P3. `FilmStock.apply` is the double reference.
+
+The film exposes the scene before the split, so HDR highlights reach its shoulder; its print is
+the new SDR base and the gain is retained (L1); strength mixes in linear light. An applied film
+develops RAW scene-linear, like a Log look, so Apple's tone curve is not applied twice. Tone and
+colour edits act before the film, as changes to the scene it photographs.
+
+`look.filmExposure` is the film's exposure compensation. Auto (`RenderEngine.filmMeter`) is
+spektrafilm's centre-weighted meter: luminance weighted by a Gaussian of sigma 0.2 of the long
+edge, put at 18.4 %, clamped to the declared ±3 EV. It meters the original photo on the fixed
+analysis source, before any edit, so preview and export agree and the light edits still move the
+exposure; `resolvedAutomatic` reports it.
+
+Grain (`look.filmGrain`, 100 % = the stock's own) follows spektrafilm's sublayer particle model
+through its variance: per channel, variance × pixel area against density, with a 35 mm frame
+spanning the render's long edge, times unit noise blurred by 0.65 pixels (3×3, scaled to the
+5×5 kernel's deviation). The noise hashes output pixel coordinates, so regions and stripes of a
+render agree; analysis cells are grainless. Halation, glare and other spatial effects are not
+modelled. Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs
+included (`Fixtures/film-reference.json`, < 1e-6), the grain RMS with spektrafilm's stochastic
+grain (< 5 %), and the GPU with the double reference, grain included (≤ 1 10-bit code).
+
 ## Caches, limits and P7-1b
 
 The engine retains full and the latest preview for one asset/development family, plus a

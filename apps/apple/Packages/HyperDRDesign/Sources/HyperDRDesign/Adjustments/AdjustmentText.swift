@@ -101,7 +101,7 @@ public enum AdjustmentText {
 
     /// A menu's options under headings. The LUT spaces (`look.input`,
     /// `look.output`) read as display, HDR and camera Log spaces; any other
-    /// choice is one section without a heading.
+    /// choice, the film stock among them, is one section without a heading.
     public struct OptionSection: Identifiable, Sendable {
         /// Nil for a choice that is not divided.
         public let family: LookSpaceFamily?
@@ -110,7 +110,7 @@ public enum AdjustmentText {
     }
 
     public static func optionSections(_ control: AdjustmentControl) -> [OptionSection] {
-        guard control.group == .look, control.kind == .choice else {
+        guard control.group == .look, control.kind == .choice, control.id != Recipe.filmID else {
             return [OptionSection(family: nil, options: control.options)]
         }
         return LookSpaceFamily.allCases.compactMap { family in
@@ -190,6 +190,9 @@ public enum AdjustmentSymbols {
         Entry(id: "color.vibrance", symbol: "drop.halffull"),
         Entry(id: "color.saturation", symbol: "drop.fill"),
         Entry(id: "look.strength", symbol: "camera.filters"),
+        Entry(id: "look.filmStrength", symbol: "film"),
+        Entry(id: "look.filmExposure", symbol: "camera.metering.center.weighted"),
+        Entry(id: "look.filmGrain", symbol: "circle.grid.3x3"),
         Entry(id: "develop.luminanceNR", symbol: "aqi.low"),
         Entry(id: "develop.colorNR", symbol: "circle.hexagongrid"),
         Entry(id: "develop.sharpness", symbol: "triangle"),

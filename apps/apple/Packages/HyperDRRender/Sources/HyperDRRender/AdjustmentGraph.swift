@@ -9,6 +9,7 @@ struct GraphUniform {
     var lutMin, lutMax: SIMD4<Float>
     var region, mode: SIMD4<UInt32>
     var inputRegion: SIMD4<Float>
+    var film: SIMD4<Float> = .zero
 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
 struct AuthorUniform {
@@ -21,6 +22,7 @@ struct AnalysisKey: Equatable {
     let tone: ToneAdjustments
     let color: ColorAdjustments
     let look: LookAdjustments
+    let film: FilmAdjustments
     let start, coverage: Float
 }
 
@@ -72,6 +74,60 @@ extension RenderEngine {
         return (texture, buffer)
     }
 
+    /// Strength, grain amount, 1/pixel area (µm⁻²) for a render of `size`, and the exposure factor.
+    func filmUniform(_ source: RenderSource, _ film: FilmAdjustments, size: PixelSize) -> SIMD4<Float> {
+        guard !film.isIdentity, let stock = film.stock, let data = try? FilmStock.named(stock) else { return .zero }
+        let inverseArea = FilmStock.inverseArea(longEdge: max(size.width, size.height), film: data.resource.filming)
+        let exposure = film.exposure ?? ((try? filmMeter(source)) ?? 0)
+        return SIMD4(film.strength, film.grain, Float(inverseArea), exp2(exposure))
+    }
+
+    /// The film's automatic exposure in stops: spektrafilm's centre-weighted meter
+    /// (Gaussian, sigma 0.2 of the long edge) of the original photo's luminance, put
+    /// at 18.4 %. Measured on the fixed analysis source, so preview and export agree,
+    /// and before any edit, so the light edits still move the exposure.
+    public func filmMeter(_ source: RenderSource) throws -> Float {
+        let fixed = try fixedAnalysisSource(source)
+        if let cache = filmMeterCache, cache.id == fixed.id { return cache.ev }
+        let input = try workingInput(fixed)
+        guard let command = queue.makeCommandBuffer(),
+              let rows = device.makeBuffer(length: input.height * 8, options: .storageModeShared) else { throw RenderError.allocationFailed }
+        let context = nodeContext(domain: fixed.domain, buffer: command)
+        var unused: UInt32 = 0
+        try context.dispatch("filmMeter", width: input.height, height: 1, textures: [input], buffers: [rows], value: &unused)
+        try finish(command)
+        let sums = UnsafeBufferPointer(start: rows.contents().bindMemory(to: SIMD2<Float>.self, capacity: input.height), count: input.height)
+        let total = sums.reduce(SIMD2<Double>.zero) { $0 + SIMD2(Double($1.x), Double($1.y)) }
+        let range = Adjustments.declaration("look.filmExposure")!.range!
+        let ev = total.x > 0 && total.y > 0 ? min(max(-log2(total.x / total.y / 0.184), range.lowerBound), range.upperBound) : 0
+        filmMeterCache = (fixed.id, Float(ev))
+        return Float(ev)
+    }
+
+    /// The stock's tables and spectral upsampling texture; one texel and row when no film is active.
+    func filmResources(_ film: FilmAdjustments) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
+        let stock = film.isIdentity ? nil : film.stock
+        if let cache = filmCache, cache.id == stock { return (cache.texture, cache.buffer) }
+        filmCache = nil
+        let texture: any MTLTexture, rows: [SIMD4<Float>]
+        if let stock {
+            let data = try FilmStock.named(stock)
+            texture = try data.spectralTexture(device); rows = data.packed()
+        } else {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: 1, height: 1, mipmapped: false)
+            descriptor.usage = .shaderRead; descriptor.storageMode = .shared
+            guard let empty = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
+            texture = empty; rows = [SIMD4<Float>(repeating: 0)]
+        }
+        let buffer = try rows.withUnsafeBytes { bytes in
+            guard let value = device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
+                else { throw RenderError.allocationFailed }
+            return value
+        }
+        filmCache = (stock, texture, buffer)
+        return (texture, buffer)
+    }
+
     func graphUniform(_ source: RenderSource, _ edit: RenderAdjustments, size: PixelSize,
                       region: CGRect, range: Float = 3, shoulder: Bool = false) -> GraphUniform {
         let t = edit.tone, c = edit.color, h = edit.hdr, l = edit.look
@@ -84,7 +140,8 @@ extension RenderEngine {
                          lut != nil && !l.input.isSDR ? 1 : 0, h.enabled ? 1 : 0),
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
-            region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion))
+            region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion),
+            film: filmUniform(source, edit.film, size: size))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -93,7 +150,7 @@ extension RenderEngine {
         try Task.checkCancellation()
         try edit.validate(domain:source.domain)
         let source = try fixedAnalysisSource(source)
-        let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look,
+        let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look, film: edit.film.withoutGrain,
                               start: edit.hdr.expansionStart ?? RenderParameter.expansionStart, coverage: edit.hdr.coverage)
         if let cached = analysisCache, cached.key == key { return cached.result }
         analysisCache = nil
@@ -110,10 +167,12 @@ extension RenderEngine {
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
         let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let film = try filmResources(edit.film)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
+        parameters.film.y = 0 // grain averages out in the cells
         try context.dispatch("graphCells", width: width, height: height,
-            textures: [input, cells, peaks, resources.texture, masks], buffers: [resources.buffer], value: &parameters)
+            textures: [input, cells, peaks, resources.texture, masks, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
         func box(_ input: any MTLTexture, _ output: any MTLTexture, radius: Int) throws {
             var p = BoxUniform(radius: UInt32(radius), vertical: 0, width: UInt32(width), height: UInt32(height))
             try context.dispatch("graphBox", width: width, height: height, textures: [input, temp], value: &p)
@@ -214,6 +273,7 @@ extension RenderEngine {
         let configuration = try graphConfiguration(source, edit, analysis: analysis, modelPeak:model?.peak ?? 0)
         let input = try workingInput(source)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let film = try filmResources(edit.film)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
@@ -222,7 +282,8 @@ extension RenderEngine {
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
         try context.dispatch("graphOutput", width: base.width, height: base.height,
-            textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion], buffers: [resources.buffer], value: &p)
+            textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture],
+            buffers: [resources.buffer, film.buffer], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,
             provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,

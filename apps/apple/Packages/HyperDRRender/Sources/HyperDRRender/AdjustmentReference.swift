@@ -258,7 +258,9 @@ extension DoubleReference {
 
     /// Source decomposition has no range limit. HDR-only strength/range operate
     /// downstream so changing them never reselects the SDR base.
-    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool) -> Split {
+    /// `grain` places the film's grain; without it the film is grainless. An automatic
+    /// film exposure reads as zero here: pass the metered value in `settings`.
+    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil) -> Split {
         var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
@@ -273,6 +275,10 @@ extension DoubleReference {
         if logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
         var base = fitP3(x*exp2(-g))
+        if !settings.film.isIdentity, let stock = settings.film.stock, let film = try? FilmStock.named(stock) {
+            let exposed = x*exp2(Double(settings.film.exposure ?? 0))
+            base = fitP3(base+(film.apply(exposed,grain:grain)-base)*Double(settings.film.strength))
+        }
         if active && settings.look.input.isSDR {
             base = look(base,settings:settings.look)
             if !settings.look.output.isSDR {

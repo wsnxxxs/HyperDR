@@ -32,6 +32,16 @@ The exact dependency versions and feature choices are defined in
 license files distributed with each dependency; this notice is an aid, not a
 substitute for those license texts.
 
+Film emulation uses film stock data derived from spektrafilm by Andrea
+Volpato (https://github.com/andreavolpato/spektrafilm), licensed CC BY-SA 4.0
+(https://creativecommons.org/licenses/by-sa/4.0/). HyperDR converted the
+Kodak Portra 400, Kodak Portra Endura, Fujifilm Velvia 100, Kodak Vision3 500T
+and Kodak 2383 profiles with `scripts/convert_spektrafilm_stocks.py` (spectral
+upsampling baked per film, illuminants, neutral print filters, scanner levels
+and fitted curves resolved, grain variance tabulated); the converted data in `HyperDRRender/Resources/Film` remains
+CC BY-SA 4.0. No spektrafilm code is included. Stock names are trademarks of
+their owners and only name the look's reference.
+
 Model inference uses Core ML in HyperDRRender. Training and ONNX export tools
 in `HyperDR_Model/` are offline tools and are not linked into the engine.
 

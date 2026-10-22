@@ -4,7 +4,7 @@ Platform-independent recipe and parameter declarations: `Foundation` only, no
 AppKit, UIKit or Photos. Minimum macOS 26 / iOS 26. The inspector, undo, the GPU
 nodes and `PHAdjustmentData` all read the same table (p7-adjustments §2.2).
 
-## Parameters (`Adjustments.all`, 28 declarations)
+## Parameters (`Adjustments.all`, 32 declarations)
 
 Groups appear in this order: HDR, Light, Color, Look, Detail (5 parameters here are
 RAW-only plus `develop.temperature`/`develop.tint`, 6 in total); `local` is reserved
@@ -37,6 +37,10 @@ white (H1), `sdrOnly` only the base with gain compensation (H2).
 | `look.strength` | 0…100 %, 1 | 100 % | all, LUT chosen | whole · instant |
 | `look.input` | choice | `srgb` | all, LUT chosen | whole · instant |
 | `look.output` | choice | `srgb` | all, LUT chosen | whole · instant |
+| `look.film` | choice (`Adjustments.filmStocks`) | `none` | all | whole · instant |
+| `look.filmStrength` | 0…100 %, 1 | 100 % | all, a film chosen | whole · instant |
+| `look.filmExposure` | floatOrAuto −3…3 EV, 0.1 | auto (centre-weighted meter of the original) | all, a film chosen | whole · instant |
+| `look.filmGrain` | 0…200 %, 1 | 100 % (the stock's grain on 35 mm) | all, a film chosen | whole · instant |
 | `develop.luminanceNR` | 0…100 %, 1 | `fromSource` | `rawEDR` | whole · redevelop |
 | `develop.colorNR` | 0…100 %, 1 | `fromSource` | `rawEDR` | whole · redevelop |
 | `develop.sharpness` | 0…100 %, 1 | `fromSource` | `rawEDR` | whole · redevelop |

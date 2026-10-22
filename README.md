@@ -43,7 +43,7 @@ Local quality gates, including package-driven E5 frame checks, are documented
 in [tests/quality](tests/quality/README.md). They do not require user photos or a
 CI runner. Parser fuzz targets remain opt-in under `tests/fuzz`.
 
-Windows development stopped at [a43d46a](https://github.com/wsnxxxs/HyperDR/tree/a43d46a).
+Windows development stopped at [6949167](https://github.com/wsnxxxs/HyperDR/tree/6949167).
 The former Python/Web panel and Tauri shell were removed. Offline model training
 and Core ML conversion tools remain in `HyperDR_Model/`; they are not native
 engine dependencies. See [third-party notices](THIRD_PARTY_NOTICES.md).

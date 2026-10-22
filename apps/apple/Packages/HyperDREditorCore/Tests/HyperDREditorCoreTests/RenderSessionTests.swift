@@ -164,7 +164,7 @@ import UniformTypeIdentifiers
         #expect(try await render(warmer).modelGainPending == false)
         // Another preview size shares the development.
         #expect(try await render(warmer, PixelSize(width: 128, height: 128)).modelGainPending == false)
-        // Render gives a development loaded again its stable id (510e39cc),
+        // Render gives a development loaded again its stable id (8a3d038b),
         // so the first one's prediction still applies.
         let back = try await render(recipe)
         #expect(back.modelGainPending == false)

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="330" viewBox="0 0 960 330" role="img" aria-label="HyperDR 管线：解码、配方、预览与导出共用的 GPU 渲染图"><style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", Arial, sans-serif; fill: #1d1d1f; }
+  .t { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12px; fill: #6e6e73; }
+  .k { font-size: 11px; letter-spacing: .12em; fill: #86868b; font-weight: 600; }
+  .c { font-size: 13px; fill: #6e6e73; }
+  .box { fill: #ffffff; stroke: #d2d2d7; stroke-width: 1; }
+  .hot { fill: #fff8e6; stroke: #e8a800; stroke-width: 1.25; }
+  .ln { fill: none; stroke: #b0b0b5; stroke-width: 1.25; }
+  .ar { fill: #b0b0b5; }
+  .dot { fill: #e8a800; }
+  @media (prefers-color-scheme: dark) {
+    text { fill: #f5f5f7; }
+    .s, .c { fill: #a1a1a6; }
+    .k { fill: #8e8e93; }
+    .box { fill: #1c1c1e; stroke: #3a3a3c; }
+    .hot { fill: #2a2210; stroke: #f5b800; }
+    .ln { stroke: #5a5a5e; }
+    .ar { fill: #5a5a5e; }
+    .dot { fill: #f5b800; }
+  }
+</style><text class="k" x="20" y="64">输入</text><text class="s" x="20" y="108" style="font-size:13px">RAW · DNG</text><text class="s" x="20" y="138" style="font-size:13px">HEIC · HIF</text><text class="s" x="20" y="168" style="font-size:13px">Gain-map JPEG</text><text class="s" x="20" y="198" style="font-size:13px">AVIF · PNG · TIFF</text><path class="ln" d="M160 92 V218 M160 155 H170"/><path class="ln" d="M170 155 H193"/><path class="ar" d="M200 155 l-8 -4.5 v9 z"/><rect class="box" x="200" y="120" width="160" height="70" rx="12"/><text class="t" x="280.0" y="152.0" text-anchor="middle">解码</text><text class="s" x="280.0" y="171.0" text-anchor="middle">ImageIO · CIRAWFilter</text><path class="ln" d="M360 155 H377"/><path class="ar" d="M384 155 l-8 -4.5 v9 z"/><rect class="box" x="384" y="120" width="160" height="70" rx="12"/><text class="t" x="464.0" y="152.0" text-anchor="middle">配方</text><text class="s" x="464.0" y="171.0" text-anchor="middle">无损编辑 · 可撤销</text><path class="ln" d="M544 155 H561"/><path class="ar" d="M568 155 l-8 -4.5 v9 z"/><rect class="hot" x="568" y="108" width="210" height="94" rx="12"/><text class="t" x="673.0" y="152.0" text-anchor="middle">GPU 渲染图</text><text class="s" x="673.0" y="171.0" text-anchor="middle">Core Image · Metal</text><text class="s" x="673" y="190" text-anchor="middle">线性 Display P3 · 扩展范围</text><path class="ln" d="M778 155 H792 V83 H799 M792 155 V227 H799"/><path class="ar" d="M806 83 l-8 -4.5 v9 z"/><path class="ar" d="M806 227 l-8 -4.5 v9 z"/><rect class="box" x="806" y="50" width="140" height="66" rx="12"/><text class="t" x="876.0" y="80.0" text-anchor="middle">预览</text><text class="s" x="876.0" y="99.0" text-anchor="middle">Metal EDR 显示</text><rect class="box" x="806" y="194" width="140" height="66" rx="12"/><text class="t" x="876.0" y="224.0" text-anchor="middle">导出</text><text class="s" x="876.0" y="243.0" text-anchor="middle">写入 → 校验 → 发布</text><circle class="dot" cx="20" cy="304" r="3"/><text class="c" x="32" y="308">预览与导出走同一张渲染图：屏幕上确认的画面，就是最终写入的画面。</text></svg>

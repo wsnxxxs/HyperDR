@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="300" viewBox="0 0 960 300" role="img" aria-label="An SDR base plus a gain map becomes an adaptive HDR photo"><style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", Arial, sans-serif; fill: #1d1d1f; }
+  .t { font-size: 15px; font-weight: 600; }
+  .s { font-size: 12px; fill: #6e6e73; }
+  .k { font-size: 11px; letter-spacing: .12em; fill: #86868b; font-weight: 600; }
+  .c { font-size: 13px; fill: #6e6e73; }
+  .box { fill: #ffffff; stroke: #d2d2d7; stroke-width: 1; }
+  .hot { fill: #fff8e6; stroke: #e8a800; stroke-width: 1.25; }
+  .ln { fill: none; stroke: #b0b0b5; stroke-width: 1.25; }
+  .ar { fill: #b0b0b5; }
+  .dot { fill: #e8a800; }
+  @media (prefers-color-scheme: dark) {
+    text { fill: #f5f5f7; }
+    .s, .c { fill: #a1a1a6; }
+    .k { fill: #8e8e93; }
+    .box { fill: #1c1c1e; stroke: #3a3a3c; }
+    .hot { fill: #2a2210; stroke: #f5b800; }
+    .ln { stroke: #5a5a5e; }
+    .ar { fill: #5a5a5e; }
+    .dot { fill: #f5b800; }
+  }
+</style><defs><linearGradient id="sdr" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#5b5e66"/><stop offset=".55" stop-color="#2b2d33"/><stop offset="1" stop-color="#121316"/></linearGradient><radialGradient id="gm" cx=".68" cy=".3" r=".55"><stop offset="0" stop-color="#ffffff"/><stop offset=".35" stop-color="#8a8a8a"/><stop offset="1" stop-color="#0c0c0c"/></radialGradient><radialGradient id="hl" cx=".68" cy=".3" r=".42"><stop offset="0" stop-color="#fffbe8"/><stop offset=".25" stop-color="#ffd760" stop-opacity=".95"/><stop offset="1" stop-color="#ffb300" stop-opacity="0"/></radialGradient></defs><rect x="40" y="40" width="240" height="160" rx="14" fill="url(#sdr)"/><circle cx="203" cy="88" r="20" fill="#d9d9d9"/><rect x="360" y="40" width="240" height="160" rx="14" fill="url(#gm)"/><rect x="680" y="40" width="240" height="160" rx="14" fill="url(#sdr)"/><rect x="680" y="40" width="240" height="160" rx="14" fill="url(#hl)"/><circle cx="843" cy="88" r="20" fill="#ffffff"/><text class="t" x="320" y="128.0" text-anchor="middle" style="font-size:26px;font-weight:300">+</text><text class="t" x="640" y="128.0" text-anchor="middle" style="font-size:26px;font-weight:300">=</text><text class="t" x="160.0" y="234" text-anchor="middle">SDR base</text><text class="s" x="160.0" y="254" text-anchor="middle">what every screen shows</text><text class="t" x="480.0" y="234" text-anchor="middle">Gain map</text><text class="s" x="480.0" y="254" text-anchor="middle">where the light goes beyond white</text><text class="t" x="800.0" y="234" text-anchor="middle">Adaptive HDR</text><text class="s" x="800.0" y="254" text-anchor="middle">as bright as each display allows</text></svg>

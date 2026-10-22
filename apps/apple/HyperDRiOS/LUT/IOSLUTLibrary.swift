@@ -36,6 +36,7 @@ import Observation
     @ObservationIgnored private var writeRevisions: [LUTID: Int] = [:]
     /// Whether `entries` has been read once.
     private var loaded = false
+    @ObservationIgnored private weak var editor: RecipeEditor?
     @ObservationIgnored private let library: () -> Task<LUTLibrary, any Error>
 
     init(library: @escaping () -> Task<LUTLibrary, any Error>) {
@@ -93,6 +94,7 @@ import Observation
 
     /// Reads the library and installs what the editor does not have yet.
     func refresh(into editor: RecipeEditor) async {
+        self.editor = editor
         guard let library = try? await library().value else { return }
         let read = await library.entries()
         // A LUT whose spaces are being written keeps the spaces shown, which
@@ -123,6 +125,7 @@ import Observation
         isBusy = true
         failures = []
         defer { isBusy = false }
+        let sourceID = editor.source?.id
         var imported: [LUTID] = []
         do {
             let library = try await library().value
@@ -135,15 +138,16 @@ import Observation
             failures.append(Failure(name: "", detail: Self.detail(error)))
         }
         await refresh(into: editor)
-        if urls.count == 1, let id = imported.first, editor.source != nil,
+        if !Task.isCancelled, let sourceID, editor.source?.id == sourceID,
+           urls.count == 1, let id = imported.first,
            let entry = entries.first(where: { $0.id == id }) {
             choose(entry, in: editor)
         }
     }
 
     /// Records one of a LUT's spaces: `input` or `output`, whichever is
-    /// given. The recipe's own spaces are the look group's; this only changes
-    /// where a later choice starts. The list shows the change at once; writes
+    /// given. The caller adopts a library edit into the photo, or records a
+    /// photo edit here. The list shows the change at once; writes
     /// for one LUT run one after another, each with the other side as the
     /// list holds it when the write starts, so a quick second change never
     /// puts back the first one's old value.
@@ -154,6 +158,7 @@ import Observation
         let previous = writes[id]
         writeRevisions[id, default: 0] &+= 1
         let revision = writeRevisions[id]
+        let sourceID = editor?.source?.id
         let write = Task { [weak self] in
             await previous?.value
             guard let self, let entry = entries.first(where: { $0.id == id }) else { return }
@@ -174,6 +179,11 @@ import Observation
                    writeRevisions[id] == revision,
                    let index = entries.firstIndex(where: { $0.id == id }) {
                     entries[index] = stored
+                    if editor?.source?.id == sourceID {
+                        editor?.reconcileLookSpaces(entry.contentHash,
+                                                   attemptedInput: entry.input.rawValue, attemptedOutput: entry.output.rawValue,
+                                                   input: stored.input.rawValue, output: stored.output.rawValue)
+                    }
                 }
             }
         }
@@ -188,6 +198,7 @@ import Observation
     /// that LUT (one undo step; an undone look stays unexportable until the
     /// LUT is imported again).
     func remove(_ entry: LUTEntry, from editor: RecipeEditor) async {
+        await writes[entry.id]?.value
         do {
             try await library().value.remove(entry.id)
             references[entry.id.rawValue] = nil

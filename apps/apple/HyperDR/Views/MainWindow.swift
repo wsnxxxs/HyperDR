@@ -167,6 +167,9 @@ private struct EditorWindow: View {
             .sheet(isPresented: Bindable(window).showsHistory) {
                 ExportHistorySheet(model: model)
             }
+            .onChange(of: LookPreviewInputs(editor: model.editor, looks: model.lookPreviewLooks), initial: true) { _, inputs in
+                model.lookPreviews.update(model.editor, looks: inputs.looks)
+            }
             .sheet(isPresented: Bindable(window).showsLUTLibrary) {
                 LUTLibrarySheet(model: model)
                     .environment(\.lookPickerShown, model.lookPreviews.shown)

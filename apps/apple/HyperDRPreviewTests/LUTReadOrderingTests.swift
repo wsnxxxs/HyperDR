@@ -1,4 +1,5 @@
 import XCTest
+import HyperDRRecipe
 @testable import HyperDR
 
 @MainActor final class LUTReadOrderingTests: XCTestCase {
@@ -159,5 +160,123 @@ import XCTest
             XCTAssertEqual(reads, 2, "A missing index success must explicitly reconcile membership")
             XCTAssertEqual(model.lut.library, services.library)
         }
+    }
+}
+
+@MainActor final class LUTLifecycleTests: XCTestCase {
+    private func ready() async throws -> (EditorModel, FakeEditorServices) {
+        let services = FakeEditorServices(openDelay: .zero)
+        services.library = [LUTItem(id: "a", name: "Film", input: .srgb, output: .srgb)]
+        let model = EditorModel(services: services)
+        await model.loadExportServices()
+        model.open([URL(fileURLWithPath: "/tmp/lut-lifecycle.jpg")])
+        await eventually(timeout: .seconds(5)) { model.document?.phase == .ready }
+        await model.chooseLibraryLUT("a")
+        XCTAssertNotNil(model.editor.recipe.look)
+        return (model, services)
+    }
+
+    func testLibrarySpaceUndoRedoRestoresPersistedSpaces() async throws {
+        let (model, services) = try await ready()
+        defer { model.closeDocument() }
+        model.setLibraryLUTSpaces("a", input: .rec709, output: .p3)
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(services.library[0].input, .rec709)
+        model.undo()
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(model.editor.recipe.conditionValue("look.input")?.stringValue, "srgb")
+        XCTAssertEqual(model.lut.library[0].input, .srgb)
+        XCTAssertEqual(services.library[0].input, .srgb)
+        XCTAssertEqual(services.library[0].output, .srgb)
+        model.redo()
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(model.editor.recipe.conditionValue("look.output")?.stringValue, "p3")
+        XCTAssertEqual(services.library[0].input, .rec709)
+        XCTAssertEqual(services.library[0].output, .p3)
+    }
+
+    func testFailedRemovalKeepsTheLookAndSuccessfulRemovalIsUndoable() async throws {
+        let (model, services) = try await ready()
+        defer { model.closeDocument() }
+        let before = model.editor.recipe
+        var deletion: CheckedContinuation<Void, any Error>?
+        services.removeLUTHandler = { _ in
+            try await withCheckedThrowingContinuation { deletion = $0 }
+        }
+        model.removeLUT("a")
+        await eventually(timeout: .seconds(3)) { deletion != nil }
+        XCTAssertEqual(model.editor.recipe, before, "Keep the photo while deletion is pending")
+        deletion?.resume(throwing: UserFacingError(code: "lut_invalid")); deletion = nil
+        await eventually(timeout: .seconds(3)) { !model.lut.failures.isEmpty }
+        XCTAssertEqual(model.editor.recipe, before)
+        XCTAssertEqual(model.lut.library.count, 1)
+        services.removeLUTHandler = nil
+        model.removeLUT("a")
+        await eventually(timeout: .seconds(3)) { model.lut.library.isEmpty }
+        XCTAssertNil(model.editor.recipe.look)
+        model.undo()
+        XCTAssertEqual(model.editor.recipe, before)
+        XCTAssertTrue(model.lut.library.isEmpty, "Undo restores the photo, not a deleted library file")
+    }
+
+    func testRemovalWaitsForPendingSpaceWrite() async throws {
+        let (model, services) = try await ready()
+        defer { model.closeDocument() }
+        var write: CheckedContinuation<LUTItem, any Error>?
+        services.updateLUTHandler = { _, _, _ in
+            try await withCheckedThrowingContinuation { write = $0 }
+        }
+        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
+        await eventually(timeout: .seconds(3)) { write != nil }
+        model.removeLUT("a")
+        await Task.yield()
+        XCTAssertEqual(services.library.count, 1)
+        write?.resume(returning: LUTItem(id: "a", name: "Film", input: .p3, output: .rec709)); write = nil
+        await eventually(timeout: .seconds(3)) { model.lut.library.isEmpty }
+        XCTAssertTrue(services.library.isEmpty)
+        XCTAssertNil(model.editor.recipe.look)
+    }
+}
+
+extension LUTLifecycleTests {
+    func testImportFinishingAfterAPhotoSwitchDoesNotApplyToTheNewPhoto() async throws {
+        let (model, services) = try await ready()
+        defer { model.closeDocument() }
+        services.importedLUT = LUTItem(id: "b", name: "New", input: .rec709, output: .rec709)
+        var read: CheckedContinuation<[LUTItem], Never>?
+        var calls = 0
+        services.lutEntriesHandler = {
+            calls += 1
+            if calls == 1 { return await withCheckedContinuation { read = $0 } }
+            return services.library
+        }
+        let importing = Task { await model.importLUTs([URL(fileURLWithPath: "/tmp/new.cube")]) }
+        await eventually(timeout: .seconds(3)) { read != nil }
+        let second = URL(fileURLWithPath: "/tmp/lut-second.jpg")
+        model.open([second])
+        await eventually(timeout: .seconds(5)) { model.photo?.url == second && model.document?.phase == .ready }
+        read?.resume(returning: services.library); read = nil
+        await importing.value
+        XCTAssertNil(model.editor.recipe.look)
+        XCTAssertTrue(services.library.contains { $0.id == "b" }, "The import is still kept in the library")
+    }
+}
+
+extension LUTLifecycleTests {
+    func testFailedSpaceWriteRestoresBothThePhotoAndLibraryWithoutAnotherWrite() async throws {
+        let (model, services) = try await ready()
+        defer { model.closeDocument() }
+        var writes = 0
+        services.updateLUTHandler = { _, _, _ in
+            writes += 1
+            throw UserFacingError(code: "lut_invalid")
+        }
+        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(writes, 1)
+        XCTAssertEqual(model.lut.library[0].input, .srgb)
+        XCTAssertEqual(model.editor.recipe.conditionValue("look.input")?.stringValue, "srgb")
+        XCTAssertEqual(model.editor.recipe.conditionValue("look.output")?.stringValue, "srgb")
+        XCTAssertFalse(model.lut.failures.isEmpty)
     }
 }

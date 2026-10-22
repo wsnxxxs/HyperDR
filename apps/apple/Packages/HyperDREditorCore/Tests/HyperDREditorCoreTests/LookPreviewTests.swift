@@ -123,9 +123,110 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         recipe.setValue(.string("p3"), for: "look.input")
         recipe.setValue(.number(40), for: "look.strength")
         let base = LookPreviews.base(recipe)
-        #expect(base.look == nil && base.value(for: "look.enabled") == nil && base.value(for: "look.input") == nil)
+        #expect(base.look == nil && base.conditionValue("look.enabled")?.boolValue == false && base.value(for: "look.input") == nil)
         #expect(base.conditionValue("look.strength")?.numberValue == 40)
         recipe.setValue(.number(0), for: "look.strength")
-        #expect(LookPreviews.base(recipe).conditionValue("look.strength")?.numberValue == 100)
+        #expect(LookPreviews.base(recipe).conditionValue("look.strength")?.numberValue == 0)
+    }
+}
+
+@MainActor @Suite struct LookPreviewRegressionTests {
+    @Test func disabledAndZeroStrengthChoicesMatchTheirPreviews() async throws {
+        let (editor, _) = try await openEditor()
+        for (enabled, strength) in [(false, 40.0), (true, 0.0)] {
+            var recipe = editor.recipe
+            recipe.setValue(.bool(enabled), for: "look.enabled")
+            recipe.setValue(.number(strength), for: "look.strength")
+            editor.setRecipe(recipe)
+            let look = LookPreviews.Look(reference: film, input: "rec709", output: "p3")
+            let preview = LookPreviews.recipe(LookPreviews.base(editor.recipe), with: look)
+            editor.chooseLook(film, input: look.input, output: look.output)
+            #expect(editor.recipe == preview)
+        }
+    }
+
+    @Test func spaceEditsUndoAndRedoNotifyTheLibraryButDomainFallbackDoesNot() async throws {
+        let undo = UndoManager()
+        let (editor, _) = try await openEditor(.sdr, undo: undo)
+        var changes: [(String?, String?)] = []
+        editor.onLookSpacesChanged = { old, new in
+            if let chosen = Recipe.chosenLookSpaces(from: old, to: new) {
+                changes.append((chosen.input, chosen.output))
+            }
+        }
+        editor.chooseLook(film, input: "vlog-vgamut", output: "rec709")
+        #expect(changes.isEmpty, "The SDR fallback must not overwrite the library's Log input")
+        editor.adoptLookSpaces(film.contentHash, input: "srgb", output: "p3")
+        #expect(changes.isEmpty, "Adoption already has the library's spaces")
+        undo.undo()
+        #expect(changes.count == 1 && changes.last?.1 == "rec709")
+        undo.redo()
+        #expect(changes.count == 2 && changes.last?.1 == "p3")
+        var recipe = editor.recipe
+        recipe.setValue(.string("srgb"), for: "look.output")
+        editor.setRecipe(recipe)
+        #expect(changes.count == 3 && changes.last?.1 == "srgb")
+        undo.undo()
+        #expect(changes.count == 4 && changes.last?.1 == "p3")
+    }
+
+    @Test func selectingALogLookAndFinishingItsCanvasRenderRefreshesPreviews() async throws {
+        let (editor, fake) = try await openEditor(.rawEDR)
+        let lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        await editor.installLUT(lut)
+        let reference = LUTReference(contentHash: lut.contentHash, name: "Log")
+        let looks = [LookPreviews.Look(reference: reference, input: "slog3-sgamut3cine", output: "rec709")]
+        let previews = LookPreviews()
+        previews.update(editor, looks: looks)
+        previews.shown(true)
+        defer { previews.shown(false) }
+        try await Task.sleep(for: .milliseconds(600))
+        let before = await fake.completed.filter(\.keepsSource).count
+        editor.chooseLook(reference, input: looks[0].input, output: looks[0].output)
+        previews.update(editor, looks: looks)
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(await fake.completed.filter(\.keepsSource).count > before,
+                "Changing only the active LUT must invalidate the preview key")
+        await editor.settle()
+        let afterChoice = await fake.completed.filter(\.keepsSource).count
+        previews.update(editor, looks: looks)
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(await fake.completed.filter(\.keepsSource).count > afterChoice,
+                "A completed development must retry previews that needed it")
+    }
+
+    @Test func startingADragCancelsAPreviewAlreadyWaitingForTheRenderer() async throws {
+        let (editor, fake) = try await openEditor()
+        let previews = LookPreviews()
+        previews.update(editor, looks: [])
+        await fake.holdRenders()
+        previews.shown(true)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(await fake.heldRenderCount == 1)
+        editor.editingChanged(try #require(Adjustments.declaration("tone.exposure")), true)
+        previews.update(editor, looks: [])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await fake.cancelled.contains(where: \.keepsSource))
+        #expect(previews.images.isEmpty)
+        await fake.releaseRenders()
+        editor.editingChanged(try #require(Adjustments.declaration("tone.exposure")), false)
+        previews.update(editor, looks: [])
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(previews.images[LookPreviews.none] != nil)
+        previews.shown(false)
+    }
+}
+
+extension LookPreviewRegressionTests {
+    @Test func failedSpaceWritesDoNotOverwriteANewerEditOrAnotherLook() async throws {
+        let (editor, _) = try await openEditor()
+        editor.chooseLook(film, input: "rec709", output: "p3")
+        // The disk reply is for an older edit: preserve the more recent one.
+        editor.reconcileLookSpaces(film.contentHash, attemptedInput: "srgb", attemptedOutput: "p3",
+                                   input: "srgb", output: "srgb")
+        #expect(editor.recipe.conditionValue("look.input")?.stringValue == "rec709")
+        editor.reconcileLookSpaces(venice.contentHash, attemptedInput: "rec709", attemptedOutput: "p3",
+                                   input: "srgb", output: "srgb")
+        #expect(editor.recipe.conditionValue("look.output")?.stringValue == "p3")
     }
 }

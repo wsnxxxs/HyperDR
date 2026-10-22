@@ -58,6 +58,9 @@ import SwiftUI
     init() {
         editor = (try? RenderSession()).map { RecipeEditor(renderer: $0) }
         editor?.undo.actionName = Self.undoName
+        editor?.onLookSpacesChanged = { [weak luts = exports.luts] old, new in
+            luts?.record(from: old, to: new)
+        }
         Task { [editor, exports] in
             if let editor { await exports.luts.refresh(into: editor) }
         }

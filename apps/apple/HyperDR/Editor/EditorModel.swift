@@ -260,6 +260,9 @@ import UniformTypeIdentifiers
         if !hasEditedFrame { display.gainWeight = nil }
         canvas.setImageSize(hasEditedFrame ? document?.pixelSize : nil)
         source.domain = document?.source?.domain
+        editor.onLookSpacesChanged = { [weak self] old, new in
+            self?.recordLookSpaces(from: old, to: new)
+        }
         editor.attach(undoManager: undoManager)
         editor.undo.actionName = { Self.undoActionName($0) }
         // Every step, undo and redo included, is an edit: an export panel

@@ -201,11 +201,7 @@ struct EditorScreen: View {
     /// The controls' writes; spaces chosen on the look are recorded in the
     /// library for its LUT.
     private var recipe: Binding<Recipe> {
-        Binding(get: { editor.recipe }, set: { value in
-            let old = editor.recipe
-            editor.setRecipe(value)
-            session.exports.luts.record(from: old, to: editor.recipe)
-        })
+        Binding(get: { editor.recipe }, set: { editor.setRecipe($0) })
     }
 
     private var panel: AdjustmentPanel {

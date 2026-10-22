@@ -226,6 +226,16 @@ import UniformTypeIdentifiers
         preview.recipe = log
         await #expect(throws: EditorRenderingError.needsDevelopment) { try await session.render(preview) }
         #expect(await reloads.count == 0)
+        // Once the canvas develops Log, the same small request succeeds
+        // without reopening the source. Switching back reverses availability.
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: log, size: size))
+        _ = try await session.render(preview)
+        #expect(await reloads.count == 1)
+        preview.recipe = look
+        await #expect(throws: EditorRenderingError.needsDevelopment) { try await session.render(preview) }
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
+        _ = try await session.render(preview)
+        #expect(await reloads.count == 2)
     }
 
     private actor Counter {

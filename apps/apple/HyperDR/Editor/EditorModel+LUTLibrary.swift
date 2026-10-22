@@ -29,6 +29,7 @@ extension EditorModel {
         if write.task == nil { write.confirmed = lut.library.first { $0.id == id } }
         write.revision &+= 1
         let revision = write.revision, previous = write.task
+        let sourceID = editor.source?.id
         if let index = lut.library.firstIndex(where: { $0.id == id }) {
             lut.library[index].input = input
             lut.library[index].output = output
@@ -58,6 +59,11 @@ extension EditorModel {
                 let confirmed = lutMetadataWrites[id]?.confirmed
                 if let confirmed, let index = lut.library.firstIndex(where: { $0.id == id }) {
                     lut.library[index] = confirmed
+                    if editor.source?.id == sourceID, let reference = lutReferences[id] {
+                        editor.reconcileLookSpaces(reference.contentHash,
+                                                  attemptedInput: input.rawValue, attemptedOutput: output.rawValue,
+                                                  input: confirmed.input.rawValue, output: confirmed.output.rawValue)
+                    }
                 }
                 lutMetadataWrites[id]?.task = nil
             }

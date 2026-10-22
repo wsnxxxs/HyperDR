@@ -121,6 +121,9 @@ import Observation
     // MARK: - Collaborators
 
     @ObservationIgnored let renderer: any EditorRendering
+    /// Explicit space edits and their undo/redo, for the host's LUT library.
+    /// Library adoption and LUT selection do not write domain fallbacks back.
+    @ObservationIgnored var onLookSpacesChanged: ((Recipe, Recipe) -> Void)?
     @ObservationIgnored let undo: RecipeUndo
     @ObservationIgnored private let frameClock: any EditorFrameClock
     /// How long the canvas must be still before a detail region is rendered.
@@ -310,6 +313,23 @@ import Observation
             register(RecipeStep(before: old, after: newValue, edit: edit))
         }
         recipeDidChange(from: old)
+        onLookSpacesChanged?(old, recipe)
+    }
+
+    /// A failed library write compensates only the still-current optimistic
+    /// spaces. It adds no undo step and never queues another library write.
+    func reconcileLookSpaces(_ hash: String, attemptedInput: String, attemptedOutput: String,
+                             input: String, output: String) {
+        guard recipe.look?.contentHash == hash else { return }
+        var attempted = recipe
+        attempted.setLookSpaces(input: attemptedInput, output: attemptedOutput)
+        guard ["look.input", "look.output"].allSatisfy({ recipe.conditionValue($0) == attempted.conditionValue($0) }) else { return }
+        var confirmed = recipe
+        confirmed.setLookSpaces(input: input, output: output)
+        guard confirmed != recipe else { return }
+        let old = recipe
+        recipe = confirmed
+        recipeDidChange(from: old)
     }
 
     /// One named step. An open drag ends first, as its own step.
@@ -404,6 +424,7 @@ import Observation
         let old = recipe
         recipe = value
         recipeDidChange(from: old)
+        onLookSpacesChanged?(old, recipe)
     }
 
     private func register(_ step: RecipeStep) { undo.register(step) }

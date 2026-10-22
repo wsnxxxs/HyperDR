@@ -76,6 +76,7 @@ extension EditorModel {
         invalidateLUTLibraryReads()
         lut.isBusy = true; lut.failures = []
         defer { lut.isBusy = false }
+        let sourceID = editor.source?.id
         var imported: [String] = []
         for url in urls {
             guard !Task.isCancelled else { break }
@@ -88,13 +89,16 @@ extension EditorModel {
             invalidateLUTLibraryReads()
         }
         await refreshLUTLibrary()
-        if urls.count == 1, let id = imported.first, document != nil { await chooseLibraryLUT(id) }
+        if !Task.isCancelled, !isEditingLocked, let sourceID, editor.source?.id == sourceID,
+           urls.count == 1, let id = imported.first { await chooseLibraryLUT(id) }
     }
 
     /// Makes a library LUT the photo's look, with its spaces, once the
     /// renderer has it.
     func chooseLibraryLUT(_ id: String) async {
+        let sourceID = editor.source?.id
         await lutInstallTask?.value
+        guard !Task.isCancelled, !isEditingLocked, let sourceID, editor.source?.id == sourceID else { return }
         guard let item = lut.library.first(where: { $0.id == id }), let reference = lutReferences[id] else { return }
         editor.chooseLook(reference, input: item.input.rawValue, output: item.output.rawValue)
     }
@@ -103,11 +107,15 @@ extension EditorModel {
     /// on that LUT (one undo step).
     func removeLUT(_ id: String) {
         guard !isEditingLocked else { return }
-        if let reference = lutReferences[id] { editor.dropLook(reference.contentHash) }
+        let reference = lutReferences[id]
+        let pendingWrite = lutMetadataWrites[id]?.task
         invalidateLUTLibraryReads()
         Task { [weak self, services] in
-            do { try await services.removeLUT(id) }
-            catch { self?.lut.failures = [UserFacingError.service(error)] }
+            await pendingWrite?.value
+            do {
+                try await services.removeLUT(id)
+                if let reference { self?.editor.dropLook(reference.contentHash) }
+            } catch { self?.lut.failures = [UserFacingError.service(error)] }
             guard let self else { return }
             // Fence reads begun during a mutation too, including partial failure.
             invalidateLUTLibraryReads()

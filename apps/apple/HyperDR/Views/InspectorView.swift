@@ -151,11 +151,7 @@ private struct Adjustments: View {
     var body: some View {
         let editor = model.editor
         AdjustmentInspector(
-            recipe: Binding(get: { editor.recipe }, set: { value in
-                let old = editor.recipe
-                editor.setRecipe(value)
-                model.recordLookSpaces(from: old, to: editor.recipe)
-            }),
+            recipe: Binding(get: { editor.recipe }, set: { editor.setRecipe($0) }),
             panel: AdjustmentPanel(context: AdjustmentContext(
                 sourceValues: editor.source?.sourceValues ?? [:],
                 automaticValues: editor.automaticValues,
@@ -173,9 +169,6 @@ private struct Adjustments: View {
             },
             onLUTLibrary: { window.showsLUTLibrary = true })
         .environment(\.lookPickerShown, model.lookPreviews.shown)
-        .onChange(of: LookPreviewInputs(editor: editor, looks: model.lookPreviewLooks), initial: true) { _, inputs in
-            model.lookPreviews.update(editor, looks: inputs.looks)
-        }
     }
 }
 

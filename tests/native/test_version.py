@@ -28,6 +28,10 @@ class VersionConsistencyTests(unittest.TestCase):
             released_version,
             manifest["version-string"],
         }
+        project = (ROOT / "apps/apple/HyperDR.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        app_versions = re.findall(r"MARKETING_VERSION = ([0-9.]+);", project)
+        self.assertTrue(app_versions, "native app versions are missing")
+        versions.update(app_versions)
         self.assertEqual(len(versions), 1, "release version sources disagree: %r" % versions)
 
 

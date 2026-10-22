@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 /// path out:
 ///
 ///     let photo = try TinyPhoto(); defer { photo.remove() }
-struct TinyPhoto {
+struct TinyPhoto: Sendable {
     let url: URL
     private var directory: URL { url.deletingLastPathComponent() }
 
@@ -27,7 +27,7 @@ struct TinyPhoto {
         return Set(names.filter { $0.hasPrefix(namePrefix) })
     }
 
-    init() throws {
+    init(properties: [CFString: Any] = [:]) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.namePrefix)\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         url = directory.appendingPathComponent("input.jpg")
@@ -45,7 +45,9 @@ struct TinyPhoto {
             try? FileManager.default.removeItem(at: directory)
             throw CocoaError(.fileWriteUnknown)
         }
-        CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        var outputProperties = properties
+        outputProperties[kCGImageDestinationLossyCompressionQuality] = 0.9
+        CGImageDestinationAddImage(destination, context.makeImage()!, outputProperties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             try? FileManager.default.removeItem(at: directory)
             throw CocoaError(.fileWriteUnknown)

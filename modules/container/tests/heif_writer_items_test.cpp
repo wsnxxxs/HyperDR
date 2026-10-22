@@ -2,6 +2,7 @@
 #include "../../codec/src/hevc/hevc.hpp"
 #include "hyperdr/container/heif_reader.hpp"
 #include <array>
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include "hyperdr/foundation/cancel.hpp"
@@ -47,7 +48,16 @@ void check(const std::string& name) {
     expected_types[tmap]="tmap";expected_types[tmap+1]="Exif";expected_types[tmap+2]="mime";
     expected_refs[{tmap,"dimg"} ]={1,gain};
     expected_refs[{gain,"auxl"} ]={1};
-    expected_refs[{tmap+1,"cdsc"} ]={1};expected_refs[{tmap+2,"cdsc"} ]={1};
+    expected_refs[{tmap+1,"cdsc"} ]={1,tmap};expected_refs[{tmap+2,"cdsc"} ]={1,tmap};
+    unsigned colors=0;
+    for (const auto& association:file.items.at(tmap).properties) {
+      const auto& property=file.properties.at(association.index-1);
+      if(property.type!="colr")continue;
+      ++colors;
+      const std::array<std::uint8_t,11> hdr{'n','c','l','x',0,9,0,16,0,9,128};
+      require(std::ranges::equal(property.payload,hdr),"HDR alternative must declare BT.2020/PQ, not the SDR base ICC");
+    }
+    require(colors==1,"HDR alternative needs its own color description");
   }
   for(const auto& [id,item]:file.items)
     require(expected_types.contains(id) && item.type==expected_types.at(id),"item type/ID differs");

@@ -120,6 +120,8 @@ Bytes make_iinf(const std::vector<Item>& items) {
 
 Bytes make_iref(const std::vector<Item>& items, std::uint16_t primary) {
   Bytes payload{0, 0, 0, 0};
+  const auto alternate = std::find_if(items.begin(), items.end(),
+      [](const auto& item) { return item.type == "tmap"; });
   for (const auto& item : items) {
     if (!item.derived_from.empty()) {
       Bytes reference;
@@ -135,8 +137,9 @@ Bytes make_iref(const std::vector<Item>& items, std::uint16_t primary) {
     if (item.type == "Exif" || item.type == "mime") {
       Bytes reference;
       put16(reference, item.id);
-      put16(reference, 1);
+      put16(reference, alternate == items.end() ? 1 : 2);
       put16(reference, primary);
+      if (alternate != items.end()) put16(reference, alternate->id);
       append(payload, make_box("cdsc", reference));
     }
   }
@@ -325,7 +328,6 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
   PropertyPool pool;
   std::vector<Item> items;
   std::array<std::uint16_t, 2> logical_ids{};
-  std::vector<Association> base_description;
   for (unsigned group = 0; group < count; ++group) {
     check_cancelled();
     const auto& image = *images[group];
@@ -334,7 +336,6 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
     const auto logical_id = static_cast<std::uint16_t>(items.size() + 1);
     logical_ids[group] = logical_id;
     auto description = describe(image, config, grid, pool);
-    if (!group) base_description = description;
     Item logical{logical_id, grid ? "grid" : "hvc1", group ? "Gain map" : "Image",
                  group != 0, grid ? grid_payload(grids[group]) : Bytes{}, description, {}, {}, 0,
                  grid ? nullptr : &image.sequence};
@@ -358,8 +359,19 @@ void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base, const
     auto& gain_item = items[logical_ids[1] - 1];
     gain_item.properties.push_back(pool.add({container::iso_gain_map_aux_property(), true}));
     gain_item.auxiliary_to = primary;
+    // tmap describes the reconstructed HDR alternative, not the SDR input.
+    // Photos' detail display can otherwise interpret the alternative as SDR.
+    // Match ImageIO's independent BT.2020/PQ output description; retain the
+    // base's P3/sRGB ICC only on the base and its coded tiles.
+    auto alternate = base;
+    alternate.color = {9, 16, 9, true};
+    alternate.display_p3_icc = {};
+    alternate.light.reset();
+    auto alternate_config = configs[0];
+    alternate_config.bit_depth = std::max(10U, alternate_config.bit_depth);
+    auto alternate_description = describe(alternate, alternate_config, true, pool);
     const auto id = static_cast<std::uint16_t>(items.size() + 1);
-    items.push_back({id, "tmap", "Tone map", false, std::move(tmap), base_description,
+    items.push_back({id, "tmap", "Tone map", false, std::move(tmap), std::move(alternate_description),
         {primary, logical_ids[1]}, {}, 0});
   }
   if (!options.exif.empty()) {

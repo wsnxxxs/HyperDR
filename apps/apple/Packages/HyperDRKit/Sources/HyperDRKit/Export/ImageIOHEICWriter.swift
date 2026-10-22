@@ -17,7 +17,7 @@ public struct ImageIOGainWriteReport: Sendable, Codable {
 /// Manual ISO auxiliary data only: ImageIO never derives the base or gain.
 enum ImageIOHEICWriter {
     static func write(base: PackagePlane, gain: PackagePlane, metadata: ExportGainMetadata,
-                      to url: URL, quality: Int) throws -> ImageIOGainWriteReport {
+                      to url: URL, quality: Int, photoMetadata: ExportPhotoMetadata? = nil) throws -> ImageIOGainWriteReport {
         try Task.checkCancellation()
         guard metadata.baseHeadroom == 0 else {
             throw HyperDRError(code: "unsupported_format",
@@ -83,8 +83,9 @@ enum ImageIOHEICWriter {
                   let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
                 throw RecipeExportError.verificationFailed("imageio_heic_pixels")
             }
-            CGImageDestinationAddImage(destination, labeled, [kCGImageDestinationLossyCompressionQuality: Double(quality)/100,
-                                                              kCGImagePropertyOrientation: 1] as CFDictionary)
+            CGImageDestinationAddImage(destination, labeled, photoMetadata?.imageProperties(quality: quality)
+                ?? [kCGImageDestinationLossyCompressionQuality: Double(quality)/100,
+                    kCGImagePropertyOrientation: 1] as CFDictionary)
             let auxiliary: [CFString: Any] = [
                 kCGImageAuxiliaryDataInfoData: codes,
                 kCGImageAuxiliaryDataInfoDataDescription: ["Width": gain.width, "Height": gain.height,

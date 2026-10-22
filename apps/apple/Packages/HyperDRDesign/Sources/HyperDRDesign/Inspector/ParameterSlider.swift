@@ -29,7 +29,8 @@ public struct ParameterMaskLink {
 /// - The readout shows the formatted value until focused, then the bare
 ///   number. Return commits and stays, Escape abandons, ↑ ↓ step.
 /// - A spec with an `automatic` state shows it as the word "Auto" and a
-///   dashed track with no thumb. Elsewhere a small Auto button sits by the
+///   dashed track with a hollow ring where Auto lands, when known, so the
+///   track reads as one to drag (on iPad above all). Elsewhere a small Auto button sits by the
 ///   readout; clearing the readout or typing "auto" also returns to it, and
 ///   a click, drag, key or typed number leaves it.
 /// - With a `mask`, a small mark follows the title, and hovering the row,
@@ -306,7 +307,8 @@ private struct OptionalHelp: ViewModifier {
 
 /// The track (CSS `.field input[type="range"]`): a 3 pt line, the fill from
 /// the origin, a 13 pt thumb with a halo on hover and while dragging. In the
-/// Auto state it is a dashed line with neither fill nor thumb.
+/// Auto state it is a dashed line with no fill and a hollow ring for a thumb
+/// at the value Auto resolves to.
 private struct ParameterTrack: View {
     let title: Text
     @Binding var value: Double
@@ -349,6 +351,12 @@ private struct ParameterTrack: View {
                         path.addLine(to: CGPoint(x: width, y: mid))
                     }
                     .stroke(Color.hdr.controlTrack, style: StrokeStyle(lineWidth: 3, lineCap: .butt, dash: [4, 4]))
+                    if let resolved = spec.automatic?.resolved, spec.range.contains(resolved) {
+                        Circle()
+                            .strokeBorder(isEnabled ? Color.hdr.controlThumb : Color.hdr.inkDisabled, lineWidth: 1.5)
+                            .frame(width: Self.thumb, height: Self.thumb)
+                            .offset(x: x(spec.fraction(of: resolved)) - Self.thumb / 2, y: mid - Self.thumb / 2)
+                    }
                 } else {
                     Capsule()
                         .fill(Color.hdr.controlTrack)

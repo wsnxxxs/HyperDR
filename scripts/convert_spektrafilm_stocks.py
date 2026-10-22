@@ -217,11 +217,16 @@ def scanner_levels(references) -> list[float]:
 
 
 def grain_table(params, normalized: np.ndarray) -> dict:
-    """Film grain as spektrafilm's sublayer particle model, reduced to its variance:
-    each sublayer develops Binomial(Poisson(n / s), p) particles of density od * s with
-    p = d / dmax and s = 1 - p * uniformity, so its density variance is p * s * dmax^2 / n.
-    n is proportional to the pixel area; the table holds variance x area (um^2) against
-    the channel's density from 0 to its maximum. The blur is in pixels."""
+    """Film grain as spektrafilm's sublayer particle model, reduced to its cumulants:
+    each sublayer develops Binomial(Poisson(n / s), p) = Poisson(n p / s) particles of
+    density od * s, with p = d / dmax, s = 1 - p * uniformity and od = dmax / n, so its
+    density variance is p s dmax^2 / n and its third cumulant p s^2 dmax^3 / n^2. n is
+    proportional to the pixel area: per sublayer the tables hold variance x area (um^2)
+    and third cumulant x area^2 (um^4) against the channel's density from 0 to its
+    maximum. Each sublayer's dye clouds blur its particles by
+    blur_dye_clouds * sqrt(od) pixels, a fixed size in micrometres; then the whole grain
+    is blurred by `blur` pixels (the scan). Particles are counted on top of densityMinimum,
+    which is subtracted after: grain never takes density below -densityMinimum."""
     grain = params.film_render.grain
     film = params.film
     layers = np.asarray(film.data.density_curves_layers, dtype=float)
@@ -231,13 +236,17 @@ def grain_table(params, normalized: np.ndarray) -> dict:
     particle = grain.particle_area_um2 * np.asarray(grain.particle_scale)[None, :] * np.asarray(grain.particle_scale_layers)[:, None]
     densities = np.linspace(0, 1, GRAIN_SAMPLES)[:, None] * np.nanmax(normalized, axis=0)[None, :]
     per_layer = interp_density_cmy_layers(densities[None, :, :], normalized, layers, positive_film=film.is_positive)[0]
-    variance = np.zeros((GRAIN_SAMPLES, 3))
+    layers_out = []
     for layer in range(3):
         d = per_layer[:, layer, :] + fraction[layer][None, :] * np.asarray(grain.density_min)[None, :]
         p = np.clip(d / maximum_layers[layer][None, :], 1e-6, 1 - 1e-6)
         saturation = 1 - p * np.asarray(grain.uniformity)[None, :] * (1 - 1e-6)
-        variance += p * saturation * maximum_layers[layer] ** 2 * particle[layer] / fraction[layer]
-    return {"varianceArea": rows(variance), "blur": float(grain.blur),
+        variance = p * saturation * maximum_layers[layer] ** 2 * particle[layer] / fraction[layer]
+        third = p * saturation ** 2 * maximum_layers[layer] ** 3 * particle[layer] ** 2 / fraction[layer] ** 2
+        layers_out.append({"varianceArea": rows(variance), "thirdCumulantArea2": rows(third),
+                           "dyeCloudMicrons": rows(grain.blur_dye_clouds_um
+                                                   * np.sqrt(maximum_layers[layer] * particle[layer] / fraction[layer]))})
+    return {"layers": layers_out, "blur": float(grain.blur), "densityMinimum": rows(grain.density_min),
             "filmFormatMillimetres": float(params.camera.film_format_mm)}
 
 
@@ -297,16 +306,29 @@ def halation_reference(film_name: str, print_name: str | None, removed: bool) ->
 
 
 def grain_reference(film_name: str, print_name: str | None) -> dict:
-    """Density RMS of spektrafilm's stochastic grain on flat fields, central crop."""
+    """Statistics of spektrafilm's stochastic grain on flat fields (central crop): film
+    density mean, RMS, skewness and the correlation of horizontal neighbours, for pixels
+    from 91 um (a 384-pixel 35 mm frame) down to 1.5 um, where the dye clouds and the
+    particle counts shape it."""
     size, levels = 384, [0.03, 0.184, 0.8]
-    params = params_for(film_name, print_name, grain=True)
-    pipeline = SimulationPipeline(params)
-    means, deviations = [], []
-    for level in levels:
-        density = pipeline.process(np.full((size, size, 3), level), collect=Tap.CMY_FILM)[32:-32, 32:-32]
-        means.append(density.reshape(-1, 3).mean(axis=0))
-        deviations.append(density.reshape(-1, 3).std(axis=0))
-    return {"size": size, "levels": levels, "densityMean": rows(means), "densityRMS": rows(deviations)}
+    result = []
+    for pixel in [None, 6.0, 3.0, 1.5]:
+        params = params_for(film_name, print_name, grain=True)
+        if pixel is not None:
+            params.camera.film_format_mm = pixel * size / 1000
+        pipeline = SimulationPipeline(params)
+        means, deviations, skews, correlations = [], [], [], []
+        for level in levels:
+            density = pipeline.process(np.full((size, size, 3), level), collect=Tap.CMY_FILM)[32:-32, 32:-32]
+            flat = density.reshape(-1, 3)
+            centred = flat - flat.mean(axis=0)
+            means.append(flat.mean(axis=0))
+            deviations.append(flat.std(axis=0))
+            skews.append((centred ** 3).mean(axis=0) / flat.std(axis=0) ** 3)
+            correlations.append([np.corrcoef(density[:, :-1, c].ravel(), density[:, 1:, c].ravel())[0, 1] for c in range(3)])
+        result.append({"pixelMicrons": float(params.camera.film_format_mm * 1000 / size), "densityMean": rows(means),
+                       "densityRMS": rows(deviations), "skewness": rows(skews), "correlation": rows(correlations)})
+    return {"size": size, "levels": levels, "scales": result}
 
 
 def reference_inputs() -> np.ndarray:
@@ -331,7 +353,7 @@ def main() -> None:
     fixture = {"schema": "hyperdr.film-reference/v1", "attribution": ATTRIBUTION,
                "note": ("spektrafilm per-pixel outputs (no auto exposure, grain or spatial effects; scanner "
                         "black and white correction on), linear Display P3 in and out, output gamut compression "
-                        "off; film density RMS of its grain on flat fields; log film exposure with halation alone "
+                        "off; film density statistics of its grain on flat fields at several pixel sizes; log film exposure with halation alone "
                         "across a bright square (Vision3 500T without its antihalation layer); and film exposure "
                         "after in-emulsion scatter alone."),
                "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {},
@@ -349,7 +371,7 @@ def main() -> None:
         if identifier in ("kodachrome64", "vision3-500t"):
             fixture["halation"][identifier] = halation_reference(film_name, print_name, removed=identifier == "vision3-500t")
         print(f"{identifier}: grey 18.4% -> {np.round(output[6], 4)}, 1 -> {np.round(output[11], 4)}, "
-              f"16 -> {np.round(output[15], 4)}, grain RMS at 18.4% {np.round(fixture['grain'][identifier]['densityRMS'][1], 4)}")
+              f"16 -> {np.round(output[15], 4)}, grain RMS at 18.4% {np.round(fixture['grain'][identifier]['scales'][0]['densityRMS'][1], 4)}")
         if not arguments.check:
             text = json.dumps(resource, separators=(",", ":"), sort_keys=True)
             (RESOURCES / f"{identifier}.json").write_text(text + "\n")

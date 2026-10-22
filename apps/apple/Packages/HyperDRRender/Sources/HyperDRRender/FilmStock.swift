@@ -61,8 +61,7 @@ public struct FilmGrainSite: Sendable {
 /// film per pixel: exposure through the film's sensitivities, development with
 /// DIR couplers, printing through the enlarger onto paper (negatives), and
 /// viewing the print or slide under its illuminant, with the scanner's black and
-/// white levels. Grain follows spektrafilm's particle model through its variance and
-/// 0.65-pixel blur. The spatial effects of exposure, in-emulsion scatter and
+/// white levels. Grain follows spektrafilm's sublayer particle model (`addGrain`). The spatial effects of exposure, in-emulsion scatter and
 /// back-reflection halation, are separable Gaussians (`scatter`, `halationComponents`).
 /// All inputs and outputs are linear Display P3.
 public struct FilmStock: Sendable {
@@ -97,7 +96,8 @@ public struct FilmStock: Sendable {
               Self.isUniformCurve(resource.filming.logExposure, resource.filming.densityCurvesBeforeCouplers),
               resource.printing.map({ Self.isUniformCurve($0.logExposure, $0.densityCurves) }) ?? true,
               resource.filming.channelDensity.count == Self.wavelengths, resource.scanning.illuminant.count == Self.wavelengths,
-              resource.filming.grain.varianceArea.count == Self.curveSamples, resource.scanning.levels.count == 2
+              resource.filming.grain.layers.count == 3, resource.filming.grain.layers.allSatisfy({ $0.varianceArea.count == Self.curveSamples }),
+              resource.filming.grain.layers.allSatisfy({ $0.thirdCumulantArea2.count == Self.curveSamples }), resource.scanning.levels.count == 2
         else { throw RenderError.invalidAdjustment }
         let floats = bytes.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }.map { Float(Float16(bitPattern: UInt16(littleEndian: $0))) }
         self.id = id
@@ -265,22 +265,136 @@ public struct FilmStock: Sendable {
         Self.blur(raw, width: width, height: height, components: scatterComponents(longEdge: longEdge), truncate: Self.scatterTruncate)
     }
 
-    /// Developed density plus grain: per channel, the variance of the sublayer particle
-    /// model at this density and pixel area, times blurred unit noise.
+    /// Developed density plus grain, spektrafilm's sublayer particle model. Per channel,
+    /// each sublayer has a density variance and third cumulant (Poisson particle counts)
+    /// at this density and pixel area, and a kernel: its dye clouds (micrometres) then the
+    /// scan's blur (pixels), both sampled as spektrafilm's FIR blurs. One field of hashed
+    /// noise goes through the sublayers' kernels mixed by variance, scaled to the variance
+    /// and bent (Cornish–Fisher, solved exactly) to the third moment that the separately
+    /// blurred sublayers would have. Film.metal computes the same.
     func addGrain(_ density: RGB, at site: FilmGrainSite) -> RGB {
-        let film = resource.filming, inverseArea = Self.inverseArea(longEdge: site.longEdge, film: film)
-        let weights = Self.grainWeights(film.grain.blur)
+        let grain = resource.filming.grain, area = Foundation.pow(pitch(longEdge: site.longEdge), 2)
+        let kernel = grainKernel(longEdge: site.longEdge)
+        let t = RGB((0..<3).map { density[$0] / resource.filming.densityMaximum[$0] * 255 })
+        let axis = [0.0, 255, 256]
+        let variance = grain.layers.map { pointwiseMax(Self.interpolate(t, axis: axis, table: $0.varianceArea), .zero) / area }
+        let third = grain.layers.map { pointwiseMax(Self.interpolate(t, axis: axis, table: $0.thirdCumulantArea2), .zero) / (area * area) }
+        let total = variance.reduce(.zero, +)
         var result = density
-        for c in 0..<3 {
-            let variance = Self.interpolate(SIMD3(repeating: density[c] / film.densityMaximum[c] * 255),
-                                            axis: [0, 255, 256], table: film.grain.varianceArea)[c]
+        for c in 0..<3 where total[c] > 0 {
+            // The mixed kernel is a variance-weighted sum of separable Gaussians, so its sums
+            // of squares and cubes follow from the sublayers' cross sums.
+            let a = (0..<3).map { variance[$0][c] / total[c] }
+            var target2 = 0.0, target3 = 0.0, energy2 = 0.0, energy3 = 0.0
+            for l in 0..<3 {
+                target2 += variance[l][c] * kernel.target2[l][c]
+                target3 += third[l][c] * kernel.target3[l][c]
+                for m in 0..<3 {
+                    energy2 += a[l] * a[m] * kernel.square[l][m][c]
+                    for n in 0..<3 { energy3 += a[l] * a[m] * a[n] * kernel.cube[l][m][n][c] }
+                }
+            }
+            func weight(_ dx: Int, _ dy: Int) -> Double {
+                (0..<3).reduce(0) { $0 + a[$1] * kernel.taps[$1][abs(dx)][c] * kernel.taps[$1][abs(dy)][c] }
+            }
+            let scale = (target2 / energy2).squareRoot(), bend = Self.cornishFisher(target3 / (scale * scale * scale * energy3))
             var noise = 0.0
-            for dy in -1...1 { for dx in -1...1 {
-                noise += weights[abs(dx) + abs(dy)] * Double(Self.grainNoise(site.x + dx, site.y + dy, c))
+            for dy in -kernel.radius...kernel.radius { for dx in -kernel.radius...kernel.radius {
+                let z = Double(Self.grainNoise(site.x + dx, site.y + dy)[c])
+                noise += weight(dx, dy) * (z + bend * (z * z - 1))
             } }
-            result[c] = max(0, density[c] + site.amount * (max(variance, 0) * inverseArea).squareRoot() * noise)
+            result[c] = max(-grain.densityMinimum[c], density[c] + site.amount * scale * noise / (1 + 2 * bend * bend).squareRoot())
         }
         return result
+    }
+
+    /// The sublayers' grain kernels for a render of this long edge, which only the pixel
+    /// pitch sets: per sublayer, one side of its dye clouds convolved with the scan
+    /// (centre first, per channel), cut where no tap reaches 5 % of its centre; the 2D
+    /// cross sums of two and of three sublayers' cut kernels, squared (a product of
+    /// separable kernels sums to the square of its axis); each sublayer's whole kernel's
+    /// sums of squares and cubes, which set the grain's variance and third moment (the cut
+    /// kernel is rescaled to them); and the reach.
+    func grainKernel(longEdge: Int) -> GrainKernel {
+        let key = GrainKernelKey(stock: id, longEdge: longEdge)
+        if let kernel = Self.grainKernels.withLock({ $0[key] }) { return kernel }
+        let grain = resource.filming.grain, pitch = pitch(longEdge: longEdge), scan = Self.sampledGaussian(grain.blur)
+        var whole = [[RGB]](), radius = 0
+        for layer in grain.layers {
+            var side = [RGB](repeating: .zero, count: Self.grainRadius + 1)
+            for c in 0..<3 {
+                let g = Self.foldedConvolution(Self.sampledGaussian(layer.dyeCloudMicrons[c] / pitch), scan)
+                for k in g.indices { side[k][c] = g[k] }
+                radius = max(radius, g.lastIndex { $0 >= 0.05 * g[0] } ?? 0)
+            }
+            whole.append(side)
+        }
+        let taps = whole.map { side in side.indices.map { $0 <= radius ? side[$0] : .zero } }
+        func sums(_ l: Int, _ power: Double) -> RGB {
+            let sum = whole[l].indices.reduce(RGB.zero) { total, k in
+                total + (k == 0 ? 1 : 2) * RGB((0..<3).map { Foundation.pow(whole[l][k][$0], power) })
+            }
+            return sum * sum
+        }
+        func axis(_ layers: [Int]) -> RGB {
+            let sum = (0...Self.grainRadius).reduce(RGB.zero) { total, k in
+                total + (k == 0 ? 1 : 2) * layers.reduce(RGB(repeating: 1)) { $0 * taps[$1][k] }
+            }
+            return sum * sum
+        }
+        let square = (0..<3).map { l in (0..<3).map { m in axis([l, m]) } }
+        let cube = (0..<3).map { l in (0..<3).map { m in (0..<3).map { n in axis([l, m, n]) } } }
+        let kernel = GrainKernel(taps: taps, square: square, cube: cube, target2: (0..<3).map { sums($0, 2) },
+                                 target3: (0..<3).map { sums($0, 3) }, radius: radius)
+        Self.grainKernels.withLock { if $0.count > 64 { $0.removeAll() }; $0[key] = kernel }
+        return kernel
+    }
+
+    typealias GrainKernel = (taps: [[RGB]], square: [[RGB]], cube: [[[RGB]]], target2: [RGB], target3: [RGB], radius: Int)
+    private struct GrainKernelKey: Hashable { let stock: FilmStockID; let longEdge: Int }
+    private static let grainKernels = Mutex<[GrainKernelKey: GrainKernel]>([:])
+
+    /// `grainKernel` in the rows Film.metal's `filmGrain` reads: taps (3 × 7), squares
+    /// (3 × 3), cubes (3 × 3 × 3), whole squares (3), whole cubes (3), reach.
+    func packedGrainKernel(longEdge: Int) -> [SIMD4<Float>] {
+        let kernel = grainKernel(longEdge: longEdge)
+        func row(_ v: RGB) -> SIMD4<Float> { SIMD4(Float(v.x), Float(v.y), Float(v.z), 0) }
+        return kernel.taps.flatMap { $0.map(row) } + kernel.square.flatMap { $0.map(row) }
+            + kernel.cube.flatMap { $0.flatMap { $0.map(row) } } + kernel.target2.map(row) + kernel.target3.map(row)
+            + [SIMD4(Float(kernel.radius), 0, 0, 0)]
+    }
+
+    /// a such that z + a(z² - 1), z standard normal, has this skewness (at most 2.5):
+    /// (6a + 8a³) / (1 + 2a²)^1.5, by Newton's method from the small-skew a = skew / 6.
+    static func cornishFisher(_ skew: Double) -> Double {
+        let target = min(max(skew, 0), 2.5)
+        var a = target / 6
+        for _ in 0..<4 {
+            let q = 1 + 2 * a * a, root = q.squareRoot(), n = 6 * a + 8 * a * a * a
+            a -= (n / (q * root) - target) / (((6 + 24 * a * a) * q - n * 6 * a) / (q * q * root))
+        }
+        return a
+    }
+
+    /// The grain kernel's reach in pixels, at most.
+    static let grainRadius = 6
+
+    /// A Gaussian sampled at whole pixels out to Int(3 sigma + 0.5) and normalised, as
+    /// spektrafilm's FIR blurs; one side, centre first.
+    static func sampledGaussian(_ sigma: Double) -> [Double] {
+        let radius = Int(3 * max(sigma, 1e-6) + 0.5)
+        let g = (0...radius).map { Foundation.exp(-0.5 * Double($0 * $0) / (sigma * sigma)) }
+        let sum = g[0] + 2 * g[1...].reduce(0, +)
+        return g.map { $0 / sum }
+    }
+
+    /// Two symmetric kernels (one side each) convolved, truncated at `grainRadius`:
+    /// a sublayer's dye clouds, then the scan.
+    static func foldedConvolution(_ a: [Double], _ b: [Double]) -> [Double] {
+        func at(_ k: [Double], _ i: Int) -> Double { abs(i) < k.count ? k[abs(i)] : 0 }
+        return (0...grainRadius).map { i in
+            (-(a.count - 1)...(a.count - 1)).reduce(0) { $0 + at(a, $1) * at(b, i - $1) }
+        }
     }
 
     static func inverseArea(longEdge: Int, film: FilmResource.Filming) -> Double {
@@ -288,29 +402,21 @@ public struct FilmStock: Sendable {
         return 1 / (pitch * pitch)
     }
 
-    /// A 3×3 Gaussian (centre, edge, corner weights), scaled so the blurred noise keeps
-    /// the standard deviation of spektrafilm's 5×5 kernel (truncated at 3 sigma).
-    static func grainWeights(_ sigma: Double) -> [Double] {
-        func taps(_ radius: Int) -> [Double] {
-            let w = (-radius...radius).map { Foundation.exp(-Double($0 * $0) / (2 * sigma * sigma)) }
-            let sum = w.reduce(0, +); return w.map { $0 / sum }
-        }
-        func energy(_ w: [Double]) -> Double { let e = w.map { $0 * $0 }.reduce(0, +); return e * e }
-        let three = taps(1), amplitude = (energy(taps(2)) / energy(three)).squareRoot()
-        return [three[1] * three[1] * amplitude, three[0] * three[1] * amplitude, three[0] * three[0] * amplitude]
-    }
-
-    /// Unit normal noise from a hash of pixel and channel (Box–Muller on lowbias32).
-    /// Film.metal computes the same bits.
-    static func grainNoise(_ x: Int, _ y: Int, _ channel: Int) -> Float {
+    /// Unit normal noise of a pixel's three channels from one hash of its position:
+    /// Box–Muller's cosine and sine for red and green, a second draw for blue (lowbias32
+    /// hashes). Film.metal computes the same bits.
+    static func grainNoise(_ x: Int, _ y: Int) -> SIMD3<Float> {
         func hash(_ value: UInt32) -> UInt32 {
             var v = value
             v ^= v >> 16; v = v &* 0x7feb352d; v ^= v >> 15; v = v &* 0x846ca68b; v ^= v >> 16
             return v
         }
-        let h = hash(UInt32(bitPattern: Int32(truncatingIfNeeded: x)) &+ hash(UInt32(bitPattern: Int32(truncatingIfNeeded: y)) &+ hash(UInt32(channel) &+ 0x9e3779b9)))
-        let u1 = Float(h >> 8) * 0x1p-24 + 0x1p-25, u2 = Float(hash(h) >> 8) * 0x1p-24
-        return (-2 * Foundation.log(u1)).squareRoot() * Foundation.cos(2 * Float.pi * u2)
+        func uniform(_ h: UInt32) -> Float { Float(h >> 8) * 0x1p-24 }
+        let h0 = hash(UInt32(bitPattern: Int32(truncatingIfNeeded: x)) &+ hash(UInt32(bitPattern: Int32(truncatingIfNeeded: y)) &+ 0x9e3779b9))
+        let h1 = hash(h0), h2 = hash(h1), h3 = hash(h2)
+        let r = (-2 * Foundation.log(uniform(h0) + 0x1p-25)).squareRoot(), angle = 2 * Float.pi * uniform(h1)
+        let blue = (-2 * Foundation.log(uniform(h2) + 0x1p-25)).squareRoot() * Foundation.cos(2 * Float.pi * uniform(h3))
+        return SIMD3(r * Foundation.cos(angle), r * Foundation.sin(angle), blue)
     }
 
     /// Density curves, then DIR couplers: developed density inhibits the exposure
@@ -391,9 +497,9 @@ public struct FilmStock: Sendable {
         rows.append(SIMD4(Float(film.logExposure[0]), Float(film.logExposure[1]), Float(paperAxis[0]), Float(paperAxis[1])))
         rows.append(SIMD4(film.type == "positive" ? 1 : 0, resource.printing == nil ? 0 : 1,
                           Float(resource.printing?.exposureScale ?? 1), Float(film.spectralLUT.size)))
-        let weights = Self.grainWeights(film.grain.blur)
         rows.append(SIMD4(Float(film.exposureScale), Float(scan.levels[0]), Float(scan.levels[1]), 0))
-        rows.append(SIMD4(Float(weights[0]), Float(weights[1]), Float(weights[2]), Float(film.grain.filmFormatMillimetres)))
+        rows.append(row(film.grain.densityMinimum, film.grain.blur))
+        rows.append(SIMD4(Float(film.grain.filmFormatMillimetres), 0, 0, 0))
         rows += film.densityCurves.map { row($0) } + film.densityCurvesBeforeCouplers.map { row($0) }
         rows += (resource.printing?.densityCurves ?? film.densityCurves).map { row($0) }
         rows += film.channelDensity.indices.map { row(film.channelDensity[$0], film.baseDensity[$0]) }
@@ -404,7 +510,9 @@ public struct FilmStock: Sendable {
             return row(paper.illuminant[wavelength] * Self.vector(paper.sensitivity[wavelength]))
         }
         rows += scan.illuminant.indices.map { row(scan.illuminant[$0] * Self.vector(scan.observer[$0])) }
-        rows += film.grain.varianceArea.map { row($0) }
+        for layer in film.grain.layers { rows += layer.varianceArea.map { row($0) } }
+        for layer in film.grain.layers { rows += layer.thirdCumulantArea2.map { row($0) } }
+        rows += film.grain.layers.map { row($0.dyeCloudMicrons) }
         return rows
     }
 
@@ -444,11 +552,21 @@ struct FilmResource: Decodable, Sendable {
         /// Amplitude and sigma over decay of the exponential tail's Gaussians.
         let tailFit: [[Double]]
     }
-    struct Grain: Decodable, Sendable {
+    struct GrainLayer: Decodable, Sendable {
         /// Density variance × pixel area (µm²), 256 samples from zero to each channel's maximum.
         let varianceArea: [[Double]]
-        /// Gaussian blur in pixels.
+        /// Third cumulant of density × pixel area² (µm⁴), as `varianceArea`.
+        let thirdCumulantArea2: [[Double]]
+        /// Sigma of the sublayer's dye clouds per channel.
+        let dyeCloudMicrons: [Double]
+    }
+    struct Grain: Decodable, Sendable {
+        /// Sublayers, fastest first.
+        let layers: [GrainLayer]
+        /// The scan's Gaussian blur in pixels.
         let blur: Double
+        /// Particles develop on top of this density: grain never goes below its negative.
+        let densityMinimum: [Double]
         let filmFormatMillimetres: Double
     }
     struct Filming: Decodable, Sendable {

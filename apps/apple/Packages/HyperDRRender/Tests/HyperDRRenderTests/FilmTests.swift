@@ -5,7 +5,8 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 private struct FilmReference: Decodable {
-    struct Grain: Decodable { let size: Int; let densityMean, densityRMS: [[Double]] }
+    struct GrainScale: Decodable { let pixelMicrons: Double; let densityMean, densityRMS, skewness, correlation: [[Double]] }
+    struct Grain: Decodable { let size: Int; let scales: [GrainScale] }
     struct Halation: Decodable {
         let size, square, row, start: Int
         let level, background: Double
@@ -116,23 +117,37 @@ private func code(_ value: Double) -> Int {
         }
     }
 
-    /// The variance table reproduces the RMS of spektrafilm's stochastic grain.
-    @Test func grainMatchesSpektrafilmRMS() throws {
+    /// The grain reproduces spektrafilm's stochastic grain on flat fields: its RMS, its
+    /// skewness and how neighbours correlate, from 91 µm pixels (where it is white noise
+    /// under the scan's blur) to 1.5 µm (where dye clouds span pixels and few particles
+    /// make it skewed). Skewness near 1 is itself estimated to about a tenth.
+    @Test func grainMatchesSpektrafilm() throws {
         let fixture = try reference()
         for id in FilmStockID.allCases {
             let film = try FilmStock.named(id), grain = try #require(fixture.grain[id.rawValue])
-            for (mean, rms) in zip(grain.densityMean, grain.densityRMS) {
-                let density = SIMD3(mean[0], mean[1], mean[2])
-                var sum = SIMD3<Double>.zero, squares = SIMD3<Double>.zero
-                let count = 128 * 128
-                for y in 0..<128 { for x in 0..<128 {
-                    let site = FilmGrainSite(x: x, y: y, longEdge: grain.size, amount: 1)
-                    let d = film.addGrain(density, at: site) - density
-                    sum += d; squares += d * d
-                } }
-                for c in 0..<3 {
-                    let measured = (squares[c] / Double(count) - pow(sum[c] / Double(count), 2)).squareRoot()
-                    #expect(abs(measured / rms[c] - 1) < 0.05, "\(id.rawValue) channel \(c): \(measured) against \(rms[c])")
+            for scale in grain.scales {
+                let longEdge = Int((film.pitch(longEdge: 1) / scale.pixelMicrons).rounded())
+                for (level, mean) in scale.densityMean.enumerated() {
+                    let density = SIMD3(mean[0], mean[1], mean[2]), side = 100
+                    var field = [SIMD3<Double>]()
+                    for y in 0..<side { for x in 0..<side {
+                        field.append(film.addGrain(density, at: FilmGrainSite(x: x, y: y, longEdge: longEdge, amount: 1)) - density)
+                    } }
+                    let average = field.reduce(.zero, +) / Double(field.count)
+                    var second = SIMD3<Double>.zero, third = SIMD3<Double>.zero, neighbours = SIMD3<Double>.zero
+                    for (i, d) in field.enumerated() {
+                        let e = d - average
+                        second += e * e; third += e * e * e
+                        if i % side < side - 1 { neighbours += e * (field[i + 1] - average) }
+                    }
+                    second /= Double(field.count); third /= Double(field.count); neighbours /= Double(field.count - side)
+                    let label = "\(id.rawValue) \(scale.pixelMicrons) µm level \(level)"
+                    for c in 0..<3 {
+                        let rms = second[c].squareRoot(), skew = third[c] / (rms * rms * rms), correlation = neighbours[c] / second[c]
+                        #expect(abs(rms / scale.densityRMS[level][c] - 1) < 0.05, "\(label) channel \(c): RMS \(rms) against \(scale.densityRMS[level][c])")
+                        #expect(abs(skew - scale.skewness[level][c]) < 0.08 + 0.1 * scale.skewness[level][c], "\(label) channel \(c): skewness \(skew) against \(scale.skewness[level][c])")
+                        #expect(abs(correlation - scale.correlation[level][c]) < 0.05, "\(label) channel \(c): correlation \(correlation) against \(scale.correlation[level][c])")
+                    }
                 }
             }
         }

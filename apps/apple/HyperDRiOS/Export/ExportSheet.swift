@@ -53,14 +53,8 @@ struct ExportSheet: View {
                       defaultFilename: suggestedName) { model.savedToFiles($0) }
     }
 
-    /// The photo's own name with the export's extension: "DSC04127.jpg".
-    private var suggestedName: String? {
-        guard let file = exportedFile?.url else { return nil }
-        guard let photo = editor.source?.url.deletingPathExtension().lastPathComponent, !photo.isEmpty else {
-            return file.lastPathComponent
-        }
-        return photo + "." + file.pathExtension
-    }
+    /// The staged copy is already named after the photo: "DSC04127.jpg".
+    private var suggestedName: String? { exportedFile?.url.lastPathComponent }
 
     private var exportedFile: ExportedFile? {
         if case .finished(let finished) = model.phase { return ExportedFile(url: finished.file) }
@@ -456,7 +450,7 @@ struct ExportSheet: View {
                 .symbolEffect(.bounce, options: .nonRepeating)
             VStack(spacing: Space.s1) {
                 Text("ios.export.finished").font(.title3.weight(.semibold))
-                Text(verbatim: "\(finished.result.record.name) · \(ExportPlanText.bytes(Int(finished.result.record.byteCount)))")
+                Text(verbatim: "\(finished.file.lastPathComponent) · \(ExportPlanText.bytes(Int(finished.result.record.byteCount)))")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }

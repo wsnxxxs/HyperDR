@@ -14,11 +14,14 @@ nonisolated struct LUTLibraryReadVersion: Sendable {
 }
 
 extension EditorModel {
-    /// The library publishes desired spaces immediately. The recipe's own
-    /// look spaces (`look.input`, `look.output`) are the inspector's.
+    /// The library publishes desired spaces immediately, and the look in use
+    /// on that LUT takes them (`RecipeEditor.adoptLookSpaces`).
     func setLibraryLUTSpaces(_ id: String, input: LUTColorSpace, output: LUTColorSpace) {
         guard !isEditingLocked else { return }
         enqueueLUTSpaces(id, input: input, output: output)
+        if let reference = lutReferences[id] {
+            editor.adoptLookSpaces(reference.contentHash, input: input.rawValue, output: output.rawValue)
+        }
     }
 
     func enqueueLUTSpaces(_ id: String, input: LUTColorSpace, output: LUTColorSpace) {

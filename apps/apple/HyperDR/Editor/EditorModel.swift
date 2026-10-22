@@ -33,6 +33,8 @@ import UniformTypeIdentifiers
     private(set) var frameSettingsRevision = 0
     let export = ExportState()
     let lut = LUTState()
+    /// Each library LUT on the open photo, for the inspector and the library.
+    let lookPreviews = LookPreviews()
     let preferences: PreferencesState
     var exportVersions: [ExportVersion] = []
     var exportSaveStates: [String: ExportSaveState] = [:]

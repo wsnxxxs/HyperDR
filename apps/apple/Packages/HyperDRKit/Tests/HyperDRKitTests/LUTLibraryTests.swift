@@ -36,6 +36,28 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct LUTLibraryTests {
+    @Test func aNewLookStartsFromTheSpacesItsNameDeclares() async throws {
+        let cases: [(String, LUTSpace, LUTSpace)] = [
+            ("SLog3SGamut3.CineToLC-709", .slog3SGamut3Cine, .rec709),
+            ("SLog3_SGamut3_to_HLG", .slog3SGamut3, .hlg),
+            ("VLog_to_V709_forV35", .vlogVGamut, .rec709),
+            ("F-Log2 to WDR BT.709", .flog2FGamut, .rec709),
+            ("ARRI_LogC4-to-Gamma24_Rec709-D65", .logC4AWG4, .rec709),
+            ("AlexaV3_K1S1_LogC2Video_Rec709_EE", .logC3AWG3, .rec709),
+            ("CanonLog3_CinemaGamut_to_BT2100_PQ", .clog3CinemaGamut, .pq),
+            ("Rec709 Kodak 2383 D65", .rec709, .rec709),
+        ]
+        for (name, input, output) in cases {
+            let guess = try #require(LUTSpace.guess(fileName: name), "\(name)")
+            #expect(guess.input == input && guess.output == output, "\(name)")
+        }
+        #expect(LUTSpace.guess(fileName: "Warm") == nil)
+        let env = try LUTEnvironment()
+        let entry = try await env.luts.importLUT(env.source("VLog_to_V709.cube"))
+        #expect(entry.input == .vlogVGamut && entry.output == .rec709)
+        let plain = try await env.luts.importLUT(env.source(data: Data("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n".utf8)))
+        #expect(plain.input == .srgb && plain.output == .srgb)
+    }
     @Test func reusableLooksKeepSpacesAcrossReimportAndHistorySurvivesRemoval() async throws {
         let env = try LUTEnvironment()
         let photo = try await env.photo()

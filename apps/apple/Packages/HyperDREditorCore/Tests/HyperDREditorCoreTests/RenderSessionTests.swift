@@ -198,6 +198,41 @@ import UniformTypeIdentifiers
         #expect(try await render(log).modelGainPending == false)
     }
 
+    /// A LUT preview renders small from the open development and never loads
+    /// or develops the photo again; a Log look that would is refused.
+    @Test func aLookPreviewKeepsTheOpenSource() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
+            .appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")
+        try #require(FileManager.default.fileExists(atPath: url.path), "Run scripts/fetch_test_fixtures.py")
+        let session = try RenderSession()
+        let size = PixelSize(width: 64, height: 64)
+        let source = try await session.open(url, previewSize: size)
+        let recipe = Recipe(inputDomain: source.domain)
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        let lut = try ColorLUT(cube: "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
+        await session.installLUT(lut)
+        var look = recipe
+        look.look = LUTReference(contentHash: lut.contentHash, name: "Identity")
+        var preview = EditorRenderRequest(sourceID: source.id, recipe: look, size: PixelSize(width: 24, height: 16))
+        preview.keepsSource = true
+        let frame = try await session.render(preview)
+        #expect(frame.planes.base.width == 24)
+        #expect(frame.automaticValues.isEmpty)
+        var log = look
+        log.setValue(.string("slog3-sgamut3cine"), for: "look.input")
+        preview.recipe = log
+        await #expect(throws: EditorRenderingError.needsDevelopment) { try await session.render(preview) }
+        #expect(await reloads.count == 0)
+    }
+
+    private actor Counter {
+        private(set) var count = 0
+        func add() { count += 1 }
+    }
+
     /// R23-001: a file replaced after opening is refused as `sourceChanged`.
     @Test func aReplacedFileIsReportedAsChanged() async throws {
         let session = try RenderSession()

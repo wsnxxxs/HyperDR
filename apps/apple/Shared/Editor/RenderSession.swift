@@ -140,7 +140,11 @@ actor RenderSession: EditorRendering {
                             modelGain: request.usesModelGain ? prediction(for: recipe, source: tile) : nil,
                             options: options, generation: generation)
         }
-        if sourceOptions != opened.options {
+        if request.keepsSource {
+            var kept = sourceOptions
+            kept.resolution = opened.options.resolution
+            guard kept == opened.options else { throw EditorRenderingError.needsDevelopment }
+        } else if sourceOptions != opened.options {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
             let source = try await engine.load(opened.editor.url, options: sourceOptions)
@@ -169,7 +173,7 @@ actor RenderSession: EditorRendering {
         let planes = try await engine.render(source, recipe: request.recipe, lut: prepared.lut, modelGain: prepared.modelGain,
                                              options: prepared.options, size: request.size, region: request.region)
         let display = try await engine.displayPair(planes, source: source)
-        let automatic = request.region == nil
+        let automatic = request.region == nil && !request.keepsSource
             ? try await engine.resolvedAutomatic(source, recipe: request.recipe, lut: prepared.lut,
                                                  modelGain: prepared.modelGain, options: prepared.options)
             : [:]

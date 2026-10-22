@@ -31,18 +31,20 @@ public struct AdjustmentInspector: View {
     private let style: AdjustmentControlStyle
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     private let onReset: ((AdjustmentReset) -> Void)?
+    private let onLUTLibrary: (() -> Void)?
 
     @State private var expanded: Set<AdjustmentGroupID> = [.hdr, .light]
     @Environment(\.locale) private var locale
 
     public init(recipe: Binding<Recipe>, panel: AdjustmentPanel, style: AdjustmentControlStyle = .pointer,
                 onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in },
-                onReset: ((AdjustmentReset) -> Void)? = nil) {
+                onReset: ((AdjustmentReset) -> Void)? = nil, onLUTLibrary: (() -> Void)? = nil) {
         _recipe = recipe
         self.panel = panel
         self.style = style
         self.onEditingChanged = onEditingChanged
         self.onReset = onReset
+        self.onLUTLibrary = onLUTLibrary
     }
 
     private func reset(_ reset: AdjustmentReset) {
@@ -88,7 +90,7 @@ public struct AdjustmentInspector: View {
                 }
                 ForEach(state.controls) { control in
                     AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
-                                  onEditingChanged: onEditingChanged)
+                                  onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
                 }
             }
         } accessory: {
@@ -127,15 +129,18 @@ public struct AdjustmentRow: View {
     private let panel: AdjustmentPanel
     private let style: AdjustmentControlStyle
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
+    private let onLUTLibrary: (() -> Void)?
 
     public init(recipe: Binding<Recipe>, control: AdjustmentControl, panel: AdjustmentPanel,
                 style: AdjustmentControlStyle,
-                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in }) {
+                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in },
+                onLUTLibrary: (() -> Void)? = nil) {
         _recipe = recipe
         self.control = control
         self.panel = panel
         self.style = style
         self.onEditingChanged = onEditingChanged
+        self.onLUTLibrary = onLUTLibrary
     }
 
     public var body: some View {
@@ -171,9 +176,13 @@ public struct AdjustmentRow: View {
                                 selection: Binding(get: { control.selectedOption ?? "" },
                                                    set: { panel.set(control.id, option: $0, in: &recipe) }))
         case .reference:
-            AdjustmentReferenceRow(control: control, panel: panel, style: style,
-                                   selection: Binding(get: { control.reference ?? "" },
-                                                      set: { panel.set(control.id, reference: $0.isEmpty ? nil : $0, in: &recipe) }))
+            let selection = Binding(get: { control.reference ?? "" },
+                                    set: { panel.set(control.id, reference: $0.isEmpty ? nil : $0, in: &recipe) })
+            if control.id == Recipe.lookID {
+                LookPicker(control: control, panel: panel, style: style, selection: selection, onLibrary: onLUTLibrary)
+            } else {
+                AdjustmentReferenceRow(control: control, panel: panel, style: style, selection: selection)
+            }
         }
     }
 }
@@ -226,6 +235,81 @@ struct AdjustmentChoiceRow: View {
                 .frame(minHeight: style == .touch ? 44 : nil)
             }
         }
+    }
+}
+
+/// `look.lut`: the name as a menu (long names, the keyboard) with the
+/// library beside it, over a row of tiles: None, then each library LUT on
+/// the photo (`AdjustmentContext.lutPreviews`; its colour mark until the
+/// preview is in). The chosen tile scrolls into view.
+struct LookPicker: View {
+    let control: AdjustmentControl
+    let panel: AdjustmentPanel
+    let style: AdjustmentControlStyle
+    /// The chosen LUT hash; empty for none.
+    let selection: Binding<String>
+    let onLibrary: (() -> Void)?
+    @Environment(\.lookPickerShown) private var shown
+
+    var body: some View {
+        let side: CGFloat = style == .touch ? 60 : 52
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(spacing: Space.s2) {
+                AdjustmentReferenceRow(control: control, panel: panel, style: style, selection: selection)
+                if let onLibrary {
+                    Button(action: onLibrary) {
+                        Image(systemName: "swatchpalette")
+                            .frame(minWidth: style == .touch ? 44 : 24, minHeight: style == .touch ? 44 : 24)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.hdr.inkMuted)
+                    .help(Text("design.lut.library", bundle: .module))
+                    .accessibilityLabel(Text("design.lut.library", bundle: .module))
+                }
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: Space.s2) {
+                        tile("", name: Text("look.lut.none", bundle: .module), hash: nil, side: side)
+                        ForEach(panel.context.luts, id: \.contentHash) { lut in
+                            tile(lut.contentHash, name: Text(verbatim: lut.name), hash: lut.contentHash, side: side)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .scrollClipDisabled()
+                .onAppear {
+                    shown(true)
+                    proxy.scrollTo(selection.wrappedValue, anchor: .center)
+                }
+                .onDisappear { shown(false) }
+                .onChange(of: selection.wrappedValue) { _, id in
+                    withAnimation(.smooth(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+                }
+            }
+        }
+    }
+
+    private func tile(_ id: String, name: Text, hash: String?, side: CGFloat) -> some View {
+        let isSelected = selection.wrappedValue == id
+        return Button { selection.wrappedValue = id } label: {
+            VStack(spacing: 4) {
+                LUTThumbnail(image: panel.context.lutPreviews[id], contentHash: hash, side: side, isSelected: isSelected)
+                name
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.hdr.inkStrong : Color.hdr.inkMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: side + 8)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .id(id)
+        .help(name)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

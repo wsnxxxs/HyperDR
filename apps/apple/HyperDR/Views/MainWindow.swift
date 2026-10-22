@@ -169,6 +169,7 @@ private struct EditorWindow: View {
             }
             .sheet(isPresented: Bindable(window).showsLUTLibrary) {
                 LUTLibrarySheet(model: model)
+                    .environment(\.lookPickerShown, model.lookPreviews.shown)
             }
             // A sheet would hide the question: close it first.
             .onChange(of: model.pendingPhotoSwitch != nil) { _, asking in

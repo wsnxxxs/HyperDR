@@ -98,6 +98,12 @@ struct EditorScreen: View {
         }
         .sheet(isPresented: $showingLUTs) {
             LUTLibrarySheet(library: session.exports.luts, editor: editor)
+                .environment(\.lookPickerShown, session.exports.luts.previews.shown)
+        }
+        .environment(\.lookPickerShown, session.exports.luts.previews.shown)
+        // The LUT previews follow the photo, the edit and the library.
+        .onChange(of: LookPreviewInputs(editor: editor, looks: session.exports.luts.looks), initial: true) { _, inputs in
+            session.exports.luts.previews.update(editor, looks: inputs.looks)
         }
     }
 
@@ -181,7 +187,8 @@ struct EditorScreen: View {
             } else {
                 ScrollView {
                     AdjustmentInspector(recipe: recipe, panel: panel, style: .touch,
-                                        onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset)
+                                        onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
+                                        onLUTLibrary: { showingLUTs = true })
                         .padding(.bottom, Space.s5)
                 }
             }
@@ -191,15 +198,22 @@ struct EditorScreen: View {
 
     // MARK: - Editing
 
+    /// The controls' writes; spaces chosen on the look are recorded in the
+    /// library for its LUT.
     private var recipe: Binding<Recipe> {
-        Binding(get: { editor.recipe }, set: { editor.setRecipe($0) })
+        Binding(get: { editor.recipe }, set: { value in
+            let old = editor.recipe
+            editor.setRecipe(value)
+            session.exports.luts.record(from: old, to: editor.recipe)
+        })
     }
 
     private var panel: AdjustmentPanel {
         AdjustmentPanel(context: AdjustmentContext(
             sourceValues: editor.source?.sourceValues ?? [:], automaticValues: editor.automaticValues,
             capabilities: editor.source?.capabilities ?? [], unavailableOptions: editor.unavailableOptions,
-            luts: session.exports.luts.choices, lookSpaces: session.exports.luts.spaces))
+            luts: session.exports.luts.choices, lookSpaces: session.exports.luts.spaces,
+            lutPreviews: session.exports.luts.previews.images))
     }
 
     private var photoSize: (width: Int, height: Int)? {

@@ -41,7 +41,7 @@ struct InspectorContent: View {
                     VStack(alignment: .leading, spacing: 0) {
                         DecodeWarning(document: document)
                         AIStatusLine(editor: model.editor)
-                        Adjustments(model: model)
+                        Adjustments(model: model, window: window)
                             .disabled(model.isEditingLocked)
                     }
                 }
@@ -141,20 +141,28 @@ private struct Welcome: View {
 // MARK: - Adjustments
 
 /// The generated controls on the editor's recipe. Group resets and Reset All
-/// go through the editor so their undo steps are named for what they did.
+/// go through the editor so their undo steps are named for what they did;
+/// spaces chosen on the look are recorded in the library for its LUT. The
+/// look's LUT tiles show each LUT on the photo while they are on screen.
 private struct Adjustments: View {
     let model: EditorModel
+    let window: EditorWindowState
 
     var body: some View {
         let editor = model.editor
         AdjustmentInspector(
-            recipe: Binding(get: { editor.recipe }, set: { editor.setRecipe($0) }),
+            recipe: Binding(get: { editor.recipe }, set: { value in
+                let old = editor.recipe
+                editor.setRecipe(value)
+                model.recordLookSpaces(from: old, to: editor.recipe)
+            }),
             panel: AdjustmentPanel(context: AdjustmentContext(
                 sourceValues: editor.source?.sourceValues ?? [:],
                 automaticValues: editor.automaticValues,
                 capabilities: editor.source?.capabilities ?? [],
                 unavailableOptions: editor.unavailableOptions,
-                luts: model.lutChoices, lookSpaces: model.lutSpaces)),
+                luts: model.lutChoices, lookSpaces: model.lutSpaces,
+                lutPreviews: model.lookPreviews.images)),
             style: .pointer,
             onEditingChanged: { editor.editingChanged($0, $1) },
             onReset: { reset in
@@ -162,7 +170,12 @@ private struct Adjustments: View {
                 case .group(let group): editor.resetGroup(group)
                 case .all: editor.resetAll()
                 }
-            })
+            },
+            onLUTLibrary: { window.showsLUTLibrary = true })
+        .environment(\.lookPickerShown, model.lookPreviews.shown)
+        .onChange(of: LookPreviewInputs(editor: editor, looks: model.lookPreviewLooks), initial: true) { _, inputs in
+            model.lookPreviews.update(editor, looks: inputs.looks)
+        }
     }
 }
 

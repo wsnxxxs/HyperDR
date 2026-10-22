@@ -40,3 +40,59 @@ extension RecipeEditor {
         return look
     }
 }
+
+/// A LUT's input and output spaces are the LUT's own, as its maker specifies
+/// them: the library records them, and the look on that LUT takes them. Set
+/// in the library, they change the look in use at once; chosen on the look,
+/// they are recorded in the library for the next time the LUT is chosen.
+extension RecipeEditor {
+    /// The library's spaces for a LUT changed: the look on it takes them, as
+    /// one undo step. Nothing happens when the look is on another LUT.
+    func adoptLookSpaces(_ contentHash: String, input: String, output: String) {
+        guard recipe.look?.contentHash == contentHash else { return }
+        apply(.parameter("look.input")) { $0.setLookSpaces(input: input, output: output) }
+    }
+}
+
+extension Recipe {
+    /// The look's spaces set to a library LUT's. A space this photo cannot
+    /// take (a camera Log input outside RAW) is left at its default.
+    nonisolated mutating func setLookSpaces(input: String, output: String) {
+        for (id, space) in [("look.input", input), ("look.output", output)] {
+            let offered = Adjustments.declaration(id)?.options
+                .first { $0.id == space }?.domains.contains(inputDomain) == true
+            setValue(offered ? .string(space) : nil, for: id)
+        }
+    }
+
+    /// The spaces a control write chose for the same look's LUT, each side
+    /// only when it changed, for the library to record.
+    nonisolated static func chosenLookSpaces(from old: Recipe, to new: Recipe)
+        -> (contentHash: String, input: String?, output: String?)? {
+        guard let hash = new.look?.contentHash, old.look?.contentHash == hash else { return nil }
+        func chosen(_ id: String) -> String? {
+            guard let value = new.conditionValue(id)?.stringValue, old.conditionValue(id)?.stringValue != value else { return nil }
+            return value
+        }
+        let input = chosen("look.input"), output = chosen("look.output")
+        return input == nil && output == nil ? nil : (hash, input, output)
+    }
+}
+
+extension RecipeEditor {
+    /// Chooses a library LUT as the look, with its spaces, or none: one undo
+    /// step, as the look picker makes it.
+    func chooseLook(_ reference: LUTReference?, input: String, output: String) {
+        apply(.parameter(Recipe.lookID)) { recipe in
+            recipe.look = reference
+            if reference != nil { recipe.setLookSpaces(input: input, output: output) }
+        }
+    }
+
+    /// A LUT left the library: a look on it goes too, as one undo step, so
+    /// the edit never names a LUT that can no longer be exported.
+    func dropLook(_ contentHash: String) {
+        guard recipe.look?.contentHash == contentHash else { return }
+        apply(.parameter(Recipe.lookID)) { $0.look = nil }
+    }
+}

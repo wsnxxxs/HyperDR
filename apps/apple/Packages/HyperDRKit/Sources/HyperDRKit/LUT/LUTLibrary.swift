@@ -51,7 +51,10 @@ public actor LUTLibrary {
             entry = try LUTFiles.metadata(metadataName, in: directory)
             guard entry.id == id else { throw LUTFiles.invalid() }
         } else {
-            entry = LUTEntry(id: id, name: String(url.lastPathComponent.unicodeScalars.prefix(160)), input: .srgb, output: .srgb)
+            // The name's own spaces when it declares them, sRGB otherwise.
+            let spaces = LUTSpace.guess(fileName: url.deletingPathExtension().lastPathComponent)
+            entry = LUTEntry(id: id, name: String(url.lastPathComponent.unicodeScalars.prefix(160)),
+                             input: spaces?.input ?? .srgb, output: spaces?.output ?? .srgb)
             try LUTFiles.writeMetadata(entry, in: directory, replacing: false)
         }
         if let session { return try await apply(entry, from: directory, to: session) }

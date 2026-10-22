@@ -242,7 +242,8 @@ struct AdjustmentControls: View {
             let stack = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s2)) : AnyLayout(VStackLayout(spacing: Space.s1))
             stack {
                 if let lut = layout.lut {
-                    LUTSwatches(control: lut, luts: panel.context.luts, onLibrary: onLUTLibrary) {
+                    LUTSwatches(control: lut, luts: panel.context.luts, previews: panel.context.lutPreviews,
+                                onLibrary: onLUTLibrary) {
                         panel.set(lut.id, reference: $0, in: &recipe)
                     }
                     // The LUT's and the film's strengths, so the ruler can reach either.
@@ -600,18 +601,22 @@ struct AdjustmentRing: View {
 }
 
 /// The look group's row: "None", the LUT library, and a tile that opens it.
-/// There are no LUT thumbnails yet, so each swatch is a colour from its
-/// content hash.
+/// Each LUT is shown on the photo (`AdjustmentContext.lutPreviews`), with
+/// its colour mark until its preview is in; "None" is the photo without one.
 struct LUTSwatches: View {
     let control: AdjustmentControl
     let luts: [LUTReference]
+    var previews: [String: CGImage] = [:]
     var onLibrary: () -> Void = {}
     let choose: (String?) -> Void
+    @Environment(\.lookPickerShown) private var shown
 
     var body: some View {
-        swatch(name: nil, colour: Color.white.opacity(0.08), isCurrent: control.reference == nil) { choose(nil) }
+        swatch(id: nil, name: nil, isCurrent: control.reference == nil) { choose(nil) }
+            .onAppear { shown(true) }
+            .onDisappear { shown(false) }
         ForEach(luts, id: \.contentHash) { lut in
-            swatch(name: lut.name, colour: Self.colour(lut.contentHash), isCurrent: control.reference == lut.contentHash) {
+            swatch(id: lut.contentHash, name: lut.name, isCurrent: control.reference == lut.contentHash) {
                 choose(lut.contentHash)
             }
         }
@@ -629,16 +634,11 @@ struct LUTSwatches: View {
         .buttonStyle(.plain)
     }
 
-    private func swatch(name: String?, colour: Color, isCurrent: Bool, action: @escaping () -> Void) -> some View {
+    private func swatch(id: String?, name: String?, isCurrent: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(colour.gradient)
-                    .overlay {
-                        if name == nil { Image(systemName: "nosign").foregroundStyle(.secondary) }
-                    }
-                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(isCurrent ? Color.white : .clear, lineWidth: 2) }
-                    .frame(width: 44, height: 44)
+                LUTThumbnail(image: previews[id ?? LookPreviews.none], contentHash: id, side: 44,
+                             isSelected: isCurrent, selection: .white)
                 Group {
                     if let name { Text(verbatim: name) } else { AdjustmentText.command(.noLUT) }
                 }
@@ -649,11 +649,7 @@ struct LUTSwatches: View {
             .frame(width: 62)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(name.map { Text(verbatim: $0) } ?? AdjustmentText.command(.noLUT))
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
-    }
-
-    static func colour(_ hash: String) -> Color {
-        let seed = hash.unicodeScalars.reduce(UInt32(2166136261)) { ($0 ^ $1.value) &* 16777619 }
-        return Color(hue: Double(seed % 360) / 360, saturation: 0.45, brightness: 0.7)
     }
 }

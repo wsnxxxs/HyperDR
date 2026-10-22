@@ -6823,13 +6823,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Set the spaces the LUT’s maker specifies. Changes preview at once."
+            "value" : "Set the spaces the LUT’s maker specifies. The photo using this LUT changes at once, and every later choice of it starts from them."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按 LUT 提供方的说明设置输入与输出空间，修改后即时预览。"
+            "value" : "按 LUT 提供方的说明设置输入与输出空间。正在用它的照片会立即更新，之后每次选用它也从这里开始。"
           }
         }
       }
@@ -9630,6 +9630,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未能存入“照片”。"
+          }
+        }
+      }
+    },
+    "lut.library.removeMessage.inUse" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The open photo uses it, so its look goes too; you can undo that. Other photos and exports that already use it aren’t affected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前照片正在用它，它的风格会一并去掉，可以撤销。其他已经用过它的照片与导出不受影响。"
           }
         }
       }

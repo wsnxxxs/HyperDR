@@ -40,7 +40,7 @@ enum ExportVerification {
                 throw RecipeExportError.verificationFailed("imageio_bit_depth")
             }
             if plan.memory.usesRowInput {
-                return try boundedSystem(source, properties: props, plan: plan)
+                return try boundedSystem(source, properties: props, plan: plan, gainMetadata: gainMetadata)
             }
             let auxiliary = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap)
                 ?? CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap)
@@ -103,7 +103,7 @@ enum ExportVerification {
     /// reader checks container properties, gain presence and reduced HDR pixels.
     /// Never copy the auxiliary dictionary, which materializes the entire map.
     private static func boundedSystem(_ source: CGImageSource, properties: [CFString: Any],
-                                      plan: ExportPlan) throws -> SystemExportVerification {
+                                      plan: ExportPlan, gainMetadata: ExportGainMetadata?) throws -> SystemExportVerification {
         let file = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
         let contents = file?[kCGImagePropertyFileContentsDictionary] as? [CFString: Any]
         let images = contents?[kCGImagePropertyImages] as? [[CFString: Any]] ?? []
@@ -134,6 +134,13 @@ enum ExportVerification {
         guard headroom.isFinite, headroom >= 1 else {
             throw RecipeExportError.verificationFailed("system_hdr_headroom")
         }
+        // A finite SDR thumbnail is not successful HDR readback. Check the
+        // decoder's resulting range without requiring bright pixels: a dark
+        // photograph can legitimately stay below diffuse white throughout.
+        if plan.gainMap.writesGainMap, (gainMetadata?.alternateHeadroom ?? 0) > 0.0001,
+           headroom <= 1 {
+            throw RecipeExportError.verificationFailed("system_hdr_headroom")
+        }
         let image = CIImage(cgImage: decoded)
         let scale = min(1, 64 / max(image.extent.width, image.extent.height))
         let small = image.transformed(by: .init(scaleX: scale, y: scale))
@@ -157,7 +164,7 @@ enum ExportVerification {
 
 /// The b-stage ordinary SDR HEIC exception. No auxiliary data is generated.
 enum SDRHEICWriter {
-    static func write(_ plane: PackagePlane, to url: URL, quality: Int) throws {
+    static func write(_ plane: PackagePlane, to url: URL, quality: Int, photoMetadata: ExportPhotoMetadata? = nil) throws {
         try Task.checkCancellation()
         let data = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: plane.samples.baseAddress!),
                         count: plane.samples.count * 4, deallocator: .none)
@@ -176,8 +183,9 @@ enum SDRHEICWriter {
               let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
             throw RecipeExportError.verificationFailed("sdr_heic_writer")
         }
-        CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: Double(quality)/100,
-                                                    kCGImagePropertyOrientation: 1] as CFDictionary)
+        CGImageDestinationAddImage(destination, cg, photoMetadata?.imageProperties(quality: quality)
+            ?? [kCGImageDestinationLossyCompressionQuality: Double(quality)/100,
+                kCGImagePropertyOrientation: 1] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw RecipeExportError.verificationFailed("sdr_heic_finalize") }
         try Task.checkCancellation()
     }

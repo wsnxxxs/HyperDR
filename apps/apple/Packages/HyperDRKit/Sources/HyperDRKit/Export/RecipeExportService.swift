@@ -212,6 +212,7 @@ public actor RecipeExportService: RecipeExportServicing {
             let prepared = try await sessions.prepareRecipeExport(session, snapshot: snapshot)
             pending = prepared.id
             let file = prepared.directory.appendingPathComponent("result." + ext)
+            let photoMetadata = try ExportPhotoMetadata(source: photo.sourceURL, keepLocation: plan.keepLocation, size: plan.size)
             let caps = plan.writer.capabilities(encoding: plan.encoding, bitDepth: plan.baseBitDepth,
                                                 gainChannels: plan.gainMap.channels)
             let renderRequest = ExportRenderRequest(
@@ -260,7 +261,7 @@ public actor RecipeExportService: RecipeExportServicing {
                     to: file, options: .init(format: plan.encoding.rawValue, quality: plan.quality,
                         depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
                         gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
-                        presentationFrame: report.presentationFrame, framePhoto: framePhoto),
+                        presentationFrame: report.presentationFrame, framePhoto: framePhoto, exif: try photoMetadata.nativeExif()),
                     read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
                 guard packaged.verified, (packaged.gain?.clippedSamples ?? 0) == 0 else {
                     throw RecipeExportError.verificationFailed("package_rows_unverified")
@@ -321,7 +322,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 if plan.writer == .imageIO && plan.gainMap.writesGainMap {
                     guard let gain = owner.gainPlane, let metadata = report.gain else { throw RecipeExportError.invalidStripes }
                     imageIOReport = try ImageIOHEICWriter.write(base: owner.basePlane, gain: gain, metadata: metadata,
-                        to: file, quality: plan.quality)
+                        to: file, quality: plan.quality, photoMetadata: photoMetadata)
                     emit(.verifying)
                     let probe = try await engine.probe(file)
                     guard probe.width == plan.size.width, probe.height == plan.size.height,
@@ -331,7 +332,7 @@ public actor RecipeExportService: RecipeExportServicing {
                     }
                     firstReaderJSON = probe.rawJSON
                 } else if plan.encoding == .adaptive && !plan.gainMap.writesGainMap {
-                    try SDRHEICWriter.write(owner.basePlane, to: file, quality: plan.quality)
+                    try SDRHEICWriter.write(owner.basePlane, to: file, quality: plan.quality, photoMetadata: photoMetadata)
                     emit(.verifying)
                     let probe = try await engine.probe(file)
                     guard probe.width == plan.size.width, probe.height == plan.size.height,
@@ -353,7 +354,7 @@ public actor RecipeExportService: RecipeExportServicing {
                         options: .init(format: plan.encoding.rawValue, quality: plan.quality,
                                        depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
                                        gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
-                                       presentationFrame: report.presentationFrame, framePhoto: framePhoto))
+                                       presentationFrame: report.presentationFrame, framePhoto: framePhoto, exif: try photoMetadata.nativeExif()))
                     guard packaged.verified else { throw RecipeExportError.verificationFailed("package_unverified") }
                     guard (packaged.gain?.clippedSamples ?? 0) == 0 else {
                         throw HyperDRError(code: "unsupported_format", message: "The writer clipped gain samples that Render must normalize")

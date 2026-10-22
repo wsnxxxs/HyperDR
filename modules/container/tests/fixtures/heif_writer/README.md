@@ -50,3 +50,10 @@ On 2026-10-19, only `single10-crop` and `adaptive10-crop` were intentionally
 refreshed: ImageIO on macOS build 26A434 cannot expose ISO auxiliary data for
 a cropped single hvc1 with clap. All cropped images now use grid output
 dimensions, even a 1×1 grid. The other three goldens remain byte-identical.
+
+On 2026-10-22, only the two Adaptive goldens were refreshed: their `tmap`
+alternatives now declare BT.2020/PQ HDR independently of the SDR base ICC,
+with at least ten bits in the reconstructed-image hint. Exif/XMP descriptions
+reference both the base and its HDR alternative, as in ImageIO output. Coded
+tile payloads and gain-map parameters are unchanged. The three non-Adaptive
+goldens remain byte-identical.

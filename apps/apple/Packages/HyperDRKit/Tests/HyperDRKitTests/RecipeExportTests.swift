@@ -87,7 +87,7 @@ struct RecipeExportEnvironment {
     let target: ExportTarget
     let photo: TinyPhoto
     let session: PhotoSession
-    init() async throws {
+    init(photo suppliedPhoto: TinyPhoto? = nil) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("recipe-export-\(UUID())")
         configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
                                          cacheDirectory: root.appendingPathComponent("cache"))
@@ -95,7 +95,7 @@ struct RecipeExportEnvironment {
         render = try RenderEngine()
         sessions = SessionStore(configuration: configuration, formats: InputFormats())
         target = ExportTarget(configuration: configuration, sessions: sessions)
-        photo = try TinyPhoto()
+        photo = try suppliedPhoto ?? TinyPhoto()
         session = try await sessions.open(photo.url)
     }
     func service(_ fake: StripeFake = StripeFake(), budget: Int = 1_000_000_000,

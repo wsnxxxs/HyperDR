@@ -31,11 +31,15 @@ struct EditorDock<Frame: View>: View {
     let panel: AdjustmentPanel
     @Binding var pane: EditorPane
     let frameOn: Bool
+    /// The photo's own size, for the crop pane's ratios; nil before a photo.
+    var photo: GeometrySize? = nil
     var axis: Axis = .horizontal
     var large = false
     var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
     var onReset: ((AdjustmentReset) -> Void)?
     var onBypass: (AdjustmentGroupID, Bool) -> Void = { _, _ in }
+    /// The crop pane's drags begin and end.
+    var onGeometryEditing: (Bool) -> Void = { _ in }
     var onLUTLibrary: () -> Void = {}
     /// Why AI cannot be chosen, when it cannot (beside the HDR source).
     var aiUnavailable: Text?
@@ -43,8 +47,8 @@ struct EditorDock<Frame: View>: View {
 
     var body: some View {
         let groups = DockGroup.tabs(panel.groups(for: recipe))
-        let tabs = EditorTabs(groups: groups, pane: $pane, frameOn: frameOn, axis: axis, large: large,
-                              onBypass: onBypass)
+        let tabs = EditorTabs(groups: groups, pane: $pane, cropOn: !recipe.geometry.isIdentity, frameOn: frameOn,
+                              axis: axis, large: large, onBypass: onBypass)
         if axis == .horizontal {
             VStack(spacing: large ? Space.s4 : Space.s3) {
                 // One height for every pane, so the photo above stays put.
@@ -70,6 +74,8 @@ struct EditorDock<Frame: View>: View {
         switch pane {
         case .frame:
             frame()
+        case .crop:
+            CropControls(recipe: $recipe, photo: photo, axis: axis, large: large, onEditing: onGeometryEditing)
         case .group(let group):
             if let tab = groups.first(where: { $0.contains(group) }) ?? groups.first {
                 AdjustmentControls(recipe: $recipe, panel: panel, group: tab, axis: axis, large: large,

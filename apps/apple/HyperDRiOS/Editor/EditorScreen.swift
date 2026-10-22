@@ -81,9 +81,11 @@ struct EditorScreen: View {
         }
         .onChange(of: viewport, initial: true) { _, viewport in editor.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init), initial: true) { editor.attach(undoManager: undoManager) }
-        .onChange(of: pane) { _, pane in
+        .onChange(of: pane, initial: true) { _, pane in
             // The frame is drawn from the whole photo: leave zoom and split behind.
-            if pane == .frame, comparison == .split { comparison = .edited }
+            if pane == .frame || pane == .crop, comparison != .edited { comparison = .edited }
+            // The crop is edited on the whole photo, rendered once; leaving renders it cropped.
+            editor.isEditingCrop = pane == .crop
         }
         .confirmationDialog(Text("ios.adjust.resetAll.confirm"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(role: .destructive) { editor.resetAll() } label: { AdjustmentText.command(.resetAll) }
@@ -108,7 +110,7 @@ struct EditorScreen: View {
     }
 
     private var subtitle: Text {
-        guard let size = editor.source?.pixelSize else { return Text(verbatim: "") }
+        guard let size = editor.photoSize else { return Text(verbatim: "") }
         return Text(verbatim: "\(size.width) × \(size.height)")
     }
 
@@ -120,9 +122,12 @@ struct EditorScreen: View {
             canvas
         case .dock(let axis, let large):
             let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
+                                  photo: editor.source.map { GeometrySize(width: Double($0.pixelSize.width),
+                                                                          height: Double($0.pixelSize.height)) },
                                   axis: axis, large: large,
                                   onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
-                                  onBypass: bypass, onLUTLibrary: { showingLUTs = true },
+                                  onBypass: bypass, onGeometryEditing: { editor.editingGeometry($0) },
+                                  onLUTLibrary: { showingLUTs = true },
                                   aiUnavailable: aiUnavailable) {
                 FrameDock(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
                           photoSize: photoSize, misfits: session.frameMisfits, axis: axis, large: large)
@@ -144,7 +149,7 @@ struct EditorScreen: View {
 
     private var canvas: some View {
         EditorCanvas(session: session, editor: editor, comparison: comparison, splitRatio: $splitRatio,
-                     transform: $transform, framed: pane == .frame,
+                     transform: $transform, framed: pane == .frame, cropping: pane == .crop,
                      framePadding: isPad ? 56 : Space.s5, holdingOriginal: $holdingOriginal)
     }
 
@@ -233,7 +238,7 @@ struct EditorScreen: View {
     }
 
     private var photoSize: (width: Int, height: Int)? {
-        editor.source.map { ($0.pixelSize.width, $0.pixelSize.height) }
+        editor.photoSize.map { ($0.width, $0.height) }
     }
 
     private func reset(_ reset: AdjustmentReset) {
@@ -251,8 +256,8 @@ struct EditorScreen: View {
     /// What the editor needs for detail tiles: the visible part of the photo
     /// in source pixels and which renditions are on screen.
     private var viewport: CanvasViewport? {
-        guard let transform, let source = editor.source,
-              transform.imageSize == CGSize(width: source.pixelSize.width, height: source.pixelSize.height),
+        guard let transform, let photo = editor.canvasPhotoSize,
+              transform.imageSize == CGSize(width: photo.width, height: photo.height),
               let visible = transform.visibleSourceRect else { return nil }
         let mode = EditorCanvas.mode(editor, comparison: comparison, holding: holdingOriginal)
         return CanvasViewport(visible: visible,

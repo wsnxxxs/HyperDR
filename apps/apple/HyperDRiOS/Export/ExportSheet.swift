@@ -361,7 +361,7 @@ struct ExportSheet: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.7)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Text("ios.export.willWrite") + Text(verbatim: " " + summary(plan)))
             }
@@ -391,13 +391,9 @@ struct ExportSheet: View {
                 String(localized: String.LocalizationValue(plan.gamut.labelKey)), peak].joined(separator: " · ")
     }
 
+    /// One word for every destination: the tiles above already say where it goes.
     private func primaryLabel(_ plan: ExportPlan?) -> Text {
-        switch plan?.handling {
-        case .file: Text("ios.export.saveToFiles")
-        case .share: Text("ios.export.share")
-        case .photoLibrary: Text("ios.export.saveToPhotos")
-        case nil: Text("ios.export.start")
-        }
+        Text("ios.export.start")
     }
 
     // MARK: - Running, result, failure

@@ -53,8 +53,8 @@ extension EditorModel {
     /// photo is committed or while its source is unavailable.
     private var canvasViewport: CanvasViewport? {
         guard photo != nil, !isEditingLocked, sourceUnavailable == nil, let source = editor.source,
-              source.id == committedSource,
-              canvas.transform.imageSize == CGSize(width: source.pixelSize.width, height: source.pixelSize.height),
+              source.id == committedSource, let shown = editor.canvasPhotoSize,
+              canvas.transform.imageSize == CGSize(width: shown.width, height: shown.height),
               let visible = canvas.visibleSourceRect else { return nil }
         let transform = canvas.transform
         return CanvasViewport(visible: visible,

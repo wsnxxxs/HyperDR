@@ -5,6 +5,19 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 final class RAWDecoderTests: XCTestCase {
+    func testGenerationPolicyPrefersEightEvenWhenSystemDefaultIsNineOrOlder() {
+        for suffix in ["", ".dng"] {
+            let v = { (n: Int) in String(n) + suffix }
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: [v(7), v(8)], systemDefault: v(7)), v(8))
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: [v(7), v(8), v(9)], systemDefault: v(7)), v(9))
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: [v(9), v(8)], systemDefault: v(9), allowing9: false), v(8))
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: [v(7)], systemDefault: v(7)), v(7))
+            XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [v(9)], systemDefault: v(9), allowing9: false))
+            XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [v(10)], systemDefault: v(10)))
+        }
+        XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [CIRAWDecoderVersion.none.rawValue, ""], systemDefault: ""))
+    }
+
     private func fixture(_ name: String = "sony-ilce-7s.ARW") throws -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 { root.deleteLastPathComponent() }
@@ -30,8 +43,12 @@ final class RAWDecoderTests: XCTestCase {
             let filter = try XCTUnwrap(CIRAWFilter(imageURL: url))
             let preferred = await engine.preferredRAWDecoder(url)
             let expected = filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "9" }?.rawValue
+                ?? filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "8" }?.rawValue
                 ?? filter.decoderVersion.rawValue
             XCTAssertEqual(preferred, expected)
+            let fallback = await engine.fallbackRAWDecoder(url)
+            XCTAssertEqual(fallback, filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "8" }?.rawValue
+                ?? (filter.decoderVersion.rawValue.split(separator: ".").first == "9" ? nil : filter.decoderVersion.rawValue))
             let legacy = try Recipe.decode(Data("{\"inputDomain\":\"rawEDR\"}".utf8))
             XCTAssertNil(legacy.rawDecoderVersion)
             let opened = try RenderEngine.openRAW(url, options: SourceOptions(recipe: legacy))

@@ -138,7 +138,7 @@ extension RenderEngine: ExportStripeRendering {
         let maxGain = Float(bitPattern:summary[0]), signed = summary[1] != 0, transparent = summary[2] != 0
         let hdrPeak = Float(bitPattern:summary[3])
         guard maxGain.isFinite && hdrPeak.isFinite else { throw RenderError.invalidAdjustment }
-        let authored = source.domain == .dual && edit.wholeImageIsIdentity && edit.hdr.enabled
+        let authored = source.domain == .dual && edit.hdr.enabled
         let declaredHeadroom = min(authored ? pair.alternateHeadroom : maxGain,request.ceilingStops ?? .infinity)
         var reasons: Set<ExportResplitReason> = []
         let caps = request.capabilities

@@ -12,6 +12,7 @@ struct GraphUniform {
     var film: SIMD4<Float> = .zero
     var halation: SIMD4<Float> = .zero
     var scatter: SIMD4<Int32> = .zero
+    var pair: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -47,6 +48,16 @@ public struct SpatialAnalysis: @unchecked Sendable {
 }
 
 extension RenderEngine {
+    func editedPairOffset(_ source: RenderSource) -> Float {
+        // Preserve the common equal-offset ISO curve, including its intermediate
+        // display weights. A tiny floor can encode a newly lit black channel.
+        if let channels = source.authoredGainMap?.isoChannels, let first = channels.first,
+           channels.allSatisfy({ $0.baseOffset == first.baseOffset && $0.alternateOffset == first.baseOffset }) {
+            return max(1e-6, Float(first.baseOffset))
+        }
+        return 1 / 64
+    }
+
     func workingInput(_ source: RenderSource) throws -> any MTLTexture {
         if source.domain == .dual { return try reconstructedHDR(source).texture }
         return source.texture
@@ -147,7 +158,8 @@ extension RenderEngine {
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
             region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion),
-            film: filmUniform(source, edit.film, size: size))
+            film: filmUniform(source, edit.film, size: size),
+            pair: SIMD4(source.domain == .dual ? editedPairOffset(source) : 0, 0, 0, 0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -314,7 +326,7 @@ extension RenderEngine {
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
         let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
         let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
-        let rgbGain = (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
+        let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
         p.mode.x = configuration.expand ? 1 : 0
@@ -350,7 +362,9 @@ extension RenderEngine {
                        analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion, try lookBaseline(source, edit: edit)],
             buffers: [resources.buffer, film.buffer, grainKernel], value: &p)
         try finish(command)
-        return RenderPlanes(base: base, gain: gain, gainChannelCount: rgbGain ? 3 : 1, baseColorSpace: Self.workingColorSpace,
+        let encoding: GainEncoding = source.domain == .dual
+            ? .pairedLog2(offset: editedPairOffset(source), headroom: configuration.range) : .log2
+        return RenderPlanes(base: base, gain: gain, gainChannelCount: rgbGain ? 3 : 1, encoding: encoding, baseColorSpace: Self.workingColorSpace,
             provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,
             aiPending: edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel && model == nil)
     }

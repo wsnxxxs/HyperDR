@@ -20,6 +20,8 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
         revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
         options.kind.rawValue,String(options.lensCorrection),String(linear),
         options.rawDecoderVersion ?? "system-default",number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+        // Only a geometry that does something is named, so other ids are unchanged.
+        + (options.geometry.isIdentity ? [] : [(try? Recipe(geometry: options.geometry).jsonString()) ?? "geometry"])
     let data = try! JSONSerialization.data(withJSONObject:fields)
     var bytes = Array(SHA256.hash(data:data).prefix(16))
     bytes[6] = (bytes[6] & 15) | 0x80; bytes[8] = (bytes[8] & 63) | 0x80
@@ -95,7 +97,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["displayHDR", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
@@ -238,12 +240,24 @@ public actor RenderEngine {
             : opened.hdr
         return RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
             size: PixelSize(width: texture.width, height: texture.height),
-            nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height), authoredGainMap: opened.gain,
+            nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height),
+            authoredGainMap: opened.gain,
             hdrImage: hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
-            rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture)
+            rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture,
+            geometryUncroppedSize: opened.uncroppedSize)
     }
 
     func lookBaseline(_ source: RenderSource, edit: RenderAdjustments) throws -> any MTLTexture {
+        // Imported pairs need their authored SDR endpoint, in the graph's P3
+        // space, even for a tone-only edit. source.texture can be native sRGB.
+        if source.domain == .dual {
+            if CFEqual(source.baseSpace, Self.workingColorSpace) { return source.texture }
+            if let cached = lookBaselineCache, cached.id == source.renderID { return cached.texture }
+            guard let image = source.authoredBaseImage else { throw RenderError.missingGainMap }
+            let texture = try rasterize(image, space: Self.workingColorSpace)
+            lookBaselineCache = (source.renderID, texture)
+            return texture
+        }
         let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
         guard weight > 0 && weight < 1, let origin = source.origin, origin.options.sceneLinear else {
             lookBaselineCache = nil
@@ -521,13 +535,15 @@ public actor RenderEngine {
         return result
     }
 
-    /// System reconstruction of an imported pair, before editing. No luma-ratio
-    /// approximation or custom interpretation of legacy Apple metadata is used.
+    /// Use the same decoded ISO pair as the unedited canvas. Legacy Apple maps
+    /// still require the system's reconstruction; ISO maps must not switch
+    /// decoders/metadata interpretation on the first edit.
     public func reconstructedHDR(_ source: RenderSource) throws -> RenderedTexture {
         try Task.checkCancellation()
         if source.domain != .dual { return RenderedTexture(texture: source.texture, colorSpace: Self.workingColorSpace) }
         if let cached = hdrCache, cached.id == source.renderID { return RenderedTexture(texture: cached.texture, colorSpace: Self.workingColorSpace) }
-        let texture = try rasterize(source.hdrImage, space: Self.workingColorSpace)
+        let texture = try source.authoredGainMap?.isoChannels != nil
+            ? reconstructAuthoredHDR(source) : rasterize(source.hdrImage, space: Self.workingColorSpace)
         hdrCache = (source.renderID, texture)
         return RenderedTexture(texture: texture, colorSpace: Self.workingColorSpace)
     }

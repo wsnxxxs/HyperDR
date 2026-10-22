@@ -99,6 +99,17 @@ enum ExportVerification {
                          verifiedHeadroomStops: headrooms, profileName: props[kCGImagePropertyProfileName] as? String)
         }
     }
+    /// Whether ImageIO applies a gain map when asked to decode to HDR. The
+    /// Simulator's never does: it reads headroom 1 even from an iPhone's own
+    /// HEIC, which a Mac or device reads as 4 to 6.6. There the HDR range is
+    /// left unverified (the native reader has checked the gain itself)
+    /// instead of failing every gain-map export.
+    #if targetEnvironment(simulator)
+    static let systemAppliesGainMaps = false
+    #else
+    static let systemAppliesGainMaps = true
+    #endif
+
     /// Native verification owns full-resolution pixel correctness. This second
     /// reader checks container properties, gain presence and reduced HDR pixels.
     /// Never copy the auxiliary dictionary, which materializes the entire map.
@@ -137,7 +148,8 @@ enum ExportVerification {
         // A finite SDR thumbnail is not successful HDR readback. Check the
         // decoder's resulting range without requiring bright pixels: a dark
         // photograph can legitimately stay below diffuse white throughout.
-        if plan.gainMap.writesGainMap, (gainMetadata?.alternateHeadroom ?? 0) > 0.0001,
+        let checksGain = plan.gainMap.writesGainMap && Self.systemAppliesGainMaps
+        if checksGain, (gainMetadata?.alternateHeadroom ?? 0) > 0.0001,
            headroom <= 1 {
             throw RecipeExportError.verificationFailed("system_hdr_headroom")
         }
@@ -157,7 +169,7 @@ enum ExportVerification {
         try Task.checkCancellation()
         return .init(width: plan.size.width, height: plan.size.height, bitDepth: plan.baseBitDepth,
             orientation: 1, auxiliaryGain: hasGain, hdrReadable: hdr,
-            verifiedHeadroomStops: hdr ? [log2(Double(headroom))] : [],
+            verifiedHeadroomStops: hdr && (checksGain || !plan.gainMap.writesGainMap) ? [log2(Double(headroom))] : [],
             profileName: properties[kCGImagePropertyProfileName] as? String)
     }
 }

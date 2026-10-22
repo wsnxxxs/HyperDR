@@ -1622,6 +1622,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 LUT 强度" } }
       }
     },
+    "undo.geometry" : {
+      "comment" : "Undo action name of a change in the crop pane.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crop" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "裁切" } }
+      }
+    },
     "undo.resetAll" : {
       "comment" : "Undo action name of Reset All.",
       "localizations" : {

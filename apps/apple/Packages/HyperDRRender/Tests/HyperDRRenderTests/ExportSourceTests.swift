@@ -201,6 +201,18 @@ private func licensedRAW() -> URL {
         _ = try await engine.renderExportStripes(lazyAuthor,recipe:Recipe(inputDomain:.dual),request:authorRequest,
             rows:9,prepare:{ _ in },consume:{ d.consume($0) })
         compareBands(c.rgb,d.rgb,label:"ISO_base"); compareBands(c.gain,d.gain,scale:0.25,label:"ISO_gain")
+        for ev in [-1.0, 0.0001, 1.0] {
+            let recipe = Recipe(inputDomain: .dual, values: ["tone.exposure": .number(ev), "color.saturation": .number(-20)])
+            let whole = StreamPixels(), tiled = StreamPixels()
+            let wholeReport = try await engine.renderExportStripes(author, recipe: recipe, request: authorRequest,
+                rows: 9, prepare: { _ in }, consume: { whole.consume($0) })
+            let tileReport = try await engine.renderExportStripes(lazyAuthor, recipe: recipe, request: authorRequest,
+                rows: 9, prepare: { _ in }, consume: { tiled.consume($0) })
+            #expect(wholeReport.gain == tileReport.gain)
+            #expect(wholeReport.gain?.channelCount == 3)
+            compareBands(whole.rgb, tiled.rgb, label: "ISO_edited_base")
+            compareBands(whole.gain, tiled.gain, scale: 0.25, label: "ISO_edited_gain")
+        }
         try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1234)],ofItemAtPath:url.path)
         await engine.clearCaches()
         do {

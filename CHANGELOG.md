@@ -3,6 +3,27 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## Unreleased
+
+- Require iOS/iPadOS 27 and macOS 27.
+- iPhone and iPad: Settings can export diagnostics — the app's log from the
+  last few launches, the system's crash and hang reports (MetricKit) and the
+  device's model, system and memory, without photos or file names.
+- Declare the app's privacy manifest and that it uses no non-exempt
+  encryption, for TestFlight and App Store builds.
+- iPhone and iPad: a Crop pane — crop box on the photo, aspect ratios either
+  way up, rotation, a quarter turn, mirroring and vertical and horizontal
+  perspective — kept in the recipe and applied to preview and export alike.
+- iPhone: the ruler is a tape under a fixed needle with one rule for every
+  range, showing the default and how far a value is from it. The tabs are
+  HDR, then Adjust (light, colour, film grain and halation), Style (the look
+  and its strength, built-in films apart from imported LUTs) and Crop, then
+  Frame. A film's exposure is set automatically and Adjust's exposure adds to
+  it; anti-halation is on for films. The export button reads Export.
+- Light and colour edits on imported HDR gain-map photos keep the photo's own
+  SDR rendition, and an edit no longer switches it to another reconstruction.
+- New RAW photos fall back to decoder 8 when 9 is unavailable or fails.
+
 ## 0.5.0 - 2026-10-22 (Apple pre-release)
 
 - Add measured film-stock looks with grain, halation and emulsion scatter.

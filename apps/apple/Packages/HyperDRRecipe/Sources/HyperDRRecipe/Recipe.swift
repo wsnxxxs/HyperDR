@@ -69,11 +69,16 @@ public struct Recipe: Equatable, Sendable {
     }
     /// Overrides for declared parameters other than `hdr.source` and `look.lut`.
     public private(set) var values: [String: ParameterValue]
+    /// Crop, straightening, perspective, turns and mirror; written only when
+    /// it is not the identity, so a recipe without one keeps its bytes.
+    public var geometry: Geometry = .identity
 
     public init(version: Int = Recipe.currentVersion, inputDomain: InputDomain = .sdr,
                 hdrSource: HDRSource? = nil, look: LUTReference? = nil,
-                values: [String: ParameterValue] = [:], rawDecoderVersion: String? = nil) {
+                values: [String: ParameterValue] = [:], rawDecoderVersion: String? = nil,
+                geometry: Geometry = .identity) {
         self.rawDecoderVersion = rawDecoderVersion
+        self.geometry = geometry
         self.version = version
         self.inputDomain = inputDomain
         let requested = hdrSource ?? HDRSource.defaultSource(for: inputDomain)
@@ -187,7 +192,7 @@ public struct Recipe: Equatable, Sendable {
 
 extension Recipe: Codable {
     private enum CodingKeys: String, CodingKey {
-        case version, inputDomain, hdrSource, look, values, rawDecoderVersion
+        case version, inputDomain, hdrSource, look, values, rawDecoderVersion, geometry
     }
 
     public init(from decoder: any Decoder) throws {
@@ -198,7 +203,8 @@ extension Recipe: Codable {
         let look = try container.decodeIfPresent(LUTReference.self, forKey: .look)
         let values = try container.decodeIfPresent([String: ParameterValue].self, forKey: .values) ?? [:]
         self.init(version: version, inputDomain: domain, hdrSource: source, look: look, values: values,
-                  rawDecoderVersion: try container.decodeIfPresent(String.self, forKey: .rawDecoderVersion))
+                  rawDecoderVersion: try container.decodeIfPresent(String.self, forKey: .rawDecoderVersion),
+                  geometry: try container.decodeIfPresent(Geometry.self, forKey: .geometry) ?? .identity)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -209,6 +215,7 @@ extension Recipe: Codable {
         try container.encode(hdrSource, forKey: .hdrSource)
         try container.encodeIfPresent(look, forKey: .look)
         if !values.isEmpty { try container.encode(values, forKey: .values) }
+        if !geometry.isIdentity { try container.encode(geometry, forKey: .geometry) }
     }
 }
 

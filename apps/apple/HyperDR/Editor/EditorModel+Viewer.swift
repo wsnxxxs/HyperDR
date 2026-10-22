@@ -61,7 +61,7 @@ extension EditorModel {
     /// original's histogram changes only when the original does.
     func startScopes() {
         guard let source = editor.source else { return }
-        let size = Self.scopeSize(source.pixelSize)
+        let size = Self.scopeSize(editor.canvasPhotoSize ?? source.pixelSize)
         let editor = self.editor
         if let request = editor.renderRequest(size: size, original: true), wantsMeasuring(request, original: true) {
             scopingOriginal = request

@@ -455,7 +455,7 @@ import UniformTypeIdentifiers
                 }
                 try Task.checkCancellation()
                 guard generation == ticket, let source = editor.source else { throw CancellationError() }
-                document?.pixelSize = PixelSize(source.pixelSize)
+                document?.pixelSize = PixelSize(editor.photoSize ?? source.pixelSize)
                 document?.source = SourceSummary(source)
                 try await firstFrame(of: source.id)
                 try Task.checkCancellation()
@@ -864,6 +864,7 @@ import UniformTypeIdentifiers
         case .parameter(let id): Adjustments.declaration(id).map { AdjustmentText.undoName($0) } ?? AdjustmentText.undoName(.all)
         case .resetGroup(let group): AdjustmentText.undoName(.group(group))
         case .resetAll: AdjustmentText.undoName(.all)
+        case .geometry: AdjustmentText.undoGeometryName()
         }
     }
 }

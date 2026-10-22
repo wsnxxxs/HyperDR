@@ -11,12 +11,21 @@ public struct RenderOptions: Hashable, Sendable {
 extension RenderEngine {
     /// Automatic readouts in Recipe units. AI auto start is deliberately not a
     /// numeric threshold, so no expansionStart entry is returned in AI mode.
+    /// `includingSet` also reports what Auto would resolve to for parameters
+    /// the recipe sets, with everything else as it is: the editor marks that
+    /// as the default on its ruler. Exports record only parameters left on Auto.
     public func resolvedAutomatic(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
                                   modelGain: ModelGainPrediction? = nil,
-                                  options: RenderOptions = RenderOptions()) throws -> [String:Double] {
+                                  options: RenderOptions = RenderOptions(),
+                                  includingSet: Bool = false) throws -> [String:Double] {
         guard source.domain == recipe.inputDomain else { throw RenderError.invalidAdjustment }
         var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
         edit.hdr.modelGain = modelGain
+        if includingSet {
+            edit.hdr.range = nil
+            edit.hdr.expansionStart = nil
+            edit.film.exposure = nil
+        }
         let analysis = try self.analysis(source,adjustments:edit)
         let model = try filteredModelGain(source,edit:edit)
         var values: [String:Double] = [:]

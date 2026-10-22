@@ -9,6 +9,8 @@ nonisolated enum RecipeEdit: Equatable, Sendable {
     case resetGroup(ParameterGroup)
     /// Reset All.
     case resetAll
+    /// The crop pane: crop, straightening, perspective, turns, mirror.
+    case geometry
 
     /// The catalogue key of the action name; `%@` in `undo.resetGroup %@` is
     /// the group's name. The words live in HyperDRDesign's catalogue
@@ -18,6 +20,7 @@ nonisolated enum RecipeEdit: Equatable, Sendable {
         case .parameter(let id): return Adjustments.declaration(id)?.undoKey ?? "undo.\(id)"
         case .resetGroup: return "undo.resetGroup %@"
         case .resetAll: return "undo.resetAll"
+        case .geometry: return "undo.geometry"
         }
     }
 
@@ -30,7 +33,7 @@ nonisolated enum RecipeEdit: Equatable, Sendable {
     /// `RecipeEditor.resetGroup` and `resetAll`, which are always exact.
     static func classify(from before: Recipe, to after: Recipe) -> RecipeEdit? {
         let changed = Adjustments.all.filter { before.value(for: $0.id) != after.value(for: $0.id) }
-        guard let first = changed.first else { return nil }
+        guard let first = changed.first else { return before.geometry != after.geometry ? .geometry : nil }
         if changed.count >= 2 {
             let groups = Set(changed.map(\.group))
             if groups.count == 1, let group = groups.first {
@@ -61,10 +64,12 @@ extension Recipe {
         return recipe
     }
 
-    /// Every declared parameter back to its default; values for ids this
-    /// build does not know are left alone.
+    /// Every declared parameter back to its default, and the crop with them;
+    /// values for ids this build does not know are left alone.
     nonisolated func resettingAll() -> Recipe {
-        ParameterGroup.displayOrder.reduce(self) { $0.resetting($1) }
+        var recipe = ParameterGroup.displayOrder.reduce(self) { $0.resetting($1) }
+        recipe.geometry = .identity
+        return recipe
     }
 }
 

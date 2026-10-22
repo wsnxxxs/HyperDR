@@ -93,6 +93,26 @@ import Observation
         }
     }
 
+    /// The crop is being edited: the canvas renders the photo without its
+    /// geometry, whole, and the host draws the geometry over it, so dragging
+    /// the crop or the straightening never renders again. Leaving renders the
+    /// photo as cropped.
+    var isEditingCrop = false {
+        didSet {
+            guard isEditingCrop != oldValue else { return }
+            updatePreviewSize(force: true)
+        }
+    }
+
+    /// The geometry the canvas renders with.
+    var renderedGeometry: Geometry { isEditingCrop ? .identity : recipe.geometry }
+
+    /// The photo as it is exported: its size after the recipe's geometry.
+    var photoSize: HyperDRRender.PixelSize? { source.map { recipe.geometry.outputSize(of: $0.pixelSize) } }
+
+    /// The photo the canvas shows: the whole photo while the crop is edited.
+    var canvasPhotoSize: HyperDRRender.PixelSize? { source.map { renderedGeometry.outputSize(of: $0.pixelSize) } }
+
     /// The canvas's drawable size in pixels, reported by the host.
     var canvasPixelSize: HyperDRRender.PixelSize? {
         didSet { if canvasPixelSize != oldValue { updatePreviewSize() } }
@@ -262,7 +282,13 @@ import Observation
             }
         }
         opening = task
-        let opened = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        let opened: EditorSource
+        do {
+            opened = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        } catch {
+            if !(error is CancellationError) { EditorLog.error("Open failed: \(EditorLog.describe(error))") }
+            throw error
+        }
         // Once the renderer holds the photo the editor shows it too, even if
         // the caller was cancelled meanwhile; only a newer request wins.
         guard generation == openGeneration else { throw CancellationError() }
@@ -362,7 +388,7 @@ import Observation
     func setRecipe(_ newValue: Recipe) {
         var newValue = newValue
         if let id = abandonedID {
-            newValue.setValue(recipe.value(for: id), for: id)
+            if id == Self.geometryDragID { newValue.geometry = recipe.geometry } else { newValue.setValue(recipe.value(for: id), for: id) }
         }
         guard newValue != recipe else { return }
         let old = recipe
@@ -425,15 +451,27 @@ import Observation
     /// ruler's: when the finger lands), false when it ends (after its inertia
     /// stops). The whole drag is one step.
     func editingChanged(_ declaration: ParameterDeclaration, _ isEditing: Bool) {
-        if !isEditing, abandoned?.id == declaration.id {
+        editing(declaration.id, isEditing)
+    }
+
+    /// The crop pane's drags (the crop box, straightening, perspective): one step each.
+    func editingGeometry(_ isEditing: Bool) {
+        editing(Self.geometryDragID, isEditing)
+    }
+
+    /// The drag id of the crop pane's gestures.
+    nonisolated static let geometryDragID = "geometry"
+
+    private func editing(_ id: String, _ isEditing: Bool) {
+        if !isEditing, abandoned?.id == id {
             abandoned = nil
             return
         }
         finishDrag()
         abandoned = nil
         if isEditing {
-            drag = (declaration.id, recipe)
-            editingParameter = declaration.id
+            drag = (id, recipe)
+            editingParameter = id
             detailTask?.cancel()
         }
     }
@@ -472,7 +510,8 @@ import Observation
         editingParameter = nil
         var registered = false
         if recipe != drag.start {
-            register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
+            register(RecipeStep(before: drag.start, after: recipe,
+                                edit: drag.id == Self.geometryDragID ? .geometry : .parameter(drag.id)))
             registered = true
         }
         // The final, non-interactive frame, and the original if development
@@ -497,6 +536,8 @@ import Observation
     private func register(_ step: RecipeStep) { undo.register(step) }
 
     private func recipeDidChange(from old: Recipe) {
+        // A new crop or turn is a new picture size: the preview follows.
+        if old.geometry != recipe.geometry, !isEditingCrop { updatePreviewSize() }
         scheduleRender()
         updateModelGain()
     }
@@ -507,7 +548,7 @@ import Observation
         guard let source else { return }
         let side = previewFloor(canvasPixelSize)
         largestCanvasSide = side
-        let size = Self.previewSize(source: source.pixelSize, canvasSide: side)
+        let size = Self.previewSize(source: renderedGeometry.outputSize(of: source.pixelSize), canvasSide: side)
         guard force || size != previewSize else { return }
         previewSize = size
         scheduleRender()
@@ -535,6 +576,8 @@ import Observation
     private func request(for recipe: Recipe, size: HyperDRRender.PixelSize, region: CGRect? = nil,
                          interactive: Bool) -> EditorRenderRequest? {
         guard let source else { return nil }
+        var recipe = recipe
+        recipe.geometry = isEditingCrop ? .identity : recipe.geometry
         return EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size, region: region,
                                    bypassedGroups: bypassedGroups, usesModelGain: usesModelGain(recipe),
                                    isInteractive: interactive)
@@ -609,6 +652,7 @@ import Observation
             frameLacksModelGain(rendered)
         case .failure(let error):
             if !(error is CancellationError) {
+                if renderFailure == nil { EditorLog.error("Render failed: \(EditorLog.describe(error))") }
                 renderFailure = String(describing: error)
                 if !isOpening { openingPhase = nil; clearPlaceholder() }
             }
@@ -648,6 +692,7 @@ import Observation
                 self.scheduleDetails()
             case .failure(let error):
                 if !(error is CancellationError) {
+                    if self.originalFailure == nil { EditorLog.error("Original render failed: \(EditorLog.describe(error))") }
                     self.originalFailure = String(describing: error)
                     self.failedOriginalRequest = wanted
                 }
@@ -707,7 +752,8 @@ import Observation
     /// `needsDevelopment` rather than developing the photo again.
     func lookPreview(_ recipe: Recipe, side: Int) async throws -> CGImage {
         guard let source else { throw EditorRenderingError.noSource }
-        let native = source.pixelSize, long = max(native.width, native.height, 1)
+        let native = (isEditingCrop ? Geometry.identity : recipe.geometry).outputSize(of: source.pixelSize)
+        let long = max(native.width, native.height, 1)
         let size = HyperDRRender.PixelSize(width: max(1, native.width * side / long),
                                            height: max(1, native.height * side / long))
         guard var request = request(for: recipe, size: size, interactive: false) else {
@@ -784,7 +830,7 @@ import Observation
     private func lacksPixels(_ frame: EditorFrame, _ viewport: CanvasViewport) -> Bool {
         guard let source, frame.request.sourceID == source.id else { return false }
         let width = Double(frame.display.outputSize.width) + 0.5
-        return width < Double(source.pixelSize.width) && width < viewport.displayedWidth
+        return width < Double(renderedGeometry.outputSize(of: source.pixelSize).width) && width < viewport.displayedWidth
     }
 
     /// Asks for the details the viewport needs, after `detailIdle`, once the
@@ -794,13 +840,16 @@ import Observation
         detailTask = nil
         guard let source, let viewport, !isDragging, pending == nil, pacing == nil, inFlight == nil,
               !viewport.visible.isEmpty else { return }
-        let region = Self.detailRegion(visible: viewport.visible, source: source.pixelSize)
+        // No detail while the crop is edited: the canvas draws the photo turned and tilted.
+        guard !isEditingCrop else { return }
+        let photo = renderedGeometry.outputSize(of: source.pixelSize)
+        let region = Self.detailRegion(visible: viewport.visible, source: photo)
         func wanted(_ frame: EditorFrame?, _ detail: EditorFrame?, shown: Bool) -> EditorRenderRequest? {
             guard shown, let frame, lacksPixels(frame, viewport) else { return nil }
             if let detail, detail.request.rendersSame(as: frame.request),
                let covered = detail.request.region, Self.covers(covered, viewport.visible) { return nil }
             var request = frame.request
-            request.size = source.pixelSize
+            request.size = photo
             request.region = region
             request.isInteractive = false
             return request
@@ -940,7 +989,7 @@ import Observation
     }
 
     private func startPrediction(_ key: ModelKey) {
-        guard let size = previewSize ?? source?.pixelSize,
+        guard let size = previewSize ?? canvasPhotoSize,
               let request = request(for: recipe, size: size, interactive: false) else { return }
         modelTask?.cancel()
         modelKey = key
@@ -955,6 +1004,7 @@ import Observation
                 self.modelTask = nil
                 self.modelKey = nil
                 self.aiStatus = .unavailable(detail)
+                EditorLog.error("AI model unavailable")
                 return
             } catch is CancellationError {
                 guard let self, self.modelKey == key, !Task.isCancelled else { return }
@@ -964,7 +1014,10 @@ import Observation
                 return
             } catch {
                 reason = String(describing: error)
-                if !Task.isCancelled { self?.noteFailure(error) }
+                if !Task.isCancelled {
+                    EditorLog.error("AI prediction failed: \(EditorLog.describe(error))")
+                    self?.noteFailure(error)
+                }
             }
             guard let self, self.modelKey == key, !Task.isCancelled else { return }
             self.modelTask = nil

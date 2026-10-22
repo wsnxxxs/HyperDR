@@ -21,6 +21,15 @@ import SwiftUI
         case file(URL)
         /// A drop, copied in once the editor is up so the copy shows progress.
         case dropped(NSItemProvider)
+
+        /// Where the photo comes from, for the diagnostic log.
+        var origin: String {
+            switch self {
+            case .library: "the photo library"
+            case .file: "Files"
+            case .dropped: "a drop"
+            }
+        }
     }
 
     /// What an open is waiting for, from the request until the photo's first
@@ -139,6 +148,7 @@ import SwiftUI
         case .parameter(let id): return Adjustments.declaration(id).map { AdjustmentText.undoName($0) } ?? id
         case .resetGroup(let group): return AdjustmentText.undoName(.group(group))
         case .resetAll: return AdjustmentText.undoName(.all)
+        case .geometry: return AdjustmentText.undoGeometryName()
         }
     }
 
@@ -177,6 +187,7 @@ import SwiftUI
         // A newer request has started its own load; leave its spinner alone.
         defer { if request == id { loading = false; fetching = false; fetchFraction = nil } }
         var imported: ImportedPhoto?
+        DiagnosticLog.notice("Session", "Opening a photo from \(source.origin)")
         do {
             switch source {
             case .library(let item):
@@ -205,6 +216,7 @@ import SwiftUI
             if let imported { exports.photoFailed(imported.url) }
             imported?.discard()
             guard !Task.isCancelled, !(error is CancellationError) else { return }
+            DiagnosticLog.error("Session", "\(imported == nil ? "Import" : "Open") failed: \(EditorLog.describe(error))")
             if editor.source == nil {
                 openFailed = true
                 isEditing = false
@@ -278,7 +290,7 @@ import SwiftUI
     /// the photo is known, or when the engine refuses the style for this
     /// photo's proportions (`frameMisfits`).
     var frameLayout: FramePixelLayout? {
-        guard frame.isEnabled, let size = editor?.source?.pixelSize else { return nil }
+        guard frame.isEnabled, let size = editor?.photoSize else { return nil }
         return FrameLayouts.layout(frame, width: size.width, height: size.height)
     }
 

@@ -80,6 +80,9 @@ public struct AuthoredGainMap: @unchecked Sendable {
 /// generated gains are single-channel log2 stops in linear P3 with zero offsets.
 public enum GainEncoding: Sendable {
     case log2
+    /// Independently edited SDR/HDR endpoints in linear P3. Equal offsets keep
+    /// black channels representable and zero gain exactly neutral.
+    case pairedLog2(offset: Float, headroom: Float)
     case authored(AuthoredGainMap)
     case isoLog2(ISOLogGainMetadata)
 }
@@ -164,6 +167,7 @@ public struct RenderSource: @unchecked Sendable {
     let origin: (url: URL, options: SourceOptions, revision: SourceRevision)?
     public let domain: InputDomain
     public let size: PixelSize
+    /// Full size after the geometry (`SourceOptions.geometry`).
     public let nativeSize: PixelSize
     public let authoredGainMap: AuthoredGainMap?
     /// System HDR reconstruction, oriented, in CI coordinates (bottom-left).
@@ -177,6 +181,10 @@ public struct RenderSource: @unchecked Sendable {
     /// Internal ROI assets retain global source coordinates while owning only a tile.
     var samplingRegion = CGRect(x:0,y:0,width:1,height:1)
     var gainSamplingRegion = CGRect(x:0,y:0,width:1,height:1)
+    /// The full size before a geometry, when one is applied.
+    var geometryUncroppedSize: PixelSize? = nil
+    /// Full size before the geometry: the photo as the file holds it, oriented.
+    public var uncroppedSize: PixelSize { geometryUncroppedSize ?? nativeSize }
 }
 
 extension RenderSource {
@@ -280,6 +288,9 @@ public struct SourceOptions: Hashable, Sendable {
     /// so the curve sees scene-linear reflectance. Part of the cache key: preview
     /// and export reopen the source when it changes.
     public var sceneLinear: Bool
+    /// The crop pane's geometry, applied where the source opens; part of the
+    /// cache key, so preview and export reopen when it changes.
+    public var geometry: Geometry = .identity
     public var rawResolution: RAWResolution {
         get { resolution }
         set { resolution = newValue }

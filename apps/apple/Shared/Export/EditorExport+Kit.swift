@@ -17,8 +17,11 @@ extension EditorExportCapture {
                      capabilities: ExportEncodingCapabilities = .init()) -> ExportPlanRequest {
         ExportPlanRequest(choice: choice,
                           source: ExportSource(domain: source.domain,
-                                               pixelSize: ExportPixelSize(width: source.pixelSize.width,
-                                                                          height: source.pixelSize.height),
+                                               pixelSize: ExportPixelSize(width: photoSize.width,
+                                                                          height: photoSize.height),
+                                               // RAW develops the whole sensor however it is cropped.
+                                               sensorSize: source.domain == .rawEDR
+                                                   ? ExportPixelSize(width: source.pixelSize.width, height: source.pixelSize.height) : nil,
                                                hasAlpha: source.hasAlpha),
                           frame: frame,
                           edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops, needsLookBaseline: recipe.needsLookBaseline),

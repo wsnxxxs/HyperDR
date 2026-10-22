@@ -1,4 +1,17 @@
 // Gain values are decoded at their native resolution, before display sampling.
+struct DisplayHDRUniform { float3x3 p3ToGain,gainToP3;float4 baseOffset,alternateOffset;uint4 channels; };
+kernel void displayHDR(texture2d<float,access::read> base [[texture(0)]],
+                       texture2d<float,access::sample> gain [[texture(1)]],
+                       texture2d<float,access::write> output [[texture(2)]],
+                       constant DisplayHDRUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
+    float3 g=gain.sample(s,(float2(pos)+.5f)/float2(base.get_width(),base.get_height())).rgb;
+    if(p.channels.x==1)g=g.rrr;
+    float4 b=base.read(pos);
+    float3 h=p.gainToP3*((p.p3ToGain*b.rgb+p.baseOffset.xyz)*exp2(g)-p.alternateOffset.xyz);
+    output.write(float4(h,b.a),pos);
+}
 struct DisplayISOUniform { float4 minimum,maximum,inverseGamma;uint4 channels; };
 struct DisplayLegacyUniform { float3x3 gainToP3;float4 baseOffset,alternateOffset,region,size,inputRegion; };
 void displayPeak(float3 g,device atomic_uint* peak,uint lane) {

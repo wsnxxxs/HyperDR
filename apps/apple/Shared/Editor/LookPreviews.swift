@@ -3,12 +3,13 @@ import Foundation
 import HyperDRRecipe
 import Observation
 
-/// What each library LUT does to the open photo, for the look pickers: small
-/// SDR renders of the recipe with that LUT as its look, and one with none.
+/// What each look does to the open photo, for the look pickers: small SDR
+/// renders of the recipe with each built-in film stock and each library LUT
+/// as its look, and one with none.
 ///
-/// - A preview is what choosing the LUT gives: the recipe's look switch and
-///   strength are kept, its spaces the library's, everything else as edited.
-///   Incompatible looks are omitted.
+/// - A preview is what choosing the look gives: the recipe's look switch and
+///   strengths are kept, a LUT's spaces the library's, everything else as
+///   edited. Incompatible LUTs are omitted.
 /// - Hosts call `update` whenever the recipe or the library changes, and
 ///   `shown` as pickers appear and disappear (`lookPickerShown`): renders
 ///   run only while one is shown. Nothing renders during a drag; they start a
@@ -27,12 +28,14 @@ import Observation
         let output: String
     }
 
-    /// The key of the preview without a LUT in `images`.
+    /// The key of the preview without a look in `images`.
     static let none = ""
+    /// The key of a built-in film stock's preview in `images`; a LUT's is its content hash.
+    static func filmKey(_ stock: String) -> String { "film:" + stock }
     /// The long edge of a preview, in pixels: a 64-point tile at 3×.
     static let side = 192
 
-    /// Previews by content hash, and `none`.
+    /// Previews by content hash, `filmKey`, and `none`.
     private(set) var images: [String: CGImage] = [:]
 
     @ObservationIgnored private var wanted: LookPreviewInputs?
@@ -74,7 +77,8 @@ import Observation
         wanted = key
         task?.cancel()
         let base = Self.base(editor.recipe)
-        let jobs = [(Self.none, base)] + looks.filter {
+        let films = Adjustments.filmStocks.dropFirst().map { (Self.filmKey($0), Self.recipe(base, film: $0)) }
+        let jobs = [(Self.none, base)] + films + looks.filter {
             Adjustments.allowsLook(input: $0.input, output: $0.output, domain: base.inputDomain)
         }.map { ($0.reference.contentHash, Self.recipe(base, with: $0)) }
         task = Task { [weak self, weak editor] in
@@ -106,6 +110,12 @@ import Observation
         base.setValue(nil, for: Recipe.filmID)
         for id in ["look.input", "look.output"] { base.setValue(nil, for: id) }
         return base
+    }
+
+    static func recipe(_ base: Recipe, film stock: String) -> Recipe {
+        var recipe = base
+        recipe.setValue(.string(stock), for: Recipe.filmID)
+        return recipe
     }
 
     static func recipe(_ base: Recipe, with look: Look) -> Recipe {

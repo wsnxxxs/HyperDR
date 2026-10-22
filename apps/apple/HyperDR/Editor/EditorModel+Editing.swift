@@ -154,7 +154,7 @@ extension EditorModel {
         scopedRequest = nil; scopingRequest = nil
         scopedOriginal = nil; scopingOriginal = nil
         scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
-        canvas.setImageSize(PixelSize(editorSource.pixelSize))
+        canvas.setImageSize(PixelSize(editor.photoSize ?? editorSource.pixelSize))
         bumpUndoRevision()
         syncControls()
     }

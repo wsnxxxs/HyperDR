@@ -26,6 +26,22 @@ nonisolated struct DisplayComposition: @unchecked Sendable {
     var editedTrace: (any CanvasTrace)? = nil
     var originalDetailTrace: (any CanvasTrace)? = nil
     var editedDetailTrace: (any CanvasTrace)? = nil
+    /// The crop pane: the edited photo drawn through a geometry instead of the
+    /// canvas transform, with no detail tiles or comparison.
+    var geometry: GeometryDisplay? = nil
+}
+
+/// The photo seen through the crop pane's geometry: where each point of the
+/// canvas comes from in the photo, both as fractions (y down).
+nonisolated struct GeometryDisplay: Equatable, Sendable {
+    /// Canvas fractions to photo fractions, a projective map.
+    var photoFromCanvas: simd_float3x3
+    /// The crop in canvas fractions: minX, minY, maxX, maxY.
+    var crop: SIMD4<Float>
+    /// Nothing outside the crop, when the crop is not being edited.
+    var clipsToCrop = false
+    /// The photo outside the crop dimmed, while the crop is edited.
+    var dimsOutsideCrop = false
 }
 
 nonisolated struct CanvasOverlays: Equatable, Sendable {
@@ -52,6 +68,10 @@ nonisolated struct CompositionParams {
     var highlightColor = SIMD4(CanvasOverlayStyle.highlight, CanvasOverlayStyle.zebraOpacity)
     var shadowColor = SIMD4(CanvasOverlayStyle.shadow, CanvasOverlayStyle.zebraOpacity)
     var stripe = SIMD4<Float>(CanvasOverlayStyle.stripePeriodPoints, CanvasOverlayStyle.stripeWidthPoints, CanvasOverlayStyle.stripeDirection.x, CanvasOverlayStyle.stripeDirection.y)
+    /// Bit 4 of `flags`: canvas fractions to photo fractions (`GeometryDisplay`).
+    var geometry = matrix_identity_float3x3
+    /// Bit 5 of `flags` clips to it: minX, minY, maxX, maxY in canvas fractions.
+    var cropRect = SIMD4<Float>(0, 0, 1, 1)
 }
 
 /// Matches `DisplayLayerParams` in Composition.metal.
@@ -121,7 +141,7 @@ nonisolated final class DisplayCompositor {
         descriptor.fragmentFunction = library.makeFunction(name: "compositionFragment")
         descriptor.colorAttachments[0].pixelFormat = .rgba16Float
         display = try device.makeRenderPipelineState(descriptor: descriptor)
-        guard MemoryLayout<CompositionParams>.stride == 128, MemoryLayout<DisplayLayerParams>.stride == 160 else {
+        guard MemoryLayout<CompositionParams>.stride == 192, MemoryLayout<DisplayLayerParams>.stride == 160 else {
             throw PreviewError.unavailable("Composition parameter layout changed")
         }
     }
@@ -270,6 +290,17 @@ nonisolated final class DisplayCompositor {
             throw PreviewError.unavailable("Unable to create composition display encoder")
         }
         let size = CGSize(width: target.width, height: target.height)
+        if let geometry = content.geometry, let edited {
+            // The whole canvas, each point looked up in the photo through the geometry.
+            var params = parameters(content, original: false, transform: transform)
+            params.rect = SIMD4(-1, -1, 1, 1)
+            params.geometry = geometry.photoFromCanvas
+            params.cropRect = geometry.crop
+            params.flags |= 16 | (geometry.clipsToCrop ? 32 : 0) | (geometry.dimsOutsideCrop ? 64 : 0)
+            draw(encoder, texture: edited.texture, params: params)
+            encoder.endEncoding()
+            return
+        }
         let rect = transform.imageFrame
         let ratio = min(0.95, max(0.05, content.splitRatio))
         let split = Int(((rect.minX + rect.width * ratio) * CGFloat(target.width) / transform.viewport.width).rounded())

@@ -120,6 +120,12 @@ kernel void sampleSourceArea(texture2d<float, access::read> src [[texture(0)]],
     float4 prior=p.options.x ? float4(0) : previous.read(pos);
     dst.write(prior+sum/(scale.x*scale.y),pos);
 }
+kernel void countTransparent(texture2d<float, access::read> src [[texture(0)]],
+                             constant uint &unused [[buffer(0)]], device atomic_uint* count [[buffer(1)]],
+                             uint2 pos [[thread_position_in_grid]]) {
+    if (pos.x < src.get_width() && pos.y < src.get_height() && src.read(pos).a == 0)
+        atomic_fetch_add_explicit(count, 1u, memory_order_relaxed);
+}
 kernel void zeroGain(texture2d<float, access::write> dst [[texture(0)]],
                      constant uint &unused [[buffer(0)]], uint2 pos [[thread_position_in_grid]]) {
     if (pos.x < dst.get_width() && pos.y < dst.get_height()) dst.write(float4(0), pos);

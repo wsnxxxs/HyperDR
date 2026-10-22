@@ -185,18 +185,35 @@ spanning the render's long edge, times unit noise blurred by 0.65 pixels (3×3, 
 5×5 kernel's deviation). The noise hashes output pixel coordinates, so regions and stripes of a
 render agree; analysis cells are grainless.
 
+In-emulsion scatter is part of the stock, as in spektrafilm: film exposure is blurred by an
+energy-preserving mixture of a Gaussian core (about 2 µm) and an exponential tail (about 9.5 µm,
+spektrafilm's three-Gaussian fit), per channel. It softens edges and makes very bright points bloom.
+It is computed at the render's own resolution: `graphFilmExposure` evaluates the film exposure of
+the region plus `FilmAdjustments.sourceHalo` pixels (three of the widest sigma), `filmBlur` runs
+the separable passes (half floats, scipy's reflected edges), and `graphOutput` reads the result in
+place of its own exposure. Sources cropped for a region (export tiles, the editor's detail regions)
+are materialized with that halo, so tiles and regions match the whole render exactly; export tiles
+shrink by the halo to stay within the source tile limit. Below about 220 pixels on the long edge
+its taps round to the centre alone and the pass is skipped.
+
 Halation (`look.filmHalation`, 100 % = the stock's own; `look.filmAntihalation` off uses
 spektrafilm's strengths for a film without its antihalation layer, as CineStill does to Vision3)
-is back-reflected light: film exposure plus strength × a sum of three Gaussians (sigma 65 µm for
-still film, 50 µm for motion picture, × √k, weights halving), divided by 1 + strength. The glow is
-low-frequency, so analysis records each cell's mean film exposure and `filmHalation` convolves it
-(`FilmStock.halationKernel`, truncated at five of the widest sigma, mirrored at the edges); the
-render samples that map bilinearly, so preview, export, regions and stripes share it. In-emulsion
-scatter, glare and other spatial effects are not modelled. Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs
-included (`Fixtures/film-reference.json`, within a 10-bit code), the grain RMS with spektrafilm's
-stochastic grain (< 5 %), the halation profile across a bright square with spektrafilm's (within
-1e-3 of the square; spektrafilm's recursive blur approximates the far tail), and the GPU with the
-double reference, grain and halation included (≤ 1 10-bit code).
+is back-reflected light: the scattered film exposure plus strength × a sum of three Gaussians
+(sigma 65 µm for still film, 50 µm for motion picture, × √k, weights halving), divided by 1 +
+strength. The glow is low-frequency, so analysis integrates each cell's film exposure over its exact
+footprint (`graphFilmCells`) and blurs that map with the same separable passes. The render samples
+it with a cubic B-spline, so preview, export, regions and stripes share it; the map's sigma is
+widened by the scatter's variance and narrowed by the cells' and the spline's (1/12 + 1/3 cell²,
+`FilmStock.halationMapComponents`). At a 6000-pixel render (eight pixels per cell) the glow is
+within 3 % of the stock's halation computed at full resolution. Glare and other spatial effects
+are not modelled.
+
+Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs included
+(`Fixtures/film-reference.json`, within a 10-bit code), the grain RMS with spektrafilm's stochastic
+grain (< 5 %), the halation profile across a bright square with spektrafilm's (within 1e-3 of the
+square; spektrafilm's recursive blur approximates the far tail), its scatter (1e-5), the GPU with
+the double reference, grain, scatter and halation included (≤ 1 10-bit code), regions and export
+tiles with the whole render (exactly), and full-size halation as above.
 ## Caches, limits and P7-1b
 
 The engine retains full and the latest preview for one asset/development family, plus a

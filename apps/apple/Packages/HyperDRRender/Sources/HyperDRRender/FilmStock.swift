@@ -27,6 +27,20 @@ public struct FilmAdjustments: Hashable, Sendable {
     public var isIdentity: Bool { stock == nil || strength == 0 }
     /// Analysis integrates cells, where grain averages out: it never invalidates them.
     var withoutGrain: FilmAdjustments { var value = self; value.grain = 0; return value }
+
+    /// Output pixels a region of a render of `size` reads beyond its edges: the reach of
+    /// the in-emulsion scatter. Sources cropped for a region (export tiles, detail
+    /// regions) must cover this halo too.
+    public func sourceHalo(size: PixelSize) -> Int {
+        guard !isIdentity, let stock, let data = try? FilmStock.named(stock) else { return 0 }
+        return data.scatterComponents(longEdge: max(size.width, size.height)).map { FilmStock.taps($0, truncate: FilmStock.scatterTruncate).radius }.max() ?? 0
+    }
+}
+
+/// One separable Gaussian of a spatial effect: per-channel weight and sigma in pixels.
+public struct FilmBlurComponent: Sendable {
+    public var weight: SIMD3<Double>
+    public var sigma: SIMD3<Double>
 }
 
 /// Where grain is drawn: an output pixel in the full render's coordinates. The noise is a
@@ -48,8 +62,9 @@ public struct FilmGrainSite: Sendable {
 /// DIR couplers, printing through the enlarger onto paper (negatives), and
 /// viewing the print or slide under its illuminant, with the scanner's black and
 /// white levels. Grain follows spektrafilm's particle model through its variance and
-/// 0.65-pixel blur; halation and other spatial effects are not modelled. All inputs
-/// and outputs are linear Display P3.
+/// 0.65-pixel blur. The spatial effects of exposure, in-emulsion scatter and
+/// back-reflection halation, are separable Gaussians (`scatter`, `halationComponents`).
+/// All inputs and outputs are linear Display P3.
 public struct FilmStock: Sendable {
     public let id: FilmStockID
     public let name: String
@@ -104,9 +119,14 @@ public struct FilmStock: Sendable {
     /// `halation` is the halation map's film exposure at this pixel and its per-channel
     /// strength; without it there is no halation.
     public func apply(_ rgb: RGB, grain site: FilmGrainSite? = nil, halation: (glow: RGB, strength: RGB)? = nil) -> RGB {
-        let film = resource.filming
         var raw = filmRaw(rgb)
         if let halation { raw = (raw + halation.strength * halation.glow) / (1 + halation.strength) }
+        return fromRaw(raw, grain: site)
+    }
+
+    /// From film exposure on: development, grain, print and viewing.
+    public func fromRaw(_ raw: RGB, grain site: FilmGrainSite? = nil) -> RGB {
+        let film = resource.filming
         var density = develop(logExposure: Self.log10(raw))
         if let site, site.amount > 0 { density = addGrain(density, at: site) }
         var dye = film.channelDensity, base = film.baseDensity
@@ -147,26 +167,102 @@ public struct FilmStock: Sendable {
         return Self.vector(settings.antihalation ? halation.strength : halation.strengthRemoved) * Double(settings.halation)
     }
 
-    /// The halation kernel on a grid whose long edge spans the 35 mm frame: the
-    /// normalised sum of `bounces` Gaussians of sigma sigma·√k, weighted decay^(k-1),
-    /// each normalised over the kernel, truncated at five of the widest sigma.
-    /// (2r+1)² weights, row-major.
-    public func halationKernel(longEdge: Int) -> (radius: Int, weights: [Float]) {
+    /// Micrometres per pixel of a render whose long edge spans the 35 mm frame.
+    func pitch(longEdge: Int) -> Double {
+        resource.filming.grain.filmFormatMillimetres * 1000 / Double(max(longEdge, 1))
+    }
+
+    /// Back-reflection halation on a grid of this long edge: `bounces` Gaussians of sigma
+    /// sigma·√k, weighted decay^(k-1) and normalised. `widening` adds a variance in
+    /// pixels² per channel (negative narrows, down to a tenth of a pixel).
+    public func halationComponents(longEdge: Int, widening: RGB = .zero) -> [FilmBlurComponent] {
         let halation = resource.filming.halation
-        let pitch = resource.filming.grain.filmFormatMillimetres * 1000 / Double(max(longEdge, 1))
-        let sigma = halation.sigmaMicrons / pitch
-        let radius = Int((5 * sigma * Double(halation.bounces).squareRoot()).rounded(.up))
-        var decay = (0..<halation.bounces).map { Foundation.pow(halation.decay, Double($0)) }
-        let total = decay.reduce(0, +); decay = decay.map { $0 / total }
-        let side = 2 * radius + 1
-        var weights = [Double](repeating: 0, count: side * side)
-        for k in 0..<halation.bounces {
-            let s = sigma * Double(k + 1).squareRoot()
-            var g = (-radius...radius).map { Foundation.exp(-Double($0 * $0) / (2 * s * s)) }
-            let sum = g.reduce(0, +); g = g.map { $0 / sum }
-            for y in 0..<side { for x in 0..<side { weights[y * side + x] += decay[k] * g[y] * g[x] } }
+        let sigma = halation.sigmaMicrons / pitch(longEdge: longEdge)
+        let decay = (0..<halation.bounces).map { Foundation.pow(halation.decay, Double($0)) }
+        let total = decay.reduce(0, +)
+        return decay.indices.map { k in
+            let variance = sigma * sigma * Double(k + 1) + widening
+            return FilmBlurComponent(weight: RGB(repeating: decay[k] / total), sigma: pointwiseMax(variance, RGB(repeating: 0.01)).squareRoot())
         }
-        return (radius, weights.map(Float.init))
+    }
+
+    /// Halation on the analysis cells, whose long edge is `cells`. Its glow feeds on the
+    /// scattered exposure, so it widens by the scatter's variance; the render samples it
+    /// with a cubic B-spline (variance 1/3 cell²) from cells that average their pixels
+    /// (1/12), so it narrows by those.
+    func halationMapComponents(cells: Int) -> [FilmBlurComponent] {
+        halationComponents(longEdge: cells, widening: scatterVariance(longEdge: cells) - RGB(repeating: 1.0 / 3 + 1.0 / 12))
+    }
+
+    /// In-emulsion scatter on a render of this long edge, spektrafilm's energy-preserving
+    /// mixture: (1 - tail weight) × a Gaussian core plus tail weight × an exponential
+    /// tail (its three-Gaussian fit), blended with the identity by the scatter amount.
+    public func scatterComponents(longEdge: Int) -> [FilmBlurComponent] {
+        let scatter = resource.filming.scatter, pitch = pitch(longEdge: longEdge)
+        let amount = scatter.amount, tail = Self.vector(scatter.tailWeight)
+        guard amount > 0 else { return [] }
+        var components = [FilmBlurComponent(weight: amount * (1 - tail), sigma: Self.vector(scatter.coreMicrons) / pitch)]
+        for fit in scatter.tailFit {
+            components.append(FilmBlurComponent(weight: amount * tail * fit[0], sigma: fit[1] * Self.vector(scatter.tailMicrons) / pitch))
+        }
+        if amount < 1 { components.append(FilmBlurComponent(weight: RGB(repeating: 1 - amount), sigma: .zero)) }
+        return components
+    }
+
+    /// The scatter's variance per axis in pixels², which widens what it feeds (halation).
+    func scatterVariance(longEdge: Int) -> RGB {
+        scatterComponents(longEdge: longEdge).reduce(.zero) { $0 + $1.weight * $1.sigma * $1.sigma }
+    }
+
+    /// spektrafilm truncates its scatter FIR at three sigma; halation is untruncated
+    /// there (a recursive filter), five sigma here.
+    static let scatterTruncate = 3.0, halationTruncate = 5.0
+
+    /// One axis of a component: Int(truncate·sigma + 0.5) taps each side per channel
+    /// (zero beyond a channel's own), normalised per channel, times the weight when
+    /// `weighted` (the first of the two passes).
+    static func taps(_ component: FilmBlurComponent, truncate: Double, weighted: Bool = false) -> (radius: Int, taps: [RGB]) {
+        let radii = (0..<3).map { Int(truncate * max(component.sigma[$0], 1e-6) + 0.5) }
+        let radius = radii.max()!
+        var taps = [RGB](repeating: .zero, count: 2 * radius + 1)
+        for c in 0..<3 {
+            let s = max(component.sigma[c], 1e-6)
+            let g = (-radii[c]...radii[c]).map { Foundation.exp(-0.5 * Double($0 * $0) / (s * s)) }
+            let sum = g.reduce(0, +)
+            for (i, value) in g.enumerated() { taps[radius - radii[c] + i][c] = value / sum * (weighted ? component.weight[c] : 1) }
+        }
+        return (radius, taps)
+    }
+
+    /// scipy.ndimage's 'reflect' edges: (d c b a | a b c d | d c b a).
+    static func reflect(_ i: Int, _ n: Int) -> Int {
+        let period = 2 * n, j = ((i % period) + period) % period
+        return j < n ? j : period - 1 - j
+    }
+
+    /// The sum of the components' separable blurs of a row-major field.
+    static func blur(_ field: [RGB], width: Int, height: Int, components: [FilmBlurComponent], truncate: Double) -> [RGB] {
+        var result = [RGB](repeating: .zero, count: field.count)
+        for component in components {
+            let (radius, horizontal) = taps(component, truncate: truncate, weighted: true), vertical = taps(component, truncate: truncate).taps
+            var pass = [RGB](repeating: .zero, count: field.count)
+            for y in 0..<height { for x in 0..<width {
+                var sum = RGB.zero
+                for k in -radius...radius { sum += horizontal[k + radius] * field[y * width + reflect(x + k, width)] }
+                pass[y * width + x] = sum
+            } }
+            for y in 0..<height { for x in 0..<width {
+                var sum = RGB.zero
+                for k in -radius...radius { sum += vertical[k + radius] * pass[reflect(y + k, height) * width + x] }
+                result[y * width + x] += sum
+            } }
+        }
+        return result
+    }
+
+    /// In-emulsion scatter of a field of film exposure, rendered at this long edge.
+    public func scatter(_ raw: [RGB], width: Int, height: Int, longEdge: Int) -> [RGB] {
+        Self.blur(raw, width: width, height: height, components: scatterComponents(longEdge: longEdge), truncate: Self.scatterTruncate)
     }
 
     /// Developed density plus grain: per channel, the variance of the sublayer particle
@@ -342,6 +438,12 @@ struct FilmResource: Decodable, Sendable {
         let bounces: Int
         let strength, strengthRemoved: [Double]
     }
+    struct Scatter: Decodable, Sendable {
+        let amount: Double
+        let coreMicrons, tailMicrons, tailWeight: [Double]
+        /// Amplitude and sigma over decay of the exponential tail's Gaussians.
+        let tailFit: [[Double]]
+    }
     struct Grain: Decodable, Sendable {
         /// Density variance × pixel area (µm²), 256 samples from zero to each channel's maximum.
         let varianceArea: [[Double]]
@@ -363,6 +465,7 @@ struct FilmResource: Decodable, Sendable {
         let exposureScale: Double
         let grain: Grain
         let halation: Halation
+        let scatter: Scatter
     }
     struct Printing: Decodable, Sendable {
         let illuminant: [Double]

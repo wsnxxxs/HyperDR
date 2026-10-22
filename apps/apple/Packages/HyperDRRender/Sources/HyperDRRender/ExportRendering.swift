@@ -107,14 +107,15 @@ extension RenderEngine: ExportStripeRendering {
         // fixed-scale analysis can miss. Scan GPU bands, retain only five words.
         var summary = SIMD8<UInt32>.zero
         var firstPair: ExportPairInfo?, provenance = PairProvenance.identity
-        let tileSize = exportTileSize(lazy,request:request)
+        let halo = edit.film.sourceHalo(size:request.photoSize)
+        let tileSize = exportTileSize(lazy,request:request,halo:halo)
         let scanRows = min(rows,tileSize.height)
         for y in stride(from:0,to:request.photoSize.height,by:scanRows) {
             try Task.checkCancellation()
             for x in stride(from:0,to:request.photoSize.width,by:tileSize.width) {
                 try autoreleasepool {
                     let region = CGRect(x:x,y:y,width:min(tileSize.width,request.photoSize.width-x),height:min(scanRows,request.photoSize.height-y))
-                    let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
+                    let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,halo:halo) } ?? source
                     let planes = try render(tile,adjustments:edit,size:request.photoSize,region:region)
                     guard !planes.aiPending else { throw RenderError.aiNotAvailable }
                     let pair = try displayPair(planes,source:tile)
@@ -185,15 +186,16 @@ extension RenderEngine: ExportStripeRendering {
 
     // Cap the projected native crop as well as the output. An export downscale
     // must not recreate a full-width source texture just to sample a small band.
-    func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest) -> PixelSize {
+    /// `halo`: output pixels each tile's source reaches beyond it (FilmAdjustments.sourceHalo).
+    func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest, halo: Int = 0) -> PixelSize {
         let limit = PreparedExportRows.maximumSourceTileSize
         guard let source else { return PixelSize(width:limit.width,height:PreparedExportRows.maximumReadRows) }
         let gain = source.opened.gain?.image.extent.size ?? .zero
         let width = max(Double(source.nativeSize.width),gain.width)
         let height = max(Double(source.nativeSize.height),gain.height)
         // Four native texels of halo plus up to two from outward integral rounding.
-        return PixelSize(width:max(1,min(limit.width,Int(Double(limit.width-6)*Double(request.photoSize.width)/width))),
-                         height:max(1,min(PreparedExportRows.maximumReadRows,Int(Double(limit.height-6)*Double(request.photoSize.height)/height))))
+        return PixelSize(width:max(1,min(limit.width,Int(Double(limit.width-6)*Double(request.photoSize.width)/width)-2*halo)),
+                         height:max(1,min(PreparedExportRows.maximumReadRows,Int(Double(limit.height-6)*Double(request.photoSize.height)/height)-2*halo)))
     }
 
     private func readExport(_ state: ExportPreparation, y: Int, count: Int) throws -> ExportStripe {
@@ -201,7 +203,7 @@ extension RenderEngine: ExportStripeRendering {
         guard y >= 0, count > 0, y < state.request.canvasSize.height, count <= state.request.canvasSize.height-y else {
             throw RenderError.invalidRegion
         }
-        let tileSize = exportTileSize(state.lazy,request:state.request)
+        let tileSize = exportTileSize(state.lazy,request:state.request,halo:state.edit.film.sourceHalo(size:state.request.photoSize))
         if width <= tileSize.width && count <= tileSize.height {
             return try readExportTile(state,rect:ExportRect(x:0,y:y,width:width,height:count))
         }
@@ -243,7 +245,8 @@ extension RenderEngine: ExportStripeRendering {
             var photoPlanes: RenderPlanes?
             if start < end && left < right {
                 let region = CGRect(x:left-photo.x,y:start-photo.y,width:right-left,height:end-start)
-                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
+                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,
+                                                                      halo:edit.film.sourceHalo(size:request.photoSize)) } ?? source
                 let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
                 let pair = try displayPair(rendered,source:tile)
                 photoPlanes = try exportNormalize(pair,source:source,channels:metadata?.channelCount ?? 1,

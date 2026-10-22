@@ -31,10 +31,12 @@ import numpy as np
 from spektrafilm.config import STANDARD_OBSERVER_CMFS
 from spektrafilm.model.couplers import compute_density_curves_before_dir_couplers, compute_dir_couplers_matrix
 from spektrafilm.model.density_curves import interp_density_cmy_layers
+from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.model.illuminants import standard_illuminant
 from spektrafilm.runtime.params_builder import _HALATION_PRESETS, digest_params, init_params
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.runtime.topology import Tap
+from spektrafilm.utils.fast_gaussian_filter import _EXPONENTIAL_GAUSSIAN_FITS
 from spektrafilm.utils.morph_curves import apply_print_curves_morph
 from spektrafilm.utils.spectral_upsampling import _illuminant_to_xy
 
@@ -164,6 +166,7 @@ def convert(identifier: str, film_name: str, print_name: str | None) -> tuple[di
             "exposureScale": float(np.asarray(references.black_white_filming_exposure_correction()).reshape(-1)[0]),
             "grain": grain_table(params_for(film_name, print_name, grain=True), normalized),
             "halation": halation_parameters(film_name),
+            "scatter": scatter_parameters(film_name),
         },
     }
 
@@ -250,6 +253,31 @@ def halation_parameters(film_name: str) -> dict:
             "strengthRemoved": rows(_HALATION_PRESETS[(info.use, "no")]["strength"])}
 
 
+def scatter_parameters(film_name: str) -> dict:
+    """In-emulsion scatter, energy-preserving: (1 - tailWeight) x a Gaussian of sigma
+    coreMicrons plus tailWeight x an exponential of decay tailMicrons, which spektrafilm
+    evaluates as the Gaussian mixture `tailFit` (amplitude, sigma over decay)."""
+    halation = digest_params(init_params(film_name)).film_render.halation
+    return {"amount": float(halation.scatter_amount), "coreMicrons": rows(halation.scatter_core_um),
+            "tailMicrons": rows(halation.scatter_tail_um), "tailWeight": rows(halation.scatter_tail_weight),
+            "tailFit": rows(_EXPONENTIAL_GAUSSIAN_FITS[3])}
+
+
+def scatter_reference(film_name: str) -> dict:
+    """spektrafilm's scatter alone (no halation) on film exposure: a bright square, a
+    point and a ramp on a dark field, 10 um pixels (every sigma under 3 pixels, so
+    spektrafilm uses its truncated FIR, mode 'reflect'). The test rebuilds `raw`."""
+    width, height, pixel = 40, 24, 10.0
+    raw = np.full((height, width, 3), 0.02)
+    raw[4:12, 6:16] = [40.0, 30.0, 20.0]
+    raw[18, 24] = [200.0, 150.0, 90.0]
+    raw[:, 32:] += (np.arange(width - 32) * 0.375)[None, :, None]
+    halation = dataclasses.replace(digest_params(init_params(film_name)).film_render.halation,
+                                   halation_strength=(0.0, 0.0, 0.0), boost_ev=0.0)
+    return {"pixelMicrons": pixel, "width": width, "height": height,
+            "scattered": rows(apply_halation_um(raw, halation, pixel).reshape(-1, 3))}
+
+
 def halation_reference(film_name: str, print_name: str | None, removed: bool) -> dict:
     """spektrafilm's log film exposure along the centre row of a bright square on a dark
     field, with halation alone (no grain, scatter or other spatial effects)."""
@@ -303,9 +331,11 @@ def main() -> None:
     fixture = {"schema": "hyperdr.film-reference/v1", "attribution": ATTRIBUTION,
                "note": ("spektrafilm per-pixel outputs (no auto exposure, grain or spatial effects; scanner "
                         "black and white correction on), linear Display P3 in and out, output gamut compression "
-                        "off; film density RMS of its grain on flat fields; and log film exposure with halation alone "
-                        "across a bright square (Vision3 500T without its antihalation layer)."),
-               "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {}}
+                        "off; film density RMS of its grain on flat fields; log film exposure with halation alone "
+                        "across a bright square (Vision3 500T without its antihalation layer); and film exposure "
+                        "after in-emulsion scatter alone."),
+               "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {},
+               "scatter": scatter_reference(STOCKS[0][1])}
     RESOURCES.mkdir(parents=True, exist_ok=True)
     if not arguments.check:
         for old in list(RESOURCES.glob("*.json")) + list(RESOURCES.glob("*.spectral")):

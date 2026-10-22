@@ -1,0 +1,374 @@
+import AppKit
+import HyperDRRender
+import XCTest
+@testable import HyperDR
+
+/// Framed thumbnails (M3 §20.3 rule 2, F-T1) and the export panel's Frame row (§3.1).
+@MainActor final class FrameThumbnailTests: XCTestCase {
+    private let source = URL(fileURLWithPath: "/tmp/frame-thumbnail.jpg")
+    private let destination = URL(fileURLWithPath: "/tmp/frame-thumbnail-result.heic")
+
+    // MARK: Helpers
+
+    private func solid(_ width: Int, _ height: Int, red: CGFloat, green: CGFloat, blue: CGFloat) throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.displayP3)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        // In Display P3 itself: a device RGB colour would be converted into it.
+        context.setFillColor(CGColor(colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!, components: [red, green, blue, 1])!)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// 8-bit Display P3 RGBA of an image, row 0 at the top.
+    private func pixels(_ image: CGImage) throws -> (width: Int, height: Int, data: [UInt8]) {
+        var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.displayP3)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return (image.width, image.height, data)
+    }
+
+    private func pixel(_ p: (width: Int, height: Int, data: [UInt8]), _ x: Int, _ y: Int) -> [Int] {
+        let i = (y * p.width + x) * 4
+        return [Int(p.data[i]), Int(p.data[i + 1]), Int(p.data[i + 2])]
+    }
+
+    private func layout(_ style: FrameStyle, _ width: Int = 6000, _ height: Int = 4000) throws -> FramePixelLayout {
+        try XCTUnwrap(EditorModel.frameLayout(for: style, photoWidth: width, photoHeight: height))
+    }
+
+    private func services(photoSize: HyperDR.PixelSize = HyperDR.PixelSize(width: 6000, height: 4000)) async -> FakeEditorServices {
+        let rendering = ScriptedRendering()
+        let url = source
+        await rendering.fake.configure {
+            $0.photos[url] = .init(size: HyperDRRender.PixelSize(width: photoSize.width, height: photoSize.height))
+        }
+        return FakeEditorServices(openDelay: .zero, rendering: rendering)
+    }
+
+    /// The scripted renderer behind `services`.
+    private func rendering(_ services: FakeEditorServices) -> ScriptedRendering {
+        services.rendering as! ScriptedRendering
+    }
+
+    private func ready(_ services: FakeEditorServices) async throws -> EditorModel {
+        let model = EditorModel(services: services)
+        await model.loadExportServices(); model.open([source])
+        await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
+        return model
+    }
+
+    // MARK: Geometry
+
+    func testTheCanvasShrinksToTheLongEdgeAndNeverMagnifies() throws {
+        let gallery = try layout(.gallery)
+        let big = FrameThumbnailGeometry(layout: gallery, maxPixelSize: 344)
+        XCTAssertEqual(max(big.width, big.height), 344)
+        XCTAssertEqual(Double(big.width) / Double(big.height), Double(gallery.width) / Double(gallery.height), accuracy: 0.01)
+        XCTAssertEqual(big.scale, 344.0 / Double(max(gallery.width, gallery.height)), accuracy: 1e-9)
+        let small = FrameThumbnailGeometry(layout: try layout(.gallery, 100, 60), maxPixelSize: 344)
+        XCTAssertEqual(small.scale, 1)
+        XCTAssertEqual(small.width, try layout(.gallery, 100, 60).width)
+    }
+
+    func testThePhotographAndTheCaptionLandWhereTheLayoutPutThem() throws {
+        for style in FrameStyle.allCases {
+            let layout = try layout(style)
+            let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 256)
+            let s = geometry.scale
+            XCTAssertEqual(Double(geometry.photo.x), Double(layout.photo.x) * s, accuracy: 1, "\(style)")
+            XCTAssertEqual(Double(geometry.photo.y), Double(layout.photo.y) * s, accuracy: 1, "\(style)")
+            XCTAssertEqual(Double(geometry.photo.width), Double(layout.photo.width) * s, accuracy: 1, "\(style)")
+            XCTAssertEqual(Double(geometry.photo.height), Double(layout.photo.height) * s, accuracy: 1, "\(style)")
+            XCTAssertLessThanOrEqual(geometry.photo.x + geometry.photo.width, geometry.width)
+            XCTAssertLessThanOrEqual(geometry.photo.y + geometry.photo.height, geometry.height)
+            if layout.caption.width > 0 && layout.caption.height > 0 {
+                XCTAssertEqual(Double(geometry.caption.y), Double(layout.caption.y) * s, accuracy: 1, "\(style)")
+                XCTAssertEqual(Double(geometry.caption.height), Double(layout.caption.height) * s, accuracy: 1, "\(style)")
+                XCTAssertLessThanOrEqual(geometry.caption.y + geometry.caption.height, geometry.height)
+            } else {
+                XCTAssertTrue(geometry.caption.isEmpty, "\(style) has no band")
+            }
+        }
+    }
+
+    func testThePhotographAsksForItsOwnSizeNotTheCanvas() throws {
+        let layout = try layout(.label)
+        let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 344)
+        XCTAssertEqual(geometry.photoPixelSize, max(geometry.photo.width, geometry.photo.height))
+        XCTAssertLessThan(geometry.photoPixelSize, 344)
+    }
+
+    // MARK: Composition
+
+    func testTheCardHasPaperAroundTheTonedPhotograph() throws {
+        for tone in [FrameTone.paper, .ink] {
+            var settings = FrameSettings(); settings.isEnabled = true; settings.style = .hairline; settings.tone = tone
+            let layout = try layout(.hairline, 300, 200)
+            let framing = try XCTUnwrap(FrameThumbnail.framing(settings: settings, layout: layout, facts: CaptureFacts()))
+            let picture = try XCTUnwrap(FrameThumbnail.compose(photo: try solid(30, 20, red: 1, green: 0, blue: 0),
+                                                               framing: framing, maxPixelSize: 100))
+            let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 100)
+            XCTAssertEqual(picture.width, geometry.width); XCTAssertEqual(picture.height, geometry.height)
+            let p = try pixels(picture)
+            let paper = [tone.background.red, tone.background.green, tone.background.blue].map { Int(($0 * 255).rounded()) }
+            for (x, y) in [(0, 0), (picture.width - 1, 0), (0, picture.height - 1), (picture.width - 1, picture.height - 1)] {
+                for (a, b) in zip(pixel(p, x, y), paper) { XCTAssertEqual(a, b, accuracy: 2, "\(tone) corner") }
+            }
+            let centre = pixel(p, geometry.photo.x + geometry.photo.width / 2, geometry.photo.y + geometry.photo.height / 2)
+            XCTAssertGreaterThan(centre[0], 240); XCTAssertLessThan(centre[1], 20); XCTAssertLessThan(centre[2], 20)
+            // Just inside the photograph's edge is already the photograph.
+            let edge = pixel(p, geometry.photo.x + 1, geometry.photo.y + 1)
+            XCTAssertGreaterThan(edge[0], 240)
+        }
+    }
+
+    func testTheCaptionIsDrawnInItsBandOnly() throws {
+        var settings = FrameSettings(); settings.isEnabled = true; settings.style = .gallery
+        settings.showsExposure = false; settings.showsCamera = false; settings.showsDate = false
+        let layout = try layout(.gallery)
+        let blank = try XCTUnwrap(FrameThumbnail.framing(settings: settings, layout: layout, facts: CaptureFacts()))
+        XCTAssertTrue(blank.caption.isEmpty)
+        settings.showsCamera = true
+        let facts = CaptureFacts(make: "SONY", model: "ILCE-7RM5", lens: "FE 24-70mm F2.8 GM II", focalLength: 35, fNumber: 2.8,
+                                 exposureTime: 1.0 / 250, iso: 100)
+        let captioned = try XCTUnwrap(FrameThumbnail.framing(settings: settings, layout: layout, facts: facts))
+        XCTAssertFalse(captioned.caption.isEmpty)
+        let photo = try solid(30, 20, red: 0.5, green: 0.5, blue: 0.5)
+        let without = try pixels(try XCTUnwrap(FrameThumbnail.compose(photo: photo, framing: blank, maxPixelSize: 344)))
+        let with = try pixels(try XCTUnwrap(FrameThumbnail.compose(photo: photo, framing: captioned, maxPixelSize: 344)))
+        let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 344)
+        var inBand = 0, outside = 0
+        for y in 0..<with.height {
+            for x in 0..<with.width where pixel(with, x, y) != pixel(without, x, y) {
+                let band = x >= geometry.caption.x && x < geometry.caption.x + geometry.caption.width
+                    && y >= geometry.caption.y && y < geometry.caption.y + geometry.caption.height
+                if band { inBand += 1 } else { outside += 1 }
+            }
+        }
+        XCTAssertGreaterThan(inBand, 0, "the text shows")
+        XCTAssertEqual(outside, 0, "and only in the band")
+    }
+
+    func testNoFramingWhileTheSwitchIsOffOrTheStyleDoesNotFit() throws {
+        let settings = FrameSettings()
+        XCTAssertFalse(settings.isEnabled)
+        XCTAssertNil(FrameThumbnail.framing(settings: settings, layout: try layout(.gallery), facts: CaptureFacts()))
+        var on = settings; on.isEnabled = true
+        XCTAssertNil(FrameThumbnail.framing(settings: on, layout: nil, facts: CaptureFacts()))
+    }
+
+    // MARK: Model
+
+    func testTheSummaryPictureIsTheFramedCardWhileTheFrameIsOn() async throws {
+        let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
+        var settings = model.frame; settings.isEnabled = true; settings.style = .label; model.frame = settings
+        let layout = try XCTUnwrap(model.frameLayout)
+        let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 344)
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        await eventually(timeout: .seconds(10)) { if case .ready = model.exportSummaryThumbnail { true } else { false } }
+        guard case .ready(let framed) = model.exportSummaryThumbnail else { return XCTFail("no picture") }
+        XCTAssertEqual(framed.width, geometry.width); XCTAssertEqual(framed.height, geometry.height)
+        XCTAssertEqual(rendering(services).thumbnailCalls.last, geometry.photoPixelSize, "the service shrinks only the photograph")
+        // Turning the frame off puts the bare photograph back.
+        settings.isEnabled = false; model.frame = settings
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(photo) }
+        XCTAssertEqual(rendering(services).thumbnailCalls.last, 344)
+    }
+
+    func testAnExportWithAFrameFreezesAndPassesTheFramedPicture() async throws {
+        let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
+        var settings = model.frame; settings.isEnabled = true; settings.style = .gallery; model.frame = settings
+        let geometry = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 256)
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        await eventually(timeout: .seconds(10)) { if case .ready = model.exportSummaryThumbnail { true } else { false } }
+        model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
+        await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
+        guard case .ready(let passed) = model.export.thumbnail else { return XCTFail("no picture") }
+        XCTAssertEqual(passed.width, geometry.width); XCTAssertEqual(passed.height, geometry.height)
+        XCTAssertNotNil(services.exportCalls[0].job.snapshot.frame)
+        XCTAssertLessThanOrEqual(max(passed.width, passed.height), 256)
+        model.cancelExport()
+        await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
+    }
+
+    func testAnExportWithoutAFrameStillPassesTheBarePhotograph() async throws {
+        let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
+        XCTAssertFalse(model.frame.isEnabled)
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(photo) }
+        model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
+        await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
+        XCTAssertEqual(model.export.thumbnail, .ready(photo))
+        XCTAssertNil(services.exportCalls[0].job.snapshot.frame)
+        model.cancelExport()
+        await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
+    }
+
+    // MARK: The Frame row
+
+    func testTheFrameRowSaysNoneTheStyleOrThatItDoesNotFit() async throws {
+        let model = try await ready(await services())
+        XCTAssertEqual(model.exportFrameSummary, .none)
+        var settings = model.frame; settings.isEnabled = true; settings.style = .story; model.frame = settings
+        XCTAssertEqual(model.exportFrameSummary, .style(.story))
+        XCTAssertNil(model.export.blockerKey)
+        // A photograph far wider than the Instant card can be: the engine refuses it.
+        let wide = await services(photoSize: PixelSize(width: 20_000, height: 100))
+        let stretched = try await ready(wide)
+        var instant = stretched.frame; instant.isEnabled = true; instant.style = .instant; stretched.frame = instant
+        XCTAssertNil(stretched.frameLayout)
+        XCTAssertEqual(stretched.exportFrameSummary, .misfit(.instant))
+        XCTAssertEqual(stretched.export.blockerKey, "export.blocker.frame")
+        XCTAssertNil(stretched.thumbnailFraming(), "the bare photograph stands in")
+    }
+
+    func testTheSwitchStaysLiveWhileEditingIsFree() async throws {
+        let model = try await ready(await services())
+        XCTAssertNil(model.editingLockReason)
+        model.frame.isEnabled = true
+        XCTAssertTrue(model.frame.isEnabled)
+        model.frame.isEnabled = false
+        XCTAssertFalse(model.frame.isEnabled)
+    }
+
+    // MARK: Changing the frame from the export panel
+
+    /// The window as the export panel's "Change…" leaves it: the panel asked to go.
+    private func windowAskingForFrame() -> EditorWindowState {
+        let window = EditorWindowState()
+        window.showsExport = true
+        window.changeFrameFromExport()
+        return window
+    }
+
+    func testChangeFrameWaitsForTheExportPanelToLeaveThenHandsOverAndBack() {
+        let window = windowAskingForFrame()
+        XCTAssertFalse(window.showsExport)
+        XCTAssertFalse(window.isFraming, "not before the panel has really gone")
+        XCTAssertTrue(window.returnsToExport)
+        window.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(window.isFraming)
+        window.isFraming = false
+        XCTAssertFalse(window.showsExport, "not before the frame sheet has really gone")
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(window.showsExport)
+        XCTAssertFalse(window.returnsToExport)
+    }
+
+    func testAChangeFromAnyOtherPlaceNeverReturnsToExport() {
+        let window = EditorWindowState()
+        window.changeFrameFromExport()   // no export panel up: nothing to leave
+        XCTAssertFalse(window.returnsToExport)
+        window.isFraming = true; window.isFraming = false
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(window.showsExport)
+    }
+
+    func testOpeningTheExportPanelAgainBeforeTheHandOverCancelsIt() {
+        let window = windowAskingForFrame()
+        window.openExport()   // the toolbar, the menu or an inspector card, while the panel was leaving
+        window.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(window.isFraming, "never two sheets at once")
+        XCTAssertTrue(window.showsExport)
+        XCTAssertFalse(window.returnsToExport)
+        window.showsExport = false
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(window.showsExport)
+    }
+
+    func testAPhotoSwitchQuestionStopsTheHandOverInBothDirections() {
+        let outward = windowAskingForFrame()
+        outward.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: true)
+        XCTAssertFalse(outward.isFraming); XCTAssertFalse(outward.returnsToExport)
+        let back = windowAskingForFrame()
+        back.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(back.isFraming)
+        back.isFraming = false
+        back.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: true)
+        XCTAssertFalse(back.showsExport, "the question must not be covered by the export panel")
+        XCTAssertFalse(back.returnsToExport)
+    }
+
+    func testNoHandOverWithoutAPhotographOrWhileAnotherSheetIsUp() {
+        let closed = windowAskingForFrame()
+        closed.exportSheetDismissed(hasPhoto: false, isAskingToSwitch: false)
+        XCTAssertFalse(closed.isFraming)
+        let back = windowAskingForFrame()
+        back.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        back.isFraming = false
+        back.frameSheetDismissed(hasPhoto: false, isAskingToSwitch: false)
+        XCTAssertFalse(back.showsExport)
+        let busy = windowAskingForFrame()
+        busy.showsHistory = true
+        busy.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(busy.isFraming)
+    }
+
+    // MARK: A style that does not fit
+
+    /// A result for the photograph exported without a frame stops counting as the
+    /// current one once the frame is on and the engine refuses its style.
+    func testAMisfitStyleDoesNotLeaveAMatchingResultBehind() async throws {
+        let services = await services(photoSize: PixelSize(width: 20_000, height: 100))
+        let model = try await ready(services)
+        let done = ExportResult(export: "plain", fileName: "result.heic", byteCount: 10, pixelSize: PixelSize(width: 20_000, height: 100))
+        let key = try await services.exportKey(model)
+        services.historyByURL[source] = [ExportHistoryItem(
+            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), recipeSnapshot: key, options: model.exportChoices)]
+        model.refreshExportMetadata()
+        await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true && model.export.result != nil }
+        let matching = ExportPresentation.PanelMode(phase: model.export.phase,
+            hasMatchingResult: model.export.result != nil && !model.export.isResultStale, wantsSettings: false)
+        XCTAssertEqual(matching, .result)
+        var instant = model.frame; instant.isEnabled = true; instant.style = .instant; model.frame = instant
+        XCTAssertNil(model.frameLayout)
+        XCTAssertTrue(model.export.isResultStale)
+        XCTAssertTrue(model.exportVersions.allSatisfy { !$0.matchesCurrent })
+        let now = ExportPresentation.PanelMode(phase: model.export.phase,
+            hasMatchingResult: model.export.result != nil && !model.export.isResultStale, wantsSettings: false)
+        XCTAssertEqual(now, .settings, "the panel opens on the settings, with the warning")
+        XCTAssertEqual(model.exportFrameSummary, .misfit(.instant))
+        XCTAssertEqual(model.export.blockerKey, "export.blocker.frame")
+    }
+
+    // MARK: A picture that arrives after the export began
+
+    func testAFramedPictureThatArrivesAfterTheExportBeganIsFramed() async throws {
+        let bare = try solid(4, 2, red: 1, green: 0, blue: 0)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in bare }
+        let model = EditorModel(services: services)
+        await model.loadExportServices(); model.open([source])
+        await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
+        var settings = model.frame; settings.isEnabled = true; settings.style = .gallery; model.frame = settings
+        let geometry = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 256)
+        // The summary's photograph never comes; the export's does.
+        let summarySide = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 344).photoPixelSize
+        rendering(services).thumbnailHandler = { _, size in
+            if max(size.width, size.height) == summarySide { try? await Task.sleep(for: .seconds(60)); return nil }
+            return bare
+        }
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        await eventually(timeout: .seconds(10)) { self.rendering(services).thumbnailCalls.contains(summarySide) }
+        XCTAssertEqual(model.exportSummaryThumbnail, .loading)
+        model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
+        await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
+        await eventually(timeout: .seconds(10)) { if case .ready = model.export.thumbnail { true } else { false } }
+        guard case .ready(let late) = model.export.thumbnail else { return XCTFail("no picture") }
+        XCTAssertEqual(late.width, geometry.width); XCTAssertEqual(late.height, geometry.height)
+        model.cancelExport()
+        await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
+    }
+}

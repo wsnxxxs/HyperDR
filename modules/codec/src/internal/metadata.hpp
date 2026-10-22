@@ -64,7 +64,7 @@ inline void apply_exif(DecodedImage& image, const ExifRead& exif) {
 // A decoder that filled `capture` from its decoding library instead would make
 // the same photograph a complete input in one container and an incomplete one in
 // another, and would lose the presence information the model's fallback rule
-// turns on: LibRaw reports no exposure compensation at all rather than a zero,
+// turns on: camera metadata can omit exposure compensation rather than report a zero,
 // and no 35 mm-equivalent focal length. Only the leading block is read -- every
 // format this build opens keeps IFD0 and the Exif IFD near the front, and
 // re-reading a 60 MB RAW to recover six numbers would cost more than the decode.

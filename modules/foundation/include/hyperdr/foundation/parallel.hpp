@@ -13,6 +13,9 @@
 // gain_map/guided_filter/photographic_look/heif_encoder/raster_decoder, so
 // reusing threads avoids repeated OS thread creation within each image.
 
+#include "hyperdr/foundation/cancel.hpp"
+#include "hyperdr/foundation/progress.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -47,9 +50,10 @@ class ThreadPool {
   // index, which this never does.
   template <class Fn>
   void for_rows(std::uint32_t height, Fn&& fn) {
+    check_cancelled();
     if (height == 0) return;
     if (worker_count_ == 0 || height < 64) {
-      for (std::uint32_t y = 0; y < height; ++y) fn(y);
+      for (std::uint32_t y = 0; y < height; ++y) { check_cancelled(); fn(y); }
       return;
     }
 
@@ -78,15 +82,19 @@ class ThreadPool {
     };
     auto state = std::make_shared<State>(height, jobs, std::forward<Fn>(fn));
 
-    const auto run_chunk = [state] {
+    const auto run_chunk = [state, token = current_cancel_token, config = current_execution_config] {
+      CancelScope cancel(token);
+      ExecutionScope execution(config);
       for (;;) {
         const std::uint32_t y = state->next.fetch_add(1, std::memory_order_relaxed);
         if (y >= state->height) break;
         try {
+          check_cancelled();
           state->fn(y);
         } catch (...) {
           std::lock_guard<std::mutex> lock(state->exception_mutex);
           if (!state->exception) state->exception = std::current_exception();
+          state->next.store(state->height, std::memory_order_relaxed);
           break;
         }
       }

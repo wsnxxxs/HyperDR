@@ -3,14 +3,8 @@
 // Turning a decoded 8-, 10-, 12- or 16-bit RGB buffer into the pipeline's one
 // working space: linear Display P3, 32-bit float, unbounded above 1.
 //
-// This lived inside the HEIF decoder until AVIF arrived needing the identical
-// job done from a different library's enums. The code points are the same
-// numbers in both -- libheif's `heif_color_primaries` / `heif_transfer_
-// characteristics` and libavif's `avifColorPrimaries` / `avifTransfer
-// Characteristics` are each a spelling of ITU-T H.273 -- so the shared form
-// takes plain integers and each decoder casts its own enum on the way in.
-// Duplicating it instead would have meant two transcriptions of the same
-// standard that could disagree about, say, what transfer 18 means.
+// HEIF's own reader and libavif both supply ITU-T H.273 integer code points.
+// Their container-specific tag precedence is resolved before this boundary.
 
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/image/color.hpp"

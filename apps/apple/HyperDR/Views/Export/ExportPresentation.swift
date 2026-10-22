@@ -1,0 +1,389 @@
+import Foundation
+import HyperDRDesign
+import HyperDRKit
+
+/// What the export views say for one state of the model, as plain values:
+/// which cards make up the format groups, which of the four HEVC reasons a
+/// key stands for, the parts of the status line, the progress bar's style,
+/// and the titles of the toolbar's and the panel's buttons. The views only
+/// draw what this decides, so every state of the design (M3 §2–§7) has a
+/// test.
+enum ExportPresentation {
+    // MARK: Formats
+
+    struct FormatGroup: Equatable {
+        let titleKey: String
+        let ids: [String]
+        /// Two wide cards, or four narrow ones in a row (§3.2).
+        var columns: Int { ids.count >= 4 ? 4 : 2 }
+    }
+
+    /// The card groups: HDR enhancement shows six formats in two groups,
+    /// colour-only the two SDR ones (§3.2).
+    static func groups(for workflow: Workflow) -> [FormatGroup] {
+        switch workflow {
+        case .hdr:
+            [FormatGroup(titleKey: "export.group.anyScreen", ids: ["adaptive", "iso-gainmap-jpeg"]),
+             FormatGroup(titleKey: "export.group.hdrOnly", ids: ["pq", "hlg", "avif-pq", "avif-hlg"])]
+        case .colorOnly:
+            [FormatGroup(titleKey: "export.group.format", ids: ["sdr-jpeg", "sdr-tiff"])]
+        }
+    }
+
+    /// Which of the four HEVC reasons (§3.3) a model reason key stands for;
+    /// anything else is the generic one.
+    enum Reason: String { case hevc, main10, probe, generic }
+
+    static func reason(_ blockerKey: String) -> Reason {
+        switch blockerKey {
+        case "err.server.hevc_unavailable": .hevc
+        case "err.server.hevc_main10_unavailable": .main10
+        case "err.server.hevc_probe_failed": .probe
+        default: .generic
+        }
+    }
+
+    /// The card's short reason, "No HEVC encoder".
+    static func shortReasonKey(_ blockerKey: String) -> String {
+        switch reason(blockerKey) {
+        case .hevc: "export.unavailable.short.hevc"
+        case .main10: "export.unavailable.short.main10"
+        case .probe: "export.unavailable.short.probe"
+        case .generic: "export.unavailable.short.generic"
+        }
+    }
+
+    /// The full reason, which takes the format's name as its one `%@`.
+    static func fullReasonKey(_ blockerKey: String) -> String {
+        switch reason(blockerKey) {
+        case .hevc: "export.unavailable.full.hevc %@"
+        case .main10: "export.unavailable.full.main10 %@"
+        case .probe: "export.unavailable.full.probe %@"
+        case .generic: "export.unavailable.full.generic %@"
+        }
+    }
+
+    /// Whether a blocker is about the chosen format's encoder (and so is
+    /// worded with the format's name) and not one of the model's own
+    /// sentences or an error's.
+    static func isFormatReason(_ blockerKey: String) -> Bool { blockerKey.contains(".hevc_") }
+
+    // MARK: Buttons
+
+    /// The panel's main button: HDR "Export…", colour-only "Save JPEG…" /
+    /// "Save TIFF…". The ellipsis goes in fixed-folder mode, where no save
+    /// panel follows (§3.5), and with a result the user has adjusted past
+    /// the button says "Export New Version…".
+    static func primaryActionKey(encoding: String, asksForPlace: Bool) -> String {
+        guard asksForPlace else { return "export.action.export" }
+        switch encoding {
+        case "sdr-jpeg": return "export.action.saveJPEG"
+        case "sdr-tiff": return "export.action.saveTIFF"
+        default: return "export.action.exportEllipsis"
+        }
+    }
+
+    /// The toolbar's idle title: the same words without the ellipsis, since
+    /// the button opens the panel (§2.1).
+    static func toolbarTitleKey(encoding: String) -> String {
+        switch encoding {
+        case "sdr-jpeg": "export.toolbar.saveJPEG"
+        case "sdr-tiff": "export.toolbar.saveTIFF"
+        default: "editor.export"
+        }
+    }
+
+    /// The window subtitle's last part (§2.2); nil adds nothing.
+    static func documentStatusKey(_ status: DocumentStatus, isExporting: Bool) -> String? {
+        if isExporting { return "docStatus.exporting" }
+        switch status {
+        case .waiting: return nil
+        case .notExported: return "docStatus.notExported"
+        case .modifiedSinceExport: return "docStatus.modified"
+        case .exportedNotSaved: return "docStatus.exportedNotSaved"
+        case .saved: return "docStatus.saved"
+        }
+    }
+
+    // MARK: Progress
+
+    /// How the bar is drawn: grey and still while stopping, a sweep while
+    /// there is no estimate, held at 99 % when over, else the estimate's
+    /// fraction (§6).
+    static func progressStyle(isStopping: Bool, estimate: ExportEstimate?) -> ExportProgressStyle {
+        if isStopping { return .stopped(estimate?.fraction ?? 0) }
+        guard let estimate else { return .indeterminate }
+        return estimate.isOverdue ? .overdue : .determinate(estimate.fraction)
+    }
+
+    /// The percentage shown: only with an estimate, never above 99 until
+    /// the export is done.
+    static func percent(estimate: ExportEstimate?, isDone: Bool) -> Double? {
+        estimate.map { isDone ? 1 : min($0.fraction, ExportProgressStyle.overdueFraction) }
+    }
+
+    /// The parts of "<stage> · <elapsed> · <estimate>".
+    struct StatusParts: Equatable {
+        enum Remaining: Equatable { case first, overdue, soon, seconds(Int), minutes(Int), none }
+        /// Kit's words for its stage, or the app's own for saving.
+        enum Stage: Equatable {
+            case kit(ExportMessage)
+            case app(String)
+            func text(locale: Locale) -> String {
+                switch self {
+                case .kit(let message): message.localized(locale: locale)
+                case .app(let key): AppStrings.string(key, locale: locale)
+                }
+            }
+        }
+        var stage: Stage
+        var remaining: Remaining
+    }
+
+    /// The stage is Kit's (`RecipeExportProgress.stageMessage`); publishing is
+    /// the finishing phase and delivering the saving one.
+    static func statusParts(phase: ExportState.Phase, stage: ExportMessage?,
+                            estimate: ExportEstimate?) -> StatusParts {
+        let preparing = RecipeExportProgress(stage: .preparing).stageMessage
+        let label: StatusParts.Stage
+        switch phase {
+        case .saving: label = .app("export.save.saving")
+        case .finishing: label = .kit(RecipeExportProgress(stage: .publishing).stageMessage)
+        case .idle, .preparing: label = .kit(preparing)
+        default: label = .kit(stage ?? preparing)
+        }
+        let remaining: StatusParts.Remaining
+        if phase == .saving { remaining = .none }
+        else if let estimate {
+            if estimate.isOverdue { remaining = .overdue }
+            else {
+                switch estimate.remainingBucket {
+                case .soon: remaining = .soon
+                case .seconds(let seconds): remaining = .seconds(seconds)
+                case .minutes(let minutes): remaining = .minutes(minutes)
+                case nil: remaining = .none
+                }
+            }
+        } else { remaining = .first }
+        return StatusParts(stage: label, remaining: remaining)
+    }
+
+    /// "0:21", "12:05".
+    static func elapsedText(_ seconds: Double) -> String {
+        let whole = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%d:%02d", whole / 60, whole % 60)
+    }
+
+    // MARK: Result facts
+
+    /// The peak of a result as its two numbers: the ratio to SDR white
+    /// ("5.7") and the stops ("+2.5 EV"), both in `locale`.
+    static func peak(stops: Double, locale: Locale) -> (ratio: String, stops: String) {
+        let ratio = (pow(2, stops) * 10).rounded() / 10
+        let number = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1)).locale(locale)
+        let sign = stops >= 0 ? "+" : "−"
+        return (ratio.formatted(number), sign + abs(stops).formatted(number) + " EV")
+    }
+}
+
+// MARK: - Text
+
+extension ExportPresentation {
+    /// "Encoding · 0:21 elapsed · about 10 s left": the stage, the time since
+    /// the export began and the estimate, in `locale`.
+    static func statusLine(_ parts: StatusParts, elapsed: Double, locale: Locale) -> String {
+        [parts.stage.text(locale: locale), timeLine(parts, elapsed: elapsed, locale: locale)].joined(separator: " · ")
+    }
+
+    /// "<elapsed> · <estimate>", the status line without its stage.
+    static func timeLine(_ parts: StatusParts, elapsed: Double, locale: Locale) -> String {
+        var pieces = [AppStrings.format("export.elapsed %@", locale: locale, elapsedText(elapsed))]
+        if let remaining = remainingText(parts.remaining, locale: locale) { pieces.append(remaining) }
+        return pieces.joined(separator: " · ")
+    }
+
+    static func remainingText(_ remaining: StatusParts.Remaining, locale: Locale) -> String? {
+        switch remaining {
+        case .first: AppStrings.string("export.eta.first", locale: locale)
+        case .overdue: AppStrings.string("export.eta.overdue", locale: locale)
+        case .soon: AppStrings.string("export.eta.soon", locale: locale)
+        case .seconds(let seconds):
+            AppStrings.format("export.eta.seconds %@", locale: locale, seconds.formatted(.number.locale(locale)))
+        case .minutes(let minutes):
+            AppStrings.format("export.eta.minutes %@", locale: locale, minutes.formatted(.number.locale(locale)))
+        case .none: nil
+        }
+    }
+
+    /// "72%" in `locale`.
+    static func percentText(_ fraction: Double, locale: Locale) -> String {
+        fraction.formatted(.percent.precision(.fractionLength(0)).locale(locale))
+    }
+
+    /// "Exporting 72% · about 10 s left", for the canvas capsule; "…" stands
+    /// for a percentage not known yet.
+    static func capsuleText(estimate: ExportEstimate?, parts: StatusParts, locale: Locale) -> String {
+        let percent = percent(estimate: estimate, isDone: false).map { percentText($0, locale: locale) } ?? "…"
+        let eta = remainingText(parts.remaining, locale: locale) ?? parts.stage.text(locale: locale)
+        return AppStrings.format("exportLock.canvas %@ %@", locale: locale, percent, eta)
+    }
+
+    /// The file the export is making or made: the saved name, else the
+    /// name picked in the save panel, else the suggested one.
+    @MainActor static func fileName(for model: EditorModel) -> String {
+        if let name = model.export.result?.fileName, !name.isEmpty { return name }
+        if case .file(let url)? = model.export.destination { return url.lastPathComponent }
+        return model.suggestedFileName
+    }
+
+    /// What the result card says when a copy did not reach its place, and
+    /// whether the way out is Settings. The model says which way of saving
+    /// failed (`variant == "destination"`: a place picked in the save panel,
+    /// fixed by choosing another); the sentence and the button are decided
+    /// together here so they cannot disagree. Without that mark the same code
+    /// is the fixed folder, which is fixed in Settings.
+    struct SaveFailureWording: Equatable {
+        var sentence: String
+        var offersSettings: Bool
+    }
+
+    static func saveFailure(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> SaveFailureWording {
+        let generic = AppStrings.string("export.save.failed", locale: locale)
+        if failure.variant == "destination" { return SaveFailureWording(sentence: generic, offersSettings: false) }
+        if failure.code == "export_folder_unwritable" {
+            return SaveFailureWording(sentence: ErrorText(failure).body(locale: locale), offersSettings: true)
+        }
+        // Any other failure keeps the setting's way of putting it.
+        let sentence = mode == .folder || failure.code == "session_expired" ? ErrorText(failure).body(locale: locale) : generic
+        return SaveFailureWording(sentence: sentence, offersSettings: false)
+    }
+
+    /// The sentence alone.
+    static func saveFailureSentence(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> String {
+        saveFailure(failure, mode: mode, locale: locale).sentence
+    }
+
+    /// Why this version's model fell back to the image alone, from the model's
+    /// reason code and field names (never the engine's own wording).
+    @MainActor static func fallbackNote(_ reason: ExportFallbackReason, model: EditorModel, locale: Locale) -> String {
+        guard reason.code == .missingCaptureFields, !reason.missingCaptureFields.isEmpty else {
+            return AppStrings.format("history.fallback.unknown %@", locale: locale, AppStrings.string(fallbackModelNameKey, locale: locale))
+        }
+        return AppStrings.format("ai.fallback %@ %@", locale: locale,
+            fieldList(reason.missingCaptureFields, locale: locale),
+            AppStrings.string(fallbackModelNameKey, locale: locale))
+    }
+
+    /// The engine model an export without capture data fell back to (old
+    /// exports in the history; the editor's AI is Core ML now).
+    static let fallbackModelNameKey = "model.research-cnn-v1"
+
+    /// "aperture and focal length" / 「光圈和焦距」.
+    static func fieldList(_ fields: [String], locale: Locale) -> String {
+        fields.map { AppStrings.string("field.\($0)", locale: locale) }
+            .formatted(.list(type: .and, width: .standard).locale(locale))
+    }
+
+    /// "…/Pictures", the system's own name for the folder a copy was saved in
+    /// ("…/图片" on a Chinese system), as the service stored it with the copy
+    /// (no path leaves it); "Unknown location" when it has no name.
+    static func savedFolder(_ saved: SavedLocation?, locale: Locale = .current) -> String {
+        guard let saved else { return "" }
+        return saved.folderLabel.isEmpty ? AppStrings.string("export.location.unknown", locale: locale) : saved.folderLabel
+    }
+
+    /// "Pictures": where the export is going, for "DSC04127.jpg → Pictures".
+    @MainActor static func folderName(for model: EditorModel) -> String {
+        switch model.export.destination {
+        case .file(let url)?: FileManager.default.displayName(atPath: url.deletingLastPathComponent().path)
+        case .folder(let label)?: label
+        case nil: ""
+        }
+    }
+}
+
+// MARK: - Panel
+
+extension ExportPresentation {
+    /// Which view the export panel shows for the model's phase (§3, §6, §7).
+    enum PanelMode: Equatable {
+        case settings, progress, result, failure
+
+        init(phase: ExportState.Phase) {
+            switch phase {
+            case .idle, .cancelled: self = .settings
+            case .preparing, .running, .finishing, .saving: self = .progress
+            case .succeeded: self = .result
+            case .failed: self = .failure
+            }
+        }
+
+        /// The mode when the panel is opened again after the outcome was
+        /// dismissed: a result that still matches the edits is shown (§5.16),
+        /// unless the user came to export again.
+        init(phase: ExportState.Phase, hasMatchingResult: Bool, wantsSettings: Bool) {
+            self = phase == .idle && hasMatchingResult && !wantsSettings ? .result : Self(phase: phase)
+        }
+
+        /// The panel is 760 wide for the settings and 560 for the rest.
+        var width: CGFloat { self == .settings ? 760 : 560 }
+    }
+
+    /// The footer's sentence for the blocker: a format reason is worded
+    /// with the chosen format's name; any other key is its own sentence.
+    static func blockerText(_ key: String, formatName: String, locale: Locale) -> String {
+        guard isFormatReason(key) else { return AppStrings.string(key, locale: locale) }
+        return AppStrings.format(fullReasonKey(key), locale: locale, formatName)
+    }
+
+    /// Whether the blocker is about the save folder, for the Open Settings
+    /// link next to it.
+    static func isFolderBlocker(_ key: String) -> Bool { key.contains(".export_folder_") }
+
+    /// The pieces of a finished export's facts, as plain strings.
+    struct ResultFacts: Equatable {
+        var size: String
+        var peak: (ratio: String, stops: String)?
+        var isVerified: Bool
+        var time: String
+
+        static func == (a: Self, b: Self) -> Bool {
+            a.size == b.size && a.peak?.ratio == b.peak?.ratio && a.peak?.stops == b.peak?.stops
+                && a.isVerified == b.isVerified && a.time == b.time
+        }
+    }
+
+    static func resultFacts(_ result: ExportResult, locale: Locale) -> ResultFacts {
+        let bytes = result.byteCount.formatted(.byteCount(style: .file).locale(locale))
+        let size = result.pixelSize.map { "\($0.width) × \($0.height) · \(bytes)" } ?? bytes
+        let peak = result.headroomStops.map { peak(stops: $0, locale: locale) }
+        let seconds = Int(result.elapsed.seconds.rounded())
+        return ResultFacts(size: size, peak: peak, isVerified: result.selfVerified,
+                           time: elapsedText(Double(seconds)))
+    }
+}
+
+// MARK: - History
+
+extension ExportPresentation {
+    /// A history row's one line of facts: "Today 10:42 · HDR JPEG · 6000 × 4000
+    /// · 18.4 MB · manual · this version has a frame".
+    static func historyMeta(_ version: ExportVersion, locale: Locale) -> String {
+        var parts: [String] = []
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        parts.append(formatter.string(from: version.createdAt))
+        parts.append(AppStrings.string("enc.\(version.encodingID).label", locale: locale))
+        if let gamut = version.gamut { parts.append(AppStrings.string(gamut.labelKey, locale: locale)) }
+        if let size = version.pixelSize { parts.append("\(size.width) × \(size.height)") }
+        parts.append(version.byteCount.formatted(.byteCount(style: .file).locale(locale)))
+        if let model = version.modelName { parts.append(AppStrings.format("history.ai %@", locale: locale, model)) }
+        else { parts.append(AppStrings.string("history.manual", locale: locale)) }
+        if version.hasFrame { parts.append(AppStrings.string("history.framed", locale: locale)) }
+        // Break before a dot, never after it: "AI · CNN" stays whole and no line ends with a dot.
+        return parts.joined(separator: " \u{00B7}\u{00A0}")
+    }
+}

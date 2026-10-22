@@ -12,153 +12,163 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The dependency-free Windows core carries the renderer and almost all tests.
-  core:
-    name: Core (Windows, ${{ matrix.build_type }})
-    runs-on: windows-latest
+  macos-core:
+    name: Core (macOS arm64, ${{ matrix.build_type }})
+    runs-on: macos-26
     strategy:
       fail-fast: false
       matrix:
         build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build-core
-          -DHYPERDR_WITH_CODECS=OFF
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Build and test native core and shared contracts
-        run: python scripts/test.py native --build-dir build-core --config ${{ matrix.build_type }}
-
-  panel:
-    name: Panel (Python ${{ matrix.python }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
+      - name: Configure core
+        run: cmake --preset macos-arm64-core -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Test core, native contracts and C ABI
+        run: python3 scripts/test.py native --build-dir build-core --config ${{ matrix.build_type }}
 
-      - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest -r apps/panel/requirements.txt
-
-      - name: Test panel and HTTPS helpers
-        run: python scripts/test.py panel
-
-  frontend:
-    name: Front-end
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Test front-end behavior and static contracts
-        run: python scripts/test.py frontend
-
-  # The full configuration: LibRaw, libheif, libavif, libultrahdr and the x265
-  # Main10 runtime. This is the build that produces shippable binaries, so it
-  # runs last and is allowed to be slow.
-  codecs:
-    name: Codecs (Windows, ${{ matrix.avx2 && 'AVX2' || 'SSE' }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        avx2: [false, true]
+  macos-codecs:
+    name: Codecs (macOS arm64)
+    runs-on: macos-26
     env:
-      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
     steps:
       - uses: actions/checkout@v4
-
-      # Hosted Windows images may ship a shallow or otherwise incomplete vcpkg
-      # repository. Check out the manifest baseline explicitly so cache misses
-      # remain reproducible instead of depending on runner image state.
-      - name: Check out the pinned vcpkg baseline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: brew install ninja pkg-config
+      - name: Check out pinned vcpkg baseline
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
           ref: 43643e1f5cf73db40d0d4bd610183348eb09b24e
-          path: .vcpkg
-
+          path: build-vcpkg
       - name: Bootstrap vcpkg
-        run: ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
-
-      - name: Activate the MSVC build environment
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Cache vcpkg binaries
+        run: build-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - uses: actions/cache@v4
+        with:
+          path: build-vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: vcpkg-${{ runner.os }}-
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
+      - name: Configure codecs
+        run: >-
+          cmake --preset macos-arm64-codecs
+          -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build-vcpkg/scripts/buildsystems/vcpkg.cmake"
+      - name: Build and test codecs, native contracts and C ABI
+        run: python3 scripts/test.py native --build-dir build
+      - name: GPL license gate
+        run: python3 .github/scripts/check_licenses.py build
 
-      - uses: lukka/get-cmake@latest
-
-      - name: Configure
-        env:
-          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg-cache,readwrite
-        run: >
-          cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DHYPERDR_ENABLE_AVX2=${{ matrix.avx2 && 'ON' || 'OFF' }}
-
+  macos-sanitizers:
+    name: C ABI (ASan + UBSan)
+    runs-on: macos-26
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: brew install ninja pkg-config
+      - name: Check out pinned vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 43643e1f5cf73db40d0d4bd610183348eb09b24e
+          path: build-vcpkg
+      - name: Bootstrap vcpkg
+        run: build-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - uses: actions/cache@v4
+        with:
+          path: build-vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
+      - name: Configure sanitizers
+        run: >-
+          cmake --preset macos-arm64-codecs -B build-asan
+          -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build-vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build-asan --parallel
+      - name: C ABI lifecycle and packaging
+        env:
+          UBSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-asan -R '^capi_(shared|static|package|package_rows)_test$' --output-on-failure
 
-      - name: Prepare the Main10 x265 runtime
-        run: >
-          powershell -NoProfile -ExecutionPolicy Bypass
-          -File scripts/prepare_x265_multibit.ps1
-          -VcpkgRoot "$env:VCPKG_ROOT"
-          -BuildDirectory ./build -Configuration Release
-
-      - uses: actions/setup-node@v4
+  apple-app:
+    name: Apple app (macOS 26 arm64)
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      VCPKG_ROOT: ${{ github.workspace }}/build-vcpkg
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: "20"
-
-      - name: Test native codecs and shared contracts
-        run: python scripts/test.py native --build-dir build --config Release
-
-      - name: Package the runtime
-        run: cpack --config build/CPackConfig.cmake -G ZIP -B dist -C Release
-
-      - name: Smoke-test the unpacked release
-        shell: pwsh
+          python-version: '3.12'
+      - name: Install build tools
+        run: brew install ninja pkg-config
+      - name: Show tool versions
         run: |
-          $archive = Get-ChildItem -LiteralPath dist -Filter "HyperDR-*-windows-x64.zip" |
-            Select-Object -First 1
-          if (-not $archive) { throw "CPack did not produce a release archive." }
-          ./packaging/test-release.ps1 -Archive $archive.FullName
-
-      - name: Upload the AVX2 release
-        if: success() && matrix.avx2
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
+      - name: Check out pinned vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 43643e1f5cf73db40d0d4bd610183348eb09b24e
+          path: build-vcpkg
+      - name: Bootstrap vcpkg
+        run: build-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - uses: actions/cache@v4
+        with:
+          path: build-vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
+      - name: Ensure Metal Toolchain
+        run: |
+          if ! xcodebuild -showComponent MetalToolchain 2>/dev/null | grep -q 'Status: installed'; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Test Apple app and Swift packages
+        run: python3 scripts/test.py apple
+      - name: Upload Apple logs
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: HyperDR-windows-x64-avx2
-          path: dist/HyperDR-*-windows-x64.zip
-          if-no-files-found: warn
-
-      - name: Upload the SSE release
-        if: success() && !matrix.avx2
-        uses: actions/upload-artifact@v4
-        with:
-          name: HyperDR-windows-x64
-          path: dist/HyperDR-*-windows-x64.zip
-          if-no-files-found: warn
+          name: apple-app-logs
+          path: |
+            build-apple/DerivedData/Logs
+            build-apple/**/*.xcresult
+          if-no-files-found: ignore

@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // Path comparison is shared by output-collision detection, self-overwrite
 // refusal, and the discovery walk that must not descend into its own output.
 // It used to exist in two copies with different platform behaviour.
@@ -17,6 +18,20 @@ void require(bool condition, const char* message) {
 
 void test_path_comparison() {
   const std::filesystem::path root = "out";
+#if defined(_WIN32) || defined(__APPLE__)
+  require(hyperdr::same_path("OUT", "out"), "case folding failed");
+  require(hyperdr::is_same_or_descendant("OUT/nested", root),
+          "descendant comparison did not fold case");
+#else
+  require(!hyperdr::same_path("OUT", "out"), "case-sensitive paths were folded");
+  require(!hyperdr::is_same_or_descendant("OUT/nested", root),
+          "descendant comparison folded case");
+#endif
+#ifdef __APPLE__
+  require(hyperdr::same_path(hyperdr::path_from_utf8("Été"),
+                           hyperdr::path_from_utf8("e\u0301TE\u0301")),
+          "Apple Unicode case/normalization comparison failed");
+#endif
   require(hyperdr::same_path("out", "./out"), "a redundant ./ changed the path key");
   require(hyperdr::is_same_or_descendant("out/nested/file.heic", root),
           "a descendant was not recognised");
@@ -32,7 +47,7 @@ void test_extension_is_case_insensitive() {
 }
 
 void test_atomic_write_round_trips() {
-  const auto directory = std::filesystem::temp_directory_path() / "hyperdr-file-io-test";
+  const auto directory = hyperdr::test::temporary_directory() / "hyperdr-file-io-test";
   std::filesystem::remove_all(directory);
   const auto target = directory / "nested" / "value.bin";
   const std::vector<std::uint8_t> bytes{1, 2, 3, 4};
@@ -41,11 +56,12 @@ void test_atomic_write_round_trips() {
 
   bool refused = false;
   try {
-    hyperdr::write_binary_file_atomic(target, bytes, false);
+    hyperdr::write_binary_file_atomic(target, {9, 8}, false);
   } catch (const std::exception&) {
     refused = true;
   }
   require(refused, "an existing output was overwritten without permission");
+  require(hyperdr::read_binary_file(target) == bytes, "refused write changed output");
   hyperdr::write_text_file_atomic(target, "replaced", true);
   require(hyperdr::read_binary_file(target).size() == 8, "overwrite did not replace");
   // No temporary may survive a successful publish.
@@ -58,8 +74,9 @@ void test_atomic_write_round_trips() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
+    require(hyperdr::available_memory_bytes() > 0, "available memory was not reported");
     test_path_comparison();
     test_extension_is_case_insensitive();
     test_atomic_write_round_trips();
@@ -69,4 +86,10 @@ int main() {
     std::cerr << "test failure: " << e.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

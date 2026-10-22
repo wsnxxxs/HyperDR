@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "fixtures": [
+    {
+      "id": "sony-ilce-7s-arw",
+      "filename": "sony-ilce-7s.ARW",
+      "camera": "Sony ILCE-7S",
+      "description": "14-bit compressed, APS-C crop; raw.pixls.us sample 1582",
+      "url": "https://raw.pixls.us/getfile.php/1582/nice/Sony%20-%20ILCE-7S%20-%2014bit%2014bit%20compressed%20%283:2%29.ARW",
+      "sha256": "a35ebb2fbec929daa5beb20d1ce5c15a8aac7b1a7a231455387f3df8a7442e07",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
+    },
+    {
+      "id": "canon-5d-iii-lossy-dng",
+      "filename": "canon-eos-5d-iii-lossy.dng",
+      "camera": "Adobe DNG Converter Canon EOS 5D Mark III",
+      "description": "RAW system-decoder and orientation regression; raw.pixls.us sample 1023",
+      "url": "https://raw.pixls.us/getfile.php/1023/nice/Adobe%20DNG%20Converter%20-%20Canon%20EOS%205D%20Mark%20III%20-%20Lossy%20JPEG%20compression%20(3:2).DNG",
+      "sha256": "159326856c29073e845c3c5a9ecf98c6474f43ca15798a88ad5e2baecd0664b7",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
+    },
+    {
+      "id": "leica-c-portrait-rwl",
+      "filename": "leica-c-portrait.RWL",
+      "camera": "Leica C (Typ 112)",
+      "description": "RAW system-decoder and orientation regression; raw.pixls.us sample 4963",
+      "url": "https://raw.pixls.us/getfile.php/4963/nice/Leica%20-%20C%20(Typ%20112)%20-%203:2.RWL",
+      "sha256": "95ff5be4dab1d8415ddcaae674a40d024d625d0684893fcaaa0139983611a455",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
+    }
+  ],
+  "generated_fixtures": [
+    {
+      "id": "gain-map-jpeg-iso-mono",
+      "filename": "gain-map-jpeg/iso-mono.jpg",
+      "sha256": "73703a0d2503738676a984a69a1a54a805a6564a4e37f87fad2ac6d04ffdeb03",
+      "source_revision": "a67a06d",
+      "description": "Generated with the E4q encode_gain_map_jpeg writer; 128x96 smooth base, half-size gain; independent E4c review fixture (dump.cpp generate).",
+      "license": "repository-generated synthetic test data"
+    },
+    {
+      "id": "gain-map-jpeg-iso-rgb",
+      "filename": "gain-map-jpeg/iso-rgb.jpg",
+      "sha256": "6d35a85726a1d7c8dc537908f4078b20cc85e6e4691a6cbc051aba90423446e4",
+      "source_revision": "a67a06d",
+      "description": "Generated with the E4q encode_gain_map_jpeg writer; 128x96 smooth base, half-size gain; independent E4c review fixture (dump.cpp generate).",
+      "license": "repository-generated synthetic test data"
+    },
+    {
+      "id": "gain-map-jpeg-xmp-and-iso",
+      "filename": "gain-map-jpeg/xmp-and-iso.jpg",
+      "sha256": "00a0f6b2be634e0c9c2a22514a034f46039a6cdf72c1f941a86efa6cfbf1db08",
+      "source_revision": "e03ee73",
+      "description": "Generated with the pre-E4 encode_ultrahdr_jpeg path; UHDR_WRITE_XMP=ON, UHDR_WRITE_ISO=ON; constant 128x96 P3 base .25, 64x48 mono gain .6, gain max and alternate headroom 2 stops, q95.",
+      "license": "repository-generated synthetic test data"
+    },
+    {
+      "id": "gain-map-jpeg-xmp-only",
+      "filename": "gain-map-jpeg/xmp-only.jpg",
+      "sha256": "b07b0eb279264ee56d4b008969644023a7d9159774075647bc56829507115c5b",
+      "source_revision": "e03ee73",
+      "description": "Generated with the pre-E4 encode_ultrahdr_jpeg path; UHDR_WRITE_XMP=ON, UHDR_WRITE_ISO=OFF; constant 128x96 P3 base .25, 64x48 mono gain .6, gain max and alternate headroom 2 stops, q95.",
+      "license": "repository-generated synthetic test data"
+    }
+  ]
+}

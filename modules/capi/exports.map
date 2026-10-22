@@ -1,0 +1,19 @@
+{
+  global:
+    hyperdr_abi_version;
+    hyperdr_version;
+    hyperdr_frame_layout;
+    hyperdr_string_free;
+    hyperdr_error_free;
+    hyperdr_engine_create;
+    hyperdr_engine_destroy;
+    hyperdr_capabilities;
+    hyperdr_probe;
+    hyperdr_package;
+    hyperdr_package_rows;
+    hyperdr_package_rows_supported;
+    hyperdr_cancel_create;
+    hyperdr_cancel_request;
+    hyperdr_cancel_destroy;
+  local: *;
+};

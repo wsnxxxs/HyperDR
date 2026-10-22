@@ -4,7 +4,7 @@
 // front-ends (raw decode, HEIC encode) and the core unit tests. Keeping the
 // maths here means the risky parts (wide-gamut conversion, dithered
 // quantization) are testable in the dependency-free core build even though the
-// LibRaw/libheif front-ends are not.
+// system/third-party codec front-ends are not.
 
 #include <algorithm>
 #include <array>
@@ -47,156 +47,6 @@ enum class ColorGamut : std::uint8_t {
   return std::max(0.0F, 0.2289746F * r + 0.6917385F * g + 0.0792869F * b);
 }
 
-// LibRaw XYZ output (output_color = 5), D65-adapted via the camera matrix and
-// camera white balance, converted to linear Display P3 (D65). Matrix verified
-// numerically: it is the inverse of the standard Display-P3(linear)->XYZ(D65)
-// matrix, whose luminance row equals the P3 coefficients used elsewhere.
-// Colours outside P3 produce a negative component and are clamped to the P3
-// gamut boundary here rather than being pre-clipped to Rec.709 during decode.
-//
-// No production caller: raw_decoder.cpp takes camera RGB from LibRaw
-// (output_color = 0) and applies the camera matrix in float, because every
-// LibRaw output space is converted in clamped 16-bit integers -- XYZ's 1.0888
-// Z row sum clips neutral highlights there. This conversion is what the XYZ
-// path needed, and only color_dither_test still exercises it. Delete it with
-// that test if the XYZ option is never revisited.
-[[nodiscard]] inline std::array<float, 3> xyz_d65_to_linear_p3(float X, float Y,
-                                                               float Z) {
-  return {std::max(0.0F, 2.4934969F * X - 0.9313836F * Y - 0.4027108F * Z),
-          std::max(0.0F, -0.8294890F * X + 1.7626641F * Y + 0.0236247F * Z),
-          std::max(0.0F, 0.0358458F * X - 0.0761724F * Y + 0.9568845F * Z)};
-}
-
-// LibRaw's ProPhoto primaries (D65-referred, output_color = 4), linear, to
-// linear Display P3. RAW decode reads the camera RGB of a camera LibRaw has no
-// matrix for as ProPhoto, as LibRaw's own ProPhoto output did. Keep this
-// transform linear: negative out-of-P3 components and values above 1 carry
-// real colour/headroom data and must not be clipped during RAW decode.
-[[nodiscard]] inline std::array<float, 3> prophoto_to_linear_p3(float r, float g,
-                                                                float b) {
-  return {1.63242344F * r - 0.37959635F * g - 0.25282168F * b,
-          -0.15369219F * r + 1.16669685F * g - 0.01300747F * b,
-          0.01038550F * r - 0.06280994F * g + 1.05242565F * b};
-}
-
-// Linear Display P3 to linear RGB on the ACES AP1 primaries with the D65 white
-// point kept (no chromatic adaptation), so a neutral stays r = g = b. RAW
-// decode compresses camera colours into this gamut, which contains P3. Rows
-// sum to exactly 1.
-[[nodiscard]] inline std::array<float, 3> linear_p3_to_ap1_d65(float r, float g,
-                                                               float b) {
-  return {0.74081772F * r + 0.20525316F * g + 0.05392912F * b,
-          0.04681978F * r + 0.93920143F * g + 0.01397879F * b,
-          0.00352700F * r + 0.03889024F * g + 0.95758276F * b};
-}
-
-// The inverse of linear_p3_to_ap1_d65, unclamped: an AP1 colour outside P3
-// keeps its negative P3 component.
-[[nodiscard]] inline std::array<float, 3> ap1_d65_to_linear_p3(float r, float g,
-                                                               float b) {
-  return {1.36892298F * r - 0.29615123F * g - 0.07277175F * b,
-          -0.06820785F * r + 1.08013432F * g - 0.01192647F * b,
-          -0.00227194F * r - 0.04277662F * g + 1.04504856F * b};
-}
-
-// Smooth gamut compression with the curve of the ACES Reference Gamut
-// Compression. Each component's distance from the achromatic axis,
-// (max - c) / max, is 1 on the gamut boundary and above 1 outside it.
-// Distances up to the threshold are kept; above it they bend, with no jump in
-// slope, so that a chosen limit lands on the boundary.
-//
-// The thresholds sit just above the farthest P3 reaches in AP1 (0.9437,
-// 0.9854 and 0.9952, at its primaries), so no colour inside P3 changes. A
-// common 0.95 was smoother but moved P3 red toward magenta by 6 CIEDE2000:
-// AP1's red-green edge runs along x + y = 1, as P3 red and the spectral locus
-// from yellow to red do, so real colours there reach distance 1 in blue.
-inline constexpr std::array<float, 3> kGamutCompressionThresholds{0.945F, 0.987F, 0.9955F};
-inline constexpr float kGamutCompressionPower = 1.2F;
-
-// The largest distance, per component, that non-negative mixes of `colors`
-// (the first `count` of them) reach: compressing to these limits brings every
-// such mix inside the gamut. Along the edge between two colours the distance
-// peaks at an end or where two components cross, and over all mixes it peaks
-// on such an edge. A point whose largest component is not positive has no
-// distance and is skipped; if a mix is such a point, the limits are no longer
-// a bound.
-[[nodiscard]] inline std::array<float, 3> gamut_compression_limits(
-    const std::array<std::array<float, 3>, 4>& colors, std::size_t count) {
-  std::array<double, 3> limits{};
-  const auto visit = [&limits](const std::array<double, 3>& rgb) {
-    const double achromatic = std::max({rgb[0], rgb[1], rgb[2]});
-    if (!(achromatic > 0.0)) return;
-    for (std::size_t i = 0; i < 3; ++i) {
-      limits[i] = std::max(limits[i], (achromatic - rgb[i]) / achromatic);
-    }
-  };
-  const auto at = [&colors](std::size_t index) {
-    return std::array<double, 3>{colors[index][0], colors[index][1], colors[index][2]};
-  };
-  count = std::min(count, colors.size());
-  for (std::size_t a = 0; a < count; ++a) {
-    const auto start = at(a);
-    visit(start);
-    for (std::size_t b = a + 1; b < count; ++b) {
-      const auto end = at(b);
-      for (std::size_t j = 0; j < 3; ++j) {
-        for (std::size_t k = j + 1; k < 3; ++k) {
-          const double from = start[j] - start[k];
-          const double to = end[j] - end[k];
-          if (!((from > 0.0 && to < 0.0) || (from < 0.0 && to > 0.0))) continue;
-          const double t = from / (from - to);
-          visit({start[0] + t * (end[0] - start[0]), start[1] + t * (end[1] - start[1]),
-                 start[2] + t * (end[2] - start[2])});
-        }
-      }
-    }
-  }
-  return {static_cast<float>(limits[0]), static_cast<float>(limits[1]),
-          static_cast<float>(limits[2])};
-}
-
-// The curve's scale for each limit, computed once per image. Zero where the
-// limit is at most 1 (or not finite): nothing reaches past the boundary there,
-// so that component is left alone.
-[[nodiscard]] inline std::array<float, 3> gamut_compression_scales(
-    const std::array<float, 3>& limits) {
-  const double power = kGamutCompressionPower;
-  std::array<float, 3> scales{};
-  for (std::size_t i = 0; i < 3; ++i) {
-    const double threshold = kGamutCompressionThresholds[i];
-    const double limit = limits[i];
-    if (!(limit > 1.0) || !std::isfinite(limit)) continue;
-    scales[i] = static_cast<float>(
-        (limit - threshold) /
-        std::pow(std::pow((1.0 - threshold) / (limit - threshold), -power) - 1.0,
-                 1.0 / power));
-  }
-  return scales;
-}
-
-// Compresses r, g, b toward their largest component with the scales above.
-// Scale-invariant, so highlight headroom passes through; a colour whose
-// largest component is not positive has no hue to keep and becomes black.
-[[nodiscard]] inline std::array<float, 3> compress_gamut(
-    float r, float g, float b, const std::array<float, 3>& scales) {
-  const float achromatic = std::max({r, g, b});
-  if (!(achromatic > 0.0F)) return {0.0F, 0.0F, 0.0F};
-  std::array<float, 3> rgb{r, g, b};
-  for (std::size_t i = 0; i < 3; ++i) {
-    const float threshold = kGamutCompressionThresholds[i];
-    const float distance = (achromatic - rgb[i]) / achromatic;
-    if (!(scales[i] > 0.0F) || !(distance > threshold)) continue;
-    // threshold + scale * x / (1 + x^p)^(1/p), written so that a far-out
-    // distance approaches threshold + scale instead of overflowing.
-    const float excess = (distance - threshold) / scales[i];
-    const float compressed =
-        threshold + scales[i] / std::pow(1.0F + std::pow(excess, -kGamutCompressionPower),
-                                         1.0F / kGamutCompressionPower);
-    rgb[i] = achromatic * (1.0F - compressed);
-  }
-  return rgb;
-}
-
 // Linear Rec.2020 (BT.2100 HDR files, Ultra HDR BT.2100 images, PQ and HLG
 // LUT outputs) to linear Display P3, unclamped. A Rec.2020 colour outside P3
 // keeps its negative P3 component: clamping each channel here shifted its hue
@@ -212,7 +62,7 @@ inline constexpr float kGamutCompressionPower = 1.2F;
 // Rec.709/sRGB primaries to Display P3, both linear and D65. This is the
 // inverse of the P3->709 matrix used by is_outside_rec709 below, and is needed
 // when an input already carries Rec.709 primaries (an Ultra HDR JPEG decoded
-// through libultrahdr, for example) and has to enter the P3 working space.
+// from a gain-map JPEG, for example) and has to enter the P3 working space.
 [[nodiscard]] inline std::array<float, 3> rec709_to_linear_p3(float r, float g,
                                                               float b) {
   return {std::max(0.0F, 0.82246197F * r + 0.17753803F * g),
@@ -223,8 +73,6 @@ inline constexpr float kGamutCompressionPower = 1.2F;
 // The inverse matrix without the defensive P3-channel floor. Gamut fitting
 // calls this only with a colour already inside the Rec.709 cube; retaining the
 // un-clamped form avoids hiding the result of the hue-preserving compression.
-// RAW decode also carries LibRaw's camera->linear sRGB matrix through it, where
-// a negative component is a real colour outside the sRGB gamut.
 [[nodiscard]] inline std::array<float, 3> rec709_to_linear_p3_unclamped(
     float r, float g, float b) {
   return {0.82246197F * r + 0.17753803F * g,

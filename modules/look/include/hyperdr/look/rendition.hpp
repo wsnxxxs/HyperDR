@@ -1,42 +1,11 @@
 #pragma once
 #include "hyperdr/look/options.hpp"
-#include "hyperdr/look/analysis.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/image/frame.hpp"
 #include "hyperdr/image/color.hpp"
 #include <array>
 #include <optional>
-#include <span>
-
 namespace hyperdr {
-struct RenderOptions {
-  // Keep the rendered base and its gain-map reconstruction inside sRGB
-  // chromaticity while retaining HDR luminance headroom.
-  bool clamp_srgb{false};
-  // Target for the HDR rendition; the SDR base remains Display P3.
-  // BT.2100 PQ/HLG callers select Rec.2020; gain-map output keeps P3.
-  ColorGamut hdr_gamut{ColorGamut::kDisplayP3};
-  bool auto_exposure{true};
-  float exposure_ev{0.0F};
-  // Creative offset applied after automatic or manual exposure selection.
-  // Unlike HDR gain controls, this moves the SDR base and HDR rendition together.
-  //
-  // Zero, which is what the documentation has always said and what the panel
-  // has always sent explicitly. It defaulted to +1 EV here, so a bare
-  // `HyperDR convert` brightened every file by a stop that nothing in the run
-  // reported as a decision -- least visibly on a display-referred input, where
-  // it also pushed diffuse white into the top codes of the SDR base.
-  float exposure_bias_ev{0.0F};
-  bool auto_headroom{true};
-  float headroom_stops{3.0F};
-  float gain_strength{1.0F};
-  // Optional cap used only when an external/model gain map is replayed. It is
-  // deliberately separate from `headroom_stops`: the model's development
-  // recipe must remain intact so its SDR base stays reproducible, while the
-  // selected output format may still impose a lower display ceiling.
-  float output_headroom_limit_stops{-1.0F};
-  LookOptions look{};
-};
-
 struct RenderStats {
   float exposure_ev{0.0F};
   std::optional<float> ev100;
@@ -71,29 +40,21 @@ struct RenderStats {
   bool adaptive_chroma_loss{false};
 };
 
-// Owned by an interactive caller, invalidated when source, render target or any
-// option except gain strength changes. Ordinary exports do not allocate caches.
-struct BaseRenderCache {
-  FloatImage base;
-  std::vector<float> luminance;
-};
-struct GainMapPreparation {
-  bool ready{false};
-  std::uint32_t width{}, height{};
-  float exposure_ev{}, requested_stops{}, weight_mean{1}, weight_p95{1};
-  std::vector<float> stops, local_average;
-  BaseRenderCache base;
-  RenderStats base_stats;
-};
-
-
-// Float renditions are the render contract. SDR-only has an empty hdr buffer.
-// No container, encoded gain codes or ISO metadata belong in this layer.
-enum class RenderTarget { Sdr, Hdr };
-RenderOptions render_options_for_target(RenderOptions options, RenderTarget target);
 struct PhotoRenditions {
   FloatImage sdr;
   FloatImage hdr;
+  // A framed gain-map export owns only the SDR canvas and the HDR photograph.
+  // Outside this rectangle the alternate is exactly the SDR canvas pixel.
+  std::optional<FrameRect> hdr_photo;
+  [[nodiscard]] const float* hdr_pixel(std::uint32_t x, std::uint32_t y) const noexcept {
+    if (hdr_photo) {
+      const auto& r = *hdr_photo;
+      if (x < r.x || y < r.y || x - r.x >= r.width || y - r.y >= r.height)
+        return sdr.pixels.data() + (static_cast<std::size_t>(y) * sdr.width + x) * 3;
+      return hdr.pixels.data() + (static_cast<std::size_t>(y - r.y) * hdr.width + x - r.x) * 3;
+    }
+    return hdr.pixels.data() + (static_cast<std::size_t>(y) * hdr.width + x) * 3;
+  }
   // The HDR rendition is the photograph itself rather than an expansion the
   // renderer invented, so a gain map must decode back to it pixel for pixel.
   // Set for a display-referred HDR input; the packager derives the base from
@@ -103,32 +64,15 @@ struct PhotoRenditions {
   bool hdr_is_source{false};
   bool dual_rendition{false};
   std::uint32_t authored_gain_channels{1};
+  // A model or external gain grid: the stored gain map keeps the grid's
+  // channel count instead of one chosen from the codes' content.
+  bool fixed_gain_channels{false};
   AuthoredGainMap authored_gain_map{};
   RenderStats stats;
   bool clamp_srgb{false};
   ColorGamut hdr_gamut{ColorGamut::kDisplayP3};
   // Selection made before creative grading; reused after gain quantization.
-  std::vector<std::uint8_t> below_knee;
+  BytePlane below_knee;
 };
-void measure_rendition_stats(RenderStats& stats, const FloatImage& sdr,
-    const FloatImage& hdr, std::span<const std::uint8_t> below_knee = {});
-// Final SDR output gamut mapping, after creative colour processing.
 void fit_sdr_to_srgb(FloatImage& image);
-void validate_render_options(const RenderOptions& options);
-float photographic_exposure_ev(const FloatImage& source,
-    const RenderOptions& options, const CaptureMetadata& capture = {},
-    const PhotographicAnalysis* analysis = nullptr);
-void prepare_photographic_render(const FloatImage& source,
-    const RenderOptions& options, const CaptureMetadata& capture,
-    const PhotographicAnalysis* analysis, GainMapPreparation& prepared);
-std::array<float, 3> render_common_chroma(float r, float g, float b,
-    float source_y, float sdr_y, float hdr_y, float peak, const LookOptions& look);
-std::array<float, 3> render_hdr_chroma(float r, float g, float b,
-    float source_y, float hdr_y, float peak, const LookOptions& look,
-    ColorGamut gamut);
-PhotoRenditions render_renditions(const FloatImage& source,
-    const RenderOptions& options, const CaptureMetadata& capture,
-    const InputDescription& input, RenderTarget target,
-    const PhotographicAnalysis* analysis = nullptr,
-    GainMapPreparation* preparation = nullptr);
-}  // namespace hyperdr
+}

@@ -1,9 +1,10 @@
 #pragma once
+#include "hyperdr/foundation/progress.hpp"
 
 // Decoding any supported input into the pipeline's one working space: linear
 // Display P3, 32-bit float, unbounded above 1.
 //
-// Common RAW extensions go through LibRaw; JPEG, PNG and HEIC through their own
+// Common RAW extensions go through CIRAWFilter; JPEG, PNG and HEIC through their own
 // codecs; an Ultra HDR JPEG is read through its gain map rather than through its
 // backward-compatible SDR primary, so re-exporting one does not discard the
 // captured highlight range. Everything downstream sees one image type and does
@@ -11,6 +12,7 @@
 
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/frame.hpp"
 #include "hyperdr/image/image.hpp"
 #include "hyperdr/image/source_color.hpp"
 #include "hyperdr/look/options.hpp"
@@ -29,8 +31,8 @@
 
 namespace hyperdr {
 
-// These are filename filters for discovery/UI only. LibRaw remains the
-// authority on the file contents, so accepting an extension here does not make
+// These are filename filters for discovery/UI only. CIRAWFilter decides
+// whether the actual file is supported, so accepting an extension here does not make
 // a malformed or unsupported file decode successfully.
 inline constexpr std::array<std::string_view, 30> kRawInputExtensions{
     ".3fr", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr",
@@ -45,46 +47,35 @@ inline constexpr std::array<std::string_view, 30> kRawInputExtensions{
   return false;
 }
 
+class RawUnsupported : public std::runtime_error {
+ public:
+  RawUnsupported(std::string container, std::string model);
+  [[nodiscard]] std::string detail_json() const;
+  std::string container, model;
+};
+
 class RawMemoryError : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
 };
 
-enum class HighlightRecovery {
-  Clip,
-  Unclip,
-  Blend,
-  Reconstruct,
+// Input failures retain the decoder's diagnostic text while the C ABI maps
+// their types to stable error codes. Options and resource admission stay separate.
+class SourceUnreadable : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
 };
-
-[[nodiscard]] const char* highlight_recovery_name(HighlightRecovery mode);
-[[nodiscard]] std::optional<HighlightRecovery> highlight_recovery_from_name(
-    std::string_view name);
-
-// The four common 2x2 Bayer arrangements. The value is the sensor-coordinate
-// arrangement, not the orientation of the rendered RGB image.
-enum class BayerPattern {
-  Unknown,
-  RGGB,
-  BGGR,
-  GRBG,
-  GBRG,
+class UnsupportedFormat : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+  UnsupportedFormat(std::string message, std::string feature);
+  [[nodiscard]] std::string detail_json() const;
+ private:
+  std::string feature_;
 };
-
-[[nodiscard]] const char* bayer_pattern_name(BayerPattern pattern);
-
-// A calibrated, single-sample-per-site RAW mosaic. Samples are returned after
-// LibRaw's metadata-driven black subtraction and are normalized by the
-// post-black white level. Thus `black_level` is zero in this returned domain,
-// `white_level` is the corresponding post-black saturation level, and values
-// above 1.0 remain possible after an explicit digital gain.
-struct RawMosaic {
-  FloatImage samples;
-  BayerPattern pattern{BayerPattern::Unknown};
-  std::array<float, 4> black_level{};
-  std::array<float, 4> white_level{};
-  std::uint32_t bit_depth{};
-  bool black_level_corrected{false};
+class DecodeFailed : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
 };
 
 struct RawLensMetadata {
@@ -94,44 +85,16 @@ struct RawLensMetadata {
 [[nodiscard]] RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path);
 
 struct RawDecodeOptions {
-  // User-owned DCP camera profile; empty preserves the native rendering path.
-  std::filesystem::path profile;
-  std::filesystem::path look_profile;
-  std::filesystem::path lens_profile;
   // Primaries used only when a raster lacks a colour description (ICC, CICP,
   // or PNG sRGB/cHRM). RAW uses its camera matrix and ignores it.
   ColorGamut default_gamut{ColorGamut::kSrgb};
-  // LibRaw's unclip mode can leave strongly magenta clipped highlights when
-  // sensor channels saturate at different levels. Blend is the conservative
-  // default: it removes false colour while retaining highlight luminance.
-  HighlightRecovery highlight_recovery{HighlightRecovery::Blend};
-  // LibRaw's fixed 1/2-per-axis demosaic, used only by fast preview callers.
-  // Full export callers leave this false; the decoder never enables it
-  // automatically in response to an internal memory estimate.
-  bool half_size{false};
+  bool lens_correction{true};
+  std::string source_sha256; // Optional session identity, in addition to stat timestamps.
+  ProgressSink* progress_sink{nullptr};
   // When an external canonical gain grid is supplied, decode only the SDR
   // base of an embedded Apple/Ultra HDR container. Applying the embedded map
   // first would double-count the same gain before the external grid is used.
   bool ignore_embedded_gain_map{false};
-  // Optional dcraw-format x y timestamp map, in original visible-area
-  // coordinates. Corrected from same-CFA neighbours before DefaultCrop.
-  std::filesystem::path bad_pixel_map;
-  // Optional 16-bit P5 PGM matching the original visible area. Its measured
-  // bias replaces metadata black; source and dark use the same optional LUT.
-  std::filesystem::path dark_frame;
-  // Optional text LUT for sensor-code linearization. Format: one integer N,
-  // followed by N output samples; values are code values unless all are in
-  // [0,1], in which case they are interpreted as normalized code values.
-  // Must be nondecreasing. Pixel, black and white are transformed together;
-  // the corrected code range is rebased to 0..65535 before LibRaw processing.
-  std::filesystem::path linearization_lut;
-  // Optional text lens-shading map. Format: `width height channels` followed
-  // by row-major gains; channels may be 1, 3 (RGB), or 4 (R,G1,B,G2).
-  // Covers the original visible area before DefaultCrop or orientation.
-  std::filesystem::path lens_shading_map;
-  // Conservative opt-in detector for saturated hot pixels and zero/dead
-  // pixels. It only replaces extreme outliers using same-CFA neighbours.
-  bool auto_bad_pixel_correction{false};
   // A hint, not an output size: the caller still resamples to the exact edge
   // afterwards, and zero means "decode at full size" exactly as before.
   //
@@ -141,8 +104,8 @@ struct RawDecodeOptions {
   // resample still produces the exact size. See preview_decode_floor() in
   // internal/budget.hpp for what that costs and why a preview may pay it.
   //
-  // RAW ignores this and uses `half_size` instead: LibRaw's reduction is a
-  // demosaic choice, not a resampling one.
+  // RAW selects the smallest CIRAWFilter scale in {1/8, 1/4, 1/2, 1}
+  // that still covers the requested edge.
   std::uint32_t preview_max_edge{0};
   // Float scene-linear multiplier after RAW decoding/calibration. It cannot
   // recover earlier sensor clipping, and automatic exposure may compensate
@@ -150,7 +113,30 @@ struct RawDecodeOptions {
   float digital_gain{1.0F};
 };
 
+struct RawProcessing {
+  std::string engine{"apple-ciraw"}, decoder_version, os_build;
+  float digital_gain{1}, baseline_exposure{};
+  bool lens_correction_supported{}, lens_correction_applied{};
+  float scale{1};
+  std::uint32_t block_rows{512};
+};
+struct RawHeader {
+  std::uint32_t width{}, height{};
+  RawProcessing processing;
+};
+[[nodiscard]] RawHeader probe_apple_raw(const std::filesystem::path& path);
+[[nodiscard]] std::string raw_os_build();
+float raw_preview_scale(const std::filesystem::path& path, std::uint32_t edge);
+[[nodiscard]] float raw_preview_scale(std::uint32_t max_edge,std::uint32_t source_long_edge);
+void release_apple_raw_cache(const std::filesystem::path& path);
+
 struct DecodeInfo {
+  std::optional<RawProcessing> raw;
+  // Upright full-resolution output after the accepted default crop and RAW
+  // geometry (including pixel aspect/Fuji). Recorded before preview reduction;
+  // unlike target_* these describe the delivered photo even if a crop is rejected.
+  std::uint32_t source_width{};
+  std::uint32_t source_height{};
   // The stored RAW sensor raster, including margins when the format exposes
   // them. These are sensor coordinates and are deliberately *not* rotated by
   // the capture orientation, unlike target_* and decoded_*: this is the shape
@@ -159,18 +145,12 @@ struct DecodeInfo {
   // reduction or orientation; target_* is the upright full-resolution area.
   std::uint32_t sensor_width{};
   std::uint32_t sensor_height{};
-  // The full-resolution photographic area requested by DefaultCrop, after
-  // orientation. When no DefaultCrop is present this is LibRaw's visible area.
-  //
-  // This is the DefaultCrop raster only. It does not include the pixel-aspect
-  // or Fuji-SuperCCD geometric stretch that LibRaw applies in
-  // adjust_sizes_info_only() *before* the orientation swap, so it disagrees
-  // with decoded_* for any input whose pixel_aspect != 1 or that carries Fuji
-  // data -- which a DNG container can, not just a RAF.
+  // The upright full-resolution photographic area selected by the decoder,
+  // before a preview scale is applied.
   std::uint32_t target_width{};
   std::uint32_t target_height{};
-  // Sensor-coordinate origins for the metadata request and the CFA-aligned
-  // crop LibRaw actually used. Dimensions above/below are orientation-aware;
+  // Sensor-coordinate origins for the metadata request and delivered crop.
+  // Dimensions above/below are orientation-aware;
   // origins deliberately are not and are paired with metadata.orientation.
   std::uint32_t requested_crop_left{};
   std::uint32_t requested_crop_top{};
@@ -216,17 +196,6 @@ struct DecodedImage {
   }
   PhotoMetadata metadata;
   CaptureMetadata capture;
-  // Actual RAW WB selection; empty for non-RAW inputs.
-  std::string raw_white_balance;
-  // Where the RAW camera matrix came from: `embedded` (the file's own matrix,
-  // such as a DNG ColorMatrix), `libraw` (LibRaw's per-model table), or `none`
-  // (no matrix; camera RGB is read as ProPhoto). Empty for non-RAW inputs.
-  std::string raw_color_matrix;
-  std::filesystem::path raw_profile_path;
-  std::filesystem::path raw_look_path;
-  std::filesystem::path raw_lens_profile_path;
-  std::string raw_lens_correction;
-  std::shared_ptr<const DcpRenderContext> raw_profile;
   DecodeInfo decode;
   // Usable HDR range above diffuse white as a linear multiple of 1.0.
   // PQ/HLG use their transfer capacity. Gain-map inputs use the measured
@@ -264,14 +233,14 @@ struct DecodedImage {
       return {InputDomain::kDisplayReferredSdr, 1.0F};
     }
     if (domain == InputDomain::kDualRendition && authored_sdr.has_value()) {
-      return {domain, hdr_headroom, raw_profile, content_peak_nits,
+      return {domain, hdr_headroom, content_peak_nits,
               &*authored_sdr, gain_map};
     }
-    if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F, raw_profile};
+    if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F};
     if (!(hdr_headroom > 1.0F) || !std::isfinite(hdr_headroom)) {
       return {InputDomain::kDisplayReferredSdr, 1.0F};
     }
-    return {InputDomain::kDisplayReferredHdr, hdr_headroom, {}, content_peak_nits};
+    return {InputDomain::kDisplayReferredHdr, hdr_headroom, content_peak_nits};
   }
 };
 
@@ -288,18 +257,6 @@ struct DecodedImage {
 [[nodiscard]] DecodedImage decode_image(const std::filesystem::path& path,
                                         const RawDecodeOptions& options = {});
 
-// Decode a Bayer RAW without demosaicing. This is the RAW-domain entry point
-// for denoising, HDR fusion, low-light enhancement, and neural-network input.
-// The returned raster is the visible sensor raster in sensor coordinates; it
-// is not rotated or DefaultCrop-trimmed. Non-Bayer/X-Trans inputs are rejected
-// rather than silently packed as if they were RGGB.
-[[nodiscard]] RawMosaic decode_raw_mosaic(
-    const std::filesystem::path& path, const RawDecodeOptions& options = {});
-
-// Repack a calibrated Bayer raster to H/2 x W/2 x 4 in the fixed order
-// R, Gr, Gb, B. The operation requires even dimensions and a known 2x2 CFA.
-[[nodiscard]] FloatImage pack_bayer(const RawMosaic& mosaic);
-
 // Ultra HDR JPEG/R input: applies the embedded gain map and returns the linear
 // HDR rendition instead of the SDR primary image.
 [[nodiscard]] bool is_ultrahdr_jpeg_file(const std::filesystem::path& path);
@@ -309,30 +266,5 @@ struct DecodedImage {
 // authoritative because AVIF and HEIF share the same container family.
 [[nodiscard]] bool is_avif_file(const std::filesystem::path& path);
 [[nodiscard]] DecodedImage decode_avif(const std::filesystem::path& path);
-
-struct PreviewJpeg {
-  std::vector<std::uint8_t> bytes;
-  // Transport divisor for display-referred HDR inputs. Scene-referred RAW
-  // remains unscaled and carries its photographic exposure separately.
-  float scale{1.0F};
-  float exposure_ev{0.0F};
-};
-
-// A bounded 8-bit compatibility thumbnail. The browser panel uses the native
-// float `preview-frame` command instead; this remains a public CLI utility.
-//
-// `options` is the same RAW decode configuration the conversion uses, and it
-// has to be: a preview built with different highlight recovery than the export
-// is a preview of a different image, which is exactly how the panel came to
-// show a picture that no setting could change. The caller owns the speed/detail
-// trade-off through `options.half_size`.
-// `apply_scene_exposure` is reserved for model inputs: it turns a RAW's
-// scene-linear values into the exposure-normalized SDR domain expected by the
-// external gain model. Browser previews keep it false and apply the returned
-// exposure anchor in their linear renderer instead.
-[[nodiscard]] PreviewJpeg encode_preview_jpeg(
-    const std::filesystem::path& path, std::uint32_t max_edge = 2048,
-    int quality = 85, const RawDecodeOptions& options = {},
-    bool apply_scene_exposure = false);
 
 }  // namespace hyperdr

@@ -109,7 +109,7 @@ std::optional<std::size_t> tiff_start(const std::uint8_t* data,
         (static_cast<std::uint64_t>(data[1]) << 16) |
         (static_cast<std::uint64_t>(data[2]) << 8) | data[3];
     // ISO BMFF Exif items store the TIFF offset relative to the byte after the
-    // offset field. libheif normally emits zero, but accept a non-zero prefix.
+    // offset field. Writers normally emit zero, but accept a non-zero prefix.
     if (relative <= size - 4 && is_tiff(4 + static_cast<std::size_t>(relative))) {
       return 4 + static_cast<std::size_t>(relative);
     }
@@ -307,8 +307,21 @@ std::vector<std::uint8_t> build_ifd(const std::vector<Entry>& entries, std::uint
 
 }  // namespace
 
+bool has_dng_version_ifd0(const std::uint8_t* bytes, std::size_t size) {
+  size=std::min<std::size_t>(size,64*1024);
+  const auto start=tiff_start(bytes,size);
+  if(!start || *start!=0 || size<8)return false;
+  const TiffView tiff{bytes,size,bytes[0]=='M'};
+  const auto ifd=tiff.u32(4);if(!ifd || *ifd<8)return false;
+  const auto count=tiff.u16(*ifd);
+  if(!count || *count>512 || !tiff.contains(*ifd,2ULL+12ULL * *count+4))return false;
+  for(unsigned i=0;i<*count;++i)
+    if(tiff.u16(std::uint64_t(*ifd)+2+12ULL*i).value_or(0)==50706)return true;
+  return false;
+}
+
 std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& m) {
-  // libheif expects a TIFF payload; it prepends the HEIF Exif item offset field itself.
+  // A bare TIFF payload; the HEIF writer prepends the Exif item offset field.
   std::vector<Entry> exif_entries;
   if (!m.date_time.empty()) exif_entries.push_back(ascii(0x9003, m.date_time));
   if (m.exposure_seconds > 0) exif_entries.push_back(rational_value(0x829A, m.exposure_seconds));

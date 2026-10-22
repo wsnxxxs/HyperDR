@@ -8,4 +8,13 @@ hyperdr_add_module(foundation
     src/json_writer.cpp
   DEPENDS Threads::Threads)
 
+if(WIN32)
+  target_sources(hyperdr_foundation PRIVATE src/file_io_windows.cpp)
+else()
+  target_sources(hyperdr_foundation PRIVATE src/file_io_posix.cpp)
+  if(APPLE)
+    target_link_libraries(hyperdr_foundation PRIVATE "-framework CoreFoundation")
+  endif()
+endif()
+
 add_subdirectory(tests)

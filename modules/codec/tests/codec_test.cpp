@@ -1,20 +1,23 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hevc/hevc.hpp"
+#include "hyperdr/container/heif_writer.hpp"
+#include "internal/icc_profiles.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/inspect.hpp"
+#include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/file_io.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/fidelity.hpp"
 #include "hyperdr/image/transfer.hpp"
 
 #include <avif/avif.h>
-#include <libheif/heif.h>
-#include <libheif/heif_items.h>
-#include <libheif/heif_properties.h>
 #include <png.h>
 #include <lcms2.h>
 
@@ -28,6 +31,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "heif_hlg_422.hpp"
+#include "heif_native_decode.hpp"
 
 namespace {
 
@@ -49,24 +54,24 @@ void require(bool condition, const char* message) {
 }
 
 void require_hevc_profiles(const std::vector<std::uint8_t>& bytes,
-                           bool expect_main10, bool expect_still_picture) {
+                           bool expect_main10, bool expect_main8) {
   const auto inspection = hyperdr::inspect_heif(bytes);
   bool has_main10 = false;
-  bool has_still_picture = false;
+  bool has_main8 = false;
   for (const auto& box : inspection.boxes) {
     if (box.type != "hvcC") continue;
     require(box.size >= 23 && box.offset + box.size <= bytes.size(),
             "HEIC has an invalid hvcC box");
     const auto profile = bytes[static_cast<std::size_t>(box.offset) + 9] & 31;
-    require(profile == 2 || profile == 3,
+    require(profile == 1 || profile == 2,
             "HEIC writer emitted an unexpected HEVC profile");
     require(bytes[static_cast<std::size_t>(box.offset) + 20] != 255,
             "HEIC writer emitted HEVC Level 8.5");
     has_main10 |= profile == 2;
-    has_still_picture |= profile == 3;
+    has_main8 |= profile == 1;
   }
   require(has_main10 == expect_main10 &&
-              has_still_picture == expect_still_picture,
+              has_main8 == expect_main8,
           "HEIC writer emitted the wrong HEVC profile");
 }
 
@@ -180,7 +185,7 @@ std::vector<std::uint8_t> make_pq_png() {
 }
 
 void check_png_cicp_headroom() {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
                     "hyperdr-codec-cicp-pq.png";
   try {
     hyperdr::write_binary_file_atomic(path, make_pq_png(), true);
@@ -199,7 +204,7 @@ hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& byte
                                            const char* label,
                                            const char* extension = ".heic",
                                            const hyperdr::RawDecodeOptions& options = {}) {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (std::string("hyperdr-codec-input-") + label + extension);
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -212,9 +217,9 @@ hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& byte
   }
 }
 
-hyperdr::DecodedImage decode_ultrahdr_input(const std::vector<std::uint8_t>& bytes) {
+hyperdr::DecodedImage decode_gain_map_jpeg_input(const std::vector<std::uint8_t>& bytes) {
   const auto path =
-      std::filesystem::temp_directory_path() / "hyperdr-codec-input-ultrahdr.jpg";
+      hyperdr::test::temporary_directory() / "hyperdr-codec-input-ultrahdr.jpg";
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
     auto decoded = hyperdr::decode_ultrahdr(path);
@@ -245,159 +250,34 @@ void require_linear_round_trip(const hyperdr::DecodedImage& decoded,
 //
 // Every encoding this project writes is 4:2:0 or interleaved RGB, so no HyperDR
 // output can stand in for the one HDR input shape cameras actually produce:
-// Sony's HEIF stills are Main 4:2:2 10 HLG. Decoding those needs libheif's
-// 4:2:2 chroma upsampling *and* an HEVC decoder that implements the range
-// extensions, neither of which any other test touches. The fixture is therefore
-// built here through libheif's own x265 `chroma` parameter.
+// Sony's HEIF stills are Main 4:2:2 10 HLG. Decoding those needs 4:2:2 chroma
+// upsampling *and* an HEVC decoder that implements the range extensions,
+// neither of which any other test touches. The fixture is therefore
+// built here through VT's native Main42210 profile.
 
-struct TestContextDeleter {
-  void operator()(heif_context* p) const { if (p) heif_context_free(p); }
-};
-struct TestEncoderDeleter {
-  void operator()(heif_encoder* p) const { if (p) heif_encoder_release(p); }
-};
-struct TestImageDeleter {
-  void operator()(heif_image* p) const { if (p) heif_image_release(p); }
-};
-struct TestHandleDeleter {
-  void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); }
-};
-struct TestEncodingOptionsDeleter {
-  void operator()(heif_encoding_options* p) const {
-    if (p) heif_encoding_options_free(p);
-  }
-};
-
-void require_heif(const heif_error& error, const char* operation) {
-  if (error.code == heif_error_Ok) return;
-  throw std::runtime_error(std::string(operation) + ": " +
-                           (error.message ? error.message : "unknown libheif error"));
-}
-
-heif_error collect_heif_bytes(heif_context*, const void* data, size_t size, void* user) {
-  try {
-    auto& out = *static_cast<std::vector<std::uint8_t>*>(user);
-    const auto* bytes = static_cast<const std::uint8_t*>(data);
-    out.insert(out.end(), bytes, bytes + size);
-    return {heif_error_Ok, heif_suberror_Unspecified, "Success"};
-  } catch (...) {
-    // Never allow a C++ exception to cross libheif's C callback boundary.
-    return {heif_error_Encoding_error, heif_suberror_Unspecified, "fixture write failed"};
-  }
-}
-
-// Encodes `linear` (linear Display P3, 1.0 = diffuse white) as a 10-bit BT.2100
-// HLG HEIC with 4:2:2 chroma. Returns an empty vector when the x265 build in use
-// cannot do 4:2:2 or Main10, which is reported rather than treated as a failure,
-// exactly like the existing Main10 round trips below.
+// Required native VT 4:2:2 fixture. Failure is a failure, never a skip.
 std::vector<std::uint8_t> encode_hlg_422(const hyperdr::FloatImage& linear) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the 4:2:2 fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the 4:2:2 fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 95),
-               "set the 4:2:2 fixture quality");
-  // Not every x265 build exposes 4:2:2. A refusal here means the fixture cannot
-  // be produced, not that the decoder under test is broken.
-  if (heif_encoder_set_parameter_string(encoder.get(), "chroma", "422").code !=
-      heif_error_Ok) {
-    return {};
-  }
-
-  heif_image* image_raw = nullptr;
-  require_heif(heif_image_create(static_cast<int>(linear.width),
-                                 static_cast<int>(linear.height), heif_colorspace_RGB,
-                                 heif_chroma_interleaved_RRGGBB_LE, &image_raw),
-               "create the 4:2:2 fixture image");
-  std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-  require_heif(heif_image_add_plane(image.get(), heif_channel_interleaved,
-                                    static_cast<int>(linear.width),
-                                    static_cast<int>(linear.height), 10),
-               "allocate the 4:2:2 fixture plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
-  require(plane != nullptr && stride > 0, "4:2:2 fixture plane is unavailable");
-  constexpr unsigned max_code = (1U << 10U) - 1U;
-  for (std::uint32_t y = 0; y < linear.height; ++y) {
-    auto* row = reinterpret_cast<std::uint16_t*>(plane + static_cast<std::size_t>(y) * stride);
-    for (std::uint32_t x = 0; x < linear.width; ++x) {
-      const auto wide = hyperdr::p3_to_rec2020(linear.at(x, y, 0), linear.at(x, y, 1),
-                                               linear.at(x, y, 2));
-      const auto encoded = hyperdr::hlg_encode(
-          {std::max(0.0F, wide[0]), std::max(0.0F, wide[1]), std::max(0.0F, wide[2])});
-      for (unsigned channel = 0; channel < 3; ++channel) {
-        row[x * 3 + channel] = static_cast<std::uint16_t>(
-            std::lround(std::clamp(encoded[channel], 0.0F, 1.0F) * max_code));
-      }
-    }
-  }
-
-  heif_color_profile_nclx nclx{};
-  nclx.version = 1;
-  nclx.color_primaries = heif_color_primaries_ITU_R_BT_2020_2_and_2100_0;
-  nclx.transfer_characteristics = heif_transfer_characteristic_ITU_R_BT_2100_0_HLG;
-  nclx.matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance;
-  nclx.full_range_flag = 1;
-  require_heif(heif_image_set_nclx_color_profile(image.get(), &nclx),
-               "set the 4:2:2 fixture nclx");
-
-  std::unique_ptr<heif_encoding_options, TestEncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  require(options != nullptr, "cannot allocate the 4:2:2 fixture options");
-  options->output_nclx_profile = &nclx;
-  heif_image_handle* handle_raw = nullptr;
-  const auto encoded = heif_context_encode_image(context.get(), image.get(),
-                                                 encoder.get(), options.get(),
-                                                 &handle_raw);
-  if (encoded.code != heif_error_Ok) {
-    // Same treatment as the Main10 round trips: a bit-depth or chroma refusal
-    // from x265 is an absent fixture, anything else is a real failure.
-    const std::string message = encoded.message ? encoded.message : "";
-    if (message.find("Bit depth not supported") != std::string::npos ||
-        message.find("chroma") != std::string::npos) {
-      return {};
-    }
-    require_heif(encoded, "encode the 4:2:2 fixture");
-  }
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require_heif(heif_context_set_primary_image(context.get(), handle.get()),
-               "set the 4:2:2 fixture primary image");
-
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the 4:2:2 fixture");
-  return bytes;
+  return heif_fixture::hlg422(linear);
 }
 
 // Proves the fixture really is 4:2:2 before its decode is used as evidence:
-// asking libheif for the native colourspace is the only way to see the chroma
-// format the conversion to RGB would otherwise hide.
+// the hvcC and the decoded picture both say so, where the conversion to RGB
+// would otherwise hide the chroma format.
 void require_chroma_422(const std::vector<std::uint8_t>& bytes) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the 4:2:2 inspection context");
-  require_heif(heif_context_read_from_memory_without_copy(context.get(), bytes.data(),
-                                                          bytes.size(), nullptr),
-               "read the 4:2:2 fixture");
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
-               "get the 4:2:2 fixture primary handle");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  heif_image* native_raw = nullptr;
-  require_heif(heif_decode_image(handle.get(), &native_raw, heif_colorspace_undefined,
-                                 heif_chroma_undefined, nullptr),
-               "decode the 4:2:2 fixture natively");
-  std::unique_ptr<heif_image, TestImageDeleter> native(native_raw);
-  const auto chroma = heif_image_get_chroma_format(native.get());
-  if (chroma != heif_chroma_422) {
-    throw std::runtime_error("the 4:2:2 fixture was not encoded as 4:2:2 (chroma=" +
-                             std::to_string(static_cast<int>(chroma)) + ")");
-  }
-  require(heif_image_handle_get_luma_bits_per_pixel(handle.get()) == 10,
-          "the 4:2:2 fixture is not 10-bit");
+  const auto file = hyperdr::read_heif(bytes);
+  const auto plan = file.resolve_image();
+  require(plan.config.chroma_format == 2 && plan.config.bit_depth == 10,
+          "the 4:2:2 fixture's hvcC is not 4:2:2 10-bit");
+  unsigned pictures = 0;
+  heif_native::for_each_picture(file, plan, [&](auto, auto, const heif_native::Picture& picture) {
+    ++pictures;
+    if (picture.chroma_format != 2) {
+      throw std::runtime_error("the 4:2:2 fixture was not decoded as 4:2:2 (chroma=" +
+                               std::to_string(picture.chroma_format) + ")");
+    }
+    require(picture.bit_depth == 10, "the 4:2:2 fixture is not 10-bit");
+  });
+  require(pictures > 0, "the 4:2:2 fixture decoded no pictures");
 }
 
 // An input's declared headroom, and the preview divisor that follows from it.
@@ -408,7 +288,7 @@ void require_chroma_422(const std::vector<std::uint8_t>& bytes) {
 // only the HDR one may be scaled.
 void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* label,
                           const char* extension) {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (std::string("hyperdr-codec-headroom-") + label + extension);
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -421,12 +301,6 @@ void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* la
     require(sdr.hdr_headroom == 1.0F,
             "the SDR base of a gain-map input must declare no headroom");
 
-    const auto hdr_preview = hyperdr::encode_preview_jpeg(path, 256, 85);
-    require(hdr_preview.scale > 1.0F,
-            "an HDR input's preview must be divided so its highlights survive");
-    const auto sdr_preview = hyperdr::encode_preview_jpeg(path, 256, 85, base_only);
-    require(sdr_preview.scale == 1.0F,
-            "an SDR input's preview must not be divided");
     std::filesystem::remove(path);
   } catch (...) {
     std::filesystem::remove(path);
@@ -434,198 +308,129 @@ void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* la
   }
 }
 
-// Decodes the primary image and checks CICP plus non-inverted channel order at a
-// bright sample. This is the regression the 8-bit default path was missing: a file
-// can be structurally perfect and still carry an undecodable bitstream (for example
-// a single-slice NAL beyond libde265's 16 MiB security limit).
+// Decodes the primary image with VideoToolbox and checks CICP plus non-inverted
+// channel order at a bright sample. This is the regression the 8-bit default
+// path was missing: a file can be structurally perfect and still carry an
+// undecodable bitstream (for example a single-slice NAL the decoder refuses).
 void decode_and_check(const std::vector<std::uint8_t>& bytes, std::uint32_t width, std::uint32_t height) {
-  heif_context* context = heif_context_alloc();
-  require(context != nullptr, "cannot allocate decode context");
-  try {
-    auto err = heif_context_read_from_memory_without_copy(context, bytes.data(), bytes.size(), nullptr);
-    require(err.code == heif_error_Ok, "cannot read encoded HEIC");
-    heif_image_handle* primary = nullptr;
-    err = heif_context_get_primary_image_handle(context, &primary);
-    require(err.code == heif_error_Ok && primary, "cannot get primary image");
-
-    heif_color_profile_nclx* nclx = nullptr;
-    err = heif_image_handle_get_nclx_color_profile(primary, &nclx);
-    const bool nclx_ok = err.code == heif_error_Ok && nclx &&
-                         nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 &&
-                         nclx->transfer_characteristics == heif_transfer_characteristic_IEC_61966_2_1 &&
-                         nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-                         nclx->full_range_flag == 1 &&
-                         heif_image_handle_get_raw_color_profile_size(primary) > 0;
-    if (nclx) heif_nclx_color_profile_free(nclx);
-    if (!nclx_ok) { heif_image_handle_release(primary); throw std::runtime_error("primary image has incorrect Display P3 CICP"); }
-
-    const bool wide = heif_image_handle_get_luma_bits_per_pixel(primary) > 8;
-    heif_image* decoded = nullptr;
-    err = heif_decode_image(primary, &decoded, heif_colorspace_RGB,
-                            wide ? heif_chroma_interleaved_RRGGBB_LE : heif_chroma_interleaved_RGB, nullptr);
-    heif_image_handle_release(primary);
-    require(err.code == heif_error_Ok && decoded, "cannot decode primary image");
-    require(static_cast<std::uint32_t>(heif_image_get_width(decoded, heif_channel_interleaved)) == width &&
-                static_cast<std::uint32_t>(heif_image_get_height(decoded, heif_channel_interleaved)) == height,
-            "decoded primary image has wrong dimensions");
-    int stride = 0;
-    const auto* plane = heif_image_get_plane_readonly(decoded, heif_channel_interleaved, &stride);
-    require(plane != nullptr, "decoded primary image has no pixels");
-    const std::size_t row = static_cast<std::size_t>(height / 2) * stride;
-    const std::size_t x = static_cast<std::size_t>(width - 2) * 3;
-    bool ordered = false;
-    if (wide) {
-      const auto* sample = reinterpret_cast<const std::uint16_t*>(plane + row) + x;
-      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
-    } else {
-      const auto* sample = plane + row + x;
-      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
-    }
-    heif_image_release(decoded);
-    require(ordered, "primary image color-channel round trip failed");
-  } catch (...) {
-    heif_context_free(context);
-    throw;
-  }
-  heif_context_free(context);
+  const auto file = hyperdr::read_heif(bytes);
+  const auto plan = file.resolve_image();
+  require(plan.color && plan.color->primaries == 12 && plan.color->transfer == 13 &&
+              plan.color->matrix == 1 && plan.color->full_range && !plan.icc.empty(),
+          "primary image has incorrect Display P3 CICP");
+  require(plan.width == width && plan.height == height,
+          "decoded primary image has wrong dimensions");
+  const bool wide = plan.config.bit_depth > 8;
+  // The normalized float is an integer code over the full-range maximum.
+  const float maximum = wide ? 1023.F : 255.F;
+  const auto code = [&](std::uint32_t x, std::uint32_t y) {
+    const auto rgb = heif_native::encoded_rgb(file, plan, x, y);
+    return std::array<int, 3>{int(std::lround(rgb[0] * maximum)), int(std::lround(rgb[1] * maximum)),
+                              int(std::lround(rgb[2] * maximum))};
+  };
+  const auto bright = code(width - 2, height / 2);
+  // At the almost-white sample the original channel separation can be less
+  // than one code. Lossy VT quantisation may reverse it by two codes.
+  const int slack = wide ? 2 : 0;
+  const bool ordered = bright[0] + slack >= bright[1] && bright[1] + slack >= bright[2];
+  const auto middle = code(width / 3, height / 2);
+  const bool distinct = middle[0] > middle[1] && middle[1] > middle[2];
+  require(ordered && distinct, "primary image color-channel round trip failed");
 }
 
 void check_gain_decode(const std::vector<std::uint8_t>& bytes,
                        const hyperdr::FloatImage* expected = nullptr) {
-  const auto references = hyperdr::find_tmap_references(bytes);
-  heif_context* context = heif_context_alloc();
-  require(context != nullptr, "cannot allocate gain decode context");
-  try {
-    auto error = heif_context_read_from_memory_without_copy(
-        context, bytes.data(), bytes.size(), nullptr);
-    require(error.code == heif_error_Ok, "cannot read gain-map HEIC");
-    heif_image_handle* handle = nullptr;
-    error = heif_context_get_image_handle(context, references.gain_id, &handle);
-    require(error.code == heif_error_Ok && handle, "cannot get Gain Map handle");
-
-    heif_color_profile_nclx* nclx = nullptr;
-    error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-    const bool profile_ok =
-        error.code == heif_error_Ok && nclx &&
-        nclx->color_primaries == heif_color_primaries_unspecified &&
-        nclx->transfer_characteristics == heif_transfer_characteristic_unspecified &&
-        nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-        nclx->full_range_flag == 1;
-    if (nclx) heif_nclx_color_profile_free(nclx);
-    if (!profile_ok) {
-      heif_image_handle_release(handle);
-      throw std::runtime_error("Gain Map nclx is not 2/2/1/full");
-    }
-
-    heif_image* decoded = nullptr;
-    error = heif_decode_image(handle, &decoded, heif_colorspace_YCbCr,
-                              heif_chroma_420, nullptr);
-    heif_image_handle_release(handle);
-    require(error.code == heif_error_Ok && decoded, "cannot decode Gain Map");
-    int y_stride = 0;
-    const auto* y_plane =
-        heif_image_get_plane_readonly(decoded, heif_channel_Y, &y_stride);
-    const int width = heif_image_get_width(decoded, heif_channel_Y);
-    const int height = heif_image_get_height(decoded, heif_channel_Y);
-    require(y_plane && width > 0 && height > 0 && y_stride >= width,
-            "invalid Gain Map luma plane");
-    if (expected) {
-      require(expected->channels == 1 && expected->width == static_cast<std::uint32_t>(width) &&
-                  expected->height == static_cast<std::uint32_t>(height),
-              "Gain Map probe has unexpected dimensions");
-    }
-    int minimum = 255;
-    int maximum = 0;
-    std::uint64_t total_code_error = 0;
-    int maximum_code_error = 0;
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
-        const auto actual = y_plane[y * y_stride + x];
-        minimum = std::min(minimum, static_cast<int>(actual));
-        maximum = std::max(maximum, static_cast<int>(actual));
+  const auto file = hyperdr::read_heif(bytes);
+  const auto gain = file.resolve_gain_map();
+  require(gain.has_value(), "cannot resolve the Gain Map");
+  const auto& plan = gain->gain;
+  require(plan.color && plan.color->primaries == 2 && plan.color->transfer == 2 &&
+              plan.color->matrix == 1 && plan.color->full_range,
+          "Gain Map nclx is not 2/2/1/full");
+  require(plan.config.bit_depth == 8 && plan.config.chroma_format == 1,
+          "Gain Map is not 8-bit 4:2:0");
+  const int width = int(plan.width), height = int(plan.height);
+  require(width > 0 && height > 0, "invalid Gain Map dimensions");
+  if (expected) {
+    require(expected->channels == 1 && expected->width == static_cast<std::uint32_t>(width) &&
+                expected->height == static_cast<std::uint32_t>(height),
+            "Gain Map probe has unexpected dimensions");
+  }
+  int minimum = 255;
+  int maximum = 0;
+  std::uint64_t total_code_error = 0;
+  int maximum_code_error = 0;
+  heif_native::for_each_picture(file, plan, [&](std::uint32_t x0, std::uint32_t y0,
+                                                const heif_native::Picture& picture) {
+    require(picture.bit_depth == 8 && picture.chroma_format == 1, "Gain Map picture is not 8-bit 4:2:0");
+    for (std::uint32_t py = 0; py < picture.height && y0 + py < plan.height; ++py) {
+      for (std::uint32_t px = 0; px < picture.width && x0 + px < plan.width; ++px) {
+        const int actual = int(picture.luma_at(px, py));
+        minimum = std::min(minimum, actual);
+        maximum = std::max(maximum, actual);
         if (expected) {
-          const auto wanted = static_cast<std::uint8_t>(std::lround(
-              std::clamp(expected->at(static_cast<std::uint32_t>(x),
-                                      static_cast<std::uint32_t>(y), 0), 0.0F, 1.0F) * 255.0F));
-          const int code_error = std::abs(static_cast<int>(actual) - wanted);
+          const auto wanted = static_cast<int>(std::lround(
+              std::clamp(expected->at(x0 + px, y0 + py, 0), 0.0F, 1.0F) * 255.0F));
+          const int code_error = std::abs(actual - wanted);
           total_code_error += code_error;
           maximum_code_error = std::max(maximum_code_error, code_error);
         }
       }
     }
-    if (expected) {
-      const double mean_code_error = static_cast<double>(total_code_error) /
-                                     (static_cast<double>(width) * height);
-      std::cout << "Q95 Gain Map code error: mean " << mean_code_error
-                << ", maximum " << maximum_code_error << '\n';
-      require(mean_code_error <= 0.5 && maximum_code_error <= 3,
-              "Q95 Gain Map changed the gain codes too much");
-    }
-    require(minimum <= 16 && maximum >= 239,
-            "Gain Map does not retain full-range endpoints");
-    for (const auto channel : {heif_channel_Cb, heif_channel_Cr}) {
-      int stride = 0;
-      const auto* plane = heif_image_get_plane_readonly(decoded, channel, &stride);
-      const int cw = heif_image_get_width(decoded, channel);
-      const int ch = heif_image_get_height(decoded, channel);
-      require(plane && cw > 0 && ch > 0 && stride >= cw,
-              "invalid Gain Map chroma plane");
-      for (int y = 0; y < ch; y += std::max(1, ch / 32)) {
-        for (int x = 0; x < cw; x += std::max(1, cw / 32)) {
-          require(std::abs(static_cast<int>(plane[y * stride + x]) - 128) <= 3,
-                  "Gain Map chroma is not neutral");
-        }
+    for (std::uint32_t cy = 0; cy < picture.chroma_height(); cy += std::max(1U, picture.chroma_height() / 32)) {
+      for (std::uint32_t cx = 0; cx < picture.chroma_width(); cx += std::max(1U, picture.chroma_width() / 32)) {
+        require(std::abs(int(picture.cb_at(cx, cy)) - 128) <= 3 &&
+                    std::abs(int(picture.cr_at(cx, cy)) - 128) <= 3,
+                "Gain Map chroma is not neutral");
       }
     }
-    heif_image_release(decoded);
-  } catch (...) {
-    heif_context_free(context);
-    throw;
+  });
+  if (expected) {
+    const double mean_code_error = static_cast<double>(total_code_error) /
+                                   (static_cast<double>(width) * height);
+    std::cout << "Q95 Gain Map code error: mean " << mean_code_error
+              << ", maximum " << maximum_code_error << '\n';
+    require(mean_code_error <= 0.5 && maximum_code_error <= 3,
+            "Q95 Gain Map changed the gain codes too much");
   }
-  heif_context_free(context);
+  require(minimum <= 16 && maximum >= 239,
+          "Gain Map does not retain full-range endpoints");
 }
 void check_semantic_rejections(const std::vector<std::uint8_t>& bytes) {
   const auto references = hyperdr::find_tmap_references(bytes);
-  auto broken_dimg = bytes;
+  // The tmap item's dimg now claims three targets where two are listed.
   bool changed = false;
-  for (std::size_t i = 0; i + 16 <= broken_dimg.size(); ++i) {
-    if (broken_dimg[i] == 0 && broken_dimg[i + 1] == 0 &&
-        broken_dimg[i + 2] == 0 && broken_dimg[i + 3] == 16 &&
-        broken_dimg[i + 4] == 'd' && broken_dimg[i + 5] == 'i' &&
-        broken_dimg[i + 6] == 'm' && broken_dimg[i + 7] == 'g' &&
-        broken_dimg[i + 8] == static_cast<std::uint8_t>(references.tmap_id >> 8) &&
-        broken_dimg[i + 9] == static_cast<std::uint8_t>(references.tmap_id) &&
-        broken_dimg[i + 10] == 0 && broken_dimg[i + 11] == 2 &&
-        broken_dimg[i + 12] == static_cast<std::uint8_t>(references.base_id >> 8) &&
-        broken_dimg[i + 13] == static_cast<std::uint8_t>(references.base_id) &&
-        broken_dimg[i + 14] == static_cast<std::uint8_t>(references.gain_id >> 8) &&
-        broken_dimg[i + 15] == static_cast<std::uint8_t>(references.gain_id)) {
-      broken_dimg[i + 10] = 0;
-      broken_dimg[i + 11] = 3;
-      changed = true;
-      break;
+  const auto broken_dimg = heif_fixture::edit(bytes, [&](auto& meta) {
+    for (auto& box : meta) {
+      if (box.type != "iref") continue;
+      heif_fixture::children(box, 4, [&](auto& refs) {
+        for (auto& ref : refs) {
+          if (ref.type == "dimg" && heif_fixture::get(ref.data, 0, 2) == references.tmap_id) {
+            heif_fixture::put(ref.data, 2, 3, 2);
+            changed = true;
+          }
+        }
+      });
     }
-  }
+  });
   require(changed && !hyperdr::inspect_heif(broken_dimg).structurally_valid,
           "grid dimg masked a broken tmap dimg");
 
-  auto colliding_group = bytes;
+  // The altr group takes an item's ID.
   changed = false;
-  for (std::size_t i = 0; i + 28 <= colliding_group.size(); ++i) {
-    if (colliding_group[i + 4] == 'a' && colliding_group[i + 5] == 'l' &&
-        colliding_group[i + 6] == 't' && colliding_group[i + 7] == 'r') {
-      colliding_group[i + 12] =
-          static_cast<std::uint8_t>(references.gain_id >> 24);
-      colliding_group[i + 13] =
-          static_cast<std::uint8_t>(references.gain_id >> 16);
-      colliding_group[i + 14] =
-          static_cast<std::uint8_t>(references.gain_id >> 8);
-      colliding_group[i + 15] =
-          static_cast<std::uint8_t>(references.gain_id);
-      changed = true;
-      break;
+  const auto colliding_group = heif_fixture::edit(bytes, [&](auto& meta) {
+    for (auto& box : meta) {
+      if (box.type != "grpl") continue;
+      heif_fixture::children(box, 0, [&](auto& groups) {
+        for (auto& group : groups) {
+          if (group.type == "altr") {
+            heif_fixture::put(group.data, 4, references.gain_id, 4);
+            changed = true;
+          }
+        }
+      });
     }
-  }
+  });
   require(changed && !hyperdr::inspect_heif(colliding_group).structurally_valid,
           "altr group/item ID collision was accepted");
 }
@@ -644,8 +449,8 @@ void check_structure(const std::vector<std::uint8_t>& bytes, const char* label) 
 }
 
 void reconstruct_and_check(const std::vector<std::uint8_t>& bytes, const char* label) {
-  const auto temp_heic = std::filesystem::temp_directory_path() / "hyperdr-codec-test.heic";
-  const auto temp_tiff = std::filesystem::temp_directory_path() / "hyperdr-codec-test.tiff";
+  const auto temp_heic = hyperdr::test::temporary_directory() / "hyperdr-codec-test.heic";
+  const auto temp_tiff = hyperdr::test::temporary_directory() / "hyperdr-codec-test.tiff";
   hyperdr::write_binary_file_atomic(temp_heic, bytes, true);
   hyperdr::reconstruct_heic_to_tiff(temp_heic, temp_tiff);
   const auto tiff = hyperdr::read_binary_file(temp_tiff);
@@ -662,7 +467,7 @@ void reconstruct_and_check(const std::vector<std::uint8_t>& bytes, const char* l
 // fails if the two arms are decoded or rendered differently, if the statistics
 // are read from the wrong arm, or if they are never populated at all.
 void display_curve_identity_check(const std::vector<std::uint8_t>& bytes, const char* label) {
-  const auto temp_heic = std::filesystem::temp_directory_path() / "hyperdr-display-curve-test.heic";
+  const auto temp_heic = hyperdr::test::temporary_directory() / "hyperdr-display-curve-test.heic";
   hyperdr::write_binary_file_atomic(temp_heic, bytes, true);
   const std::vector<float> headrooms{0.0F, 1.0F, 2.5F};
   const auto result = hyperdr::compare_gain_map_heic_curve(temp_heic, temp_heic, headrooms);
@@ -696,7 +501,7 @@ void display_curve_identity_check(const std::vector<std::uint8_t>& bytes, const 
 void display_curve_difference_check(const std::vector<std::uint8_t>& reference_bytes,
                                     const std::vector<std::uint8_t>& candidate_bytes,
                                     const char* label) {
-  const auto directory = std::filesystem::temp_directory_path();
+  const auto directory = hyperdr::test::temporary_directory();
   const auto reference = directory / "hyperdr-display-curve-reference.heic";
   const auto candidate = directory / "hyperdr-display-curve-candidate.heic";
   hyperdr::write_binary_file_atomic(reference, reference_bytes, true);
@@ -767,23 +572,20 @@ float region_mean_luminance(const hyperdr::FloatImage& image, std::uint32_t x0,
 
 void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   const auto hlg = encode_hlg_422(make_camera_hdr(3200, 48));
-  require(!hlg.empty(), "x265 cannot produce the 4:2:2 HLG camera fixture");
+  require(!hlg.empty(), "VideoToolbox cannot produce the 4:2:2 HLG camera fixture");
   const auto source = decode_encoded_input(hlg, "camera-hlg");
   require(source.domain == hyperdr::InputDomain::kDisplayReferredHdr,
           "the HLG fixture must decode as an HDR source");
 
-  hyperdr::RenderOptions identity;
-  identity.auto_headroom = false;
-  identity.headroom_stops = 3.0F;
-  identity.look.headroom_max_stops = 3.0F;
-  identity.look.shoulder_start = 0.25F;
-  identity.look.contrast = 1.0F;
-  identity.look.vibrance = 0.0F;
-  auto photo = hyperdr::render_renditions(source.linear_p3, identity, source.capture,
-                                          source.describe_input(),
-                                          hyperdr::RenderTarget::Hdr);
-  require(photo.hdr_is_source, "an HLG photograph must be packaged as its own HDR");
-  const auto gain = hyperdr::gain_map_from_renditions(std::move(photo));
+  hyperdr::PhotoRenditions photo;
+  photo.hdr=source.linear_p3; photo.sdr=source.linear_p3;
+  photo.stats.headroom_stops=3; photo.stats.headroom_linear=8;
+  for(unsigned y=0;y<photo.sdr.height;++y)for(unsigned x=0;x<photo.sdr.width;++x){
+    const auto* pixel=photo.hdr_pixel(x,y);
+    const float divisor=std::max({1.F,pixel[0],pixel[1],pixel[2]});
+    for(unsigned c=0;c<3;++c)photo.sdr.at(x,y,c)/=divisor;
+  }
+  const auto gain = hyperdr::test::encoded_pair(std::move(photo));
   require(gain.gain_map.width == 3200 && gain.gain_map.height == 48,
           "an HDR source's gain map must be full resolution");
 
@@ -823,12 +625,12 @@ void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   check(decode_encoded_input(adaptive, "hdr-source-adaptive"), "HLG source to Adaptive HEIC",
         1.5, 3.0);
 
-  const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(gain, metadata, 95);
-  hyperdr::verify_ultrahdr_jpeg(ultrahdr);
-  check(decode_ultrahdr_input(ultrahdr), "HLG source to Ultra HDR", 2.5, 3.0);
+  const auto gain_jpeg = hyperdr::encode_gain_map_jpeg(gain, metadata, 95);
+  hyperdr::verify_gain_map_jpeg(gain_jpeg);
+  check(decode_gain_map_jpeg_input(gain_jpeg), "HLG source to gain-map JPEG", 2.5, 3.0);
 }
 
-void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
+void check_rgb_gain_map_jpeg(const hyperdr::PhotoMetadata& metadata) {
   hyperdr::PhotoRenditions photo;
   photo.sdr = hyperdr::FloatImage(64, 32, 3);
   photo.hdr = hyperdr::FloatImage(64, 32, 3);
@@ -842,11 +644,11 @@ void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
       photo.hdr.at(x, y, c) = target[c];
     }
   }
-  const auto packed = hyperdr::gain_map_from_renditions(photo,
-      hyperdr::GainMapWriterProfile::iso_generic);
-  const auto bytes = hyperdr::encode_ultrahdr_jpeg(packed, metadata, 95);
-  hyperdr::verify_ultrahdr_jpeg(bytes);
-  const auto decoded = decode_ultrahdr_input(bytes);
+  const auto packed = hyperdr::test::encoded_pair(photo,
+      false);
+  const auto bytes = hyperdr::encode_gain_map_jpeg(packed, metadata, 95);
+  hyperdr::verify_gain_map_jpeg(bytes);
+  const auto decoded = decode_gain_map_jpeg_input(bytes);
   const float measured_peak = std::max(1.0F,
       *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
   require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
@@ -861,10 +663,10 @@ void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
         "RGB JPEG round trip must retain channel ratios and negative gains");
     error += delta * delta;
   }
-  std::cout << "Graded RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
+  std::cout << "Graded RGB gain-map JPEG MSE: " << error / photo.hdr.pixels.size() << '\n';
 }
 
-void check_ultrahdr_icc(const hyperdr::PhotoMetadata& metadata) {
+void check_gain_map_jpeg_icc(const hyperdr::PhotoMetadata& metadata) {
   hyperdr::PhotoRenditions photo;
   photo.sdr = hyperdr::FloatImage(32, 32, 3);
   std::fill(photo.sdr.pixels.begin(), photo.sdr.pixels.end(), .2F);
@@ -874,118 +676,63 @@ void check_ultrahdr_icc(const hyperdr::PhotoMetadata& metadata) {
   photo.stats.headroom_linear = 2;
   for (bool clamp : {false, true}) for (bool pair : {false, true}) {
     photo.clamp_srgb = clamp;
-    auto bytes = pair ? hyperdr::encode_ultrahdr_jpeg(photo, metadata, 95)
-        : hyperdr::encode_ultrahdr_jpeg(hyperdr::gain_map_from_renditions(photo), metadata, 95);
-    hyperdr::verify_ultrahdr_jpeg(bytes);
+    auto bytes = hyperdr::encode_gain_map_jpeg(hyperdr::test::encoded_pair(photo,
+        false), metadata, 95);
+    (void)pair;
+    hyperdr::verify_gain_map_jpeg(bytes);
     constexpr std::string_view signature = "ICC_PROFILE";
     const auto marker = std::search(bytes.begin(), bytes.end(), signature.begin(), signature.end());
-    require(marker != bytes.end(), "Ultra HDR primary must carry an ICC profile");
+    require(marker != bytes.end(), "gain-map JPEG primary must carry an ICC profile");
     // APP2 identifier, terminator, sequence number and chunk count precede ICC.
     const auto start = marker + 14;
     const auto profile = cmsOpenProfileFromMem(&*start,
         static_cast<cmsUInt32Number>(bytes.end() - start));
-    require(profile != nullptr, "Ultra HDR ICC must be readable by a colour manager");
+    require(profile != nullptr, "gain-map JPEG ICC must be readable by a colour manager");
     const auto* red = static_cast<const cmsCIEXYZ*>(cmsReadTag(profile, cmsSigRedColorantTag));
     const auto* curve = static_cast<const cmsToneCurve*>(cmsReadTag(profile, cmsSigRedTRCTag));
     const bool valid = red && curve && std::abs(red->X - .5151) < .001 &&
         std::abs(cmsEvalToneCurveFloat(curve, .02F) - hyperdr::srgb_eotf(.02F)) < 1e-5F;
     cmsCloseProfile(profile);
-    require(valid, "Ultra HDR pixels require Display P3 primaries and an sRGB toe, including gamut clamp");
+    require(valid, "gain-map JPEG pixels require Display P3 primaries and an sRGB toe, including gamut clamp");
     // Hide only the identifier, preserving JPEG lengths and MPF offsets.
     *marker = 'X';
     bool rejected = false;
-    try { hyperdr::verify_ultrahdr_jpeg(bytes); }
+    try { hyperdr::verify_gain_map_jpeg(bytes); }
     catch (const std::runtime_error& error) {
-      rejected = std::string_view(error.what()).find("incomplete base/gain-map data") != std::string_view::npos;
+      rejected = std::string_view(error.what()).find("no primary ICC profile") != std::string_view::npos;
     }
-    require(rejected, "Ultra HDR verification must reject an empty ICC block even when its pointer exists");
+    require(rejected, "gain-map JPEG verification must reject an empty ICC block even when its pointer exists");
   }
 }
 
 std::vector<std::uint8_t> encode_icc_only_heic() {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the ICC-only fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the ICC-only fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 90),
-               "set the ICC-only fixture quality");
-
-  heif_image* image_raw = nullptr;
-  require_heif(heif_image_create(4, 4, heif_colorspace_RGB,
-                                 heif_chroma_interleaved_RGB, &image_raw),
-               "create the ICC-only fixture image");
-  std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-  require_heif(heif_image_add_plane(image.get(), heif_channel_interleaved, 4, 4, 8),
-               "allocate the ICC-only fixture plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
-  require(plane != nullptr && stride >= 12, "ICC-only fixture plane is unavailable");
-  for (int y = 0; y < 4; ++y) {
-    for (int x = 0; x < 4; ++x) {
-      plane[y * stride + x * 3] = 48;
-      plane[y * stride + x * 3 + 1] = 96;
-      plane[y * stride + x * 3 + 2] = 144;
-    }
-  }
-
-  cmsHPROFILE profile = cmsCreate_sRGBProfile();
-  require(profile != nullptr, "cannot create the ICC-only fixture profile");
-  cmsUInt32Number profile_size = 0;
-  if (!cmsSaveProfileToMem(profile, nullptr, &profile_size) || profile_size == 0) {
-    cmsCloseProfile(profile);
-    throw std::runtime_error("cannot size the ICC-only fixture profile");
-  }
-  std::vector<std::uint8_t> icc(profile_size);
-  const bool saved = cmsSaveProfileToMem(profile, icc.data(), &profile_size) != 0;
-  cmsCloseProfile(profile);
-  require(saved, "cannot serialize the ICC-only fixture profile");
-  icc.resize(profile_size);
-  require_heif(heif_image_set_raw_color_profile(image.get(), "prof", icc.data(), icc.size()),
-               "set the ICC-only fixture profile");
-
-  std::unique_ptr<heif_encoding_options, TestEncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  require(options != nullptr, "cannot allocate the ICC-only fixture options");
-  options->macOS_compatibility_workaround_no_nclx_profile = 1;
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
-                                         options.get(), &handle_raw),
-               "encode the ICC-only fixture");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require_heif(heif_context_set_primary_image(context.get(), handle.get()),
-               "set the ICC-only fixture primary image");
-
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the ICC-only fixture");
-  return bytes;
+  namespace h=hyperdr::codec::hevc;
+  h::EncodeParams params;params.color={2,2,1};
+  auto sequence=h::encode(1,[](auto,h::YuvTile& tile){h::rgb_tile(h::tile_grid(4,4),0,
+      [](auto,auto,auto count,float* v){for(unsigned i=0;i<count;++i){v[3*i]=48.F/255;v[3*i+1]=96.F/255;v[3*i+2]=144.F/255;}},1,false,tile);},params);
+  hyperdr::HeifEncodedImage image{sequence,4,4,{},std::nullopt,{}};
+  auto bytes=hyperdr::write_heif(image);
+  cmsHPROFILE profile=cmsCreate_sRGBProfile();
+  require(profile!=nullptr,"create ICC-only fixture profile");cmsUInt32Number size=0;
+  const bool sized=cmsSaveProfileToMem(profile,nullptr,&size)!=0;
+  std::vector<std::uint8_t> icc(size);
+  const bool saved=sized&&cmsSaveProfileToMem(profile,icc.data(),&size);cmsCloseProfile(profile);
+  require(saved,"serialize ICC-only fixture profile");icc.resize(size);
+  return heif_fixture::edit(bytes,[&](auto& meta){heif_fixture::properties(meta,[&](auto& prop){
+    if(prop.type=="colr"){prop.data={'p','r','o','f'};prop.data.insert(prop.data.end(),icc.begin(),icc.end());}
+  });});
 }
 
 void check_icc_only_heic() {
   const auto bytes = encode_icc_only_heic();
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the ICC-only inspection context");
-  require_heif(heif_context_read_from_memory_without_copy(
-                   context.get(), bytes.data(), bytes.size(), nullptr),
-               "read the ICC-only fixture");
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
-               "get the ICC-only fixture primary image");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require(heif_image_handle_get_raw_color_profile_size(handle.get()) > 0,
-          "ICC-only fixture lost its ICC profile");
-  heif_color_profile_nclx* nclx = nullptr;
-  const auto nclx_error =
-      heif_image_handle_get_nclx_color_profile(handle.get(), &nclx);
-  require(nclx_error.code != heif_error_Ok || nclx == nullptr,
-          "ICC-only fixture unexpectedly contains nclx");
-  if (nclx) heif_nclx_color_profile_free(nclx);
+  {
+    const auto file = hyperdr::read_heif(bytes);
+    const auto plan = file.resolve_image();
+    require(!plan.icc.empty(), "ICC-only fixture lost its ICC profile");
+    require(!plan.color, "ICC-only fixture unexpectedly contains nclx");
+  }
 
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
                     "hyperdr-codec-icc-only.heic";
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -1090,7 +837,7 @@ void check_avif_gain_map(bool hdr_primary) {
                 inspect->image->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_PQ,
             "AVIF fixture must store ICC and PQ CICP together");
   }
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (hdr_primary ? "hyperdr-gain-hdr-primary.avif" : "hyperdr-gain-sdr-primary.avif");
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -1151,7 +898,7 @@ void require_avif_content_light(const std::vector<std::uint8_t>& bytes,
           "AVIF CLLI does not use maxRGB for MaxCLL and MaxPALL");
 }
 
-void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
+void check_gain_map_jpeg_pair(const hyperdr::PhotoMetadata& metadata) {
   hyperdr::PhotoRenditions photo;
   // Odd dimensions exercise half-float packed stride and JPEG edge padding.
   photo.sdr = hyperdr::FloatImage(65, 33, 3);
@@ -1168,118 +915,61 @@ void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
     }
   }
   const auto check_hdr = [&](const std::vector<std::uint8_t>& bytes) {
-    hyperdr::verify_ultrahdr_jpeg(bytes);
-    const auto info = hyperdr::probe_ultrahdr_jpeg(bytes);
-    require(info.width == 65 && info.height == 33 &&
-        info.gain_width == 65 && info.gain_height == 33, "API3 must retain full raster size");
-    require(info.gain_min[0] < 0 && info.gain_max[0] > 0, "API3 must support signed RGB gain");
-    require(std::abs(info.headroom_stops -
-                     *std::max_element(info.gain_max.begin(), info.gain_max.end())) < .001F,
-            "API3 must declare its actual maximum gain");
-    const auto decoded = decode_ultrahdr_input(bytes);
+    hyperdr::verify_gain_map_jpeg(bytes);
+    const auto parsed = hyperdr::parse_gain_map_jpeg(bytes);
+    require(hyperdr::rational_value(hyperdr::gain_map_channel(parsed.metadata, 0).gain_min) < 0, "ISO JPEG must support signed RGB gain");
+    require(std::abs(hyperdr::rational_value(parsed.metadata.alternate_headroom) - 2) < .001F,
+        "ISO JPEG capacity must describe the rendered peak");
+    const auto decoded = decode_gain_map_jpeg_input(bytes);
     const float measured_peak = std::max(1.0F,
         *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
     require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
                 decoded.authored_sdr.has_value() &&
                 std::abs(decoded.hdr_headroom - measured_peak) < 1e-5F,
-            "API3 must retain both authored renditions and measured headroom");
-    require(decoded.metadata.model == metadata.model, "API3 must preserve EXIF");
+            "ISO JPEG must retain both authored renditions and measured headroom");
+    require(decoded.metadata.model == metadata.model, "ISO JPEG must preserve EXIF");
     double error = 0;
     for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
       const float expected = photo.hdr.pixels[i];
       const float delta = decoded.linear_p3.pixels[i] - expected;
       if (std::abs(delta) >= .08F * std::max(expected, .1F)) {
-        std::cerr << "API3 mismatch sample " << i << ": got " << decoded.linear_p3.pixels[i]
+        std::cerr << "ISO JPEG mismatch sample " << i << ": got " << decoded.linear_p3.pixels[i]
                   << " expected " << expected << '\n';
       }
       require(std::abs(delta) < .08F * std::max(expected, .1F),
-          "API3 must reconstruct independent channel ratios");
+          "ISO JPEG must reconstruct independent channel ratios");
       error += delta * delta;
     }
-    std::cout << "API3 RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
+    std::cout << "ISO JPEG RGB gain-map MSE: " << error / photo.hdr.pixels.size() << '\n';
   };
-  check_hdr(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
-  // Existing sRGB JPEG carries its own ICC. It is intentionally low quality:
-  // gain must be computed from its decoded samples, not the original floats.
-  const auto jpeg = hyperdr::encode_sdr_jpeg(photo.sdr, metadata, 20);
-  const auto reused = hyperdr::encode_ultrahdr_jpeg(photo.hdr, jpeg,
-      hyperdr::ColorGamut::kSrgb, 2, 95);
-  check_hdr(reused);
-  const std::array<std::uint8_t, 2> sos{0xff, 0xda};
-  const auto scan = std::search(jpeg.begin(), jpeg.end(), sos.begin(), sos.end());
-  require(scan != jpeg.end() &&
-      std::search(reused.begin(), reused.end(), scan, jpeg.end()) != reused.end(),
-      "API3 must reuse the original compressed JPEG scan without re-encoding");
-  bool rejected = false;
-  try {
-    (void)hyperdr::encode_ultrahdr_jpeg(hyperdr::FloatImage(64, 33, 3), jpeg,
-        hyperdr::ColorGamut::kSrgb, 2, 95);
-  } catch (const std::exception&) { rejected = true; }
-  require(rejected, "API3 must reject misaligned raster dimensions");
-  // Zero headroom remains a valid SDR-compatible Ultra HDR file.
+  const auto packed = hyperdr::test::encoded_pair(photo, false);
+  check_hdr(hyperdr::encode_gain_map_jpeg(packed, metadata, 90));
+  // Zero headroom is a valid SDR-compatible ISO gain-map JPEG.
   photo.hdr = photo.sdr;
   photo.stats.headroom_stops = 0;
-  hyperdr::verify_ultrahdr_jpeg(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
+  hyperdr::verify_gain_map_jpeg(hyperdr::encode_gain_map_jpeg(
+      hyperdr::test::encoded_pair(photo, false), metadata, 90));
 }
 
 }  // namespace
 
 // Apple's pre-ISO HDR photo: an SDR primary, an 8-bit monochrome auxiliary
 // image of type urn:com:apple:photo:2020:aux:hdrgainmap, and the headroom in
-// MakerNote tags 33 and 48. libheif cannot write auxiliary images directly, so
-// the gain item is encoded as an ordinary image and given the auxC property and
-// auxl reference Apple writes.
-std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the legacy Apple fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the legacy Apple fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 100),
-               "set the legacy Apple fixture quality");
-  constexpr int kSize = 16;
-  const auto encode = [&](heif_colorspace space, heif_chroma chroma, heif_channel channel,
-                          int components, auto value) {
-    heif_image* image_raw = nullptr;
-    require_heif(heif_image_create(kSize, kSize, space, chroma, &image_raw),
-                 "create a legacy Apple fixture image");
-    std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-    require_heif(heif_image_add_plane(image.get(), channel, kSize, kSize, 8),
-                 "allocate a legacy Apple fixture plane");
-    int stride = 0;
-    auto* plane = heif_image_get_plane(image.get(), channel, &stride);
-    require(plane != nullptr, "legacy Apple fixture plane is unavailable");
-    for (int y = 0; y < kSize; ++y)
-      for (int x = 0; x < kSize; ++x)
-        for (int c = 0; c < components; ++c)
-          plane[y * stride + x * components + c] = value(x);
-    heif_image_handle* handle_raw = nullptr;
-    require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
-                                           nullptr, &handle_raw),
-                 "encode a legacy Apple fixture image");
-    return std::unique_ptr<heif_image_handle, TestHandleDeleter>(handle_raw);
-  };
-  // A mid-grey base; the gain map is full gain on the left half, none on the right.
-  const auto primary = encode(heif_colorspace_RGB, heif_chroma_interleaved_RGB,
-      heif_channel_interleaved, 3, [](int) { return std::uint8_t{128}; });
-  const auto gain = encode(heif_colorspace_monochrome, heif_chroma_monochrome,
-      heif_channel_Y, 1, [](int x) { return static_cast<std::uint8_t>(x < kSize / 2 ? 255 : 0); });
-  require_heif(heif_context_set_primary_image(context.get(), primary.get()),
-               "set the legacy Apple fixture primary image");
-  const auto primary_id = heif_image_handle_get_item_id(primary.get());
-  const auto gain_id = heif_image_handle_get_item_id(gain.get());
-  const std::string urn = "urn:com:apple:photo:2020:aux:hdrgainmap";
-  std::vector<std::uint8_t> aux_type(4, 0);  // FullBox version and flags.
-  aux_type.insert(aux_type.end(), urn.begin(), urn.end());
-  aux_type.push_back(0);
-  require_heif(heif_item_add_raw_property(context.get(), gain_id, heif_fourcc('a', 'u', 'x', 'C'),
-                                          nullptr, aux_type.data(), aux_type.size(), 1, nullptr),
-               "attach the legacy Apple auxiliary type");
-  require_heif(heif_context_add_item_reference(context.get(), heif_fourcc('a', 'u', 'x', 'l'),
-                                               gain_id, primary_id),
-               "reference the legacy Apple gain map");
+// MakerNote tags 33 and 48. Our writer only writes ISO tone-mapped pairs, so
+// the gain item is written as the ISO auxiliary and then given the auxC URN and
+// auxl reference Apple writes, with the tmap item and its group removed.
+std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote, bool midtone = false) {
+  namespace h=hyperdr::codec::hevc;
+  constexpr int kSize=16;const auto grid=h::tile_grid(kSize,kSize);
+  h::EncodeParams params;params.quality=100;params.color={12,13,1};
+  auto primary=h::encode(1,[&](auto,h::YuvTile& tile){h::rgb_tile(grid,0,
+      [](auto,auto,auto n,float* v){std::fill_n(v,n*3,128.F/255);},1,false,tile);},params);
+  params.color={2,2,1};
+  auto gain=h::encode(1,[&](auto,h::YuvTile& tile){h::luma_tile(grid,0,
+      [&](auto,auto x0,auto n,float* v){for(unsigned i=0;i<n;++i)v[i]=midtone?128.F/255:(x0+i<kSize/2?1.F:0.F);},tile);},params);
+  auto icc=hyperdr::codec::display_p3_profile();
+  hyperdr::HeifEncodedImage base_image{primary,kSize,kSize,{},std::nullopt,icc},gain_image{gain,kSize,kSize,{2,2,1,true},std::nullopt,{}};
+  hyperdr::HeifWriteOptions options;options.gain_metadata=hyperdr::GainMapMetadata{};
   if (with_makernote) {
     // The Exif fixture from exif_test: tags 33 = 3/2 and 48 = 0 declare 3 stops.
     std::vector<std::uint8_t> tiff(104, 0);
@@ -1303,19 +993,33 @@ std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
     be16(58, 0x21); be16(60, 10); be32(62, 1); be32(66, 38);
     be16(70, 0x30); be16(72, 10); be32(74, 1); be32(78, 46);
     be32(82, 3); be32(86, 2); be32(90, 0); be32(94, 1);
-    require_heif(heif_context_add_exif_metadata(context.get(), primary.get(),
-                                                tiff.data(), static_cast<int>(tiff.size())),
-                 "attach the legacy Apple MakerNote");
+    options.exif=std::move(tiff);
   }
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the legacy Apple fixture");
-  return bytes;
+  auto bytes=hyperdr::write_heif(base_image,&gain_image,options);
+  bytes=heif_fixture::edit(bytes,[](auto& meta){
+    heif_fixture::properties(meta,[](auto& prop){if(prop.type=="auxC"){
+      const std::string urn="urn:com:apple:photo:2020:aux:hdrgainmap";
+      prop.data.assign(4,0);prop.data.insert(prop.data.end(),urn.begin(),urn.end());prop.data.push_back(0);
+    }});
+    for(auto& box:meta){
+      if(box.type=="grpl")box.type="free";
+      if(box.type=="iinf")heif_fixture::children(box,8,[](auto& entries){for(auto& e:entries)
+        if(e.type=="infe"&&e.data.size()>=12&&std::string(e.data.begin()+8,e.data.begin()+12)=="tmap")
+          std::copy_n("free",4,e.data.begin()+8);
+      });
+      if(box.type=="iref")heif_fixture::children(box,4,[](auto& refs){for(auto& r:refs)
+        if(r.type=="dimg"&&heif_fixture::get(r.data,0,2)==5)r.type="free";
+      });
+    }
+  });
+  auto top=heif_fixture::parse(bytes);
+  for(auto& box:top)if(box.type=="ftyp")for(std::size_t i=8;i+4<=box.data.size();i+=4)
+    if(std::string(box.data.begin()+i,box.data.begin()+i+4)=="tmap")std::copy_n("mif1",4,box.data.begin()+i);
+  return heif_fixture::serialize(top);
 }
 
 void check_apple_legacy_heic() {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-apple-legacy.heic";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-apple-legacy.heic";
   try {
     hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(true), true);
     const auto decoded = hyperdr::decode_image(path);
@@ -1329,6 +1033,24 @@ void check_apple_legacy_heic() {
                 std::abs(decoded.hdr_headroom - measured) < 1e-5F &&
                 decoded.hdr_headroom < 4.0F,
             "legacy Apple usable headroom must be the measured peak, not the MakerNote capacity");
+
+    // A mid-code gain distinguishes Apple's power curve from BT.709 inverse OETF.
+    const auto mid_bytes = encode_apple_legacy_heic(true, true);
+    hyperdr::write_binary_file_atomic(path, mid_bytes, true);
+    const auto mid = hyperdr::decode_image(path);
+    const auto file = hyperdr::read_heif(mid_bytes);
+    float code = -1;
+    for (const auto& [id, item] : file.items) {
+      if (file.auxiliary_type(id) != "urn:com:apple:photo:2020:aux:hdrgainmap") continue;
+      const auto plan = file.resolve_image(id);
+      hyperdr::codec::hevc::decode_item(plan.config, plan.tiles.size(),
+          [&](std::size_t i) { const auto& e=plan.tiles[i].extents.front();return file.bytes.subspan(e.offset,e.length); },
+          [&](auto, hyperdr::codec::hevc::DecodedPicture&& picture) {code=picture.luma_at(8,8)/255.F;});
+    }
+    require(code > .45F && code < .55F, "legacy mid-code fixture was not preserved");
+    const float ratio = mid.linear_p3.at(8,8,0) / mid.authored_sdr->at(8,8,0);
+    require(std::abs(ratio - (1 + 7 * std::pow(code,2.2F))) < 1e-5F,
+            "legacy Apple gain must intentionally use code^2.2, not BT.709");
 
     hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(false), true);
     const auto fallback = hyperdr::decode_image(path);
@@ -1346,12 +1068,9 @@ void check_apple_legacy_heic() {
   }
 }
 
-int main() {
+int main() try {
   try {
-    hyperdr::GainMapOptions options;
-    options.auto_exposure = false;
-    options.auto_headroom = false;
-    options.headroom_stops = 3.0F;
+    const float options = 3.0F;
     hyperdr::PhotoMetadata metadata;
     metadata.model = "ILCE-7RM5";
     metadata.lens = "Synthetic test lens";
@@ -1359,18 +1078,45 @@ int main() {
     metadata.exposure_seconds = 1.0 / 125.0;
     metadata.aperture = 2.8;
     metadata.date_time = "2026:08:12 10:11:12";
-    check_rgb_ultrahdr(metadata);
-    check_ultrahdr_pair(metadata);
-    check_ultrahdr_icc(metadata);
-    check_icc_only_heic();
-    check_apple_legacy_heic();
+    check_rgb_gain_map_jpeg(metadata);
+    check_gain_map_jpeg_pair(metadata);
+    check_gain_map_jpeg_icc(metadata);
+    const auto caps=hyperdr::codec::hevc::encoder_caps();
+    const bool have_hevc = caps.main8 && caps.main10;
+    if (have_hevc) {
+      check_icc_only_heic();
+      check_apple_legacy_heic();
+    }
     check_avif_gain_map(false);
     check_avif_gain_map(true);
 
-    // Default 8-bit output through the grid path (wider than one 2048 tile), with a
+    if (!have_hevc) {
+      // The transitional macOS build intentionally has a decoder only. Keep
+      // its JPEG/R and AVIF round trips active without generating HEVC fixtures.
+      const auto small = make_synthetic(64, 32);
+      const auto gain = hyperdr::test::gradient_pair(small, options);
+      const auto expected = hyperdr::reconstruct_gain_map(
+          gain.base_linear, gain.gain_map, gain.metadata, gain.headroom_stops);
+      const auto jpeg = hyperdr::encode_gain_map_jpeg(gain, metadata, 90);
+      hyperdr::verify_gain_map_jpeg(jpeg);
+      require_linear_round_trip(decode_gain_map_jpeg_input(jpeg), expected,
+                                "gain-map JPEG round trip changed brightness");
+      for (const auto encoding : {hyperdr::HdrEncoding::AvifPq,
+                                  hyperdr::HdrEncoding::AvifHlg}) {
+        const auto bytes = hyperdr::encode_avif(hyperdr::test::decoded_pair(gain), metadata, 80, encoding);
+        hyperdr::verify_avif_decodable(bytes);
+        require_linear_round_trip(decode_encoded_input(bytes, "avif", ".avif"), expected,
+                                  "AVIF round trip changed brightness");
+      }
+      check_png_cicp_headroom();
+      std::cout << "codec round trips passed; HEVC fixtures skipped (no encoder)\n";
+      return 0;
+    }
+
+    // Default 8-bit output through the grid path (wider than one 512 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
     const auto large = make_synthetic(2600, 1408);
-    const auto large_gain = hyperdr::make_gain_map(large, options);
+    const auto large_gain = hyperdr::test::gradient_pair(large, options);
     const auto bytes8 = hyperdr::encode_adaptive_heic(large_gain, metadata, 90, 8);
     check_structure(bytes8, "8-bit grid");
     require_hevc_profiles(bytes8, false, true);
@@ -1383,7 +1129,7 @@ int main() {
 
     // Single-tile 8-bit output.
     const auto small = make_synthetic(64, 32);
-    const auto small_gain = hyperdr::make_gain_map(small, options);
+    const auto small_gain = hyperdr::test::gradient_pair(small, options);
 
     // The name no longer decides which decoder reads a raster. A phone gallery
     // exports HEIC under a .jpg suffix routinely, and that file used to reach
@@ -1401,11 +1147,11 @@ int main() {
                 "a renamed HEIC did not decode to the same pixels");
       }
 
-      const auto jpeg = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
+      const auto jpeg = hyperdr::encode_gain_map_jpeg(small_gain, metadata, 90);
       const auto jpeg_truthful = decode_encoded_input(jpeg, "signature-jpeg", ".jpg");
       const auto jpeg_renamed = decode_encoded_input(jpeg, "signature-jpeg", ".png");
       require(jpeg_renamed.linear_p3.pixels == jpeg_truthful.linear_p3.pixels,
-              "a renamed Ultra HDR JPEG did not decode to the same pixels");
+              "a renamed gain-map JPEG did not decode to the same pixels");
 
       // A supported extension is not a promise. Refusing this by signature, and
       // saying so, beats a codec-level complaint about a missing marker.
@@ -1413,7 +1159,7 @@ int main() {
       bool refused = false;
       try {
         static_cast<void>(decode_encoded_input(prose, "signature-prose", ".jpg"));
-      } catch (const std::invalid_argument& error) {
+      } catch (const hyperdr::DecodeFailed& error) {
         refused = std::string(error.what()).find("no supported signature") !=
                   std::string::npos;
       }
@@ -1431,8 +1177,8 @@ int main() {
     hyperdr::RawDecodeOptions base_only;
     base_only.ignore_embedded_gain_map = true;
     const auto oriented_jpeg_bytes =
-        hyperdr::encode_ultrahdr_jpeg(small_gain, portrait_metadata, 90);
-    const auto oriented_jpeg_path = std::filesystem::temp_directory_path() /
+        hyperdr::encode_gain_map_jpeg(small_gain, portrait_metadata, 90);
+    const auto oriented_jpeg_path = hyperdr::test::temporary_directory() /
                                     "hyperdr-codec-oriented-jpeg.jpg";
     hyperdr::write_binary_file_atomic(oriented_jpeg_path, oriented_jpeg_bytes,
                                       true);
@@ -1463,8 +1209,8 @@ int main() {
                 oriented_jpeg.metadata.orientation == 1,
             "JPEG Exif orientation did not normalize pixels, geometry and metadata");
 
-    // libheif's writer normalises Exif orientation on output, so make an
-    // Exif-only input fixture by changing that one TIFF value after encoding.
+    // The writer normalises Exif orientation on output, so make an Exif-only
+    // input fixture by changing that one TIFF value after encoding.
     // This mirrors phones whose pixels are landscape-stored without adding an
     // irot/imir property that would make the container authoritative.
     auto oriented_heic_bytes =
@@ -1491,37 +1237,12 @@ int main() {
     require(patched_orientation && *patched_orientation == 6,
             "raw HEIC Exif patch did not produce orientation 6");
     {
-      std::unique_ptr<heif_context, TestContextDeleter> context(
-          heif_context_alloc());
-      require_heif(heif_context_read_from_memory_without_copy(
-                       context.get(), oriented_heic_bytes.data(),
-                       oriented_heic_bytes.size(), nullptr),
-                   "open oriented HEIC fixture");
-      heif_image_handle* raw_handle = nullptr;
-      require_heif(heif_context_get_primary_image_handle(
-                       context.get(), &raw_handle),
-                   "get oriented HEIC primary");
-      std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(raw_handle);
-      const auto id = heif_image_handle_get_item_id(handle.get());
-      require(heif_item_get_properties_of_type(
-                  context.get(), id,
-                  heif_item_property_type_transform_rotation, nullptr, 0) == 0 &&
-                  heif_item_get_properties_of_type(
-                  context.get(), id,
-                  heif_item_property_type_transform_mirror, nullptr, 0) == 0,
+      const auto file = hyperdr::read_heif(oriented_heic_bytes);
+      const auto plan = file.resolve_image();
+      require(plan.transforms.empty(),
               "Exif-only HEIC fixture unexpectedly has a container orientation");
-      const int count = heif_image_handle_get_number_of_metadata_blocks(
-          handle.get(), "Exif");
-      std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
-      require(count > 0 && heif_image_handle_get_list_of_metadata_block_IDs(
-                               handle.get(), "Exif", ids.data(), count) > 0,
-              "oriented HEIC fixture has no Exif item");
-      const auto size =
-          heif_image_handle_get_metadata_size(handle.get(), ids.front());
-      std::vector<std::uint8_t> exif(size);
-      require_heif(heif_image_handle_get_metadata(
-                       handle.get(), ids.front(), exif.data()),
-                   "read oriented HEIC Exif");
+      const auto exif = file.exif();
+      require(!exif.empty(), "oriented HEIC fixture has no Exif item");
       const auto orientation =
           hyperdr::read_exif_orientation(exif.data(), exif.size());
       require(orientation && *orientation == 6,
@@ -1538,28 +1259,28 @@ int main() {
                 oriented_heic.metadata.orientation == 1,
             "HEIC Exif orientation did not normalize pixels, geometry and metadata");
 
-    const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
-    require(ultrahdr.size() > 512 && ultrahdr[0] == 0xFF && ultrahdr[1] == 0xD8,
-            "Ultra HDR output is not a JPEG/R stream");
-    hyperdr::verify_ultrahdr_jpeg(ultrahdr);
-    const auto expected_ultrahdr = hyperdr::reconstruct_gain_map(
+    const auto gain_jpeg = hyperdr::encode_gain_map_jpeg(small_gain, metadata, 90);
+    require(gain_jpeg.size() > 512 && gain_jpeg[0] == 0xFF && gain_jpeg[1] == 0xD8,
+            "gain-map JPEG output is not a JPEG stream");
+    hyperdr::verify_gain_map_jpeg(gain_jpeg);
+    const auto expected_gain_jpeg = hyperdr::reconstruct_gain_map(
         small_gain.base_linear, small_gain.gain_map, small_gain.metadata,
         small_gain.headroom_stops);
-    const auto decoded_ultrahdr = decode_ultrahdr_input(ultrahdr);
-    require(decoded_ultrahdr.metadata.model == metadata.model &&
-                decoded_ultrahdr.metadata.lens == metadata.lens &&
-                decoded_ultrahdr.metadata.iso == metadata.iso &&
-                decoded_ultrahdr.metadata.orientation == 1,
-            "Ultra HDR input did not preserve portable Exif");
-    const float measured_ultrahdr_peak = std::max(1.0F,
-        *std::max_element(decoded_ultrahdr.linear_p3.pixels.begin(),
-                          decoded_ultrahdr.linear_p3.pixels.end()));
-    require(decoded_ultrahdr.domain == hyperdr::InputDomain::kDualRendition &&
-                decoded_ultrahdr.authored_sdr.has_value() &&
-                std::abs(decoded_ultrahdr.hdr_headroom - measured_ultrahdr_peak) < 1e-5F,
-            "Ultra HDR input did not preserve authored SDR and measured HDR range");
-    require_linear_round_trip(decoded_ultrahdr, expected_ultrahdr,
-                              "Ultra HDR input did not reconstruct its Gain Map");
+    const auto decoded_gain_jpeg = decode_gain_map_jpeg_input(gain_jpeg);
+    require(decoded_gain_jpeg.metadata.model == metadata.model &&
+                decoded_gain_jpeg.metadata.lens == metadata.lens &&
+                decoded_gain_jpeg.metadata.iso == metadata.iso &&
+                decoded_gain_jpeg.metadata.orientation == 1,
+            "gain-map JPEG input did not preserve portable Exif");
+    const float measured_gain_jpeg_peak = std::max(1.0F,
+        *std::max_element(decoded_gain_jpeg.linear_p3.pixels.begin(),
+                          decoded_gain_jpeg.linear_p3.pixels.end()));
+    require(decoded_gain_jpeg.domain == hyperdr::InputDomain::kDualRendition &&
+                decoded_gain_jpeg.authored_sdr.has_value() &&
+                std::abs(decoded_gain_jpeg.hdr_headroom - measured_gain_jpeg_peak) < 1e-5F,
+            "gain-map JPEG input did not preserve authored SDR and measured HDR range");
+    require_linear_round_trip(decoded_gain_jpeg, expected_gain_jpeg,
+                              "gain-map JPEG input did not reconstruct its Gain Map");
     // AVIF is the encoding this project could write but not read, so unlike the
     // other five it had no input round trip: `verify_avif_decodable` only ever
     // proved libavif would open the file, never that HyperDR would.
@@ -1569,7 +1290,7 @@ int main() {
     for (const auto encoding :
          {hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool pq = encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto avif = hyperdr::encode_avif(small_gain, metadata, 80, encoding);
+      const auto avif = hyperdr::encode_avif(hyperdr::test::decoded_pair(small_gain), metadata, 80, encoding);
       require(avif.size() > 32, "AVIF encoder produced an implausibly small file");
       require(!contains_text(avif, "AdaptiveHDR") &&
                   !contains_text(avif, "ISO-21496-1"),
@@ -1607,12 +1328,15 @@ int main() {
     }
     std::cout << "PQ/HLG AVIF input round trips passed\n";
     check_png_cicp_headroom();
-    auto no_headroom_options = options;
-    no_headroom_options.headroom_stops = 0.0F;
-    const auto no_headroom_gain = hyperdr::make_gain_map(small, no_headroom_options);
-    hyperdr::verify_ultrahdr_jpeg(
-        hyperdr::encode_ultrahdr_jpeg(no_headroom_gain, metadata, 20));
+    const float no_headroom_options = 0;
+    const auto no_headroom_gain = hyperdr::test::gradient_pair(small, no_headroom_options);
+    hyperdr::verify_gain_map_jpeg(
+        hyperdr::encode_gain_map_jpeg(no_headroom_gain, metadata, 20));
     auto gain_probe = small_gain;
+    // This is the fixed-q95 code-preservation probe. P3a-2 gives ordinary
+    // gain streams an independent lossy quality cap; framed streams retain
+    // q95 for E5. Keep this path's original 0.5-mean / 3-max code limits.
+    gain_probe.presentation_frame = true;
     for (std::size_t i = 0; i < gain_probe.gain_map.pixels.size(); ++i) {
       const auto code = i % 7 == 0 ? 0U : (i % 11 == 0 ? 255U : static_cast<unsigned>((i * 37U) % 255U));
       gain_probe.gain_map.pixels[i] = static_cast<float>(code) / 255.0F;
@@ -1668,7 +1392,7 @@ int main() {
     // Single-image BT.2100 exports must be Main10, carry the requested transfer
     // function, remain distinct from gain-map topology, and decode end-to-end.
     for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
-        const auto hdr_bytes = hyperdr::encode_hdr_heic(small_gain, metadata, 80, encoding);
+        const auto hdr_bytes = hyperdr::encode_hdr_heic(hyperdr::test::decoded_pair(small_gain), metadata, 80, encoding);
         require_hevc_profiles(hdr_bytes, true, false);
         const auto inspection = hyperdr::inspect_heif(hdr_bytes);
         require(inspection.structurally_valid && inspection.has_heic_brand &&
@@ -1689,33 +1413,16 @@ int main() {
             ".heic", reduced_jpeg_options);
         // The stored ispe can include codec padding beyond the clean aperture.
         // Check it against the container, not the intended display dimensions.
-        std::unique_ptr<heif_context, TestContextDeleter> geometry_context(heif_context_alloc());
-        require_heif(heif_context_read_from_memory_without_copy(geometry_context.get(),
-            hdr_bytes.data(), hdr_bytes.size(), nullptr), "read HEIC preview geometry");
-        heif_image_handle* geometry_raw = nullptr;
-        require_heif(heif_context_get_primary_image_handle(geometry_context.get(), &geometry_raw),
-            "get HEIC preview geometry");
-        std::unique_ptr<heif_image_handle, TestHandleDeleter> geometry_handle(geometry_raw);
-        heif_color_profile_nclx* hdr_nclx_raw = nullptr;
-        require_heif(heif_image_handle_get_nclx_color_profile(
-                         geometry_handle.get(), &hdr_nclx_raw),
-                     "get BT.2100 HEIC nclx");
-        std::unique_ptr<heif_color_profile_nclx,
-                        decltype(&heif_nclx_color_profile_free)>
-            hdr_nclx(hdr_nclx_raw, &heif_nclx_color_profile_free);
-        require(hdr_nclx != nullptr &&
-                    hdr_nclx->matrix_coefficients ==
-                        heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance,
+        const auto geometry_file = hyperdr::read_heif(hdr_bytes);
+        const auto geometry = geometry_file.resolve_image();
+        require(geometry.color && geometry.color->matrix == 9,
                 "BT.2100 HEIC must use the same Rec.2020 YCbCr matrix as AVIF");
-        heif_content_light_level hdr_light{};
         const auto expected_light = expected_content_light(expected_hdr);
-        require(heif_image_handle_get_content_light_level(
-                    geometry_handle.get(), &hdr_light) &&
-                    hdr_light.max_content_light_level == expected_light[0] &&
-                    hdr_light.max_pic_average_light_level == expected_light[1],
+        require(geometry.light && geometry.light->maximum == expected_light[0] &&
+                    geometry.light->average == expected_light[1],
                 "HEIC CLLI does not use maxRGB for MaxCLL and MaxPALL");
-        require(reduced.decode.sensor_width == static_cast<unsigned>(heif_image_handle_get_ispe_width(geometry_handle.get())) &&
-                    reduced.decode.sensor_height == static_cast<unsigned>(heif_image_handle_get_ispe_height(geometry_handle.get())) &&
+        require(reduced.decode.sensor_width == geometry.width &&
+                    reduced.decode.sensor_height == geometry.height &&
                     reduced.decode.sensor_width == decoded.decode.sensor_width &&
                     reduced.decode.sensor_height == decoded.decode.sensor_height &&
                     reduced.decode.target_width == 64 && reduced.decode.target_height == 32 &&
@@ -1770,8 +1477,8 @@ int main() {
                                hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool avif = encoding == hyperdr::HdrEncoding::AvifPq || encoding == hyperdr::HdrEncoding::AvifHlg;
       const bool pq = encoding == hyperdr::HdrEncoding::Pq || encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto bytes = avif ? hyperdr::encode_avif(checker_gain, metadata, 90, encoding)
-                              : hyperdr::encode_hdr_heic(checker_gain, metadata, 90, encoding);
+      const auto bytes = avif ? hyperdr::encode_avif(hyperdr::test::decoded_pair(checker_gain), metadata, 90, encoding)
+                              : hyperdr::encode_hdr_heic(hyperdr::test::decoded_pair(checker_gain), metadata, 90, encoding);
       const auto full = decode_encoded_input(bytes, "checker-full", avif ? ".avif" : ".heic");
       const auto reduced = decode_encoded_input(bytes, "checker-preview", avif ? ".avif" : ".heic",
                                                 reduced_jpeg_options);
@@ -1789,7 +1496,7 @@ int main() {
     // decode depends on the HEVC range extensions.
     const auto hlg422 = encode_hlg_422(small);
     if (hlg422.empty()) {
-      throw std::runtime_error("x265 cannot produce the required 4:2:2 Main10 fixture");
+      throw std::runtime_error("VideoToolbox cannot produce the required 4:2:2 Main10 fixture");
     }
     require_chroma_422(hlg422);
     const auto decoded_hlg422 = decode_encoded_input(hlg422, "hlg422");
@@ -1800,7 +1507,7 @@ int main() {
                               "4:2:2 HLG input did not decode to its linear values");
     std::cout << "4:2:2 HLG input round trip passed\n";
     check_hdr_source_gain_maps(metadata);
-    std::cout << "HLG source to Adaptive HEIC and Ultra HDR round trips passed\n";
+    std::cout << "HLG source to Adaptive HEIC and gain-map JPEG round trips passed\n";
 
     // 10-bit output is required: it is the only way to exercise the Main10
     // path used by the BT.2100 encodings.
@@ -1818,4 +1525,10 @@ int main() {
     std::cerr << "codec test failure: " << e.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

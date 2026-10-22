@@ -1,0 +1,116 @@
+{
+  "schema": "hyperdr.model-gain-references/v1",
+  "description": "Frozen pre-P7-4 ncnn references for the Core ML tolerance gate",
+  "encoding": {
+    "transfer": "sRGB",
+    "bits": 8,
+    "channels": "RGB",
+    "colorSpace": "linear Display P3 after decode"
+  },
+  "gainLayout": "row-major float32 little-endian, signed log2 stops, stride 16",
+  "resampleNotes": "<name>.png decodes to the model input source; <name>.engine.png is the same picture after the engine's resample_to, sRGB-encoded for storage",
+  "resampleCases": [
+    {
+      "name": "resample-fractional",
+      "source": [
+        120,
+        160
+      ],
+      "analysis": [
+        80,
+        96
+      ]
+    },
+    {
+      "name": "resample-staged",
+      "source": [
+        160,
+        400
+      ],
+      "analysis": [
+        64,
+        128
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "canon",
+      "source": "canon-eos-5d-iii-lossy.dng",
+      "kind": "raw-fixture",
+      "tensor": [
+        128,
+        192
+      ],
+      "grid": [
+        8,
+        12
+      ],
+      "ncnnModelId": "research-cnn-v1",
+      "ncnnModelVersion": "research-demo-fold0-seed908/v1",
+      "gainMinStops": 0.53173828125,
+      "gainMaxStops": 1.158203125,
+      "upsampledBy": 4,
+      "upsampledTensor": [
+        512,
+        768
+      ],
+      "upsampledGrid": [
+        32,
+        48
+      ],
+      "upsampledNcnnModelId": "research-cnn-v1"
+    },
+    {
+      "name": "leica",
+      "source": "leica-c-portrait.RWL",
+      "kind": "raw-fixture",
+      "tensor": [
+        192,
+        128
+      ],
+      "grid": [
+        12,
+        8
+      ],
+      "ncnnModelId": "research-cnn-v1",
+      "ncnnModelVersion": "research-demo-fold0-seed908/v1",
+      "gainMinStops": 0.76513671875,
+      "gainMaxStops": 0.97119140625
+    },
+    {
+      "name": "clipped",
+      "source": "synthetic",
+      "kind": "synthetic",
+      "tensor": [
+        96,
+        96
+      ],
+      "grid": [
+        6,
+        6
+      ],
+      "ncnnModelId": "research-cnn-v1",
+      "ncnnModelVersion": "research-demo-fold0-seed908/v1",
+      "gainMinStops": 0.423828125,
+      "gainMaxStops": 1.2021484375
+    },
+    {
+      "name": "shadow",
+      "source": "synthetic",
+      "kind": "synthetic",
+      "tensor": [
+        96,
+        96
+      ],
+      "grid": [
+        6,
+        6
+      ],
+      "ncnnModelId": "research-cnn-v1",
+      "ncnnModelVersion": "research-demo-fold0-seed908/v1",
+      "gainMinStops": 0.312255859375,
+      "gainMaxStops": 1.767578125
+    }
+  ]
+}

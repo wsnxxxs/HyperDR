@@ -16,6 +16,28 @@ void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+void test_dng_content_classifier() {
+  for (bool big : {false, true}) {
+    std::vector<std::uint8_t> bytes(65560);
+    auto put = [&](size_t at, std::uint32_t value, unsigned size) {
+      for (unsigned i = 0; i < size; ++i)
+        bytes[at + i] = value >> (8 * (big ? size - 1 - i : i));
+    };
+    bytes[0] = bytes[1] = big ? 'M' : 'I';
+    put(2, 42, 2); put(4, 8, 4); put(8, 1, 2); put(10, 50706, 2);
+    require(hyperdr::has_dng_version_ifd0(bytes.data(), bytes.size()), "DNG IFD0 endian detection");
+    require(!hyperdr::has_dng_version_ifd0(bytes.data(), 25), "truncated IFD0 accepted");
+    put(8, 513, 2);
+    require(!hyperdr::has_dng_version_ifd0(bytes.data(), bytes.size()), "IFD0 entry bound ignored");
+    put(4, 65530, 4); put(65530, 1, 2); put(65532, 50706, 2);
+    require(!hyperdr::has_dng_version_ifd0(bytes.data(), bytes.size()), "64 KB bound ignored");
+    put(4, 0, 4);
+    require(!hyperdr::has_dng_version_ifd0(bytes.data(), bytes.size()), "overlapping IFD0 accepted");
+    put(4, 8, 4); put(8, 1, 2); put(10, 256, 2);
+    require(!hyperdr::has_dng_version_ifd0(bytes.data(), bytes.size()), "ordinary TIFF misclassified");
+  }
+}
+
 void test_exif() {
   hyperdr::PhotoMetadata metadata;
   metadata.make = "Sony";
@@ -368,6 +390,7 @@ void test_apple_legacy_makernote_headroom() {
 
 int main() {
   try {
+    test_dng_content_classifier();
     test_exif();
     test_capture_parameters_and_exposure_bias();
     test_portable_metadata_round_trip();

@@ -105,7 +105,7 @@ BilinearGridSampler::BilinearGridSampler(std::uint32_t grid_width,
                                               image_width, image_height, 0, y));
 }
 
-float sample_grid_bilinear(const std::vector<float>& grid,
+float sample_grid_bilinear(std::span<const float> grid,
                            std::uint32_t grid_width, std::uint32_t grid_height,
                            std::uint32_t image_width,
                            std::uint32_t image_height, std::uint32_t x,

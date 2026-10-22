@@ -14,16 +14,6 @@
 
 namespace hyperdr {
 
-using GainMapOptions = RenderOptions;
-
-// Validates the renderer's own controls, then the look's, before any RAW decode
-// or image allocation happens: a rejected setting should cost nothing.
-void validate_gain_map_options(const GainMapOptions& options);
-
-// The headroom the exported curve represents. Automatic headroom is content
-// dependent, so a curve built without an image uses the configured ceiling.
-[[nodiscard]] float nominal_headroom_stops(const GainMapOptions& options);
-
 struct GainMapResult {
   FloatImage base_linear;
   FloatImage gain_map;
@@ -32,6 +22,8 @@ struct GainMapResult {
   float exposure_ev{};
   float headroom_stops{};
   RenderStats stats;
+  // Framed exports protect the zero-gain mat from JPEG ringing at photo edges.
+  bool presentation_frame{false};
 };
 
 }  // namespace hyperdr

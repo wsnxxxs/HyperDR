@@ -60,6 +60,8 @@ inline Bytes file(const std::string& name, const hyperdr::HeifByteSink& sink = {
     base.display_p3_icc = icc;
     options.gain_metadata = metadata(grid);
     PhotoMetadata capture;
+    // Fixture metadata stays fixed when the product version changes.
+    capture.software = "HyperDR 1.0.0";
     capture.make = "HyperDR"; capture.model = "V2 fixture"; capture.iso = 400;
     capture.exposure_seconds = 1.0/125; capture.copyright = "CC0 synthetic fixture";
     options.exif = make_minimal_exif(capture);

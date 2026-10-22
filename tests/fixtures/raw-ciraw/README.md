@@ -13,7 +13,7 @@ The old executable remains only in ignored build-r3-validation/ as evidence.
 
 `apple-model-7s.json` freezes the Release Apple outputs immediately before R3;
 `apple-model-7s-debug.json` freezes Debug/ASan outputs using the retained
-pre-deletion build-e4d-asan libraries and the old headers from 1e897f0.
+pre-deletion build-e4d-asan libraries and the old headers from 9eb0680.
 The reference capture helper is in ignored build-r3-validation/freeze_asan.py.
 Debug and Release differ slightly in model preparation/inference, so the test
 selects the corresponding reference using NDEBUG. Each configuration must remain

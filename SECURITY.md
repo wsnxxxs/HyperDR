@@ -26,6 +26,6 @@ drop, and writes only to locations you choose or the folder you keep for
 exports.
 
 The earlier browser panel, which accepted uploads over the LAN and could serve
-them over TLS, was deleted on 2026-10-20 (last visible at `71933a32`). The
+them over TLS, was deleted on 2026-10-20 (last visible at `5cd997fd`). The
 Windows version is frozen at [`6949167`](https://github.com/wsnxxxs/HyperDR/tree/6949167);
 see that revision for its release, packaging and certificate handling.

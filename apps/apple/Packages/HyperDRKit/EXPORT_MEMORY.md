@@ -24,7 +24,7 @@ For native area N, canvas width W and callback height R:
   GPU admission uses Render's maximum source tile/read rows and the actual
   device's `maximumTextureDimension`, rather than logical canvas dimensions.
 - HEIC encoding adds a 12W × min(512,H) float slab, 32 MiB codec allowance and
-  one compressed sequence C. Since `09c1b526`, assembly retains only C and
+  one compressed sequence C. Since `38250df7`, assembly retains only C and
   streams the container into the staged file; both full-plane and row package
   paths use the file sink. Items and <=256 KiB writes borrow spans, so there is
   no extra chunk allocation or complete output vector. The existing 32 MiB
@@ -81,7 +81,7 @@ establish the typical-device result. No constants are lowered to force admission
 
 ## Detached TIFF bitmap ownership
 
-The merged Render source loader (`aaf2bcfd`, with the R42/R47 tile/gain fixes)
+The merged Render source loader (`c89a80ea`, with the R42/R47 tile/gain fixes)
 materializes large TIFFs without auxiliary gain once through ImageIO. Its
 CGDataProvider retains the decoded native bitmap; CI wraps that backing rather
 than introducing another native-size float Render texture. Orientation and

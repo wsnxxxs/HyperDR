@@ -472,7 +472,9 @@ nonisolated struct ExportStack: Sendable {
                     request: request,
                     lut: capture.lut, destination: nil,
                     progress: { progress in Task { @MainActor in self?.progressed(progress, run: run) } })
-                let file = try await stack.sessions.stageExportForTransfer(opened.session, export: result.record.id)
+                let file = try await stack.sessions.stageExportForTransfer(
+                    opened.session, export: result.record.id,
+                    fileName: Self.transferName(photo: capture.source.url.lastPathComponent, file: result.record.name))
                 self?.finished(Finished(result: result, file: file), run: run)
             } catch {
                 // A memory refusal: which check, with the service's numbers.
@@ -597,7 +599,18 @@ nonisolated struct ExportStack: Sendable {
 
     /// A copy of the version's file to share or save; the version stays.
     func stage(_ entry: ExportHistoryEntry) async throws -> URL {
-        try await stack.value.sessions.stageExportForTransfer(entry.session, export: entry.id)
+        try await stack.value.sessions.stageExportForTransfer(
+            entry.session, export: entry.id, fileName: Self.transferName(photo: entry.photoName, file: entry.record.name))
+    }
+
+    /// The photo's own name with the export's extension, "IMG_8681.heic",
+    /// for what Files, Share and Photos receive; the version's own name
+    /// when the photo's is unknown.
+    nonisolated static func transferName(photo: String, file: String) -> String {
+        let stem = (photo as NSString).deletingPathExtension, ext = (file as NSString).pathExtension
+        guard !stem.isEmpty, !stem.hasPrefix("."), !stem.contains("/"), !ext.isEmpty else { return file }
+        let name = stem + "." + ext
+        return name.utf8.count <= 255 ? name : file
     }
 
     func remove(_ entry: ExportHistoryEntry) async throws {

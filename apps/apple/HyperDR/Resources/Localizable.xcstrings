@@ -9557,7 +9557,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "存储到相册"
+            "value" : "存储到“照片”"
           }
         }
       }
@@ -9593,7 +9593,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已存储到相册"
+            "value" : "已存储到“照片”"
           }
         }
       }
@@ -9629,7 +9629,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未能存入相册。"
+            "value" : "未能存入“照片”。"
           }
         }
       }

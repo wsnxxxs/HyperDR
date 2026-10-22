@@ -224,7 +224,7 @@ private struct HistoryDetail: View {
             }
         }
         LabeledContent {
-            Text(verbatim: "\(record.name) · \(ExportPlanText.bytes(Int(record.byteCount)))")
+            Text(verbatim: "\(IOSExportModel.transferName(photo: entry.photoName, file: record.name)) · \(ExportPlanText.bytes(Int(record.byteCount)))")
                 .lineLimit(1).truncationMode(.middle)
         } label: {
             Text("ios.history.file")

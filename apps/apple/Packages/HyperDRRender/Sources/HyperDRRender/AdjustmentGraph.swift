@@ -337,10 +337,15 @@ extension RenderEngine {
             p.scatter = SIMD4(Int32(region.minX - around.minX), Int32(region.minY - around.minY), 1, 0)
             scattered = exposure
         }
+        // The grain's sublayer kernels depend only on this render's pixel pitch.
+        let grainRows = edit.film.stock.flatMap { try? FilmStock.named($0) }?.packedGrainKernel(longEdge: max(size.width, size.height))
+            ?? [SIMD4<Float>(repeating: 0)]
+        guard let grainKernel = device.makeBuffer(bytes: grainRows, length: grainRows.count * 16, options: .storageModeShared)
+            else { throw RenderError.allocationFailed }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
             textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
                        analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion],
-            buffers: [resources.buffer, film.buffer], value: &p)
+            buffers: [resources.buffer, film.buffer, grainKernel], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,
             provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,

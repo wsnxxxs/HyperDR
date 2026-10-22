@@ -211,7 +211,8 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
 }
 // `exposed`, when w is set, is the film exposure after the in-emulsion scatter.
 WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,
-                        const device FilmData& film,texture2d<float,access::read> filmLUT,int2 site,float3 glow=0,float4 exposed=0) {
+                        const device FilmData& film,texture2d<float,access::read> filmLUT,int2 site,float3 glow=0,float4 exposed=0,
+                        constant float4* grainKernel=nullptr) {
     float3 rgb=graphScene(pixel,p,cube,table);
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
@@ -220,7 +221,7 @@ WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,ac
     if(p.film.x>0) {
         float3 raw=exposed.w>0 ? exposed.xyz : filmRaw(rgb*p.film.w,film,filmLUT);
         if(p.halation.w>0) raw=(raw+p.halation.xyz*glow)/(1+p.halation.xyz);
-        base=fit(mix(base,filmFromRaw(raw,film,p.film.yz,site),p.film.x),1.f);
+        base=fit(mix(base,filmFromRaw(raw,film,p.film.yz,site,grainKernel),p.film.x),1.f);
     }
     if(p.flags.y) {
         // L1: an SDR-input look changes the base, retaining the captured ratio.
@@ -340,13 +341,13 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
                         texture2d<float,access::read> scattered [[texture(8)]],
                         constant GraphUniform& p [[buffer(0)]],
                         device const float4* table [[buffer(1)]],const device FilmData& film [[buffer(2)]],
-                        uint2 pos [[thread_position_in_grid]]) {
+                        constant float4* grainKernel [[buffer(3)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
     float2 uv=(float2(pos+p.region.zw)+.5f)/float2(p.region.xy);
     auto pair=preparePair(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table,film,filmLUT,int2(pos+p.region.zw),
                          p.halation.w>0 ? filmSmooth(halation,uv) : float3(0),
-                         p.scatter.z ? float4(scattered.read(uint2(int2(pos)+p.scatter.xy)).rgb,1) : float4(0));
+                         p.scatter.z ? float4(scattered.read(uint2(int2(pos)+p.scatter.xy)).rgb,1) : float4(0),grainKernel);
     float g=pair.gain;
     if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
     if(p.mode.y)g=max(g,model.sample(s,uv).x);

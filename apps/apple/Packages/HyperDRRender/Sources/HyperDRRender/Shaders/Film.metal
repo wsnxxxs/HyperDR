@@ -1,14 +1,16 @@
 // Film emulation (FilmStock.swift is the double reference). Rows match FilmStock.packed():
 // matrices are rows of float4; densities carry the base density in w; the two light
 // tables are illuminant × sensitivity (printing) and illuminant × observer (viewing).
-// levels: slide exposure scale, scanner slope and offset on Y. grain: 3×3 weights
-// (centre, edge, corner) and the film format in millimetres.
+// levels: slide exposure scale, scanner slope and offset on Y. grain: the density under the
+// particles (grain's floor is its negative) and, in w, the scan's blur in pixels. format.x:
+// the film format in millimetres. Grain tables: each sublayer's variance ×
+// area and third cumulant × area², and its dye clouds (µm).
 struct FilmData {
     float4 p3ToReference[3], couplers[3], xyzToP3[3];
-    float4 densityMaximum, axes, info, levels, grain;
+    float4 densityMaximum, axes, info, levels, grain, format;
     float4 filmCurves[256], filmCurvesBeforeCouplers[256], paperCurves[256];
     float4 filmDensity[81], scannedDensity[81], printLight[81], scanLight[81];
-    float4 grainVariance[256];
+    float4 grainVariance[3*256], grainThird[3*256], grainClouds[3];
 };
 float3 filmRows(const device float4* m,float3 v) { return float3(dot(m[0].xyz,v),dot(m[1].xyz,v),dot(m[2].xyz,v)); }
 float3 filmLog10(float3 x) { return log10(max(x,0.f)+1e-10f); }
@@ -46,11 +48,12 @@ float3 filmSpectral(texture2d<float,access::read> lut,float2 tc,int size) {
     return weights!=0 ? sum/weights : sum;
 }
 uint filmHash(uint v) { v^=v>>16;v*=0x7feb352du;v^=v>>15;v*=0x846ca68bu;v^=v>>16;return v; }
-// Unit normal noise per pixel and channel; FilmStock.grainNoise computes the same bits.
-float filmNoise(int x,int y,uint c) {
-    uint h=filmHash(as_type<uint>(x)+filmHash(as_type<uint>(y)+filmHash(c+0x9e3779b9u)));
-    float u1=float(h>>8)*0x1p-24f+0x1p-25f,u2=float(filmHash(h)>>8)*0x1p-24f;
-    return sqrt(-2*log(u1))*cos(2*M_PI_F*u2);
+// Unit normal noise of a pixel's three channels; FilmStock.grainNoise computes the same bits.
+float3 filmNoise(int x,int y) {
+    uint h0=filmHash(as_type<uint>(x)+filmHash(as_type<uint>(y)+0x9e3779b9u)),h1=filmHash(h0),h2=filmHash(h1),h3=filmHash(h2);
+    float r=sqrt(-2*log(float(h0>>8)*0x1p-24f+0x1p-25f)),angle=2*M_PI_F*float(h1>>8)*0x1p-24f;
+    float blue=sqrt(-2*log(float(h2>>8)*0x1p-24f+0x1p-25f))*cos(2*M_PI_F*float(h3>>8)*0x1p-24f);
+    return float3(r*cos(angle),r*sin(angle),blue);
 }
 // Linear film exposure of a scene colour: the spectral upsampling's chromaticity table
 // scaled by X+Y+Z (and a slide's scanner correction).
@@ -60,23 +63,51 @@ float3 filmRaw(float3 rgb,const device FilmData& d,texture2d<float,access::read>
     float2 tc=clamp(float2((1-x)*(1-x),y/max(1-x,1e-10f)),0.f,1.f);
     return filmSpectral(lut,tc,int(d.info.w))*s*d.levels.x;
 }
+// a such that z + a(z² - 1) has this skewness (FilmStock.cornishFisher).
+float3 filmBend(float3 skew) {
+    float3 target=clamp(skew,0.f,2.5f),a=target/6;
+    for(int i=0;i<4;i++) {
+        float3 q=1+2*a*a,root=sqrt(q),n=6*a+8*a*a*a;
+        a-=(n/(q*root)-target)/(((6+24*a*a)*q-n*6*a)/(q*q*root));
+    }
+    return a;
+}
+// spektrafilm's sublayer grain; FilmStock.addGrain is the reference and explains it.
+// grain: amount, 1/pixel area (µm⁻²). taps: FilmStock.packedGrainKernel for this render.
+float3 filmGrain(float3 density,const device FilmData& d,float2 grain,int2 pixel,constant float4* taps) {
+    float3 t=density/d.densityMaximum.xyz*255.f,v[3],total=0,target2=0,target3=0;
+    for(int l=0;l<3;l++) {
+        v[l]=max(filmCurve(t,0.f,255.f,d.grainVariance+256*l),0.f)*grain.y;total+=v[l];
+        target2+=v[l]*taps[57+l].xyz;
+        target3+=max(filmCurve(t,0.f,255.f,d.grainThird+256*l),0.f)*grain.y*grain.y*taps[60+l].xyz;
+    }
+    float3 inverse=1/max(total,1e-30f),a[3]={v[0]*inverse,v[1]*inverse,v[2]*inverse},energy2=0,energy3=0;
+    for(int l=0;l<3;l++) for(int m=0;m<3;m++) {
+        energy2+=a[l]*a[m]*taps[21+3*l+m].xyz;
+        for(int n=0;n<3;n++) energy3+=a[l]*a[m]*a[n]*taps[30+9*l+3*m+n].xyz;
+    }
+    float3 scale=sqrt(target2/max(energy2,1e-30f)),bend=filmBend(target3/max(scale*scale*scale*energy3,1e-30f)),noise=0;
+    int radius=int(taps[63].x);
+    for(int dy=-radius;dy<=radius;dy++) {
+        int y=abs(dy);
+        float3 b0=a[0]*taps[y].xyz,b1=a[1]*taps[7+y].xyz,b2=a[2]*taps[14+y].xyz;
+        for(int dx=-radius;dx<=radius;dx++) {
+            int x=abs(dx);
+            float3 n=filmNoise(pixel.x+dx,pixel.y+dy);
+            noise+=(b0*taps[x].xyz+b1*taps[7+x].xyz+b2*taps[14+x].xyz)*(n+bend*(n*n-1));
+        }
+    }
+    return select(max(-d.grain.xyz,density+grain.x*scale*noise*rsqrt(1+2*bend*bend)),density,total<=0);
+}
 // From film exposure on: development, grain, print and viewing.
 // grain: amount, 1/pixel area (µm⁻²); pixel: output coordinates in the full render.
-float3 filmFromRaw(float3 raw,const device FilmData& d,float2 grain,int2 pixel) {
+float3 filmFromRaw(float3 raw,const device FilmData& d,float2 grain,int2 pixel,constant float4* grainKernel) {
     float3 logE=filmLog10(raw);
     float3 density=filmCurve(logE,d.axes.x,d.axes.y,d.filmCurves);
     float3 silver=d.info.x!=0 ? d.densityMaximum.xyz-density : density;
     logE-=silver.r*d.couplers[0].xyz+silver.g*d.couplers[1].xyz+silver.b*d.couplers[2].xyz;
     density=filmCurve(logE,d.axes.x,d.axes.y,d.filmCurvesBeforeCouplers);
-    if(grain.x>0) {
-        float3 variance=filmCurve(density/d.densityMaximum.xyz*255.f,0.f,255.f,d.grainVariance);
-        for(uint c=0;c<3;c++) {
-            float noise=0;
-            for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
-                noise+=d.grain[abs(dx)+abs(dy)]*filmNoise(pixel.x+dx,pixel.y+dy,c);
-            density[c]=max(0.f,density[c]+grain.x*sqrt(max(variance[c],0.f)*grain.y)*noise);
-        }
-    }
+    if(grain.x>0) density=filmGrain(density,d,grain,pixel,grainKernel);
     if(d.info.y!=0) {
         float3 raw=0;
         for(uint w=0;w<81;w++) raw+=exp10(-(dot(density,d.filmDensity[w].xyz)+d.filmDensity[w].w))*d.printLight[w].xyz;

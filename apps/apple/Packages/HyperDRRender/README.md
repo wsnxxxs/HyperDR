@@ -179,10 +179,19 @@ edge, put at 18.4 %, clamped to the declared ±3 EV. It meters the original phot
 analysis source, before any edit, so preview and export agree and the light edits still move the
 exposure; `resolvedAutomatic` reports it.
 
-Grain (`look.filmGrain`, 100 % = the stock's own) follows spektrafilm's sublayer particle model
-through its variance: per channel, variance × pixel area against density, with a 35 mm frame
-spanning the render's long edge, times unit noise blurred by 0.65 pixels (3×3, scaled to the
-5×5 kernel's deviation). The noise hashes output pixel coordinates, so regions and stripes of a
+Grain (`look.filmGrain`, 100 % = the stock's own) follows spektrafilm's sublayer particle model,
+with a 35 mm frame spanning the render's long edge. Per channel, each of the three sublayers
+develops Poisson particle counts: its density variance and third cumulant against density, per
+pixel area, are tabulated. Each sublayer's dye clouds (0.5–1.7 µm, a size on the film) and then
+the scan (0.65 pixels) blur its particles, both sampled as spektrafilm's FIR blurs. The render
+draws one field of hashed unit noise per channel (Box–Muller, one hash per pixel), puts it
+through the sublayers' kernels mixed by their variance at the pixel's density, scales it to the
+variance the separately blurred sublayers give, and bends it (Cornish–Fisher, solved exactly) to
+their third moment. The kernels depend only on the pixel pitch, so `FilmStock.packedGrainKernel`
+computes them once per render, cut where no tap reaches 5 % of its centre (3×3 at ordinary sizes,
+wider once dye clouds span pixels, as at 110 MP); the variance and third moment come from the
+whole kernels. Grain never takes density below minus the stock's minimum density, as particles
+counted above it cannot. The noise hashes output pixel coordinates, so regions and stripes of a
 render agree; analysis cells are grainless.
 
 In-emulsion scatter is part of the stock, as in spektrafilm: film exposure is blurred by an
@@ -209,8 +218,8 @@ within 3 % of the stock's halation computed at full resolution. Glare and other 
 are not modelled.
 
 Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs included
-(`Fixtures/film-reference.json`, within a 10-bit code), the grain RMS with spektrafilm's stochastic
-grain (< 5 %), the halation profile across a bright square with spektrafilm's (within 1e-3 of the
+(`Fixtures/film-reference.json`, within a 10-bit code), the grain with spektrafilm's stochastic
+grain at 91, 6, 3 and 1.5 µm pixels (RMS < 5 %, skewness and neighbour correlation), the halation profile across a bright square with spektrafilm's (within 1e-3 of the
 square; spektrafilm's recursive blur approximates the far tail), its scatter (1e-5), the GPU with
 the double reference, grain, scatter and halation included (≤ 1 10-bit code), regions and export
 tiles with the whole render (exactly), and full-size halation as above.

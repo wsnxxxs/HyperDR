@@ -1479,6 +1479,23 @@
         }
       }
     },
+    "frame.shadow.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This style has no print shadow."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这种样式没有相纸投影。"
+          }
+        }
+      }
+    },
     "frame.signature" : {
       "extractionState" : "manual",
       "localizations" : {

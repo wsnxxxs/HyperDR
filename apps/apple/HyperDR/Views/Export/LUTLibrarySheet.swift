@@ -61,20 +61,28 @@ struct LUTLibrarySheet: View {
                         .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
                 }
             }
-            HStack(spacing: Space.s2) {
-                HStack(spacing: Space.s2) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Color.hdr.inkMuted).accessibilityHidden(true)
-                    TextField("lut.library.search", text: $query).textFieldStyle(.plain)
-                }
-                .padding(.horizontal, Space.s2).frame(height: ControlMetrics.compact)
-                .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
-                Button { isPickingFiles = true } label: { Label("lut.library.import", systemImage: "plus") }
-                    .buttonStyle(HDRButtonStyle(.secondary, height: ControlMetrics.compact))
-                    .disabled(model.lut.importBlockerKey != nil || model.lut.isBusy)
+            // An empty library has nothing to search, and its own import button.
+            if !model.lut.library.isEmpty {
+                searchAndImport
             }
             notices
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Space.s5).padding(.vertical, Space.s4)
+    }
+
+    private var searchAndImport: some View {
+        HStack(spacing: Space.s2) {
+            HStack(spacing: Space.s2) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Color.hdr.inkMuted).accessibilityHidden(true)
+                TextField("lut.library.search", text: $query).textFieldStyle(.plain)
+            }
+            .padding(.horizontal, Space.s2).frame(height: ControlMetrics.compact)
+            .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
+            Button { isPickingFiles = true } label: { Label("lut.library.import", systemImage: "plus") }
+                .buttonStyle(HDRButtonStyle(.secondary, height: ControlMetrics.compact))
+                .disabled(model.lut.importBlockerKey != nil || model.lut.isBusy)
+        }
     }
 
     @ViewBuilder private var notices: some View {

@@ -44,6 +44,10 @@ their owners and only name the look's reference.
 
 Model inference uses Core ML in HyperDRRender. Training and ONNX export tools
 in `HyperDR_Model/` are offline tools and are not linked into the engine.
+The experimental denoising implementation in `HyperDR_Model/denoise/nafnet.py`
+is derived from NAFNet (Copyright (c) 2022 megvii-model), under the MIT License;
+the upstream license text is included in `HyperDR_Model/denoise/NAFNet-LICENSE.txt`.
+Downloaded RawNIND datasets and model checkpoints are not distributed.
 
 `libavif` and its libaom codec are build dependencies for the two AVIF output
 formats; they are not merely reference implementations. The ISO 21496 metadata

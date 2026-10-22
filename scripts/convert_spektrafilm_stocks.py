@@ -32,7 +32,7 @@ from spektrafilm.config import STANDARD_OBSERVER_CMFS
 from spektrafilm.model.couplers import compute_density_curves_before_dir_couplers, compute_dir_couplers_matrix
 from spektrafilm.model.density_curves import interp_density_cmy_layers
 from spektrafilm.model.illuminants import standard_illuminant
-from spektrafilm.runtime.params_builder import digest_params, init_params
+from spektrafilm.runtime.params_builder import _HALATION_PRESETS, digest_params, init_params
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.runtime.topology import Tap
 from spektrafilm.utils.morph_curves import apply_print_curves_morph
@@ -163,6 +163,7 @@ def convert(identifier: str, film_name: str, print_name: str | None) -> tuple[di
             "baseDensity": rows(film.data.base_density),
             "exposureScale": float(np.asarray(references.black_white_filming_exposure_correction()).reshape(-1)[0]),
             "grain": grain_table(params_for(film_name, print_name, grain=True), normalized),
+            "halation": halation_parameters(film_name),
         },
     }
 
@@ -237,6 +238,36 @@ def grain_table(params, normalized: np.ndarray) -> dict:
             "filmFormatMillimetres": float(params.camera.film_format_mm)}
 
 
+def halation_parameters(film_name: str) -> dict:
+    """Back-reflection halation: the film exposure plus strength x a sum of `bounces`
+    Gaussians of sigma sigmaMicrons * sqrt(k), weighted decay^(k-1) and normalised,
+    divided by 1 + strength. `strengthRemoved` is the same film without its
+    antihalation layer (spektrafilm's 'no' preset for its use)."""
+    params = digest_params(init_params(film_name))
+    halation, info = params.film_render.halation, params.film.info
+    return {"sigmaMicrons": float(halation.halation_first_sigma_um[0]), "bounces": int(halation.halation_n_bounces),
+            "decay": float(halation.halation_bounce_decay), "strength": rows(halation.halation_strength),
+            "strengthRemoved": rows(_HALATION_PRESETS[(info.use, "no")]["strength"])}
+
+
+def halation_reference(film_name: str, print_name: str | None, removed: bool) -> dict:
+    """spektrafilm's log film exposure along the centre row of a bright square on a dark
+    field, with halation alone (no grain, scatter or other spatial effects)."""
+    size, square, level, background = 1024, 32, 64.0, 0.02
+    params = params_for(film_name, print_name, grain=True)
+    params.film_render.grain.active = False
+    params.film_render.halation.active = True
+    params.film_render.halation.scatter_amount = 0.0
+    if removed:
+        params.film_render.halation.halation_strength = _HALATION_PRESETS[(params.film.info.use, "no")]["strength"]
+    image = np.full((size, size, 3), background)
+    image[(size - square) // 2:(size + square) // 2, (size - square) // 2:(size + square) // 2] = level
+    log_exposure = SimulationPipeline(params).process(image, collect=Tap.LOG_E_FILM)
+    start, row = size // 2 - 200, size // 2
+    return {"size": size, "square": square, "level": level, "background": background, "removed": removed,
+            "row": row, "start": start, "logExposure": rows(log_exposure[row, start:start + 400])}
+
+
 def grain_reference(film_name: str, print_name: str | None) -> dict:
     """Density RMS of spektrafilm's stochastic grain on flat fields, central crop."""
     size, levels = 384, [0.03, 0.184, 0.8]
@@ -272,8 +303,9 @@ def main() -> None:
     fixture = {"schema": "hyperdr.film-reference/v1", "attribution": ATTRIBUTION,
                "note": ("spektrafilm per-pixel outputs (no auto exposure, grain or spatial effects; scanner "
                         "black and white correction on), linear Display P3 in and out, output gamut compression "
-                        "off; and film density RMS of its grain on flat fields."),
-               "inputs": rows(inputs), "outputs": {}, "grain": {}}
+                        "off; film density RMS of its grain on flat fields; and log film exposure with halation alone "
+                        "across a bright square (Vision3 500T without its antihalation layer)."),
+               "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {}}
     RESOURCES.mkdir(parents=True, exist_ok=True)
     if not arguments.check:
         for old in list(RESOURCES.glob("*.json")) + list(RESOURCES.glob("*.spectral")):
@@ -284,6 +316,8 @@ def main() -> None:
         output = pipeline.process(inputs[None, :, :])[0]
         fixture["outputs"][identifier] = rows(output)
         fixture["grain"][identifier] = grain_reference(film_name, print_name)
+        if identifier in ("kodachrome64", "vision3-500t"):
+            fixture["halation"][identifier] = halation_reference(film_name, print_name, removed=identifier == "vision3-500t")
         print(f"{identifier}: grey 18.4% -> {np.round(output[6], 4)}, 1 -> {np.round(output[11], 4)}, "
               f"16 -> {np.round(output[15], 4)}, grain RMS at 18.4% {np.round(fixture['grain'][identifier]['densityRMS'][1], 4)}")
         if not arguments.check:

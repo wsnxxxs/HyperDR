@@ -52,12 +52,18 @@ float filmNoise(int x,int y,uint c) {
     float u1=float(h>>8)*0x1p-24f+0x1p-25f,u2=float(filmHash(h)>>8)*0x1p-24f;
     return sqrt(-2*log(u1))*cos(2*M_PI_F*u2);
 }
-// grain: amount, 1/pixel area (µm⁻²); pixel: output coordinates in the full render.
-float3 filmApply(float3 rgb,const device FilmData& d,texture2d<float,access::read> lut,float2 grain,int2 pixel) {
+// Linear film exposure of a scene colour: the spectral upsampling's chromaticity table
+// scaled by X+Y+Z (and a slide's scanner correction).
+float3 filmRaw(float3 rgb,const device FilmData& d,texture2d<float,access::read> lut) {
     float3 xyz=filmRows(d.p3ToReference,rgb);
     float s=xyz.x+xyz.y+xyz.z,x=xyz.x/max(s,1e-10f),y=xyz.y/max(s,1e-10f);
     float2 tc=clamp(float2((1-x)*(1-x),y/max(1-x,1e-10f)),0.f,1.f);
-    float3 logE=filmLog10(filmSpectral(lut,tc,int(d.info.w))*s*d.levels.x);
+    return filmSpectral(lut,tc,int(d.info.w))*s*d.levels.x;
+}
+// From film exposure on: development, grain, print and viewing.
+// grain: amount, 1/pixel area (µm⁻²); pixel: output coordinates in the full render.
+float3 filmFromRaw(float3 raw,const device FilmData& d,float2 grain,int2 pixel) {
+    float3 logE=filmLog10(raw);
     float3 density=filmCurve(logE,d.axes.x,d.axes.y,d.filmCurves);
     float3 silver=d.info.x!=0 ? d.densityMaximum.xyz-density : density;
     logE-=silver.r*d.couplers[0].xyz+silver.g*d.couplers[1].xyz+silver.b*d.couplers[2].xyz;
@@ -81,6 +87,25 @@ float3 filmApply(float3 rgb,const device FilmData& d,texture2d<float,access::rea
     seen=max(seen,0.f)+1e-10f;
     seen*=clamp(d.levels.y*seen.y+d.levels.z,0.f,1.f)/(seen.y+1e-10f);
     return filmRows(d.xyzToP3,seen);
+}
+// Back-reflection halation on the analysis cells: each cell's mean film exposure,
+// convolved with the stock's sum of Gaussians (weights from FilmStock.halationKernel,
+// (2r+1)² row-major, mirrored at the edges). Glow is low-frequency, so the render
+// samples this map bilinearly.
+kernel void filmHalation(texture2d<float,access::read> raw [[texture(0)]],texture2d<float,access::write> glow [[texture(1)]],
+                         constant int& radius [[buffer(0)]],device const float* weights [[buffer(1)]],
+                         uint2 pos [[thread_position_in_grid]]) {
+    int w=raw.get_width(),h=raw.get_height();
+    if(int(pos.x)>=w || int(pos.y)>=h) return;
+    float3 sum=0;
+    for(int dy=-radius;dy<=radius;dy++) {
+        int y=int(pos.y)+dy;y=y<0 ? -y : y>=h ? 2*(h-1)-y : y;y=clamp(y,0,h-1);
+        for(int dx=-radius;dx<=radius;dx++) {
+            int x=int(pos.x)+dx;x=x<0 ? -x : x>=w ? 2*(w-1)-x : x;x=clamp(x,0,w-1);
+            sum+=weights[(dy+radius)*(2*radius+1)+dx+radius]*raw.read(uint2(x,y)).rgb;
+        }
+    }
+    glow.write(float4(sum,0),pos);
 }
 // One row per thread: centre-weighted (Gaussian, sigma 0.2 of the long edge) sums of
 // luminance and weight, for RenderEngine.filmMeter.

@@ -127,7 +127,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 @Test func filmStrengthAppearsOnceAFilmIsChosen() throws {
     var recipe = Recipe(inputDomain: .sdr)
     panel.set(Recipe.filmID, option: "velvia100", in: &recipe)
-    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmGrain"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmGrain", "look.filmHalation", "look.filmAntihalation"])
     let film = try #require(panel.control(Recipe.filmID, in: recipe))
     let sections = AdjustmentText.optionSections(film)
     #expect(sections.allSatisfy { $0.family == nil }, "film stocks are not LUT spaces")

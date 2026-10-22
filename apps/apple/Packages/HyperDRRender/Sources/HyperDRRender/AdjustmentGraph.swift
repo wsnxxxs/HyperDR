@@ -10,6 +10,7 @@ struct GraphUniform {
     var region, mode: SIMD4<UInt32>
     var inputRegion: SIMD4<Float>
     var film: SIMD4<Float> = .zero
+    var halation: SIMD4<Float> = .zero
 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
 struct AuthorUniform {
@@ -38,6 +39,8 @@ public struct SpatialAnalysis: @unchecked Sendable {
     public let peaks: SIMD4<Float>
     /// Original source capacity in stops, including authored headroom metadata.
     public let sourceHeadroom: Float
+    /// The film's halation glow, as film exposure on the cells; nil without halation.
+    public var filmHalation: (any MTLTexture)? = nil
 }
 
 extension RenderEngine {
@@ -165,14 +168,25 @@ extension RenderEngine {
         }
         let cells = try texture(), peaks = try texture(), masks = try texture()
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
-        let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
+        let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float), filmRaw = try texture()
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
         let film = try filmResources(edit.film)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
         parameters.film.y = 0 // grain averages out in the cells
         try context.dispatch("graphCells", width: width, height: height,
-            textures: [input, cells, peaks, resources.texture, masks, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
+            textures: [input, cells, peaks, resources.texture, masks, film.texture, filmRaw], buffers: [resources.buffer, film.buffer], value: &parameters)
+        var halation: (any MTLTexture)? = nil
+        if let stock = edit.film.stock, !edit.film.isIdentity, edit.film.halation > 0,
+           let data = try? FilmStock.named(stock), data.halationStrength(edit.film).max() > 0 {
+            let kernel = data.halationKernel(longEdge: max(width, height))
+            guard let weights = device.makeBuffer(bytes: kernel.weights, length: kernel.weights.count * 4, options: .storageModeShared)
+                else { throw RenderError.allocationFailed }
+            let glow = try texture()
+            var radius = Int32(kernel.radius)
+            try context.dispatch("filmHalation", width: width, height: height, textures: [filmRaw, glow], buffers: [weights], value: &radius)
+            halation = glow
+        }
         func box(_ input: any MTLTexture, _ output: any MTLTexture, radius: Int) throws {
             var p = BoxUniform(radius: UInt32(radius), vertical: 0, width: UInt32(width), height: UInt32(height))
             try context.dispatch("graphBox", width: width, height: height, textures: [input, temp], value: &p)
@@ -192,9 +206,10 @@ extension RenderEngine {
         try finish(command)
         let originalPeak = summary.contents().advanced(by: 16).load(as: SIMD4<Float>.self).x
         let taggedHeadroom = max(source.authoredGainMap?.baseHeadroom ?? 0, source.authoredGainMap?.alternateHeadroom ?? 0)
-        let result = SpatialAnalysis(size: PixelSize(width: width, height: height), cells: cells, masks: masks,
+        var result = SpatialAnalysis(size: PixelSize(width: width, height: height), cells: cells, masks: masks,
             expansion: expansion, peaks: summary.contents().load(as: SIMD4<Float>.self),
             sourceHeadroom: max(log2(max(1, originalPeak)), log2(max(1, source.hdrImage.contentHeadroom)), Float(taggedHeadroom)))
+        result.filmHalation = halation
         analysisCache = (key, result)
         return result
     }
@@ -281,8 +296,12 @@ extension RenderEngine {
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
+        if analysis.filmHalation != nil, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
+            p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film)), 1)
+        }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
-            textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture],
+            textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
+                       analysis.filmHalation ?? analysis.expansion],
             buffers: [resources.buffer, film.buffer], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,

@@ -281,6 +281,20 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片" } }
       }
     },
+    "ctrl.look.filmAntihalation.help" : {
+      "comment" : "Adjustment control help (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The film's antihalation layer. Off removes it, as CineStill does to Vision3, for a much stronger glow." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片的防光晕层。关闭即去除该层（CineStill 对 Vision3 的做法），光晕会强得多。" } }
+      }
+    },
+    "ctrl.look.filmAntihalation.label" : {
+      "comment" : "Adjustment control name (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Antihalation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "防光晕层" } }
+      }
+    },
     "ctrl.look.filmExposure.help" : {
       "comment" : "Adjustment control help (look.filmExposure).",
       "localizations" : {
@@ -307,6 +321,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Grain" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颗粒" } }
+      }
+    },
+    "ctrl.look.filmHalation.help" : {
+      "comment" : "Adjustment control help (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The reddish glow light reflected from the film base adds around bright highlights. 100% is the stock's own." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "片基反射的光在明亮高光周围形成的偏红辉光。100% 为该胶片本身的光晕。" } }
+      }
+    },
+    "ctrl.look.filmHalation.label" : {
+      "comment" : "Adjustment control name (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "光晕" } }
       }
     },
     "ctrl.look.filmStrength.help" : {
@@ -1517,6 +1545,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择胶片" } }
       }
     },
+    "undo.look.filmAntihalation" : {
+      "comment" : "Undo action name (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Antihalation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更改防光晕层" } }
+      }
+    },
     "undo.look.filmExposure" : {
       "comment" : "Undo action name (look.filmExposure).",
       "localizations" : {
@@ -1529,6 +1564,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Grain" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整颗粒" } }
+      }
+    },
+    "undo.look.filmHalation" : {
+      "comment" : "Undo action name (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整光晕" } }
       }
     },
     "undo.look.filmStrength" : {

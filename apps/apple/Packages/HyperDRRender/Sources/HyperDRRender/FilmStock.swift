@@ -18,6 +18,11 @@ public struct FilmAdjustments: Hashable, Sendable {
     public var exposure: Float? = nil
     /// Scales the grain's standard deviation; 1 is the stock's own grain on a 35 mm frame.
     public var grain: Float = RenderParameter.defaultNumber("look.filmGrain")
+    /// Scales the back-reflection halation; 1 is the stock's own.
+    public var halation: Float = RenderParameter.defaultNumber("look.filmHalation")
+    /// Off removes the antihalation layer (as CineStill does to Vision3), spektrafilm's
+    /// 'no' strengths for the film's use.
+    public var antihalation: Bool = RenderParameter.defaultBool("look.filmAntihalation")
     public init() {}
     public var isIdentity: Bool { stock == nil || strength == 0 }
     /// Analysis integrates cells, where grain averages out: it never invalidates them.
@@ -96,9 +101,13 @@ public struct FilmStock: Sendable {
     public typealias RGB = SIMD3<Double>
 
     /// The full film, print and viewing chain for one linear-P3 colour.
-    public func apply(_ rgb: RGB, grain site: FilmGrainSite? = nil) -> RGB {
+    /// `halation` is the halation map's film exposure at this pixel and its per-channel
+    /// strength; without it there is no halation.
+    public func apply(_ rgb: RGB, grain site: FilmGrainSite? = nil, halation: (glow: RGB, strength: RGB)? = nil) -> RGB {
         let film = resource.filming
-        var density = develop(logExposure: filmExposure(rgb))
+        var raw = filmRaw(rgb)
+        if let halation { raw = (raw + halation.strength * halation.glow) / (1 + halation.strength) }
+        var density = develop(logExposure: Self.log10(raw))
         if let site, site.amount > 0 { density = addGrain(density, at: site) }
         var dye = film.channelDensity, base = film.baseDensity
         if let paper = resource.printing {
@@ -121,12 +130,43 @@ public struct FilmStock: Sendable {
 
     /// log10 film exposure: Hanatos 2025 upsampling, looked up by chromaticity
     /// (Mitchell–Netravali, reflected edges, as spektrafilm) and scaled by X+Y+Z.
-    func filmExposure(_ rgb: RGB) -> RGB {
+    func filmExposure(_ rgb: RGB) -> RGB { Self.log10(filmRaw(rgb)) }
+
+    /// Linear film exposure, before halation.
+    public func filmRaw(_ rgb: RGB) -> RGB {
         let xyz = Self.multiply(resource.filming.p3ToReference, rgb)
         let sum = xyz.x + xyz.y + xyz.z
         let x = xyz.x / max(sum, 1e-10), y = xyz.y / max(sum, 1e-10)
         let tx = min(max((1 - x) * (1 - x), 0), 1), ty = min(max(y / max(1 - x, 1e-10), 0), 1)
-        return Self.log10(sampleSpectralLUT(tx, ty) * sum * resource.filming.exposureScale)
+        return sampleSpectralLUT(tx, ty) * sum * resource.filming.exposureScale
+    }
+
+    /// Per-channel halation strength for these settings; zero without halation.
+    public func halationStrength(_ settings: FilmAdjustments) -> RGB {
+        let halation = resource.filming.halation
+        return Self.vector(settings.antihalation ? halation.strength : halation.strengthRemoved) * Double(settings.halation)
+    }
+
+    /// The halation kernel on a grid whose long edge spans the 35 mm frame: the
+    /// normalised sum of `bounces` Gaussians of sigma sigma·√k, weighted decay^(k-1),
+    /// each normalised over the kernel, truncated at five of the widest sigma.
+    /// (2r+1)² weights, row-major.
+    public func halationKernel(longEdge: Int) -> (radius: Int, weights: [Float]) {
+        let halation = resource.filming.halation
+        let pitch = resource.filming.grain.filmFormatMillimetres * 1000 / Double(max(longEdge, 1))
+        let sigma = halation.sigmaMicrons / pitch
+        let radius = Int((5 * sigma * Double(halation.bounces).squareRoot()).rounded(.up))
+        var decay = (0..<halation.bounces).map { Foundation.pow(halation.decay, Double($0)) }
+        let total = decay.reduce(0, +); decay = decay.map { $0 / total }
+        let side = 2 * radius + 1
+        var weights = [Double](repeating: 0, count: side * side)
+        for k in 0..<halation.bounces {
+            let s = sigma * Double(k + 1).squareRoot()
+            var g = (-radius...radius).map { Foundation.exp(-Double($0 * $0) / (2 * s * s)) }
+            let sum = g.reduce(0, +); g = g.map { $0 / sum }
+            for y in 0..<side { for x in 0..<side { weights[y * side + x] += decay[k] * g[y] * g[x] } }
+        }
+        return (radius, weights.map(Float.init))
     }
 
     /// Developed density plus grain: per channel, the variance of the sublayer particle
@@ -297,6 +337,11 @@ public struct FilmStock: Sendable {
 
 struct FilmResource: Decodable, Sendable {
     struct SpectralLUT: Decodable, Sendable { let size: Int }
+    struct Halation: Decodable, Sendable {
+        let sigmaMicrons, decay: Double
+        let bounces: Int
+        let strength, strengthRemoved: [Double]
+    }
     struct Grain: Decodable, Sendable {
         /// Density variance × pixel area (µm²), 256 samples from zero to each channel's maximum.
         let varianceArea: [[Double]]
@@ -317,6 +362,7 @@ struct FilmResource: Decodable, Sendable {
         /// The scanner's correction of a slide's exposure (1 for negatives).
         let exposureScale: Double
         let grain: Grain
+        let halation: Halation
     }
     struct Printing: Decodable, Sendable {
         let illuminant: [Double]

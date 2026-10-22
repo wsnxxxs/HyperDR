@@ -1,5 +1,6 @@
 import Foundation
 import CoreML
+import Accelerate
 
 /// The Core ML AI gain model.
 ///
@@ -169,9 +170,17 @@ public final class ModelGainModel: @unchecked Sendable {
         var stops = [Float](repeating: 0, count: expected.width * expected.height)
         switch value.dataType {
         case .float16:
+            // vImage rather than Float16, which x86_64 macOS lacks: Xcode still
+            // builds the packages for x86_64 under a generic macOS destination.
             value.withUnsafeBytes { source in
-                let values = source.bindMemory(to: Float16.self)
-                for index in 0..<stops.count { stops[index] = Float(values[index]) }
+                stops.withUnsafeMutableBytes { destination in
+                    var input = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress!),
+                                              height: 1, width: vImagePixelCount(destination.count / 4),
+                                              rowBytes: destination.count / 2)
+                    var output = vImage_Buffer(data: destination.baseAddress!, height: 1,
+                                               width: input.width, rowBytes: destination.count)
+                    _ = vImageConvert_Planar16FtoPlanarF(&input, &output, vImage_Flags(kvImageNoFlags))
+                }
             }
         case .double:
             value.withUnsafeBytes { source in

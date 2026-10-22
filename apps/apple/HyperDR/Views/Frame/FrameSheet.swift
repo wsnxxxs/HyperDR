@@ -15,6 +15,9 @@ struct FrameSheet: View {
     @FocusState private var previewFocused: Bool
     /// The preview took focus from a click, not the keyboard: no ring.
     @State private var focusedByPointer = false
+    /// The sheet is still opening: the preview, its first focusable view,
+    /// gets the focus the sheet hands out, which nobody asked for with a key.
+    @State private var isOpening = true
 
     var body: some View {
         @Bindable var model = model
@@ -160,7 +163,12 @@ struct FrameSheet: View {
             .focusEffectDisabled()
             .focused($previewFocused)
             .onChange(of: previewFocused) { _, now in
+                if now && isOpening { focusedByPointer = true }
                 if !now { focusedByPointer = false; compare.keyboardLeft() }
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(500))
+                isOpening = false
             }
             .onKeyPress(keys: [.space], phases: [.down, .repeat, .up]) { press in
                 guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
@@ -275,9 +283,7 @@ struct FrameSettingsPanel: View {
                 tones
                 Divider()
                 captionControls
-                Toggle("frame.shadow", isOn: $settings.showsShadow)
-                    .toggleStyle(HDRSwitchToggleStyle())
-                    .disabled(settings.style.geometry.shadow == nil)
+                shadowToggle
             }
             .disabled(!settings.isEnabled)
             .opacity(settings.isEnabled ? 1 : 0.45)
@@ -330,6 +336,17 @@ struct FrameSettingsPanel: View {
                 .accessibilityAddTraits(settings.tone == tone ? .isSelected : [])
             }
         }
+    }
+
+    /// A style without a shadow shows the switch off, not the choice it
+    /// keeps for the styles that have one.
+    @ViewBuilder private var shadowToggle: some View {
+        let hasShadow = settings.style.geometry.shadow != nil
+        Toggle("frame.shadow", isOn: Binding(get: { hasShadow && settings.showsShadow },
+                                             set: { settings.showsShadow = $0 }))
+            .toggleStyle(HDRSwitchToggleStyle())
+            .disabled(!hasShadow)
+            .help(hasShadow ? Text(verbatim: "") : Text("frame.shadow.none"))
     }
 
     @ViewBuilder private var captionControls: some View {

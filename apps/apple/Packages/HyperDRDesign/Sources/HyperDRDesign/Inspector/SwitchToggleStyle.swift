@@ -4,20 +4,36 @@ import SwiftUI
 /// accent when on, with the label leading and the switch trailing.
 ///
 /// VoiceOver sees a system switch; with keyboard navigation on, the switch
-/// takes focus and Space toggles it.
+/// takes focus and Space toggles it. `.labelsHidden()` leaves the switch
+/// alone, as it does a system toggle; the label still names it for VoiceOver.
 public struct HDRSwitchToggleStyle: ToggleStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
+        SwitchRow(configuration: configuration)
+    }
+}
+
+private struct SwitchRow: View {
+    let configuration: ToggleStyleConfiguration
+    @Environment(\.labelsVisibility) private var labelsVisibility
+
+    var body: some View {
+        let showsLabel = labelsVisibility != .hidden
         HStack(spacing: Space.s3) {
-            configuration.label
-                .font(.hdr.caption)
-            Spacer(minLength: 0)
+            if showsLabel {
+                configuration.label
+                    .font(.hdr.caption)
+                Spacer(minLength: 0)
+            }
             SwitchBody(configuration: configuration)
         }
         // One switch named by the label, as a system toggle.
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isToggle)
+        .accessibilityLabel { label in
+            if showsLabel { label } else { configuration.label }
+        }
     }
 }
 

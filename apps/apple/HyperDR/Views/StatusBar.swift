@@ -76,19 +76,22 @@ struct StatusBar: View {
 
 /// Fit, zoom out, the zoom level and zoom in, bound to the canvas. Without a
 /// photo on the canvas there is nothing to zoom and all of it is disabled.
+/// Fit appears only once the photo is zoomed: at the fitted size the readout
+/// already says "Fit", and a dimmed "Fit Window" beside it read as a second,
+/// broken control.
 private struct ZoomControls: View {
     let canvas: CanvasModel
 
     var body: some View {
         let hasPhoto = canvas.imageFrame != nil
         HStack(spacing: Space.s1) {
-            let canFit = hasPhoto && canvas.zoom != .fit
-            // The bar's muted foreground would otherwise hide whether it is enabled.
-            Button("editor.fit") { canvas.fitToWindow() }
-                .buttonStyle(.link)
-                .foregroundStyle(canFit ? Color.hdr.accent : Color.hdr.inkDisabled)
-                .padding(.trailing, Space.s2)
-                .disabled(!canFit)
+            if hasPhoto && canvas.zoom != .fit {
+                // The bar's muted foreground would otherwise hide that it is a link.
+                Button("editor.fit") { canvas.fitToWindow() }
+                    .buttonStyle(.link)
+                    .foregroundStyle(Color.hdr.accent)
+                    .padding(.trailing, Space.s2)
+            }
             Button("editor.zoomOut", systemImage: "minus") { canvas.zoomOut() }
                 .labelStyle(.iconOnly)
                 .disabled(!canvas.canZoomOut)

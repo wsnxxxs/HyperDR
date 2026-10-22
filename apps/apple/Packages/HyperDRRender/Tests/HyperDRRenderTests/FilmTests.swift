@@ -108,7 +108,9 @@ private func code(_ value: Double) -> Int {
                     for (i, value) in inputs.enumerated() {
                         let expected = DoubleReference.prepare(value, settings: edit, sdr: isSDR)
                         for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[i * 4 + c])) - code(expected.base[c]))) }
-                        if !isSDR { gain = max(gain, abs(Double(pixels.gain[i]) - expected.gain)) }
+                        if !isSDR { for c in 0..<3 {
+                            gain = max(gain, abs(Double(pixels.gain[i*pixels.gainChannelCount+(pixels.gainChannelCount == 1 ? 0 : c)]) - expected.gains[c]))
+                        } }
                     }
                     #expect(worst <= 1, "\(id.rawValue) at \(strength), sdr \(isSDR): \(worst) codes from the double reference")
                     #expect(gain < 1e-4)

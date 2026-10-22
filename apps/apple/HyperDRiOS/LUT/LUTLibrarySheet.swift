@@ -71,7 +71,7 @@ struct LUTLibraryList: View {
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .disabled(editor.source == nil)
+                            .disabled(editor.source == nil || !Adjustments.allowsLook(input: entry.input.rawValue, output: entry.output.rawValue, domain: editor.recipe.inputDomain))
                             .accessibilityAddTraits(inUse ? .isSelected : [])
                             Spacer(minLength: 0)
                             LUTSpacesMenu(entry: entry,

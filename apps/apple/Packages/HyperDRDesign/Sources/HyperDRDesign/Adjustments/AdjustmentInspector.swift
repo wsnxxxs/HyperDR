@@ -274,6 +274,7 @@ struct LookPicker: View {
                         tile("", name: Text("look.lut.none", bundle: .module), hash: nil, side: side)
                         ForEach(panel.context.luts, id: \.contentHash) { lut in
                             tile(lut.contentHash, name: Text(verbatim: lut.name), hash: lut.contentHash, side: side)
+                                .disabled(control.disabledOptions.contains(lut.contentHash))
                         }
                     }
                     .padding(.vertical, 2)
@@ -327,6 +328,7 @@ struct AdjustmentReferenceRow: View {
                 Text("look.lut.none", bundle: .module).tag("")
                 ForEach(panel.context.luts, id: \.contentHash) { lut in
                     Text(verbatim: lut.name).tag(lut.contentHash)
+                        .disabled(control.disabledOptions.contains(lut.contentHash))
                 }
             } else {
                 ForEach(panel.context.models) { model in

@@ -301,7 +301,8 @@ public struct AdjustmentPanel: Sendable {
         }
         return AdjustmentControl(declaration: declaration, value: value, isDefault: isDefault,
                                  options: declaration.options.filter { $0.domains.contains(domain) },
-                                 disabledOptions: context.unavailableOptions[id] ?? [],
+                                 disabledOptions: (context.unavailableOptions[id] ?? []).union(id == Recipe.lookID
+                                     ? Set(context.luts.filter { !canChooseLook($0.contentHash, domain: domain) }.map(\.contentHash)) : []),
                                  defaultNumber: defaultNumber, automaticNumber: automatic)
     }
 
@@ -348,13 +349,14 @@ public struct AdjustmentPanel: Sendable {
     /// Chooses a LUT from the library (`look.lut`) or a model (`hdr.model`);
     /// nil removes the LUT. A LUT's spaces start from what the library
     /// records for it (`AdjustmentContext.lookSpaces`), in the same write, so
-    /// the choice is one undo step. A space this photo cannot use (a Log
-    /// input outside RAW) goes back to its default instead, so the recipe
-    /// never names a space Render would refuse. Removing the LUT leaves the
+    /// the choice is one undo step. Incompatible LUTs cannot be chosen;
+    /// their declared encodings are never changed to make them fit. Removing the LUT leaves the
     /// spaces alone; they are hidden without one.
     public func set(_ id: String, reference: String?, in recipe: inout Recipe) {
         if id == Recipe.lookID {
+            if let reference, !canChooseLook(reference, domain: recipe.inputDomain) { return }
             recipe.look = reference.flatMap { hash in context.luts.first { $0.contentHash == hash } }
+            if reference == nil { recipe.setValue(nil, for: Recipe.filmID) }
             if let look = recipe.look, let spaces = context.lookSpaces[look.contentHash] {
                 setLookSpace(spaces.input, id: "look.input", in: &recipe)
                 setLookSpace(spaces.output, id: "look.output", in: &recipe)
@@ -364,10 +366,13 @@ public struct AdjustmentPanel: Sendable {
         }
     }
 
+    public func canChooseLook(_ hash: String, domain: InputDomain) -> Bool {
+        guard let spaces = context.lookSpaces[hash] else { return true }
+        return Adjustments.allowsLook(input: spaces.input, output: spaces.output, domain: domain)
+    }
+
     private func setLookSpace(_ space: String, id: String, in recipe: inout Recipe) {
-        guard let control = control(id, in: recipe) else { return }
-        let offered = control.options.contains { $0.id == space } && !control.disabledOptions.contains(space)
-        recipe.setValue(offered ? .string(space) : nil, for: id)
+        recipe.setValue(.string(space), for: id)
     }
 
     /// Back to Auto (a `floatOrAuto` parameter whose default is Auto).

@@ -49,7 +49,7 @@ public struct ExportGainPair: Sendable, Hashable, Codable {
     }
 
     public let provenance: Provenance
-    /// 1 or 3 (ISO 21496-1). Ours are always 1; an authored pair may be 3.
+    /// 1 or 3 (ISO 21496-1). Partial look crossfades and authored pairs may be RGB.
     public let channels: Int
     /// True when the pair's base and alternate offsets are both zero, which is
     /// always true of what we separate and not always of an imported pair.
@@ -86,10 +86,13 @@ public struct ExportEditFacts: Sendable, Hashable {
     /// The resolved `hdr.range` in stops. "Auto" is resolved before planning:
     /// for `hdr` and `dual` sources it is never below the source's own headroom.
     public var peakStops: Double
+    /// A partial Log/film look also develops the Apple display endpoint.
+    public var needsLookBaseline: Bool
 
-    public init(hdrEnabled: Bool = true, peakStops: Double) {
+    public init(hdrEnabled: Bool = true, peakStops: Double, needsLookBaseline: Bool = false) {
         self.hdrEnabled = hdrEnabled
         self.peakStops = peakStops
+        self.needsLookBaseline = needsLookBaseline
     }
 }
 
@@ -480,7 +483,8 @@ public enum ExportPlanner {
             encoding: encoding, writer: writer, writesGainMap: writesGainMap,
             isFramed: request.frame.isFramed, baseBitDepth: baseBitDepth, writeRows: rows,
             retainedBytes: request.resources.bytes, allowsRowInput: request.allowsRowInput,
-            quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality))
+            quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality,
+            needsLookBaseline: request.edit.needsLookBaseline))
     }
 
     /// Search estimates only, freezing the measured budget and writer choices.

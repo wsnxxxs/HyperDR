@@ -260,7 +260,24 @@ extension DoubleReference {
     /// downstream so changing them never reselects the SDR base.
     /// `grain` places the film's grain; without it the film is grainless. An automatic
     /// film exposure reads as zero here: pass the metered value in `settings`.
-    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil) -> Split {
+    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil, baseline: RGB? = nil) -> Split {
+        let weight = !settings.look.isIdentity ? settings.look.strength : settings.film.isIdentity ? 0 : settings.film.strength
+        if weight > 0 && weight < 1 {
+            var full = settings
+            if !full.look.isIdentity { full.look.strength = 1 } else { full.film.strength = 1 }
+            let styled = prepare(source, settings: full, sdr: sdr, grain: grain)
+            var plain = settings; plain.look.lut = nil; plain.film.stock = nil
+            let original = prepare(baseline ?? source, settings: plain, sdr: sdr)
+            let w = Double(weight)
+            let base = original.base + (styled.base-original.base)*w
+            if styled.gains == original.gains { return Split(base: base, gains: original.gains) }
+            var gains = RGB.zero
+            for c in 0..<3 {
+                let a = original.base[c]*exp2(original.gains[c]), b = styled.base[c]*exp2(styled.gains[c])
+                gains[c] = base[c] == 0 ? 0 : log2(max((a+(b-a)*w)/base[c],1e-30))
+            }
+            return Split(base: base, gains: gains)
+        }
         var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
@@ -270,13 +287,15 @@ extension DoubleReference {
         // A log look keeps linear-P3 negatives through the primary matrix. Fit after
         // the strength mix so the gain split never sees a negative component.
         let logLook = active && settings.look.input.isLog
-        if !logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
+        if !logLook && settings.film.isIdentity { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         if active && !settings.look.input.isSDR { x = look(x,settings:settings.look) }
         if logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
+        let filmScene = x
+        x = fitP3(x,upper:max(1,x.x,x.y,x.z))
         var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
         var base = fitP3(x*exp2(-g))
         if !settings.film.isIdentity, let stock = settings.film.stock, let film = try? FilmStock.named(stock) {
-            let exposed = x*exp2(Double(settings.film.exposure ?? 0))
+            let exposed = filmScene*exp2(Double(settings.film.exposure ?? 0))
             base = fitP3(base+(film.apply(exposed,grain:grain)-base)*Double(settings.film.strength))
         }
         if active && settings.look.input.isSDR {
@@ -299,19 +318,20 @@ extension DoubleReference {
     public static func hdrOutput(_ pair: Split, expansion: Double = 0, settings: HDRAdjustments,
                                  range: Double, shoulder: Bool, allowRolloff: Bool) -> Split {
         var base = pair.base
-        var gain = max(pair.gain,expansion)*Double(settings.strength)
-        let peak = max(base.x,base.y,base.z)*exp2(gain)
-        if peak > 0 { gain += log2(max(softShoulder(peak,range:range,active:shoulder)/peak,1e-30)) }
+        var gains = pair.gains
+        for c in 0..<3 { gains[c] = max(gains[c],expansion)*Double(settings.strength) }
+        let peak = (0..<3).map { base[$0]*exp2(gains[$0]) }.max()!
+        if peak > 0 {
+            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder)/peak,1e-30)))
+        }
         if allowRolloff && settings.sdrRolloff > 0 {
             let m = max(base.x,base.y,base.z)
             if m > 0.7 {
-                let compressed = 0.7-0.3*expm1(-(m-0.7)/0.3)
-                let target = m+(compressed-m)*Double(settings.sdrRolloff)
-                base *= target/m; gain += log2(m/target)
+                let target = m+(0.7+0.3*(1-exp(-(m-0.7)/0.3))-m)*Double(settings.sdrRolloff)
+                base *= target/m; gains += RGB(repeating: log2(m/target))
             }
         }
-        if !settings.enabled { gain = 0 }
-        return Split(base:base,gain:gain)
+        return Split(base:base,gains:settings.enabled ? gains : .zero)
     }
 
     public static func authoredGain(base: RGB, gain: RGB, baseOffset: RGB, alternateOffset: RGB,

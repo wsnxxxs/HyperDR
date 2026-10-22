@@ -151,12 +151,12 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(sdr.conditionValue("look.input") == .string("p3"))
     #expect(sdr.conditionValue("look.output") == .string("hlg"))
 
-    // A Log input is RAW only: outside RAW the input goes back to its default,
-    // and the output is still the library's.
+    // A Log input is RAW only. The choice is disabled, and a stale binding
+    // write cannot replace the existing valid look or relabel the Log LUT.
+    let previous = sdr
+    #expect(panel.control("look.lut", in: sdr)?.disabledOptions.contains("sha256:02") == true)
     panel.set("look.lut", reference: "sha256:02", in: &sdr)
-    #expect(sdr.look?.name == "Venice")
-    #expect(sdr.value(for: "look.input") == nil && sdr.conditionValue("look.input") == .string("srgb"))
-    #expect(sdr.conditionValue("look.output") == .string("rec709"))
+    #expect(sdr == previous)
 
     var raw = Recipe(inputDomain: .rawEDR)
     panel.set("look.lut", reference: "sha256:02", in: &raw)

@@ -86,6 +86,7 @@ public actor RecipeExportService: RecipeExportServicing {
             // Recipe is authoritative for the SDR switch. The selection cannot
             // turn processing back on or turn the recipe into legacy options.
             actualRequest.edit.hdrEnabled = snapshot.recipe.conditionValue("hdr.enabled")?.boolValue ?? true
+            actualRequest.edit.needsLookBaseline = snapshot.recipe.needsLookBaseline
             if let frame = snapshot.frame {
                 guard frame.width > 0, frame.height > 0, frame.width <= 1_048_576, frame.height <= 1_048_576,
                       frame.width <= (1 << 34) / frame.height else { throw RecipeExportError.invalidSnapshot }

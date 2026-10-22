@@ -25,10 +25,13 @@ private func compare(_ pixels: PlanePixels, _ expected: [DoubleReference.Split])
     for i in expected.indices {
         for c in 0..<3 {
             #expect(abs(code(Double(pixels.baseRGBA[i*4+c]))-code(expected[i].base[c])) <= 1)
-            let actualHDR = Double(pixels.baseRGBA[i*4+c])*exp2(Double(pixels.gain[i]))
-            #expect(abs(code(actualHDR,hdr:true)-code(expected[i].base[c]*exp2(expected[i].gain),hdr:true)) <= 1)
+            let actualHDR = Double(pixels.baseRGBA[i*4+c])*exp2(Double(pixels.gain[i*pixels.gainChannelCount+(pixels.gainChannelCount == 1 ? 0 : c)]))
+            #expect(abs(code(actualHDR,hdr:true)-code(expected[i].base[c]*exp2(expected[i].gains[c]),hdr:true)) <= 1)
         }
-        #expect(abs(Int((Double(pixels.gain[i])*1023/3).rounded())-Int((expected[i].gain*1023/3).rounded())) <= 1)
+        for c in 0..<3 {
+            let actual = Double(pixels.gain[i*pixels.gainChannelCount+(pixels.gainChannelCount == 1 ? 0 : c)])
+            #expect(abs(actual-expected[i].gains[c])*1023/3 <= 1)
+        }
     }
 }
 private func cube(swap: Bool = false) -> String {
@@ -329,12 +332,15 @@ private func wideHalf() -> String {
         compare(bypassed,values.map { DoubleReference.sourceHDRSplit($0) })
         edit.look.output = .pq; edit.look.strength = 0.05
         let amplified = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
-        let amplifiedReference = values.map { value -> DoubleReference.Split in
-            let pair = DoubleReference.sourceHDRSplit(value)
-            let changedBase = DoubleReference.look(pair.base,settings:edit.look)
-            return DoubleReference.sourceHDRSplit(changedBase*exp2(pair.gain))
-        }
-        compare(amplified,amplifiedReference)
+        var fullEdit = edit; fullEdit.look.strength = 1
+        let endpoints = values.map { DoubleReference.prepare($0,settings:fullEdit,sdr:false) }
+        for i in values.indices { for c in 0..<3 {
+            let oldBase = original.baseRGBA[i*4+c], oldHDR = oldBase*exp2(original.gain[i])
+            let full = endpoints[i], expectedBase = oldBase+(Float(full.base[c])-oldBase)*edit.look.strength
+            let expectedHDR = oldHDR+(Float(full.base[c]*exp2(full.gains[c]))-oldHDR)*edit.look.strength
+            #expect(abs(amplified.baseRGBA[i*4+c]-expectedBase) < 1e-5)
+            #expect(abs(amplified.baseRGBA[i*4+c]*exp2(amplified.gain[i*3+c])-expectedHDR) < 1e-4)
+        } }
         #expect(amplified.gain[0] > original.gain[0])
         edit.look.strength = 0
         let hdrOutputBypass = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))

@@ -169,6 +169,7 @@ extension ExportMemoryEstimate {
         var allowsRowInput: Bool = true
         var quality: Int = 90
         var gainChannels: Int = 3
+        var needsLookBaseline: Bool = false
     }
 
     /// b-stage allocation model. Source, whole-plane owners, ABI copies and
@@ -186,7 +187,9 @@ extension ExportMemoryEstimate {
         let source = sourcePixels * (input.source.domain == .dual ? 48 : 16)
         let rawCache = input.source.domain == .rawEDR
             ? (input.source.sensorSize ?? input.source.pixelSize).pixels * 16 : 0
-        let resident = source + rawCache + input.retainedBytes + 32 * 1024 * 1024
+        let baseline = input.needsLookBaseline && input.source.domain == .rawEDR
+            ? max(sourcePixels, input.source.sensorSize?.pixels ?? 0) * 24 + sourcePixels * 16 : 0
+        let resident = source + rawCache + baseline + input.retainedBytes + 32 * 1024 * 1024
         let owner = p * pairBytes
         // GPU output remains alive while readback packs RGBA into RGB. RGB
         // gain peaks at (4+3 + 4+3) Floats = 56 CPU bytes per stripe pixel,
@@ -223,7 +226,10 @@ extension ExportMemoryEstimate {
         // Render source/output/composite textures, or scale tiles with canvas.
         let nativePixels = max(input.source.pixelSize.pixels,
             input.source.sensorSize?.pixels ?? 0)
-        let decoder = nativePixels * 24
+        // The Apple baseline and scene development can have separate native caches.
+        // Do not assume the frameworks share their decoder storage.
+        let developments = input.needsLookBaseline && input.source.domain == .rawEDR ? 2 : 1
+        let decoder = nativePixels * 24 * developments
         // Until native auxiliary dimensions are available, reserve a full-size
         // RGBAf gain resource for dual input; it is separate from base decode.
         let auxiliary = input.source.domain == .dual ? input.source.pixelSize.pixels * 16 : 0
@@ -278,7 +284,7 @@ extension ExportMemoryEstimate {
         let width = min(source.width, maximumTextureDimension)
         let height = min(source.height, maximumTextureDimension)
         let outputRows = min(PreparedExportRows.maximumReadRows, maximumTextureDimension)
-        return width * height * 48 + width * outputRows * 64 + 1024 * 1024 * 48
+        return width * height * 64 + width * outputRows * 64 + 1024 * 1024 * 48
     }
 
     /// HEIC row output enforces a 4 MiB maximum per encoded tile. Reserve

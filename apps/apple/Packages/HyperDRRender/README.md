@@ -33,6 +33,31 @@ can remain unresolved. An active missing/mismatched LUT reports `invalidLUT`, av
 look loss. Equal LUT contents share identity/cache keys even after reparsing. Security-scoped
 bookmark resolution stays with the caller.
 
+### Look stage (2026-10-22)
+
+Built-in film and imported LUTs are alternative looks. Recipe selection makes
+that change in one undo step; direct `RenderAdjustments` callers cannot activate
+both. Light/colour adjustments precede the look. An SDR-input LUT grades the
+separated base; Log/HLG/PQ-input LUTs transform the complete image before separation.
+A LUT's input/output declarations are never changed to fit a photo: camera Log
+input requires RAW, and incompatible library choices are disabled.
+
+Every active look runs at full strength. Its completed SDR base and reconstructed
+HDR rendition crossfade independently against the neutral rendition in linear
+light. RGB gain represents the two mixed renditions exactly when their ratios
+or colours differ; HDR enable/strength/range remain downstream and never change
+the base. Zero strength is exactly the neutral endpoint; one is the full look.
+
+RAW Log and film input use boost 0, boostShadow 0, file baseline exposure, and
+**no early gamut mapping**. Signed extended-linear-P3 values survive until the
+look's input transform, with fitting at the output boundary. For partial strength,
+`lookBaseline` independently develops the Apple display endpoint with the same
+RAW settings and sampling window. Only the latest preview/ROI baseline texture
+is cached; export admission reserves both decoders via `Recipe.needsLookBaseline`.
+This costs an extra development at partial strength. Full strength, zero and
+non-scene looks do not allocate a second RAW development. AI continues using its
+separate Apple-boost identity.
+
 `RenderEngine` is an actor. Cancellation is checked around decode, GPU submission and stripes.
 System decode and submitted GPU work finish before cancellation is reported; cancelled results
 are discarded. Textures exposed to clients are read-only. All public textures/readbacks use

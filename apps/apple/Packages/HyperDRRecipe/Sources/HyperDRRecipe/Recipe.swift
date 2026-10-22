@@ -57,7 +57,13 @@ public struct Recipe: Equatable, Sendable {
     public let version: Int
     public private(set) var inputDomain: InputDomain
     public private(set) var hdrSource: HDRSource
-    public var look: LUTReference?
+    public var look: LUTReference? {
+        didSet {
+            // Built-in film and imported LUTs are alternative looks, never two
+            // display renderings in series. Keep the selection in one undo step.
+            if look != nil { values[Recipe.filmID] = nil }
+        }
+    }
     /// Overrides for declared parameters other than `hdr.source` and `look.lut`.
     public private(set) var values: [String: ParameterValue]
 
@@ -71,13 +77,14 @@ public struct Recipe: Equatable, Sendable {
             ? requested : HDRSource.defaultSource(for: inputDomain)
         self.look = look
         self.values = values.filter { $0.key != Recipe.hdrSourceID && $0.key != Recipe.lookID }
+        if look != nil { self.values[Recipe.filmID] = nil }
     }
 
     // MARK: - Values
 
     /// A different photo replaces the source; the HDR source falls back to the new
-    /// domain's default when it no longer applies. A camera Log look input falls
-    /// back to the declaration's default outside RAW. Other stored values are
+    /// domain's default when it no longer applies. An incompatible camera Log
+    /// look is removed, without relabelling its input. Other stored values are
     /// kept: a value that does not apply to the new domain is simply not visible.
     public mutating func setInputDomain(_ domain: InputDomain) {
         inputDomain = domain
@@ -87,7 +94,7 @@ public struct Recipe: Equatable, Sendable {
         if let input = values["look.input"]?.stringValue,
            let option = Adjustments.declaration("look.input")?.options.first(where: { $0.id == input }),
            !option.domains.contains(domain) {
-            setValue(nil, for: "look.input")
+            look = nil
         }
     }
 
@@ -136,6 +143,9 @@ public struct Recipe: Equatable, Sendable {
         case Recipe.lookID:
             assertionFailure("LUT references are set through `look`, as a content hash or bookmark")
         default:
+            if id == Self.filmID, let stock = value?.stringValue, stock != "none" {
+                look = nil
+            }
             guard let value else {
                 values[id] = nil
                 return
@@ -226,5 +236,31 @@ extension Recipe {
               adjustmentData.formatVersion == Recipe.adjustmentFormatVersion,
               let recipe = try? Recipe.decode(adjustmentData.data) else { return nil }
         self = recipe
+    }
+}
+
+// A LUT's declared encoding is a contract, not a preference to fall back from.
+extension Adjustments {
+    public static func allowsLook(input: String, output: String, domain: InputDomain) -> Bool {
+        [("look.input", input), ("look.output", output)].allSatisfy { id, space in
+            declaration(id)?.options.contains { $0.id == space && $0.domains.contains(domain) } == true
+        }
+    }
+}
+
+extension Recipe {
+    /// Partial scene looks render the Apple display development as their neutral
+    /// endpoint. Export admission must price that second RAW decoder as well.
+    public var needsLookBaseline: Bool {
+        guard inputDomain == .rawEDR else { return false }
+        func partial(_ id: String) -> Bool {
+            guard let value = conditionValue(id)?.numberValue else { return false }
+            return value > 0 && value < 100
+        }
+        if let stock = conditionValue(Self.filmID)?.stringValue, stock != "none",
+           partial("look.filmStrength") { return true }
+        guard look != nil, conditionValue("look.enabled")?.boolValue == true, partial("look.strength"),
+              let space = conditionValue("look.input")?.stringValue else { return false }
+        return Adjustments.declaration("look.input")?.options.first { $0.id == space }?.domains == [.rawEDR]
     }
 }

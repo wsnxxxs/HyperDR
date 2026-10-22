@@ -7,8 +7,8 @@ import Observation
 /// SDR renders of the recipe with that LUT as its look, and one with none.
 ///
 /// - A preview is what choosing the LUT gives: the recipe's look switch and
-///   strength are kept, its spaces the library's (a space the photo cannot take, a Log
-///   input outside RAW, at its default), everything else as edited.
+///   strength are kept, its spaces the library's, everything else as edited.
+///   Incompatible looks are omitted.
 /// - Hosts call `update` whenever the recipe or the library changes, and
 ///   `shown` as pickers appear and disappear (`lookPickerShown`): renders
 ///   run only while one is shown. Nothing renders during a drag; they start a
@@ -74,7 +74,9 @@ import Observation
         wanted = key
         task?.cancel()
         let base = Self.base(editor.recipe)
-        let jobs = [(Self.none, base)] + looks.map { ($0.reference.contentHash, Self.recipe(base, with: $0)) }
+        let jobs = [(Self.none, base)] + looks.filter {
+            Adjustments.allowsLook(input: $0.input, output: $0.output, domain: base.inputDomain)
+        }.map { ($0.reference.contentHash, Self.recipe(base, with: $0)) }
         task = Task { [weak self, weak editor] in
             try? await Task.sleep(for: .milliseconds(250))
             for (id, recipe) in jobs {
@@ -101,6 +103,7 @@ import Observation
     static func base(_ recipe: Recipe) -> Recipe {
         var base = recipe
         base.look = nil
+        base.setValue(nil, for: Recipe.filmID)
         for id in ["look.input", "look.output"] { base.setValue(nil, for: id) }
         return base
     }

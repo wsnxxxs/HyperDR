@@ -5,7 +5,8 @@ import SwiftUI
 /// Settings, from the library's top trailing button: the app and its
 /// version at the top (where the subscription's state and Restore Purchases
 /// will go), the LUT library, the export history kept in the app and how
-/// much room it takes, and About (version, privacy, acknowledgements).
+/// much room it takes, diagnostics to send when something goes wrong, and
+/// About (version, privacy, acknowledgements).
 /// Only what the app really has; nothing here is a placeholder.
 struct SettingsSheet: View {
     let session: EditingSession
@@ -13,6 +14,9 @@ struct SettingsSheet: View {
     @State private var history: [ExportHistoryEntry] = []
     @State private var confirmingClear = false
     @State private var clearing = false
+    @State private var diagnostics: DiagnosticsFile?
+    @State private var preparingDiagnostics = false
+    @State private var diagnosticsFailed = false
 
     var body: some View {
         NavigationStack {
@@ -48,6 +52,18 @@ struct SettingsSheet: View {
                     Text("ios.settings.history.footer")
                 }
                 Section {
+                    Button(action: exportDiagnostics) {
+                        LabeledContent {
+                            if preparingDiagnostics { ProgressView() }
+                        } label: {
+                            Label("ios.settings.diagnostics.export", systemImage: "stethoscope")
+                        }
+                    }
+                    .disabled(preparingDiagnostics)
+                } footer: {
+                    Text("ios.settings.diagnostics.footer")
+                }
+                Section {
                     LabeledContent { Text(verbatim: Self.version).monospacedDigit() } label: {
                         Text("ios.settings.version")
                     }
@@ -71,6 +87,12 @@ struct SettingsSheet: View {
             } message: {
                 Text("ios.settings.history.footer")
             }
+            .sheet(item: $diagnostics) { file in
+                ActivitySheet(items: [file.url])
+                    .presentationDetents([.medium, .large])
+                    .ignoresSafeArea()
+            }
+            .alert(Text("ios.settings.diagnostics.failed"), isPresented: $diagnosticsFailed) {}
         }
         .task { history = await session.exports.history() }
     }
@@ -101,6 +123,15 @@ struct SettingsSheet: View {
         }
     }
 
+    /// Writes the diagnostics file, then offers it to share.
+    private func exportDiagnostics() {
+        preparingDiagnostics = true
+        Task {
+            do { diagnostics = DiagnosticsFile(url: try await DiagnosticsReport.make()) } catch { diagnosticsFailed = true }
+            preparingDiagnostics = false
+        }
+    }
+
     /// "1.0.0 (42)".
     private static var version: String {
         let info = Bundle.main.infoDictionary
@@ -108,6 +139,23 @@ struct SettingsSheet: View {
         guard let build = info?["CFBundleVersion"] as? String, build != short else { return short }
         return "\(short) (\(build))"
     }
+}
+
+private struct DiagnosticsFile: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
+/// The system share sheet for files made on request, which `ShareLink`
+/// cannot wait for.
+private struct ActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 /// The third-party notices bundled with the app (`THIRD_PARTY_NOTICES.md`):

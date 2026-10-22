@@ -129,7 +129,15 @@ photo-dependent HDR content into the mat.
 ## Current pipeline
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
-CIRAWFilter decode; Core ML supplies AI gain. RecipeExportService prepares lazy
+CIRAWFilter decode; Core ML supplies AI gain. New RAW photos select decoder 9
+when the file supports it (including `9.dng`), otherwise Apple's default; the exact
+version is stored in `Recipe.rawDecoderVersion`. A new photo whose decoder 9
+cannot decode retries Apple's default once and records that exact version.
+Saved recipes never downgrade. Old recipes without this field keep the system
+default. An unavailable recorded version blocks decoding/export.
+All RAW developments use an extended-linear sRGB CIContext, converting to extended
+linear P3 at output: decoder 9 loses red with a P3/Rec.2020 working context.
+Preview, ROI, look baseline and AI input share the recorded decoder. RecipeExportService prepares lazy
 ROI rows and calls the synchronous package row reader. The engine contains
 writers, image/container readers, VideoToolbox codecs, bounded verification,
 capability probing and frame layout; it has no CLI or image-processing graph.

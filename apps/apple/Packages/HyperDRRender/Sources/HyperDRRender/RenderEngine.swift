@@ -16,10 +16,10 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
     }
     let r = options.raw
     let linear = sceneLinear ?? options.sceneLinear
-    let fields = ["hyperdr.source/v3",url.path,String(revision.size ?? -1),
+    let fields = ["hyperdr.source/v4",url.path,String(revision.size ?? -1),
         revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
         options.kind.rawValue,String(options.lensCorrection),String(linear),
-        number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+        options.rawDecoderVersion ?? "system-default",number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
     let data = try! JSONSerialization.data(withJSONObject:fields)
     var bytes = Array(SHA256.hash(data:data).prefix(16))
     bytes[6] = (bytes[6] & 15) | 0x80; bytes[8] = (bytes[8] & 63) | 0x80
@@ -40,6 +40,8 @@ public actor RenderEngine {
     public let device: any MTLDevice
     let queue: any MTLCommandQueue
     let context: CIContext
+    /// RAW 9 loses red in a P3 working context. Convert to extended P3 only at output.
+    private var rawContext: CIContext?
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
     var modelPredictionCache: [ModelPredictionKey:ModelGainPrediction] = [:]
@@ -102,6 +104,16 @@ public actor RenderEngine {
         self.pipelines = pipelines
     }
 
+    private func rawRenderingContext() -> CIContext {
+        if let rawContext { return rawContext }
+        let created = CIContext(mtlDevice: device, options: [
+            .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
+            .workingFormat: CIFormat.RGBAf.rawValue, .cacheIntermediates: false, .memoryTarget: 256
+        ])
+        rawContext = created
+        return created
+    }
+
     public func clearCaches() {
         modelPredictionCache.removeAll()
         modelPredictionOrder.removeAll()
@@ -122,23 +134,37 @@ public actor RenderEngine {
         authorCache = nil
         displayMatrices.removeAll()
         context.clearCaches()
+        rawContext?.clearCaches()
     }
 
     /// The caller owns any security scope needed to read this URL. No UI-thread I/O.
-    public func load(_ url: URL, options: SourceOptions = SourceOptions()) throws -> RenderSource {
+    public func load(_ url: URL, options: SourceOptions = SourceOptions(), preparingAnalysis: Bool = false,
+                     progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> RenderSource {
         return try autoreleasepool {
             try Task.checkCancellation()
             let revision = try SourceRevision(url:url)
             let key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
-            if let cached = sourceCache[key] { return cached }
+            if let cached = sourceCache[key] {
+                if preparingAnalysis { _ = try fixedAnalysisSource(cached) }
+                return cached
+            }
             var familyKey = key
             familyKey.options.resolution = .full
             if sourceFamily?.key != familyKey {
                 clearImageCaches()
                 sourceFamily = (familyKey,familyKey.stableID)
             }
-            let opened = try Self.open(url, options: options)
+            let opened = try Self.open(url, options: options, progress: progress)
+            progress?(.developing)
             let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
+            if preparingAnalysis, opened.domain == .rawEDR, analysisSource?.id != source.id {
+                progress?(.preparingAnalysis)
+                // Keep one temporary native decoder alive for both independent
+                // ROI grids. Neither texture is resampled from the other. The
+                // graph and its native caches are released before load returns.
+                let fixed = try opened.rawVariant(resolution: Self.analysisResolution(native: source.nativeSize))
+                analysisSource = try materialize(fixed, id: source.id, origin: source.origin)
+            }
             try revision.validate(url)
             // Retain full and the latest preview together, while bounding variant residency.
             sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
@@ -199,7 +225,7 @@ public actor RenderEngine {
     private func materialize(_ opened: OpenedSource, id: UUID = UUID(),
                              origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
         let texture = try opened.rawPreviewSize.map { try rasterizeRAWPreview(opened.image,size:$0,space:opened.baseSpace) }
-            ?? rasterize(opened.image,space:opened.baseSpace,opaque:opened.domain == .rawEDR)
+            ?? rasterize(opened.image,space:opened.baseSpace,opaque:opened.domain == .rawEDR, raw:opened.domain == .rawEDR)
         // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
@@ -238,7 +264,7 @@ public actor RenderEngine {
             let rect = CGRect(x: e.minX + (n.minX * e.width).rounded(), y: e.minY + ((1-n.maxY) * e.height).rounded(),
                               width: (n.width * e.width).rounded(), height: (n.height * e.height).rounded())
             texture = try rasterize(opened.image.cropped(to: rect), space: Self.workingColorSpace,
-                                    maximumRows: PreparedExportRows.maximumSourceTileSize.height, opaque: true)
+                                    maximumRows: PreparedExportRows.maximumSourceTileSize.height, opaque: true, raw: true)
         }
         guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
         try origin.revision.validate(origin.url)
@@ -258,20 +284,20 @@ public actor RenderEngine {
     /// is rendered again, then split in two along its longer side, recursively; a piece
     /// under 32 pixels that stays incomplete fails to decode rather than reading as black.
     func rasterize(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat = .rgba32Float,
-                   maximumRows: Int = .max, opaque: Bool = false) throws -> any MTLTexture {
-        guard opaque else { return try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: false) }
+                   maximumRows: Int = .max, opaque: Bool = false, raw: Bool = false) throws -> any MTLTexture {
+        guard opaque else { return try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: false, raw: raw) }
         for _ in 0..<Self.decodeAttempts {
-            let texture = try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: true)
+            let texture = try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: true, raw: raw)
             if try transparentTexels(texture) == 0 { return texture }
         }
         let extent = image.extent.integral
         guard max(extent.width, extent.height) >= 64 else { throw RenderError.cannotDecodeSource }
-        return try rasterizeHalves(image, space: space, format: format, maximumRows: maximumRows)
+        return try rasterizeHalves(image, space: space, format: format, maximumRows: maximumRows, raw: raw)
     }
 
     /// An opaque region as two halves along its longer side, each rasterized on its own.
     func rasterizeHalves(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat,
-                         maximumRows: Int) throws -> any MTLTexture {
+                         maximumRows: Int, raw: Bool = false) throws -> any MTLTexture {
         let extent = image.extent.integral
         // Halves in Core Image's bottom-up coordinates, placed into top-down rows.
         let halves: [CGRect]
@@ -289,7 +315,7 @@ public actor RenderEngine {
             width: Int(extent.width), height: Int(extent.height), format: format)
         for half in halves {
             try autoreleasepool {
-                let piece = try rasterize(image.cropped(to: half), space: space, format: format, maximumRows: maximumRows, opaque: true)
+                let piece = try rasterize(image.cropped(to: half), space: space, format: format, maximumRows: maximumRows, opaque: true, raw: raw)
                 guard let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
                     throw RenderError.allocationFailed
                 }
@@ -320,7 +346,7 @@ public actor RenderEngine {
     }
 
     private func rasterizeOnce(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat,
-                               maximumRows: Int, opaque: Bool) throws -> any MTLTexture {
+                               maximumRows: Int, opaque: Bool, raw: Bool) throws -> any MTLTexture {
         try Task.checkCancellation()
         let extent = image.extent.integral
         guard maximumRows > 0, extent.width.isFinite, extent.height.isFinite,
@@ -340,7 +366,7 @@ public actor RenderEngine {
                 try autoreleasepool {
                     let height = min(maximumRows,texture.height-y)
                     let rect = CGRect(x:extent.minX,y:extent.maxY-Double(y+height),width:extent.width,height:Double(height))
-                    let band = try rasterize(image.cropped(to:rect),space:space,format:format,opaque:opaque)
+                    let band = try rasterize(image.cropped(to:rect),space:space,format:format,opaque:opaque,raw:raw)
                     guard let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
                         throw RenderError.allocationFailed
                     }
@@ -361,7 +387,7 @@ public actor RenderEngine {
         destination.colorSpace = space
         destination.isFlipped = false
         destination.alphaMode = .unpremultiplied
-        let task = try context.startTask(toRender:topDown,to:destination)
+        let task = try (raw ? rawRenderingContext() : context).startTask(toRender:topDown,to:destination)
         try finish(buffer)
         _ = try task.waitUntilCompleted()
         return texture

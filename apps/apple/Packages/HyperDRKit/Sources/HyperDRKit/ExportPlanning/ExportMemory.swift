@@ -185,8 +185,11 @@ extension ExportMemoryEstimate {
         let needsGain = input.writesGainMap || input.encoding.isBT2100
         let pairBytes = needsGain ? 24 : 12
         let source = sourcePixels * (input.source.domain == .dual ? 48 : 16)
+        // Match the empirical native decoder/ROI allowance used by row input.
+        // RAW 9's measured whole-development footprint exceeds the old 16 B/px
+        // reserve even after removing the output texture (Mac, 2026-10-22).
         let rawCache = input.source.domain == .rawEDR
-            ? (input.source.sensorSize ?? input.source.pixelSize).pixels * 16 : 0
+            ? max(sourcePixels, input.source.sensorSize?.pixels ?? 0) * 24 + 512 * 1024 * 1024 : 0
         let baseline = input.needsLookBaseline && input.source.domain == .rawEDR
             ? max(sourcePixels, input.source.sensorSize?.pixels ?? 0) * 24 + sourcePixels * 16 : 0
         let resident = source + rawCache + baseline + input.retainedBytes + 32 * 1024 * 1024

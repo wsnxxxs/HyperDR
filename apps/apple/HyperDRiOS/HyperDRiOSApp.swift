@@ -24,7 +24,7 @@ struct StudioRoot: View {
 
     var body: some View {
         HomeScreen(session: session)
-            .fullScreenCover(isPresented: $session.isEditing) {
+            .fullScreenCover(isPresented: $session.isEditing, onDismiss: session.editorDismissed) {
                 if let editor = session.editor { EditorScreen(session: session, editor: editor) }
             }
             .onChange(of: scenePhase) { _, phase in

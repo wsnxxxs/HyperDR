@@ -69,6 +69,45 @@ Before the compressed-sample spool change RAW preflight blocked at rounded
 [Historical Mac experiments and 110MP projections](EXPORT_MEMORY_HISTORY.md)
 explain the memory allowance, rejected precision/cache changes and earlier timings.
 
+## System RAW 9 backend measurement — 2026-10-22 (Mac only)
+
+New photos choose CIRAWFilter decoder 9 when supported, retaining the exact
+`9` / `9.dng` identity in the recipe. Existing recipes with no decoder field
+keep the system default. Every RAW read uses an extended-linear sRGB working
+CIContext and converts to extended-linear P3 at output; decoder 9 loses red
+with a P3 working context. Other rendering stays in P3.
+
+Mac, macOS 27.0.1, Apple M6, `DSC01468.ARW`, 9504 × 6336 (60,217,344
+pixels, marketed as 61MP), optimized standalone Swift/Metal CIContext,
+RGBAf output, boost 1, exposure 0, EDR 1, contrast/local tone map 0,
+cacheIntermediates false, memoryTarget 256. One fresh process per decoder/mode;
+three reads reuse the same graph. Warm times include decoder-internal reuse,
+so they are not independent developments. This is a backend decode benchmark,
+not application export timing. `/usr/bin/time -l` records process peaks including
+output storage and framework/Metal memory; RSS and footprint are different metrics.
+
+| Mode | Decoder | First read | Reused graph reads 2 / 3 | Peak RSS | Peak footprint |
+|---|---|---:|---:|---:|---:|
+| Full RGBAf bitmap | 8 | 0.916 s | 0.578 / 0.574 s | 1341 MiB | 2329 MiB |
+| Full RGBAf bitmap | 9 | 2.254 s | 0.235 / 0.207 s | 1415 MiB | 2715 MiB |
+| One native 4096 × 516 ROI | 8 | 0.075 s | 0.019 / 0.017 s | 153 MiB | 398 MiB |
+| One native 4096 × 516 ROI | 9 | 0.163 s | 0.005 / 0.007 s | 172 MiB | 426 MiB |
+| Whole image via ≤4096 × 516 native ROIs | 8 | 0.913 s | 0.707 / 0.607 s | 404 MiB | 1060 MiB |
+| Whole image via ≤4096 × 516 native ROIs | 9 | 2.414 s | 0.266 / 0.299 s | 397 MiB | 1472 MiB |
+
+The first decoder-9 process also spent 4.703 s opening the filter/loading the
+system model before the first read (other setup times 0.188–0.234 s).
+Evidence and benchmark source: ignored `build/denoise/raw9-backend/`.
+
+The row allowance stays **24 B/native-pixel + 512 MiB**: at this size it
+reserves 1890 MiB, above the measured 1472 MiB scan footprint. The whole-plane
+fallback now uses that same decoder allowance beside its 16 B/pixel source
+texture and 32 MiB fixed reserve (2841 MiB at this size), replacing its old
+16 B/native-pixel decoder reserve. The measured RAW 9 full footprint (2715 MiB)
+exceeded the old allowance. Admission tests cover the revised fallback.
+**iPhone/iPad RAW 9 memory and performance have not been measured.** These Mac
+numbers do not establish 110MP RAW 9 admission or repeatability on a device.
+
 ## Editing and render bounds
 
 The editor uses a lazy `ExportSource` for details on every platform. A detail

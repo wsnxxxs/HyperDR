@@ -205,6 +205,11 @@ public struct AdjustmentGroupState: Identifiable, Equatable, Sendable {
     public let modified: [AdjustmentControl]
     /// The chosen LUT's name (look group).
     public let lutName: String?
+    /// Switches this photo would show but its decoder does not offer (lens
+    /// correction for a camera the system has no lens profile for), in
+    /// declared order: hosts show them in place, unavailable, rather than
+    /// leave the control silently missing.
+    public var unsupported: [ParameterDeclaration] = []
 
     public var id: AdjustmentGroupID { group }
     public var isModified: Bool { !modified.isEmpty }
@@ -241,7 +246,19 @@ public struct AdjustmentPanel: Sendable {
             .filter { !$0.isDefault }
         return AdjustmentGroupState(group: group, headerToggle: header,
                                     controls: all.filter { !Self.isHeaderToggle($0.declaration) },
-                                    modified: modified, lutName: group == .look ? recipe.look?.name : nil)
+                                    modified: modified, lutName: group == .look ? recipe.look?.name : nil,
+                                    unsupported: unsupported(in: group, recipe: recipe))
+    }
+
+    /// Switches the photo's development would show but the decoder does not
+    /// offer: a development switch (`cost == .redevelop`) is lens correction,
+    /// which a camera without a lens profile lacks. Missing sliders (noise
+    /// reduction a decoder dropped) and options a model gates are left out.
+    func unsupported(in group: AdjustmentGroupID, recipe: Recipe) -> [ParameterDeclaration] {
+        Adjustments.parameters(in: group).filter {
+            $0.kind == .bool && $0.cost == .redevelop && $0.capability != nil
+                && Adjustments.isVisible($0, in: recipe) && !isCapable($0)
+        }
     }
 
     /// The header switch: the first bool of a group whose other parameters

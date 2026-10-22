@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "adjust.noProfile" : {
+      "comment" : "In place of the lens correction switch when the system has no lens profile for this camera. Do not claim the photo is corrected automatically.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No profile available" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无配置文件" } }
+      }
+    },
     "design.lut.library" : {
       "comment" : "Button beside the LUT menu that opens the LUT library.",
       "localizations" : {

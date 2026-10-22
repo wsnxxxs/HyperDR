@@ -109,6 +109,7 @@ extension SourceOptions {
     public init(recipe: Recipe, rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full, options: RenderOptions = RenderOptions()) throws {
         self.init(rawResolution:rawResolution, resolution:resolution,
                   sceneLinear:Self.sceneLinearDevelopment(recipe:recipe,options:options))
+        rawDecoderVersion = recipe.rawDecoderVersion
         let values = RecipeValues(recipe:recipe,options:options)
         lensCorrection = try values.bool("develop.lensCorrection")
         raw.temperature = try values.optionalNumber("develop.temperature")

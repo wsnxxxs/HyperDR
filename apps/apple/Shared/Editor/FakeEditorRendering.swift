@@ -19,6 +19,7 @@ actor FakeEditorRendering: EditorRendering {
 
     enum ModelBehavior: Sendable {
         case succeed
+        case cancel
         case fail(String)
         case unavailable(String)
     }
@@ -26,9 +27,13 @@ actor FakeEditorRendering: EditorRendering {
     /// What `open` reports, by URL; others open as `defaultPhoto`.
     var photos: [URL: Photo] = [:]
     var defaultPhoto = Photo()
+    var embeddedPreview: CGImage?
+    private var holdingOpens = false
+    private var heldOpens: [Int: CheckedContinuation<Void, Never>] = [:]
     var modelBehavior = ModelBehavior.succeed
     /// Thrown by every render while set.
     var renderError: EditorRenderingError?
+    var renderErrorForRequest: (@Sendable (EditorRenderRequest) -> EditorRenderingError?)?
     /// Thrown by every open while set.
     var openError: EditorRenderingError?
 
@@ -47,13 +52,26 @@ actor FakeEditorRendering: EditorRendering {
     private var holdingRenders = false
     private var holdingPredictions = false
     private var heldRenders: [Int: CheckedContinuation<Void, Never>] = [:]
-    private var heldPredictions: [CheckedContinuation<Void, Never>] = []
+    private var heldPredictions: [Int: CheckedContinuation<Void, Never>] = [:]
     private var nextHold = 0
     private var textures: (base: any MTLTexture, gain: any MTLTexture)?
 
     init() {}
 
     func configure(_ change: @Sendable (isolated FakeEditorRendering) -> Void) { change(self) }
+
+    func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
+        embeddedPreview.map { .init(image: $0, pixelSize: (photos[url] ?? defaultPhoto).size) }
+    }
+    func holdOpens() { holdingOpens = true }
+    func releaseOpens() {
+        holdingOpens = false
+        let held = heldOpens
+        heldOpens = [:]
+        held.values.forEach { $0.resume() }
+    }
+    var heldOpenCount: Int { heldOpens.count }
+    private func releaseOpen(_ id: Int) { heldOpens.removeValue(forKey: id)?.resume() }
 
     // MARK: - Holding
 
@@ -74,8 +92,8 @@ actor FakeEditorRendering: EditorRendering {
     func releasePredictions() {
         holdingPredictions = false
         let held = heldPredictions
-        heldPredictions = []
-        held.forEach { $0.resume() }
+        heldPredictions = [:]
+        held.values.forEach { $0.resume() }
     }
 
     var heldPredictionCount: Int { heldPredictions.count }
@@ -84,10 +102,22 @@ actor FakeEditorRendering: EditorRendering {
         heldRenders.removeValue(forKey: id)?.resume()
     }
 
+    private func releasePrediction(_ id: Int) {
+        heldPredictions.removeValue(forKey: id)?.resume()
+    }
+
     // MARK: - EditorRendering
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
         opened.append(url)
+        if holdingOpens {
+            nextHold += 1
+            let id = nextHold
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { heldOpens[id] = $0 }
+            } onCancel: { Task { await self.releaseOpen(id) } }
+        }
+        try Task.checkCancellation()
         if let openError { throw openError }
         let photo = photos[url] ?? defaultPhoto
         let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
@@ -114,6 +144,7 @@ actor FakeEditorRendering: EditorRendering {
         guard let current else { throw EditorRenderingError.noSource }
         guard current.id == request.sourceID else { throw EditorRenderingError.staleSource }
         if let renderError { throw renderError }
+        if let error = renderErrorForRequest?(request) { throw error }
         if let look = request.recipe.activeLook, !installedLUTs.contains(look.contentHash) {
             throw EditorRenderingError.missingLUT(look.contentHash)
         }
@@ -144,12 +175,19 @@ actor FakeEditorRendering: EditorRendering {
     func predictModelGain(_ request: EditorRenderRequest) async throws {
         predictions.append(request.recipe.conditionValue("hdr.model")?.stringValue ?? "")
         if holdingPredictions {
-            await withCheckedContinuation { heldPredictions.append($0) }
+            nextHold += 1
+            let id = nextHold
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { heldPredictions[id] = $0 }
+            } onCancel: {
+                Task { await self.releasePrediction(id) }
+            }
         }
         try Task.checkCancellation()
         load(request)
         switch modelBehavior {
         case .succeed: made.insert(Self.family(request))
+        case .cancel: throw CancellationError()
         case .fail(let reason): throw FakeFailure(reason: reason)
         case .unavailable(let reason): throw EditorRenderingError.modelUnavailable(reason)
         }

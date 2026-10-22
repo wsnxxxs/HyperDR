@@ -26,7 +26,7 @@ white (H1), `sdrOnly` only the base with gain compensation (H2).
 | `tone.highlights` | −100…100, 1 | 0 | all | whole · instant |
 | `tone.shadows` | −100…100, 1 | 0 | all | whole · instant |
 | `tone.blacks` | −100…100, 1 | 0 | all | whole · instant |
-| `develop.temperature` | 2000…50000 K, 50 | `fromSource` | `rawEDR` | whole · redevelop |
+| `develop.temperature` | 2000…12000 K, 50 | `fromSource` | `rawEDR` | whole · redevelop |
 | `develop.tint` | −150…150, 1 | `fromSource` | `rawEDR` | whole · redevelop |
 | `color.warmth` | −100…100, 1 | 0 | `sdr`, `hdr`, `dual` | whole · instant |
 | `color.tint` | −100…100, 1 | 0 | `sdr`, `hdr`, `dual` | whole · instant |

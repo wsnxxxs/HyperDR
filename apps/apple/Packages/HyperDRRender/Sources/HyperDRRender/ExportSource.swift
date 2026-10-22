@@ -60,10 +60,14 @@ extension RenderEngine {
     /// Materialize a native-pixel ROI plus two texels of sampling support. Decoder
     /// spatial filters receive the crop downstream, allowing Core Image to request
     /// their own input halo. Output coordinates remain global, not band-local.
-    public func materializeExportRegion(_ source: ExportSource, outputSize: PixelSize, region: CGRect) throws -> RenderSource {
+    /// `halo` widens the region by the output pixels the render reads beyond it
+    /// (`FilmAdjustments.sourceHalo`).
+    public func materializeExportRegion(_ source: ExportSource, outputSize: PixelSize, region requested: CGRect, halo: Int = 0) throws -> RenderSource {
         try Task.checkCancellation()
         try source.revision.validate(source.url)
-        _ = try validatedRegion(region, size:outputSize)
+        _ = try validatedRegion(requested, size:outputSize)
+        let region = requested.insetBy(dx:CGFloat(-max(0,halo)),dy:CGFloat(-max(0,halo)))
+            .intersection(CGRect(x:0,y:0,width:outputSize.width,height:outputSize.height))
         let full = source.nativeSize
         let sx = Double(full.width)/Double(outputSize.width), sy = Double(full.height)/Double(outputSize.height)
         // Bound the texel centers actually sampled, rather than a whole source

@@ -65,6 +65,47 @@ private func licensedRAW() -> URL {
         }
     }
 
+    /// The film's scatter reads beyond a tile: a tile materialized with the halo renders
+    /// exactly as the whole image does there, and one without it does not.
+    @Test func filmTilesCarryTheScatterHalo() async throws {
+        let engine = try RenderEngine()
+        let size = PixelSize(width:3000,height:300)
+        let image = CIFilter(name:"CICheckerboardGenerator",parameters:["inputCenter":CIVector(x:0,y:0),
+            "inputColor0":CIColor(red:0.9,green:0.8,blue:0.7),"inputColor1":CIColor(red:0.05,green:0.06,blue:0.04),
+            "inputWidth":5,"inputSharpness":1])!.outputImage!.cropped(to:CGRect(x:0,y:0,width:size.width,height:size.height))
+        let analysis = try await engine.source(image:image,domain:.sdr)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("film-halo-\(UUID())")
+        try Data([0]).write(to:url)
+        defer { try? FileManager.default.removeItem(at:url) }
+        let opened = OpenedSource(domain:.sdr,image:image,hdr:image,baseSpace:RenderEngine.workingColorSpace,gain:nil,raw:nil,nativeSize:size)
+        let lazy = ExportSource(id:analysis.id,domain:.sdr,nativeSize:size,rawSettings:nil,
+            analysisSource:analysis,opened:opened,url:url,revision:try SourceRevision(url:url))
+        var edit = RenderAdjustments()
+        edit.film.stock = .portra400; edit.film.grain = 0; edit.film.exposure = 0; edit.film.halation = 0
+        let halo = edit.film.sourceHalo(size:size)
+        #expect(halo >= 6)
+        let bounds = CGRect(x:0,y:0,width:size.width,height:size.height)
+        let whole = RenderEngine.readPixels(try await engine.render(
+            try await engine.materializeExportRegion(lazy,outputSize:size,region:bounds),adjustments:edit,size:size,region:bounds))
+        func difference(_ region: CGRect, halo: Int) async throws -> Float {
+            let tile = try await engine.materializeExportRegion(lazy,outputSize:size,region:region,halo:halo)
+            let pixels = RenderEngine.readPixels(try await engine.render(tile,adjustments:edit,size:size,region:region))
+            var worst: Float = 0
+            for y in 0..<Int(region.height) { for x in 0..<Int(region.width) { for c in 0..<3 {
+                worst = max(worst,abs(pixels.baseRGBA[(y*Int(region.width)+x)*4+c]
+                    - whole.baseRGBA[((y+Int(region.minY))*size.width+x+Int(region.minX))*4+c]))
+            } } }
+            return worst
+        }
+        for region in [CGRect(x:1003,y:101,width:300,height:80),CGRect(x:0,y:0,width:200,height:50),CGRect(x:2900,y:250,width:100,height:50)] {
+            #expect(try await difference(region,halo:halo) == 0,"\(region)")
+        }
+        #expect(try await difference(CGRect(x:1003,y:101,width:300,height:80),halo:0) > 0.01)
+        // Export tiles leave room for the halo within the source tile limit.
+        let tile = await engine.exportTileSize(lazy,request:ExportRenderRequest(photoSize:size,capabilities:streamCaps),halo:halo)
+        #expect(tile.width + 2*halo + 6 <= PreparedExportRows.maximumSourceTileSize.width)
+    }
+
     @Test func oversizedPanoramaRowsAndTextureLimit() async throws {
         let engine = try RenderEngine()
         let width = 20017, height = 19

@@ -130,7 +130,9 @@ actor RenderSession: EditorRendering {
                 opened.detail = try await engine.openExportSource(opened.editor.url, options: sourceOptions)
                 opened.detailOptions = sourceOptions
             }
-            let tile = try await engine.materializeExportRegion(opened.detail!, outputSize: request.size, region: region)
+            // The film's scatter reads a few pixels beyond the region.
+            let halo = try RenderAdjustments(recipe: recipe, lut: lut, options: options).film.sourceHalo(size: request.size)
+            let tile = try await engine.materializeExportRegion(opened.detail!, outputSize: request.size, region: region, halo: halo)
             try Task.checkCancellation()
             try checkCurrent(generation)
             self.opened = opened

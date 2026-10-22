@@ -14,8 +14,10 @@ private struct FilmReference: Decodable {
     }
     let inputs: [[Double]]
     let outputs: [String: [[Double]]]
+    struct Scatter: Decodable { let width, height: Int; let pixelMicrons: Double; let scattered: [[Double]] }
     let grain: [String: Grain]
     let halation: [String: Halation]
+    let scatter: Scatter
 }
 
 private func reference() throws -> FilmReference {
@@ -85,7 +87,9 @@ private func code(_ value: Double) -> Int {
         }
     }
 
-    /// Film sees the scene before the split, so HDR highlights enter its shoulder.
+    /// Film sees the scene before the split, so HDR highlights enter its shoulder. Per pixel:
+    /// no halation (a strip this small has none to speak of, but its map's sampling has a
+    /// width) and no scatter (none at this size).
     @Test func gpuMatchesTheDoubleReference() async throws {
         let engine = try RenderEngine()
         let values = try reference().inputs.map { SIMD3($0[0], $0[1], $0[2]) }
@@ -95,7 +99,7 @@ private func code(_ value: Double) -> Int {
         for id in FilmStockID.allCases {
             for strength in [Float(1), 0.4] {
                 var edit = RenderAdjustments()
-                edit.film.stock = id; edit.film.strength = strength; edit.film.grain = 0; edit.film.exposure = 0.5
+                edit.film.stock = id; edit.film.strength = strength; edit.film.grain = 0; edit.film.exposure = 0.5; edit.film.halation = 0
                 for (source, inputs, isSDR) in [(sdr, sdrValues, true), (hdr, values, false)] {
                     edit.hdr.enabled = !isSDR
                     let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
@@ -144,16 +148,21 @@ private func code(_ value: Double) -> Int {
             var settings = FilmAdjustments(); settings.stock = id; settings.antihalation = !case_.removed
             let strength = film.halationStrength(settings)
             let background = film.filmRaw(SIMD3(repeating: case_.background)), square = film.filmRaw(SIMD3(repeating: case_.level))
-            let kernel = film.halationKernel(longEdge: case_.size), r = kernel.radius, side = 2 * r + 1
+            let components = film.halationComponents(longEdge: case_.size)
             let low = (case_.size - case_.square) / 2, high = low + case_.square
             func inside(_ i: Int) -> Double { (low..<high).contains(i) ? 1 : 0 }
+            // The square is separable: each Gaussian covers it by the product of its axes.
+            func axis(_ i: Int, _ taps: (radius: Int, taps: [SIMD3<Double>])) -> SIMD3<Double> {
+                (-taps.radius...taps.radius).reduce(.zero) { $0 + taps.taps[$1 + taps.radius] * inside(i + $1) }
+            }
             var worst = SIMD3<Double>.zero
             for (i, expected) in case_.logExposure.enumerated() {
                 let x = case_.start + i
-                var cover = 0.0
-                for dy in -r...r { for dx in -r...r {
-                    cover += Double(kernel.weights[(dy + r) * side + dx + r]) * inside(x + dx) * inside(case_.row + dy)
-                } }
+                var cover = SIMD3<Double>.zero
+                for component in components {
+                    cover += axis(x, FilmStock.taps(component, truncate: FilmStock.halationTruncate, weighted: true))
+                        * axis(case_.row, FilmStock.taps(component, truncate: FilmStock.halationTruncate))
+                }
                 let raw = background + (square - background) * inside(x) * inside(case_.row)
                 let glow = background + (square - background) * cover
                 let actual = (raw + strength * glow) / (1 + strength)
@@ -164,8 +173,83 @@ private func code(_ value: Double) -> Int {
         }
     }
 
-    /// Halation on the GPU: with one analysis cell per pixel, the map equals the reference's
-    /// convolution, and the glow reddens the dark field next to a highlight.
+    /// spektrafilm's in-emulsion scatter: a Gaussian core and an exponential tail.
+    @Test func scatterMatchesSpektrafilm() throws {
+        let fixture = try reference().scatter, film = try FilmStock.named(.portra400)
+        let width = fixture.width, height = fixture.height
+        var raw = [SIMD3<Double>](repeating: SIMD3(repeating: 0.02), count: width * height)
+        for y in 4..<12 { for x in 6..<16 { raw[y * width + x] = SIMD3(40, 30, 20) } }
+        raw[18 * width + 24] = SIMD3(200, 150, 90)
+        for y in 0..<height { for x in 32..<width { raw[y * width + x] += SIMD3(repeating: Double(x - 32) * 0.375) } }
+        let longEdge = Int((film.pitch(longEdge: 1) / fixture.pixelMicrons).rounded())
+        let scattered = film.scatter(raw, width: width, height: height, longEdge: longEdge)
+        var worst = 0.0
+        for (i, expected) in fixture.scattered.enumerated() { for c in 0..<3 {
+            worst = max(worst, abs(scattered[i][c] - expected[c]) / max(expected[c], 1e-3))
+        } }
+        #expect(worst < 1e-5, "\(worst) relative to spektrafilm")
+        #expect(scattered[18 * width + 25].x > 1, "the point's tail spreads beyond it")
+        // Energy is kept: the field's total barely changes (reflected edges).
+        let total = raw.reduce(.zero, +), after = scattered.reduce(.zero, +)
+        for c in 0..<3 { #expect(abs(after[c] / total[c] - 1) < 1e-3) }
+    }
+
+    /// Scatter on the GPU, at the render's resolution: the reference's blur of the film
+    /// exposure, and a region (with its halo) agrees with the whole render.
+    @Test func gpuScatterMatchesTheDoubleReference() async throws {
+        let engine = try RenderEngine()
+        let width = 900, height = 40
+        var values = [SIMD3<Double>](repeating: SIMD3(0.05, 0.06, 0.04), count: width * height)
+        for y in 0..<height { for x in 0..<width where (x / 3 + y / 3) % 2 == 0 { values[y * width + x] = SIMD3(0.4, 0.3, 0.2) } }
+        for y in 14..<22 { for x in 440..<452 { values[y * width + x] = SIMD3(30, 26, 20) } }
+        let rgba = values.map { SIMD4(Float($0.x), Float($0.y), Float($0.z), 1) }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
+        let source = try await engine.source(image: image, domain: .hdr)
+        var edit = RenderAdjustments()
+        edit.hdr.enabled = false
+        edit.film.stock = .portra400; edit.film.grain = 0; edit.film.exposure = 0; edit.film.halation = 0
+        // A 2700-pixel render of the 900-pixel field (the source is sampled at a third).
+        let size = PixelSize(width: 2700, height: 120)
+        #expect(edit.film.sourceHalo(size: size) > 3)
+        let region = CGRect(x: 1250, y: 30, width: 160, height: 60)
+        let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size, region: region))
+        let film = try FilmStock.named(.portra400)
+        // The reference samples the source as the render does: bilinear, at pixel centres.
+        func sample(_ x: Int, _ y: Int) -> SIMD3<Double> {
+            let u = (Double(x) + 0.5) / 3 - 0.5, v = (Double(y) + 0.5) / 3 - 0.5
+            let x0 = Int(u.rounded(.down)), y0 = Int(v.rounded(.down)), fx = u - Double(x0), fy = v - Double(y0)
+            func at(_ x: Int, _ y: Int) -> SIMD3<Double> { values[min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)] }
+            return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
+        }
+        let halo = edit.film.sourceHalo(size: size)
+        let around = region.insetBy(dx: CGFloat(-halo), dy: CGFloat(-halo)).intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        let aw = Int(around.width), ah = Int(around.height)
+        var raw = [SIMD3<Double>]()
+        for y in 0..<ah { for x in 0..<aw { raw.append(film.filmRaw(sample(Int(around.minX) + x, Int(around.minY) + y))) } }
+        let scattered = film.scatter(raw, width: aw, height: ah, longEdge: size.width)
+        var worst = 0, unscattered = 0
+        for y in 0..<Int(region.height) { for x in 0..<Int(region.width) {
+            let i = (y + Int(region.minY - around.minY)) * aw + x + Int(region.minX - around.minX)
+            let expected = DoubleReference.fitP3(film.fromRaw(scattered[i])), plain = DoubleReference.fitP3(film.fromRaw(raw[i]))
+            for c in 0..<3 {
+                let actual = code(Double(pixels.baseRGBA[(y * Int(region.width) + x) * 4 + c]))
+                worst = max(worst, abs(actual - code(expected[c]))); unscattered = max(unscattered, abs(actual - code(plain[c])))
+            }
+        } }
+        #expect(worst <= 1, "\(worst) codes from the double reference")
+        #expect(unscattered > 8, "scatter softens the highlight's edge: \(unscattered) codes")
+        let whole = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size))
+        var seam: Float = 0
+        for y in 0..<Int(region.height) { for x in 0..<Int(region.width) { for c in 0..<3 {
+            seam = max(seam, abs(whole.baseRGBA[((y + 30) * size.width + x + 1250) * 4 + c] - pixels.baseRGBA[(y * Int(region.width) + x) * 4 + c]))
+        } } }
+        #expect(seam == 0, "a region matches the whole render: \(seam)")
+    }
+
+    /// Halation on the GPU: with one analysis cell per pixel, the map is the reference's
+    /// convolution (narrowed for its sampling) sampled by a cubic B-spline, and the glow
+    /// reddens the dark field next to a highlight.
     @Test func gpuHalationMatchesTheDoubleReference() async throws {
         let engine = try RenderEngine()
         let width = 720, height = 24, dark = SIMD3<Double>(repeating: 0.05), bright = SIMD3<Double>(repeating: 40)
@@ -179,17 +263,21 @@ private func code(_ value: Double) -> Int {
         edit.film.stock = .vision3500T; edit.film.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
         let film = try FilmStock.named(.vision3500T), strength = film.halationStrength(edit.film)
-        let kernel = film.halationKernel(longEdge: width), r = kernel.radius, side = 2 * r + 1
         let raw = values.map { film.filmRaw($0) }
-        func mirror(_ i: Int, _ n: Int) -> Int { min(max(i < 0 ? -i : i >= n ? 2 * (n - 1) - i : i, 0), n - 1) }
+        let map = FilmStock.blur(raw, width: width, height: height, components: film.halationMapComponents(cells: width),
+                                 truncate: FilmStock.halationTruncate)
+        let scattered = film.scatter(raw, width: width, height: height, longEdge: width)
+        #expect(edit.film.sourceHalo(size: PixelSize(width: width, height: height)) > 0)
+        // At texel centres the B-spline weighs 1/6, 2/3, 1/6, clamped at the edges.
+        let spline = [1.0 / 6, 2.0 / 3, 1.0 / 6]
         var worst = 0
         for y in 0..<height { for x in 320..<400 {
             var glow = SIMD3<Double>.zero
-            for dy in -r...r { for dx in -r...r {
-                glow += Double(kernel.weights[(dy + r) * side + dx + r]) * raw[mirror(y + dy, height) * width + mirror(x + dx, width)]
+            for dy in -1...1 { for dx in -1...1 {
+                glow += spline[dy + 1] * spline[dx + 1] * map[min(max(y + dy, 0), height - 1) * width + min(max(x + dx, 0), width - 1)]
             } }
-            let v = values[y * width + x]
-            let expected = DoubleReference.fitP3(film.apply(v, halation: (glow, strength)))
+            let exposed = (scattered[y * width + x] + strength * glow) / (1 + strength)
+            let expected = DoubleReference.fitP3(film.fromRaw(exposed))
             for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[(y * width + x) * 4 + c])) - code(expected[c]))) }
         } }
         #expect(worst <= 1, "\(worst) codes from the double reference")
@@ -201,6 +289,58 @@ private func code(_ value: Double) -> Int {
         edit.film.halation = 1; edit.film.antihalation = true
         let layered = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
         #expect(layered.baseRGBA[near] < pixels.baseRGBA[near], "the antihalation layer holds the glow back")
+    }
+
+    /// At full size the halation map (768 cells, eight pixels each here) and its B-spline
+    /// give the stock's halation of the scattered exposure, computed at full resolution:
+    /// within a few per cent of the glow, for a lamp on a cell's edge and on its centre.
+    @Test(arguments: [2994, 2998]) func fullSizeHalationFollowsTheStock(x0: Int) async throws {
+        let engine = try RenderEngine()
+        let width = 6000, height = 400, lamp = 12, y0 = 194, row = 200
+        let dark = SIMD3<Double>(repeating: 0.03), bright = SIMD3<Double>(repeating: 40)
+        var rgba = [SIMD4<Float>](repeating: SIMD4(0.03, 0.03, 0.03, 1), count: width * height)
+        for y in y0..<(y0 + lamp) { for x in x0..<(x0 + lamp) { rgba[y * width + x] = SIMD4(40, 40, 40, 1) } }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
+        let source = try await engine.source(image: image, domain: .hdr)
+        var edit = RenderAdjustments()
+        edit.hdr.enabled = false
+        edit.film.stock = .vision3500T; edit.film.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false
+        let region = CGRect(x: 2800, y: row, width: 400, height: 1)
+        let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, region: region))
+        let film = try FilmStock.named(.vision3500T), strength = film.halationStrength(edit.film)
+        let low = film.filmRaw(dark), high = film.filmRaw(bright)
+        typealias Taps = (radius: Int, taps: [SIMD3<Double>])
+        func convolve(_ a: Taps, _ b: Taps) -> Taps {
+            var taps = [SIMD3<Double>](repeating: .zero, count: 2 * (a.radius + b.radius) + 1)
+            for i in a.taps.indices { for j in b.taps.indices { taps[i + j] += a.taps[i] * b.taps[j] } }
+            return (a.radius + b.radius, taps)
+        }
+        // The lamp is a square: each separable Gaussian covers it by the product of its axes.
+        func axis(_ i: Int, _ start: Int, _ taps: Taps) -> SIMD3<Double> {
+            (-taps.radius...taps.radius).reduce(.zero) { $0 + ((start..<(start + lamp)).contains(i + $1) ? taps.taps[$1 + taps.radius] : .zero) }
+        }
+        let scatter = film.scatterComponents(longEdge: width), halation = film.halationComponents(longEdge: width)
+        var worst = 0, peak = 0
+        for x in Int(region.minX)..<Int(region.maxX) {
+            var scattered = SIMD3<Double>.zero, glow = SIMD3<Double>.zero
+            for s in scatter {
+                let sh = FilmStock.taps(s, truncate: FilmStock.scatterTruncate, weighted: true), sv = FilmStock.taps(s, truncate: FilmStock.scatterTruncate)
+                scattered += axis(x, x0, sh) * axis(row, y0, sv)
+                for h in halation {
+                    let hh = FilmStock.taps(h, truncate: FilmStock.halationTruncate, weighted: true), hv = FilmStock.taps(h, truncate: FilmStock.halationTruncate)
+                    glow += axis(x, x0, convolve(hh, sh)) * axis(row, y0, convolve(hv, sv))
+                }
+            }
+            let exposed = (low + (high - low) * scattered + strength * (low + (high - low) * glow)) / (1 + strength)
+            let expected = DoubleReference.fitP3(film.fromRaw(exposed)), plain = DoubleReference.fitP3(film.fromRaw(low + (high - low) * scattered))
+            for c in 0..<3 {
+                let actual = code(Double(pixels.baseRGBA[(x - Int(region.minX)) * 4 + c]))
+                worst = max(worst, abs(actual - code(expected[c]))); peak = max(peak, code(expected[c]) - code(plain[c]))
+            }
+        }
+        #expect(peak > 400, "the glow is visible: \(peak) codes")
+        #expect(Double(worst) < 0.03 * Double(peak), "\(worst) codes from the full-resolution halation, glow \(peak)")
     }
 
     /// Grain is deterministic per output pixel: the GPU draws the reference's noise, and a

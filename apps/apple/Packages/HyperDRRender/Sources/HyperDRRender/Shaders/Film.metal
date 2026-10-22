@@ -88,24 +88,38 @@ float3 filmFromRaw(float3 raw,const device FilmData& d,float2 grain,int2 pixel) 
     seen*=clamp(d.levels.y*seen.y+d.levels.z,0.f,1.f)/(seen.y+1e-10f);
     return filmRows(d.xyzToP3,seen);
 }
-// Back-reflection halation on the analysis cells: each cell's mean film exposure,
-// convolved with the stock's sum of Gaussians (weights from FilmStock.halationKernel,
-// (2r+1)² row-major, mirrored at the edges). Glow is low-frequency, so the render
-// samples this map bilinearly.
-kernel void filmHalation(texture2d<float,access::read> raw [[texture(0)]],texture2d<float,access::write> glow [[texture(1)]],
-                         constant int& radius [[buffer(0)]],device const float* weights [[buffer(1)]],
-                         uint2 pos [[thread_position_in_grid]]) {
-    int w=raw.get_width(),h=raw.get_height();
+// scipy.ndimage's 'reflect' edges: (d c b a | a b c d | d c b a).
+int filmReflect(int i,int n) {
+    int period=2*n,j=((i%period)+period)%period;
+    return j<n ? j : period-1-j;
+}
+// One axis of one Gaussian of a spatial effect (FilmStock.taps): per-channel taps, 2·radius+1
+// of them. The second, vertical pass of each later component adds into dst. Film exposure
+// textures span the region and its halo, so a reflected edge is always the image's own.
+struct FilmBlurUniform { int radius,vertical,accumulate,unused; };
+kernel void filmBlur(texture2d<float,access::read> src [[texture(0)]],texture2d<float,access::read_write> dst [[texture(1)]],
+                     constant FilmBlurUniform& u [[buffer(0)]],device const float4* taps [[buffer(1)]],
+                     uint2 pos [[thread_position_in_grid]]) {
+    int w=src.get_width(),h=src.get_height();
     if(int(pos.x)>=w || int(pos.y)>=h) return;
+    int n=u.vertical ? h : w,i=u.vertical ? int(pos.y) : int(pos.x);
     float3 sum=0;
-    for(int dy=-radius;dy<=radius;dy++) {
-        int y=int(pos.y)+dy;y=y<0 ? -y : y>=h ? 2*(h-1)-y : y;y=clamp(y,0,h-1);
-        for(int dx=-radius;dx<=radius;dx++) {
-            int x=int(pos.x)+dx;x=x<0 ? -x : x>=w ? 2*(w-1)-x : x;x=clamp(x,0,w-1);
-            sum+=weights[(dy+radius)*(2*radius+1)+dx+radius]*raw.read(uint2(x,y)).rgb;
-        }
+    for(int k=-u.radius;k<=u.radius;k++) {
+        int j=filmReflect(i+k,n);
+        sum+=taps[k+u.radius].xyz*src.read(u.vertical ? uint2(pos.x,j) : uint2(j,pos.y)).rgb;
     }
-    glow.write(float4(sum,0),pos);
+    if(u.accumulate) sum+=dst.read(pos).rgb;
+    dst.write(float4(sum,0),pos);
+}
+// Cubic B-spline through four bilinear fetches: the halation map, smooth between its cells
+// (FilmStock's halation sigma already allows for the spline's and the cells' own width).
+float3 filmSmooth(texture2d<float,access::sample> map,float2 uv) {
+    constexpr sampler s(coord::pixel,address::clamp_to_edge,filter::linear);
+    float2 x=uv*float2(map.get_width(),map.get_height())-.5f,i=floor(x),f=x-i;
+    float2 w0=(1-f)*(1-f)*(1-f)/6,w1=(4-6*f*f+3*f*f*f)/6,w2=(1+3*f+3*f*f-3*f*f*f)/6,w3=f*f*f/6;
+    float2 g0=w0+w1,g1=w2+w3,h0=i-.5f+w1/g0,h1=i+1.5f+w3/g1;
+    return g0.y*(g0.x*map.sample(s,float2(h0.x,h0.y)).rgb+g1.x*map.sample(s,float2(h1.x,h0.y)).rgb)
+          +g1.y*(g0.x*map.sample(s,float2(h0.x,h1.y)).rgb+g1.x*map.sample(s,float2(h1.x,h1.y)).rgb);
 }
 // One row per thread: centre-weighted (Gaussian, sigma 0.2 of the long edge) sums of
 // luminance and weight, for RenderEngine.filmMeter.

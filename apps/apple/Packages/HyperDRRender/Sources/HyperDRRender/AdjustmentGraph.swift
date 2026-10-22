@@ -11,7 +11,9 @@ struct GraphUniform {
     var inputRegion: SIMD4<Float>
     var film: SIMD4<Float> = .zero
     var halation: SIMD4<Float> = .zero
+    var scatter: SIMD4<Int32> = .zero
 }
+struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
 struct AuthorUniform {
     var minimum, maximum, inverseGamma, baseOffset, alternateOffset, controls: SIMD4<Float>
@@ -40,6 +42,7 @@ public struct SpatialAnalysis: @unchecked Sendable {
     /// Original source capacity in stops, including authored headroom metadata.
     public let sourceHeadroom: Float
     /// The film's halation glow, as film exposure on the cells; nil without halation.
+    /// Its blur allows for the cells' and the render's B-spline sampling width.
     public var filmHalation: (any MTLTexture)? = nil
 }
 
@@ -168,23 +171,22 @@ extension RenderEngine {
         }
         let cells = try texture(), peaks = try texture(), masks = try texture()
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
-        let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float), filmRaw = try texture()
+        let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
         let film = try filmResources(edit.film)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
         parameters.film.y = 0 // grain averages out in the cells
         try context.dispatch("graphCells", width: width, height: height,
-            textures: [input, cells, peaks, resources.texture, masks, film.texture, filmRaw], buffers: [resources.buffer, film.buffer], value: &parameters)
+            textures: [input, cells, peaks, resources.texture, masks, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
         var halation: (any MTLTexture)? = nil
         if let stock = edit.film.stock, !edit.film.isIdentity, edit.film.halation > 0,
            let data = try? FilmStock.named(stock), data.halationStrength(edit.film).max() > 0 {
-            let kernel = data.halationKernel(longEdge: max(width, height))
-            guard let weights = device.makeBuffer(bytes: kernel.weights, length: kernel.weights.count * 4, options: .storageModeShared)
-                else { throw RenderError.allocationFailed }
-            let glow = try texture()
-            var radius = Int32(kernel.radius)
-            try context.dispatch("filmHalation", width: width, height: height, textures: [filmRaw, glow], buffers: [weights], value: &radius)
+            let filmRaw = try texture(), glow = try texture()
+            try context.dispatch("graphFilmCells", width: width, height: height,
+                textures: [input, filmRaw, resources.texture, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
+            try filmBlur(filmRaw, into: glow, components: data.halationMapComponents(cells: max(width, height)),
+                         truncate: FilmStock.halationTruncate, context: context)
             halation = glow
         }
         func box(_ input: any MTLTexture, _ output: any MTLTexture, radius: Int) throws {
@@ -212,6 +214,24 @@ extension RenderEngine {
         result.filmHalation = halation
         analysisCache = (key, result)
         return result
+    }
+
+    /// The sum of the components' separable blurs (FilmStock.blur) into `output`.
+    func filmBlur(_ input: any MTLTexture, into output: any MTLTexture, components: [FilmBlurComponent],
+                  truncate: Double, context: RenderNodeContext) throws {
+        let pass = try context.texture(width: input.width, height: input.height, format: input.pixelFormat)
+        for (index, component) in components.enumerated() {
+            for vertical in [false, true] {
+                let taps = FilmStock.taps(component, truncate: truncate, weighted: !vertical)
+                let rows = taps.taps.map { SIMD4(Float($0.x), Float($0.y), Float($0.z), 0) }
+                guard let buffer = device.makeBuffer(bytes: rows, length: rows.count * 16, options: .storageModeShared)
+                    else { throw RenderError.allocationFailed }
+                var u = FilmBlurUniform(radius: Int32(taps.radius), vertical: vertical ? 1 : 0,
+                                        accumulate: vertical && index > 0 ? 1 : 0, unused: 0)
+                try context.dispatch("filmBlur", width: input.width, height: input.height,
+                                     textures: vertical ? [pass, output] : [input, pass], buffers: [buffer], value: &u)
+            }
+        }
     }
 
     func graphConfiguration(_ source: RenderSource, _ edit: RenderAdjustments, analysis: SpatialAnalysis, modelPeak: Float = 0) throws -> (range: Float, expand: Bool, shoulder: Bool) {
@@ -299,9 +319,27 @@ extension RenderEngine {
         if analysis.filmHalation != nil, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
             p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film)), 1)
         }
+        var scattered: (any MTLTexture)?
+        let halo = edit.film.sourceHalo(size: size)
+        if halo > 0, let stock = edit.film.stock {
+            // In-emulsion scatter at the render's own resolution: film exposure of the
+            // region and its halo, blurred, read in place of the render's own.
+            let around = region.insetBy(dx: CGFloat(-halo), dy: CGFloat(-halo))
+                .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+            var q = p
+            q.region = SIMD4(UInt32(size.width), UInt32(size.height), UInt32(around.minX), UInt32(around.minY))
+            let raw = try context.texture(width: Int(around.width), height: Int(around.height), format: .rgba16Float)
+            try context.dispatch("graphFilmExposure", width: raw.width, height: raw.height,
+                textures: [input, raw, resources.texture, film.texture], buffers: [resources.buffer, film.buffer], value: &q)
+            let exposure = try context.texture(width: raw.width, height: raw.height, format: .rgba16Float)
+            try filmBlur(raw, into: exposure, components: try FilmStock.named(stock).scatterComponents(longEdge: max(size.width, size.height)),
+                         truncate: FilmStock.scatterTruncate, context: context)
+            p.scatter = SIMD4(Int32(region.minX - around.minX), Int32(region.minY - around.minY), 1, 0)
+            scattered = exposure
+        }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
             textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
-                       analysis.filmHalation ?? analysis.expansion],
+                       analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion],
             buffers: [resources.buffer, film.buffer], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,

@@ -116,7 +116,7 @@ actor RenderSession: EditorRendering {
             guard restoring == nil, case RenderError.cannotDecodeSource = error,
                   let requested = options.rawDecoderVersion,
                   requested.split(separator: ".").first == "9",
-                  let version = await engine.defaultRAWDecoder(url), version != requested else { throw error }
+                  let version = await engine.fallbackRAWDecoder(url), version != requested else { throw error }
             try Task.checkCancellation()
             guard try FileRevision(url) == revision else { throw RenderError.sourceChanged }
             options.rawDecoderVersion = version
@@ -126,6 +126,7 @@ actor RenderSession: EditorRendering {
             try await beforeOpenLoad?(options)
             source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
             fallback = RAWDecoderFallback(requested: requested, used: version)
+            EditorLog.notice("RAW decoder \(requested) could not decode; reopened with \(version)")
         }
         let developed = clock.now
         await progress(.preparingPreview)
@@ -135,12 +136,14 @@ actor RenderSession: EditorRendering {
         }
         try Task.checkCancellation()
         guard generation == self.generation else { throw CancellationError() }
-        let editor = EditorSource(id: UUID(), url: url, domain: source.domain, pixelSize: source.nativeSize,
+        // The photo's own size: the editor applies the geometry the recipe carries.
+        let editor = EditorSource(id: UUID(), url: url, domain: source.domain, pixelSize: source.uncroppedSize,
                                   sourceValues: report.sourceValues,
                                   capabilities: Self.capabilities(report.capabilities),
                                   hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url),
                                   rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback)
         opened = Opened(editor: editor, revision: revision, source: source, options: options)
+        EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") in \(began.duration(to: clock.now))")
         predictions = [:]
         predictionOrder = []
         return editor
@@ -177,7 +180,7 @@ actor RenderSession: EditorRendering {
             guard let lut = luts[look.contentHash] else { throw EditorRenderingError.missingLUT(look.contentHash) }
             return lut
         }
-        let full = request.region != nil || request.size == opened.editor.pixelSize
+        let full = request.region != nil || request.size == recipe.geometry.outputSize(of: opened.editor.pixelSize)
         let sourceOptions = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size),
                                               options: options)
         if let region = request.region {
@@ -206,7 +209,10 @@ actor RenderSession: EditorRendering {
         if request.keepsSource {
             var kept = sourceOptions
             kept.resolution = opened.options.resolution
-            guard kept == opened.options else { throw EditorRenderingError.needsDevelopment }
+            // Only RAW is developed: a film's scene-linear development changes nothing else.
+            guard kept == opened.options || opened.source.domain != .rawEDR else {
+                throw EditorRenderingError.needsDevelopment
+            }
         } else if sourceOptions != opened.options && opened.source.reusesRAWPreview(options: sourceOptions) {
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
             opened.options = sourceOptions
@@ -242,7 +248,8 @@ actor RenderSession: EditorRendering {
         let display = try await engine.displayPair(planes, source: source)
         let automatic = request.region == nil && !request.keepsSource
             ? try await engine.resolvedAutomatic(source, recipe: request.recipe, lut: prepared.lut,
-                                                 modelGain: prepared.modelGain, options: prepared.options)
+                                                 modelGain: prepared.modelGain, options: prepared.options,
+                                                 includingSet: true)
             : [:]
         try Task.checkCancellation()
         try checkCurrent(prepared.generation)

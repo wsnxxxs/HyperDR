@@ -23,12 +23,19 @@ struct EditorCanvas: View {
     @Binding var transform: CanvasTransform?
     /// Show the export's frame around the photo.
     let framed: Bool
+    /// The crop pane: the whole photo through its geometry, with the crop box over it.
+    var cropping = false
     /// The margin around a framed card.
     var framePadding: CGFloat = Space.s5
 
     /// The canvas is held to show the original.
     @Binding var holdingOriginal: Bool
     @State private var headroom = HeadroomSnapshot()
+    /// The crop pane's placement while its box is dragged.
+    @State private var cropFreeze: CropLayout?
+
+    /// Room around the crop in the crop pane, for its corners.
+    static let cropMargin: CGFloat = 28
 
     var body: some View {
         GeometryReader { proxy in
@@ -38,7 +45,7 @@ struct EditorCanvas: View {
                 if let layout, session.frame.isEnabled {
                     mat(layout, placement: placement)
                 }
-                canvas
+                canvas(viewport: placement.print.size)
                     .frame(width: placement.print.width, height: placement.print.height)
                     .position(x: placement.print.midX, y: placement.print.midY)
                 if let layout, session.frame.isEnabled, layout.caption.height > 0 {
@@ -122,15 +129,39 @@ struct EditorCanvas: View {
 
     // MARK: Canvas
 
-    private var canvas: some View {
-        EDRCanvas(content: content,
+    private func canvas(viewport: CGSize) -> some View {
+        let crop = cropLayout(viewport)
+        return EDRCanvas(content: content(crop),
                   fitRequest: framed,
                   onHeadroom: { headroom = $0 },
                   onDrawableSize: { editor.canvasPixelSize = $0 },
                   onHoldOriginal: { holdingOriginal = $0 },
                   onError: { _ in session.notice = "ios.error.load" },
                   onTransform: { transform = $0 })
-            .overlay { adornments }
+            .overlay {
+                if cropping, let crop {
+                    CropOverlay(layout: crop, adjusting: editor.editingParameter == RecipeEditor.geometryDragID,
+                                freeze: $cropFreeze, write: { geometry in
+                                    var recipe = editor.recipe
+                                    recipe.geometry = geometry
+                                    editor.setRecipe(recipe)
+                                }, onEditing: { editor.editingGeometry($0) })
+                } else if !cropping {
+                    adornments
+                }
+            }
+    }
+
+    /// The crop pane's placement of the photo; also, once it is left, until
+    /// the cropped frame arrives (the whole photo drawn through the crop, so
+    /// it never shows uncropped). Nil when the frame shown is not the whole photo.
+    private func cropLayout(_ viewport: CGSize) -> CropLayout? {
+        guard let frame = editor.frame, let source = editor.frameSource, frame.request.recipe.geometry == .identity,
+              cropping || !editor.recipe.geometry.isIdentity, viewport.width > 0, viewport.height > 0 else { return nil }
+        if cropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
+        let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
+        return CropLayout(photo: photo, geometry: editor.recipe.geometry, viewport: viewport,
+                          margin: cropping ? Self.cropMargin : 0)
     }
 
     /// The original of the shown photo, when there is one to compare with.
@@ -151,10 +182,11 @@ struct EditorCanvas: View {
         }
     }
 
-    private var content: EDRCanvasUIView.Content? {
+    private func content(_ crop: CropLayout?) -> EDRCanvasUIView.Content? {
         guard let frame = editor.frame, let source = editor.frameSource else { return nil }
-        // Until the new photo's first frame arrives the previous one stays, at its own size.
-        let size = source.pixelSize
+        // Until the new photo's first frame arrives the previous one stays, at its
+        // own size: its photo after the geometry it was rendered with.
+        let size = frame.request.recipe.geometry.outputSize(of: source.pixelSize)
         let original = original
         let originalDetail = original == nil ? nil : editor.shownOriginalDetail
         return EDRCanvasUIView.Content(edited: DisplayPair(frame.display),
@@ -163,7 +195,8 @@ struct EditorCanvas: View {
                                        originalDetail: originalDetail.map { DisplayPair($0.display) },
                                        mode: mode, splitRatio: splitRatio,
                                        previewsAsSDR: editor.previewsAsSDR,
-                                       imageSize: CGSize(width: size.width, height: size.height))
+                                       imageSize: CGSize(width: size.width, height: size.height),
+                                       geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping))
     }
 
     /// The split divider and the badge, in the canvas's coordinates.

@@ -2,23 +2,45 @@ import HyperDRDesign
 import HyperDRRecipe
 import SwiftUI
 
-/// What the dock shows: one adjustment group, or the export's frame.
+/// What the dock shows: one adjustment group, the crop, or the export's frame.
 enum EditorPane: Hashable {
     case group(AdjustmentGroupID)
+    case crop
     case frame
 }
 
-/// One tab of the dock: an adjustment group, or light and colour together.
-/// The two are used side by side, so one tab with both rows of rings keeps
-/// the tab bar short; the recipe's groups stay as they are.
+/// One tab of the dock: an adjustment group, or light and colour together
+/// as Adjust. The two are used side by side, so one tab with both rows of
+/// rings keeps the tab bar short; the recipe's groups stay as they are.
+///
+/// Style holds only the choice of look and its strength. The film's grain and
+/// halation shape the photo like the light and colour controls, so Adjust
+/// shows them, after colour, while a film is on; its exposure follows its
+/// meter (Adjust's exposure moves it) and its antihalation layer stays on.
 struct DockGroup: Identifiable {
     /// The groups that share a tab, in display order.
     static let merged: [AdjustmentGroupID] = [.light, .color]
+    /// The look's controls Adjust shows.
+    static let borrowed = ["look.filmGrain", "look.filmHalation"]
+    /// What Style keeps of the look group.
+    static let lookControls: Set<String> = [Recipe.filmID, Recipe.lookID, "look.strength", "look.filmStrength"]
 
     let states: [AdjustmentGroupState]
+    /// Another group's controls shown on this tab, after its own.
+    var borrowed: [AdjustmentControl] = []
     var id: AdjustmentGroupID { states[0].group }
-    var isModified: Bool { states.contains { $0.isModified } }
     var isMerged: Bool { states.count > 1 }
+
+    /// The controls the tab shows.
+    var controls: [AdjustmentControl] {
+        let own = states.flatMap(\.controls)
+        return (id == .look ? own.filter { Self.lookControls.contains($0.id) } : own) + borrowed
+    }
+
+    var isModified: Bool {
+        if id == .look { return controls.contains { !$0.isDefault } }
+        return states.contains { $0.isModified } || borrowed.contains { !$0.isDefault }
+    }
 
     func contains(_ group: AdjustmentGroupID) -> Bool { states.contains { $0.group == group } }
 
@@ -35,6 +57,10 @@ struct DockGroup: Identifiable {
                 tabs.append(DockGroup(states: [state]))
             }
         }
+        if let look = groups.first(where: { $0.group == .look }),
+           let index = tabs.firstIndex(where: { merged.contains($0.id) }) {
+            tabs[index].borrowed = borrowed.compactMap { id in look.controls.first { $0.id == id } }
+        }
         return tabs
     }
 }
@@ -48,6 +74,8 @@ struct DockGroup: Identifiable {
 struct EditorTabs: View {
     let groups: [DockGroup]
     @Binding var pane: EditorPane
+    /// The photo is cropped, turned, tilted or mirrored.
+    var cropOn = false
     let frameOn: Bool
     var axis: Axis = .horizontal
     var large = false
@@ -55,32 +83,44 @@ struct EditorTabs: View {
     @Namespace private var selection
 
     var body: some View {
-        let stack = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s2)) : AnyLayout(VStackLayout(spacing: Space.s2))
-        GlassEffectContainer(spacing: Space.s2) {
+        let stack = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s3)) : AnyLayout(VStackLayout(spacing: Space.s3))
+        let hdr = groups.filter { $0.id == .hdr }
+        GlassEffectContainer(spacing: Space.s3) {
+            // HDR at the start, the edits that change the photo in the
+            // middle, the frame around it at the end.
             stack {
-                let inner = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                inner {
-                    ForEach(groups) { tab in
-                        self.tab(.group(tab.id), symbol: AdjustmentSymbols.group(tab.id),
-                                 label: tab.isMerged ? Text("ios.adjust.lightColor") : AdjustmentText.group(tab.id),
-                                 marked: tab.isModified, mark: tab.id == .hdr ? Color.hdr.amber : Color.hdr.accent,
-                                 isCurrent: { if case .group(let group) = $0 { tab.contains(group) } else { false } })
-                            .onLongPressGesture(minimumDuration: 0.35) {
-                                for state in tab.states { onBypass(state.group, true) }
-                            } onPressingChanged: { pressing in
-                                if !pressing { for state in tab.states { onBypass(state.group, false) } }
-                            }
-                    }
+                capsule { ForEach(hdr) { groupTab($0) } }
+                capsule {
+                    ForEach(groups.filter { $0.id != .hdr }) { groupTab($0) }
+                    tab(.crop, symbol: "crop.rotate", label: Text("ios.crop.title"), marked: cropOn, mark: Color.hdr.accent)
                 }
-                .padding(4)
-                .glassEffect(.regular, in: .capsule)
-                tab(.frame, symbol: "photo.artframe", label: Text("ios.frame.title"), marked: frameOn, mark: .white)
-                    .padding(4)
-                    .glassEffect(.regular, in: .capsule)
+                capsule {
+                    tab(.frame, symbol: "photo.artframe", label: Text("ios.frame.title"), marked: frameOn, mark: .white)
+                }
             }
+            .padding(axis == .horizontal ? .horizontal : .vertical, Space.s3)
         }
         .animation(.smooth(duration: 0.25), value: pane)
         .sensoryFeedback(.selection, trigger: pane)
+    }
+
+    private func capsule(@ViewBuilder _ content: () -> some View) -> some View {
+        let inner = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        return inner { content() }
+            .padding(4)
+            .glassEffect(.regular, in: .capsule)
+    }
+
+    private func groupTab(_ tab: DockGroup) -> some View {
+        self.tab(.group(tab.id), symbol: tab.isMerged ? "slider.horizontal.3" : AdjustmentSymbols.group(tab.id),
+                 label: tab.isMerged ? Text("ios.adjust.tab") : AdjustmentText.group(tab.id),
+                 marked: tab.isModified, mark: tab.id == .hdr ? Color.hdr.amber : Color.hdr.accent,
+                 isCurrent: { if case .group(let group) = $0 { tab.contains(group) } else { false } })
+            .onLongPressGesture(minimumDuration: 0.35) {
+                for state in tab.states { onBypass(state.group, true) }
+            } onPressingChanged: { pressing in
+                if !pressing { for state in tab.states { onBypass(state.group, false) } }
+            }
     }
 
     private func tab(_ target: EditorPane, symbol: String, label: Text, marked: Bool, mark: Color,
@@ -126,8 +166,11 @@ struct EditorTabs: View {
 ///   visible, their values and the edits. Numbers get a ring and switches
 ///   a filled circle; other choices and references wait behind "More" at the
 ///   end of the row. HDR's own switch and its source sit above the row.
-/// - The look group's row lists the LUTs instead of rings ("None" first, the
-///   library last); the ruler then sets the strength.
+/// - The look group chooses its look first: built-in (the film stocks) or
+///   imported (the LUT library), as segments above the row; the row lists
+///   that kind's looks before its strength ("None" first, the library tile
+///   last). One look at a time: choosing a film removes the LUT and the other
+///   way round. Its other controls are Adjust's or have none (`DockGroup`).
 /// - Rings: empty at the default, clockwise for positive and anticlockwise for
 ///   negative; amber for HDR. Double-tap resets, a long press opens the menu.
 /// - Tapping the readout types an exact value.
@@ -148,6 +191,8 @@ struct AdjustmentControls: View {
 
     /// The chosen control of each group, kept while switching groups.
     @State private var selected: [AdjustmentGroupID: String] = [:]
+    /// The look kind the row shows, once chosen; until then the recipe's.
+    @State private var chosenLookKind: LookKind?
     @State private var showingOptions = false
     @State private var typing = false
     @State private var draft = ""
@@ -157,13 +202,17 @@ struct AdjustmentControls: View {
         let actual = BarLayout(group)
         let off = actual.isSwitchedOff
         // Switched off, the group's controls stay in place, grey and locked.
-        let layout = off ? switchedOnLayout(actual) ?? actual : actual
+        let layout = (off ? switchedOnLayout(actual) ?? actual : actual).showing(lookKind)
         let current = layout.rings.first { $0.id == selected[group.id] } ?? layout.rings.first
         let stack = axis == .horizontal ? AnyLayout(VStackLayout(spacing: large ? Space.s3 : Space.s2))
             : AnyLayout(VStackLayout(alignment: .center, spacing: Space.s2))
         stack {
             if actual.power != nil || layout.leadChoice != nil {
                 headline(power: actual.power, lead: layout.leadChoice, off: off).padding(.horizontal, Space.s4)
+            } else if layout.isLook {
+                LookKindSegments(kind: lookKind) { chosenLookKind = $0 }
+                    .frame(maxWidth: 420)
+                    .padding(.horizontal, Space.s4)
             }
             if off {
                 // In the readout's place: what the switch being off means.
@@ -189,6 +238,9 @@ struct AdjustmentControls: View {
                     .frame(height: large ? 52 : 40)
                     .disabled(!current.isAvailable)
                     .locked(off)
+            } else if layout.isLook {
+                // The ruler's place, so switching the look kind never moves the dock.
+                Color.clear.frame(height: large ? 52 : 40)
             }
         }
         .animation(.smooth(duration: 0.2), value: off)
@@ -226,11 +278,8 @@ struct AdjustmentControls: View {
     }
 
     /// The HDR source: segments, or a line when the photo brings its own HDR.
-    /// The film stock: a menu, its names being too long for segments.
     @ViewBuilder private func leadChoice(_ control: AdjustmentControl) -> some View {
-        if control.id == Recipe.filmID {
-            FilmMenu(control: control) { panel.set(control.id, option: $0, in: &recipe) }
-        } else if control.options.count > 1 {
+        if control.options.count > 1 {
             // No note under it: a line that comes and goes would move the row.
             SourceSegments(control: control) { panel.set(control.id, option: $0, in: &recipe) }
         } else if let only = control.options.first {
@@ -246,12 +295,9 @@ struct AdjustmentControls: View {
         ScrollView(axis == .horizontal ? .horizontal : .vertical, showsIndicators: false) {
             let stack = axis == .horizontal ? AnyLayout(HStackLayout(spacing: Space.s2)) : AnyLayout(VStackLayout(spacing: Space.s1))
             stack {
-                if let lut = layout.lut {
-                    LUTSwatches(control: lut, luts: panel.context.luts, previews: panel.context.lutPreviews,
-                                onLibrary: onLUTLibrary) {
-                        panel.set(lut.id, reference: $0, in: &recipe)
-                    }
-                    // The LUT's and the film's strengths, so the ruler can reach either.
+                if layout.isLook {
+                    lookSwatches(layout)
+                    // The look's strengths, so the ruler can reach them.
                     if !layout.rings.isEmpty {
                         Capsule()
                             .fill(Color.white.opacity(0.14))
@@ -295,6 +341,36 @@ struct AdjustmentControls: View {
         .defaultScrollAnchor(.center, for: .alignment)
         .defaultScrollAnchor(axis == .horizontal ? .leading : .top, for: .initialOffset)
         .frame(maxHeight: axis == .vertical ? .infinity : nil)
+    }
+
+    private var lookKind: LookKind { chosenLookKind ?? (recipe.look != nil ? .imported : .builtIn) }
+
+    /// The chosen kind's looks. "None" in either removes whichever look is on.
+    @ViewBuilder private func lookSwatches(_ layout: BarLayout) -> some View {
+        let removeLook = { panel.set(Recipe.lookID, reference: nil, in: &recipe) }
+        switch lookKind {
+        case .builtIn:
+            if let film = layout.film {
+                FilmSwatches(control: film, lookIsImported: recipe.look != nil, previews: panel.context.lutPreviews,
+                             removeLook: removeLook) { stock in
+                    // One write, one undo step: the stock, its exposure back on the meter
+                    // and its antihalation layer back on, neither having a control here.
+                    var edited = recipe
+                    panel.set(film.id, option: stock, in: &edited)
+                    panel.setAutomatic("look.filmExposure", in: &edited)
+                    panel.reset("look.filmAntihalation", in: &edited)
+                    recipe = edited
+                }
+            }
+        case .imported:
+            if let lut = layout.lut {
+                LUTSwatches(control: lut, luts: panel.context.luts, previews: panel.context.lutPreviews,
+                            filmIsOn: layout.film.map { $0.selectedOption != "none" } ?? false,
+                            onLibrary: onLUTLibrary) {
+                    if let reference = $0 { panel.set(lut.id, reference: reference, in: &recipe) } else { removeLook() }
+                }
+            }
+        }
     }
 
     private func moreButton(_ controls: [AdjustmentControl]) -> some View {
@@ -466,48 +542,6 @@ private struct PowerSwitch: View {
     }
 }
 
-/// The look group's film stock, above its row: the chosen stock in a capsule that
-/// opens the list.
-private struct FilmMenu: View {
-    let control: AdjustmentControl
-    let choose: (String) -> Void
-
-    var body: some View {
-        let selected = control.options.first { $0.id == control.selectedOption } ?? control.options.first
-        Menu {
-            Picker(selection: Binding(get: { control.selectedOption ?? "" }, set: choose)) {
-                ForEach(AdjustmentText.optionSections(control)) { section in
-                    Section {
-                        ForEach(section.options, id: \.id) { option in
-                            AdjustmentText.option(option).tag(option.id)
-                        }
-                    } header: {
-                        section.title
-                    }
-                }
-            } label: {
-                AdjustmentText.label(control.declaration)
-            }
-        } label: {
-            HStack(spacing: Space.s2) {
-                Image(systemName: "film")
-                AdjustmentText.label(control.declaration).foregroundStyle(.secondary)
-                Spacer(minLength: Space.s1)
-                if let selected { AdjustmentText.option(selected).lineLimit(1) }
-                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-            }
-            .font(.footnote.weight(.medium))
-            .padding(.horizontal, Space.s3)
-            .frame(minHeight: 36)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(AdjustmentText.label(control.declaration))
-        .disabled(!control.isAvailable)
-    }
-}
-
 /// An on/off control in the ring row: its symbol in a circle, filled while on.
 private struct SwitchRing: View {
     let control: AdjustmentControl
@@ -599,36 +633,50 @@ private struct UnsupportedRing: View {
 /// How one group's controls split across the bar.
 private struct BarLayout {
     /// Numbers, each with a ring and the ruler.
-    let rings: [AdjustmentControl]
-    /// The HDR source or the film stock, above the ring row (§5.3: the group's most
-    /// important choice).
+    private(set) var rings: [AdjustmentControl]
+    /// The HDR source, above the ring row (§5.3: the group's most important choice).
     let leadChoice: AdjustmentControl?
-    /// The LUT reference, drawn as swatches in place of the rings.
+    /// The film stock and the LUT reference, drawn as swatches before the rings.
+    let film: AdjustmentControl?
     let lut: AdjustmentControl?
+    var isLook: Bool { film != nil || lut != nil }
     /// The group's own switch (HDR on or off), beside the source.
     let power: AdjustmentControl?
     /// The switch is off: the group's other controls are hidden.
     var isSwitchedOff: Bool { power.map { !$0.isOn } ?? false }
     /// Other on/off controls, as switches at the end of the row.
-    let switches: [AdjustmentControl]
+    private(set) var switches: [AdjustmentControl]
     /// Everything else (the AI model, the LUT's input and output), behind "More".
     let more: [AdjustmentControl]
     /// Switches the photo does not offer (`AdjustmentGroupState.unsupported`).
     let unsupported: [ParameterDeclaration]
 
     init(_ group: DockGroup) {
-        let controls = group.states.flatMap(\.controls)
+        let controls = group.controls
         rings = controls.filter { $0.spec != nil }
         let others = controls.filter { $0.spec == nil }
-        let lead = others.first { $0.id == Recipe.hdrSourceID || $0.id == Recipe.filmID }
+        let lead = others.first { $0.id == Recipe.hdrSourceID }
+        let film = others.first { $0.id == Recipe.filmID }
         let lut = others.first { $0.id == Recipe.lookID }
         leadChoice = lead
+        self.film = film
         self.lut = lut
         power = group.states.lazy.compactMap(\.headerToggle).first
-        let rest = others.filter { $0.id != lead?.id && $0.id != lut?.id }
+        let rest = others.filter { $0.id != lead?.id && $0.id != film?.id && $0.id != lut?.id }
         switches = rest.filter { $0.kind == .bool }
         more = rest.filter { $0.kind != .bool }
         unsupported = group.states.flatMap(\.unsupported)
+    }
+
+    /// The look group with only the shown kind's controls: the film's
+    /// (`look.film…`) under built-in, the LUT's under imported.
+    func showing(_ kind: LookKind) -> BarLayout {
+        guard isLook else { return self }
+        let belongs = { (control: AdjustmentControl) in control.id.hasPrefix("look.film") == (kind == .builtIn) }
+        var layout = self
+        layout.rings = rings.filter(belongs)
+        layout.switches = switches.filter(belongs)
+        return layout
     }
 }
 
@@ -672,23 +720,28 @@ struct AdjustmentRing: View {
     }
 }
 
-/// The look group's row: "None", the LUT library, and a tile that opens it.
-/// Each LUT is shown on the photo (`AdjustmentContext.lutPreviews`), with
-/// its colour mark until its preview is in; "None" is the photo without one.
+/// The look group's imported row: "None", the LUT library, and a tile that
+/// opens it. Each LUT is shown on the photo (`AdjustmentContext.lutPreviews`),
+/// with its colour mark until its preview is in; "None" is the photo without
+/// a look.
 struct LUTSwatches: View {
     let control: AdjustmentControl
     let luts: [LUTReference]
     var previews: [String: CGImage] = [:]
+    /// A built-in film is the look, so "None" is not.
+    var filmIsOn = false
     var onLibrary: () -> Void = {}
     let choose: (String?) -> Void
     @Environment(\.lookPickerShown) private var shown
 
     var body: some View {
-        swatch(id: nil, name: nil, isCurrent: control.reference == nil) { choose(nil) }
+        LookSwatch(image: previews[LookPreviews.none], mark: nil, name: nil,
+                   isCurrent: control.reference == nil && !filmIsOn) { choose(nil) }
             .onAppear { shown(true) }
             .onDisappear { shown(false) }
         ForEach(luts, id: \.contentHash) { lut in
-            swatch(id: lut.contentHash, name: lut.name, isCurrent: control.reference == lut.contentHash) {
+            LookSwatch(image: previews[lut.contentHash], mark: lut.contentHash, name: Text(verbatim: lut.name),
+                       isCurrent: control.reference == lut.contentHash) {
                 choose(lut.contentHash)
             }
             .disabled(control.disabledOptions.contains(lut.contentHash))
@@ -706,23 +759,105 @@ struct LUTSwatches: View {
         }
         .buttonStyle(.plain)
     }
+}
 
-    private func swatch(id: String?, name: String?, isCurrent: Bool, action: @escaping () -> Void) -> some View {
+/// The look group's built-in row: "None" and the film stocks, each shown on
+/// the photo (`LookPreviews.filmKey`) with its colour mark until its preview is in.
+private struct FilmSwatches: View {
+    let control: AdjustmentControl
+    /// An imported LUT is the look, so "None" is not.
+    let lookIsImported: Bool
+    var previews: [String: CGImage] = [:]
+    let removeLook: () -> Void
+    let choose: (String) -> Void
+    @Environment(\.lookPickerShown) private var shown
+
+    var body: some View {
+        LookSwatch(image: previews[LookPreviews.none], mark: nil, name: nil,
+                   isCurrent: control.selectedOption == "none" && !lookIsImported, action: removeLook)
+            .onAppear { shown(true) }
+            .onDisappear { shown(false) }
+        ForEach(control.options.filter { $0.id != "none" }, id: \.id) { option in
+            LookSwatch(image: previews[LookPreviews.filmKey(option.id)], mark: option.id,
+                       name: AdjustmentText.option(option), isCurrent: control.selectedOption == option.id) {
+                choose(option.id)
+            }
+            .disabled(control.disabledOptions.contains(option.id))
+        }
+    }
+}
+
+/// One look in a look row: its preview over its name; no name is "None".
+private struct LookSwatch: View {
+    let image: CGImage?
+    /// The colour mark's seed, shown until the preview is in; nil for "None".
+    let mark: String?
+    let name: Text?
+    let isCurrent: Bool
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                LUTThumbnail(image: previews[id ?? LookPreviews.none], contentHash: id, side: 44,
-                             isSelected: isCurrent, selection: .white)
-                Group {
-                    if let name { Text(verbatim: name) } else { AdjustmentText.command(.noLUT) }
-                }
-                .font(.system(size: 10, weight: isCurrent ? .semibold : .regular))
-                .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
-                .lineLimit(1)
+                LUTThumbnail(image: image, contentHash: mark, side: 44, isSelected: isCurrent, selection: .white)
+                // Two lines, so a stock's name ("Kodak Portra 400") reads whole.
+                (name ?? AdjustmentText.command(.noLUT))
+                    .font(.system(size: 10, weight: isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2, reservesSpace: true)
             }
             .frame(width: 62)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(name.map { Text(verbatim: $0) } ?? AdjustmentText.command(.noLUT))
+        .accessibilityLabel(name ?? AdjustmentText.command(.noLUT))
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    }
+}
+
+/// Which kind of look the look group's row shows.
+enum LookKind: CaseIterable {
+    case builtIn, imported
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .builtIn: "ios.look.builtIn"
+        case .imported: "ios.look.imported"
+        }
+    }
+}
+
+/// Built-in or imported, drawn as the HDR source's segments.
+private struct LookKindSegments: View {
+    let kind: LookKind
+    let choose: (LookKind) -> Void
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(LookKind.allCases, id: \.self) { option in
+                let isCurrent = kind == option
+                Button { choose(option) } label: {
+                    Text(option.title)
+                        .font(.footnote.weight(isCurrent ? .semibold : .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .background {
+                            if isCurrent {
+                                Capsule().fill(.white.opacity(0.14)).matchedGeometryEffect(id: "segment", in: highlight)
+                            }
+                        }
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .glassEffect(.regular, in: .capsule)
+        .animation(.smooth(duration: 0.25), value: kind)
+        .sensoryFeedback(.selection, trigger: kind)
+        .accessibilityElement(children: .contain)
     }
 }

@@ -72,6 +72,8 @@ struct CompositionParams {
     uint slice, flags;
     float padding0, hdrRange, backingScale, padding1, padding2, padding;
     float4 maskColor, highlightColor, shadowColor, stripe;
+    float3x3 geometry;  // flags bit 4: canvas fractions to photo fractions
+    float4 cropRect;    // flags bit 5 clips to it, in canvas fractions
 };
 
 vertex CompositionVertex compositionVertex(uint index [[vertex_id]],
@@ -89,7 +91,20 @@ fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
                                       texture2d_array<float> image [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
     float2 texel = 0.5 / float2(image.get_width(), image.get_height());
-    float2 uv = clamp(in.uv, texel, p.uvScale - texel);
+    float2 at = in.uv;
+    // Bit 6: the photo outside the crop dimmed in linear light, so HDR
+    // highlights dim with it (an SDR veil over the layer would not).
+    bool outsideCrop = (p.flags & 16) && (in.uv.x < p.cropRect.x || in.uv.y < p.cropRect.y
+                                          || in.uv.x > p.cropRect.z || in.uv.y > p.cropRect.w);
+    if (p.flags & 16) {
+        // The crop pane: outside the photo (or the crop) the canvas stays clear.
+        if ((p.flags & 32) && (at.x < p.cropRect.x || at.y < p.cropRect.y || at.x > p.cropRect.z || at.y > p.cropRect.w))
+            return float4(0);
+        float3 q = p.geometry * float3(at, 1);
+        at = q.xy / q.z;
+        if (q.z <= 0 || any(at < 0) || any(at > 1)) return float4(0);
+    }
+    float2 uv = clamp(at, texel, p.uvScale - texel);
     float3 base = image.sample(s,uv,p.slice).rgb;
     float3 hdr = image.sample(s,uv,p.slice+1).rgb;
     // All spatial/mip filtering operates on already reconstructed linear light.
@@ -106,6 +121,7 @@ fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
         value = mix(value,p.highlightColor.rgb,p.highlightColor.a);
     if (stripe && (p.flags & 4) && max(base.r,max(base.g,base.b)) < 0.5/255.0/12.92)
         value = mix(value,p.shadowColor.rgb,p.shadowColor.a);
+    if (outsideCrop && (p.flags & 64)) value = min(value, float3(1)) * 0.3;
     return float4(value,1);
 }
 

@@ -14,6 +14,9 @@ nonisolated struct EditorExportCapture: Sendable {
     /// What `auto` resolved to in the shown frame, when it shows this recipe.
     let automaticValues: [String: Double]
 
+    /// The exported photo's size: the source after the recipe's geometry.
+    var photoSize: HyperDRRender.PixelSize { recipe.geometry.outputSize(of: source.pixelSize) }
+
     var hdrEnabled: Bool { recipe.conditionValue("hdr.enabled")?.boolValue != false }
 
     /// The HDR range the edit asks for, in stops: the set value, or what auto

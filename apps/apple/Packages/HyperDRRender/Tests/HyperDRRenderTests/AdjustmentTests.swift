@@ -355,7 +355,7 @@ private func wideHalf() -> String {
         compare(graded,values.map { DoubleReference.prepare($0,settings:edit,sdr:false) })
     }
 
-    @Test func editedAuthoredThreeChannelOffsetsAndWholeEditResplit() async throws {
+    @Test func editedAuthoredThreeChannelOffsetsAndWholeEditEndpoints() async throws {
         let engine = try RenderEngine()
         let b = SIMD3<Double>(0.2,0.4,0.6), g = SIMD3<Double>(1,1.5,3.72), o = SIMD3<Double>(repeating:1/64)
         let hdr = DoubleReference.reconstruct(b,gain:g,baseOffset:o,alternateOffset:o)
@@ -396,11 +396,11 @@ private func wideHalf() -> String {
         lookOnly.look.lut = try ColorLUT(cube:cube(swap:true))
         lookOnly.look.input = .displayP3; lookOnly.look.output = .displayP3
         let looked = try await engine.render(source,adjustments:lookOnly)
-        #expect(looked.provenance == .resplit && looked.gainChannelCount == 1)
-        if case .log2 = looked.encoding {} else { Issue.record("SDR LUT retained authored ISO encoding") }
+        #expect(looked.provenance == .resplit && looked.gainChannelCount == 3)
+        if case .pairedLog2 = looked.encoding {} else { Issue.record("SDR LUT lost its edited endpoint pair") }
         edit.tone.exposure = 0.3
         let resplit = try await engine.render(source,adjustments:edit)
-        #expect(resplit.provenance == .resplit && resplit.gainChannelCount == 1)
+        #expect(resplit.provenance == .resplit && resplit.gainChannelCount == 3)
     }
 
     @Test func cachedFrameTiming2560() async throws {

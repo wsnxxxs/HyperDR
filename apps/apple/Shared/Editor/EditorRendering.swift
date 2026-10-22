@@ -156,9 +156,10 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     /// The recipe asks for AI gain but this frame has none yet, because the
     /// prediction is not ready (`RenderPlanes.aiPending`).
     var modelGainPending = false
-    /// What `auto` parameters resolved to, by id, in the declared units
-    /// (`AdjustmentContext.automaticValues`; `hdr.range` in stops). Whole-image
-    /// renders only; a region's is empty.
+    /// What `auto` parameters resolve to, by id, in the declared units
+    /// (`AdjustmentContext.automaticValues`; `hdr.range` in stops), also for
+    /// parameters the recipe sets: the ruler marks it as their default.
+    /// Whole-image renders only; a region's is empty.
     var automaticValues: [String: Double] = [:]
 
     var size: HyperDRRender.PixelSize { request.size }
@@ -172,7 +173,8 @@ extension Recipe {
     /// The comparison recipe retains the source's range and the same RAW
     /// development. An SDR original must not acquire the default HDR expansion.
     nonisolated var original: Recipe {
-        var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion)
+        // The same crop, so the two line up.
+        var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion, geometry: geometry)
         if inputDomain == .sdr { original.setValue(.bool(false), for: "hdr.enabled") }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             original.setValue(value(for: declaration.id), for: declaration.id)

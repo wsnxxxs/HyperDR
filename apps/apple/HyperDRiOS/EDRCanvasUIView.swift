@@ -35,6 +35,9 @@ final class EDRCanvasUIView: UIView {
         var previewsAsSDR = false
         /// The photo's full oriented size, for actual pixels and detail regions.
         var imageSize: CGSize
+        /// The crop pane draws the photo through its geometry; the canvas's own
+        /// zoom, pan and hold are off meanwhile.
+        var geometry: GeometryDisplay? = nil
     }
 
     var content: Content? {
@@ -141,7 +144,8 @@ final class EDRCanvasUIView: UIView {
             composition.editedDetail = content.editedDetail
             composition.previewsAsSDR = content.previewsAsSDR
             composition.splitRatio = content.splitRatio
-            if let original = content.original {
+            composition.geometry = content.geometry
+            if let original = content.original, content.geometry == nil {
                 composition.original = original
                 composition.originalDetail = content.originalDetail
                 composition.mode = content.mode
@@ -180,19 +184,24 @@ final class EDRCanvasUIView: UIView {
         }
     }
 
+    /// The crop pane has the canvas's touches.
+    private var cropping: Bool { content?.geometry != nil }
+
     @objc private func pinched(_ recognizer: UIPinchGestureRecognizer) {
-        guard recognizer.state == .changed || recognizer.state == .ended else { return }
+        guard !cropping, recognizer.state == .changed || recognizer.state == .ended else { return }
         apply(geometry.zoomed(to: geometry.zoom * recognizer.scale, anchorInView: recognizer.location(in: self)))
         recognizer.scale = 1
     }
 
     @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        guard !cropping else { return }
         let delta = recognizer.translation(in: self)
         recognizer.setTranslation(.zero, in: self)
         apply(geometry.panned(by: CGSize(width: delta.x, height: delta.y)))
     }
 
     @objc private func doubleTapped(_ recognizer: UITapGestureRecognizer) {
+        guard !cropping else { return }
         let target = geometry.zoom > CanvasTransform.minZoom ? CanvasTransform.minZoom
             : min(geometry.maxZoom, max(2, geometry.actualPixelsZoom))
         apply(geometry.zoomed(to: target, anchorInView: recognizer.location(in: self)))
@@ -200,7 +209,7 @@ final class EDRCanvasUIView: UIView {
 
     @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
-        case .began: onHoldOriginal(true)
+        case .began: if !cropping { onHoldOriginal(true) }
         case .ended, .cancelled, .failed: onHoldOriginal(false)
         default: break
         }
@@ -270,6 +279,6 @@ struct EDRCanvas: UIViewRepresentable {
         return a.edited.hasSameContent(as: b.edited) && same(a.original, b.original)
             && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail)
             && a.mode == b.mode && a.splitRatio == b.splitRatio && a.previewsAsSDR == b.previewsAsSDR
-            && a.imageSize == b.imageSize
+            && a.imageSize == b.imageSize && a.geometry == b.geometry
     }
 }

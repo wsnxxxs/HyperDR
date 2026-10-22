@@ -52,8 +52,35 @@ private struct DisplayLegacyUniform {
     var region: SIMD4<Float>
     var size,inputRegion: SIMD4<Float>
 }
+private struct DisplayHDRUniform {
+    var p3ToGain, gainToP3: simd_float3x3
+    var baseOffset, alternateOffset: SIMD4<Float>
+    var channels: SIMD4<UInt32>
+}
 
 extension RenderEngine {
+    func reconstructAuthoredHDR(_ source: RenderSource) throws -> any MTLTexture {
+        guard let metadata = source.authoredGainMap, let gain = source.gainTexture else { throw RenderError.missingGainMap }
+        let n = source.samplingRegion
+        let x = (n.minX * CGFloat(source.size.width)).rounded()
+        let y = (n.minY * CGFloat(source.size.height)).rounded()
+        let region = CGRect(x: x, y: y, width: CGFloat(source.texture.width), height: CGFloat(source.texture.height))
+        let planes = RenderPlanes(base: source.texture, gain: gain, gainChannelCount: metadata.channelCount,
+            encoding: .authored(metadata), baseColorSpace: source.baseSpace, provenance: .authored,
+            region: region, outputSize: source.size)
+        let pair = try displayPair(planes, source: source)
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let node = nodeContext(domain: .dual, buffer: command)
+        let output = try node.texture(width: pair.base.width, height: pair.base.height)
+        var p = DisplayHDRUniform(p3ToGain: pair.p3ToGain, gainToP3: pair.gainToP3,
+            baseOffset: SIMD4(pair.baseOffset, 0), alternateOffset: SIMD4(pair.alternateOffset, 0),
+            channels: SIMD4(UInt32(pair.gainChannelCount), 0, 0, 0))
+        try node.dispatch("displayHDR", width: output.width, height: output.height,
+            textures: [pair.base, pair.gain, output], value: &p)
+        try finish(command)
+        return output
+    }
+
     /// Normalize a rendered pair for display, retaining the export pair unchanged.
     /// `source` supplies the system HDR reconstruction for legacy Apple metadata.
     public func displayPair(_ planes: RenderPlanes, source: RenderSource) throws -> DisplayGainPair {
@@ -65,6 +92,9 @@ extension RenderEngine {
         var legacy = false
         switch planes.encoding {
         case .log2: break
+        case .pairedLog2(let offset, let headroom):
+            baseOffset = SIMD3(repeating: offset); alternateOffset = baseOffset
+            taggedHeadroom = headroom
         case .isoLog2(let metadata):
             gainSpace = metadata.workingColorSpace
             baseOffset = metadata.baseOffset; alternateOffset = metadata.alternateOffset

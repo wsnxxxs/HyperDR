@@ -57,6 +57,11 @@ public enum AdjustmentText {
         }
     }
 
+    /// The undo action name of a change in the crop pane ("Crop").
+    public static func undoGeometryName(locale: Locale = .current) -> String {
+        DesignStrings.string("undo.geometry", bundle: .module, locale: locale)
+    }
+
     public static func labelString(_ declaration: ParameterDeclaration, locale: Locale = .current) -> String {
         DesignStrings.string(declaration.labelKey, locale: locale)
     }

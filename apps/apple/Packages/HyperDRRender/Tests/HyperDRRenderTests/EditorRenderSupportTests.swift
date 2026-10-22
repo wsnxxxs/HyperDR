@@ -29,6 +29,11 @@ import HyperDRRecipe
         let auto = try await engine.resolvedAutomatic(source,recipe:Recipe(inputDomain:.sdr))
         #expect(auto["hdr.expansionStart"] == 25)
         #expect((0.5...3).contains(try #require(auto["hdr.range"])))
+        // Set parameters report nothing, unless the editor asks where Auto would be.
+        let set = Recipe(inputDomain:.sdr,values:["hdr.range":.number(1),"hdr.expansionStart":.number(40)])
+        #expect(try await engine.resolvedAutomatic(source,recipe:set).isEmpty)
+        let marked = try await engine.resolvedAutomatic(source,recipe:set,includingSet:true)
+        #expect(marked["hdr.range"] == auto["hdr.range"] && marked["hdr.expansionStart"] == 25)
         let hdr = try await engine.source(image:CIImage(color:CIColor(red:CGFloat(pow(2,3.72)),green:1,blue:1,
             colorSpace:RenderEngine.workingColorSpace)!).cropped(to:CGRect(x:0,y:0,width:1,height:1)),domain:.hdr)
         let report = try await engine.sourceReport(hdr)

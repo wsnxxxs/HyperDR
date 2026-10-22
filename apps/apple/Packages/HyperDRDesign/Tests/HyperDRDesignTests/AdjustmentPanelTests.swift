@@ -330,16 +330,16 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(DefaultDetent.apply(0.02, defaultValue: 0, pointsPerUnit: 125) == 0.02)
 }
 
-@Test func theRulerFitsTheRangeInItsWidth() throws {
+@Test func theRulerIsATapeUnderAFixedNeedle() throws {
     let control = try #require(panel.control("tone.exposure", in: Recipe(inputDomain: .sdr)))
-    let ruler = try #require(RulerScale(control, width: 428))
-    #expect(ruler.length == 400 && ruler.pointsPerUnit == 50, "8 EV over 400 pt")
-    #expect(ruler.position(of: 0) == 200, "a signed control's zero in the middle")
+    let ruler = try #require(RulerScale(control, width: 400))
+    #expect(ruler.pointsPerUnit == 75, "4 EV, the larger side, over a reach of 300 pt")
+    #expect(ruler.offset(of: 1, needle: 0) == 75 && ruler.offset(of: -4, needle: 0) == -300)
     #expect(ruler.majorTick == 1 && ruler.minorTick == 0.1)
-    #expect(ruler.value(from: 0, translation: 50) == 1, "dragging right raises the value")
-    #expect(ruler.value(from: 0, translation: 50, speed: 0.25) == 0.25)
-    #expect(ruler.value(from: 3.5, translation: 500) == 4)
-    #expect(ruler.value(from: 0, translation: 4) == 0, "the default holds within 5 pt")
+    #expect(ruler.value(from: 0, translation: -75) == 1, "the tape follows the finger: left raises the value")
+    #expect(ruler.value(from: 0, translation: 75, speed: 0.25) == -0.25)
+    #expect(ruler.value(from: 3.5, translation: -500) == 4)
+    #expect(ruler.value(from: 0, translation: -4) == 0, "the default holds within 5 pt")
     #expect(ruler.value(from: 0, translation: 5, speed: 0.25) == 0, "5 pt of finger travel, also slowed down")
     #expect(ruler.settled(0.3049) == 0.3)
     #expect(ruler.crossing(from: -0.2, to: 0.2).defaultValue)
@@ -348,14 +348,41 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(!ruler.crossing(from: 0.2, to: 0.4).any)
     #expect(ruler.ticks.first?.value == -4 && ruler.ticks.last?.value == 4)
     #expect(ruler.ticks.filter(\.isMajor).count == 9)
-
-    let sharpness = try #require(panel.control("develop.sharpness", in: Recipe(inputDomain: .rawEDR)))
-    let oneSided = try #require(RulerScale(sharpness, width: 428))
-    #expect(oneSided.position(of: 0) == 0, "a one-sided control starts at the left end")
+    #expect(RulerScale(control, width: 120)?.pointsPerUnit == 65, "a narrow ruler keeps a reach of 260 pt")
 
     let temperature = try #require(panel.control("develop.temperature", in: Recipe(inputDomain: .rawEDR)))
-    let kelvin = try #require(RulerScale(temperature, width: 428))
+    let kelvin = try #require(RulerScale(temperature, width: 400))
     #expect(kelvin.range == 2000...12000)
-    #expect(kelvin.majorTick == 1000 && kelvin.minorTick * kelvin.pointsPerUnit >= 4)
-    #expect(kelvin.position(of: 60_000) == kelvin.length, "a source value past the range sits at its end")
+    #expect(kelvin.pointsPerUnit == 0.03, "the declared range, not the as-shot default, sets the scale")
+    #expect(kelvin.majorTick == 1000 && kelvin.minorTick * kelvin.pointsPerUnit >= 7)
+    #expect(kelvin.offset(of: 60_000, needle: 12_000) == 0, "a source value past the range sits at its end")
+}
+
+/// 0…100 from 0, ±100 from 0 and 0…100 from 100 follow one rule: the tape
+/// stops at the bounds, and each default is one reach from its far end.
+@Test func everyRangeShapeFollowsTheSameRule() throws {
+    let recipe = Recipe(inputDomain: .hdr)
+    func scale(_ id: String) throws -> RulerScale {
+        let control = try #require(panel.control(id, in: recipe))
+        return try #require(RulerScale(control, width: 400))
+    }
+    let signed = try scale("color.vibrance"), upward = try scale("hdr.sdrRolloff"), downward = try scale("look.strength")
+    #expect(signed.defaultValue == 0 && upward.defaultValue == 0 && downward.defaultValue == 100)
+    #expect(signed.pointsPerUnit == 3 && upward.pointsPerUnit == 3 && downward.pointsPerUnit == 3, "the same feel")
+    // Where the bounds sit, with the needle at the default.
+    #expect(signed.offset(of: -100, needle: 0) == -300 && signed.offset(of: 100, needle: 0) == 300)
+    #expect(upward.offset(of: 0, needle: 0) == 0 && upward.offset(of: 100, needle: 0) == 300, "tape on the right only")
+    #expect(downward.offset(of: 0, needle: 100) == -300 && downward.offset(of: 100, needle: 100) == 0,
+            "tape on the left only")
+    // The same gesture means the same thing everywhere: left raises, right lowers, the bounds hold.
+    #expect(upward.value(from: 0, translation: 30) == 0 && upward.value(from: 0, translation: -30) == 10)
+    #expect(downward.value(from: 100, translation: -30) == 100 && downward.value(from: 100, translation: 30) == 90)
+    #expect(signed.value(from: 0, translation: 30) == -10 && signed.value(from: 0, translation: -30) == 10)
+    #expect(signed.minorTick == 2.5, "a quarter of a major tick: 7.5 pt apart")
+    // 1 % is the same distance on every percent control, wider ranges included.
+    // An Auto default is what Auto resolves to, so the dot and the lit span have somewhere to be.
+    let range = try scale("hdr.range")
+    #expect(range.defaultValue == 2.4 && range.value(from: 2.4, translation: -4) == 2.4)
+    let strength = try scale("hdr.strength")
+    #expect(strength.pointsPerUnit == 3 && strength.offset(of: 200, needle: 100) == 300)
 }

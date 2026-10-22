@@ -1,6 +1,6 @@
 # HyperDRRender
 
-Shared macOS 26 / iOS 26 GPU processing, without AppKit, UIKit, C ABI or C++ interop.
+Shared macOS 27 / iOS 27 GPU processing, without AppKit, UIKit, C ABI or C++ interop.
 HyperDRRecipe's `Adjustments` owns parameter declarations, defaults, ranges, units and typed
 visibility conditions. Render reads this catalogue; it declares no copies of HDR range or RAW
 lens correction. `RenderAdjustments(recipe:lut:)` and `SourceOptions(recipe:)` resolve Recipe v1
@@ -69,6 +69,13 @@ ImageIO opens JPEG/PNG/TIFF/HEIC/AVIF and classifies SDR / PQ or HLG HDR / dual.
 ISO/Apple auxiliary bytes, normalized encoded texture (one or three channels), metadata,
 gamma/min/max, offsets, headrooms and gain-working gamut remain on the source. System HDR
 reconstruction handles legacy Apple data without a luminance-ratio approximation.
+ISO reconstruction uses the same decoded min/max/gamma, offsets and working gamut as
+the original canvas, so editing does not switch to a different system rendition.
+
+New RAW imports prefer decoder 9, then 8, including `9.dng` / `8.dng`. If 9 is
+listed but fails to decode, RenderSession retries 8 once and records that version.
+Only cameras without 8 use an older supported system default. Saved recipes retain
+their recorded decoder; cancellation, allocation and GPU errors do not trigger a retry.
 
 RAW uses G2: boost 1, file boostShadow/baseline, exposure 0, LTM 0, EDR 1, contrast 0,
 as-shot temperature/tint, and selectable lens correction. **Apple's original detail, sharpness
@@ -155,9 +162,13 @@ entry points reject duplicates with `RenderError.duplicateHDRSplit` before rende
   before separation. Strength mixes original and transformed RGB in linear light at the
   corresponding stage; zero bypasses conversions. 3D interpolation uses explicit float
   trilinear reads. L1 gain/ratio retention applies to our zero-offset split pairs.
-  Any active light/color/look edit on a dual source first crosses the authored-pair boundary:
-  reconstruct the author's HDR, split in linear P3, then apply the look to that new pair;
-  provenance is `resplit`. Only unedited and HDR-only dual edits retain authored gain/offsets.
+  Light/color edits on dual sources apply to both the authored SDR base and reconstructed
+  HDR in linear P3. The SDR endpoint uses the SDR exposure shoulder; HDR exposure stays
+  linear. SDR LUTs transform that base and retain the endpoint ratio; partial looks mix
+  both completed endpoints. The resulting `pairedLog2` is RGB with equal offsets (the
+  author's common equal offset when available, with a 1e-6 floor; otherwise 1/64).
+  It retains global headroom rather than deriving display weight from a local gain peak.
+  Provenance remains `resplit`; unedited/HDR-only pairs retain their native encoding.
 * Analytic expansion uses a fixed grid with longest edge 768, integrating every source pixel
   into cells once. Local log-luminance contrast identifies small speculars; coverage supplies a
   broad-region floor; local variance suppresses dark noise. Separable box statistics and a

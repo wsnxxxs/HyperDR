@@ -107,6 +107,7 @@ extension RenderEngine {
             authoredBaseImage:opened.gain == nil ? nil : baseImage,rawSettings:opened.raw,
             texture:base,baseSpace:opened.baseSpace,gainTexture:gainTexture)
         result.samplingRegion = normalized; result.gainSamplingRegion = gainRegion
+        result.geometryUncroppedSize = opened.uncroppedSize
         try source.revision.validate(source.url)
         return result
     }

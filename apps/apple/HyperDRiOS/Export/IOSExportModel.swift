@@ -219,7 +219,7 @@ nonisolated struct ExportStack: Sendable {
     /// a failure when the engine refuses the style for the photo.
     private func framePlan(_ capture: EditorExportCapture, choice: ExportChoice) -> Result<FrameExportPlan?, any Error> {
         guard framing.settings.isEnabled else { return .success(nil) }
-        let size = capture.source.pixelSize
+        let size = capture.photoSize
         let key = FrameKey(framing: framing, size: size, choice: choice)
         if let frameCache, frameCache.key == key { return frameCache.plan }
         let plan = Result { try FrameExportPlan.make(settings: framing.settings, facts: framing.facts, photoSize: size,
@@ -453,6 +453,7 @@ nonisolated struct ExportStack: Sendable {
         phase = .running(RecipeExportProgress(stage: .preparing))
         fraction = nil
         waitingForSource = true
+        DiagnosticLog.notice("Export", "Started \(choice); available to the app \(DeviceFacts.availableMemory)")
         task = Task { [weak self] in
             do {
                 let opened = try await opening.task.value
@@ -555,6 +556,7 @@ nonisolated struct ExportStack: Sendable {
         guard run == self.run else { return }
         task = nil
         endBackgroundTask()
+        DiagnosticLog.notice("Export", "Finished, \(finished.result.record.byteCount) bytes")
         phase = .finished(finished)
         // The web destination is "Save to Files…": the save sheet follows;
         // the Photos destination goes into the library.
@@ -571,9 +573,11 @@ nonisolated struct ExportStack: Sendable {
         waitingForSource = false
         endBackgroundTask()
         if Self.isCancellation(error) {
+            DiagnosticLog.notice("Export", leftRun == run ? "Stopped on leaving the app" : "Cancelled")
             phase = leftRun == run ? .failed(Self.stopped) : .choosing
             return
         }
+        DiagnosticLog.error("Export", "Failed: \(EditorLog.describe(error))\(memory.map { "; \($0.summary)" } ?? "")")
         var failure = Self.failure(error)
         if let memory {
             failure = Failure(key: failure.key, detail: memory.summary, memory: Self.memoryLine(memory),

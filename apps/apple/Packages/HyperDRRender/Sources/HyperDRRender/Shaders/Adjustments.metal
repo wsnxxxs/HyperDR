@@ -64,6 +64,7 @@ struct GraphUniform {
     float4 film; // strength (0: no film), grain amount, 1/pixel area (µm⁻²), exposure factor
     float4 halation; // per-channel strength, w: the render samples a halation map
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
+    float4 pair; // x: equal offset for independently edited SDR/HDR endpoints
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -195,10 +196,10 @@ float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
-    rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
+    rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,4,p.tone1.x,false);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
@@ -212,6 +213,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
                         const device FilmData& film,texture2d<float,access::read> filmLUT,int2 site,float3 glow=0,float4 exposed=0,
                         constant float4* grainKernel=nullptr) {
     float3 rgb=graphScene(pixel,p,cube,table);
+    float3 neutralHDR=rgb;
     // Every look is evaluated at full strength, then mixed with a separately
     // rendered display-reference baseline. Never mix scene exposure with a print.
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
@@ -234,6 +236,24 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     }
     float3 gain=g;
     float weight=(p.flags.y || p.flags.z) ? p.color.y : p.film.x;
+    if(p.flags.x==3) {
+        // An imported gain map already defines an SDR rendition. Re-splitting
+        // its HDR maximum on the first nonzero edit destroys that rendition.
+        // Edit both endpoints, then carry their RGB ratio (including blacks).
+        float offset=p.pair.x;
+        float3 neutralBase=fit(graphScene(baseline,p,cube,table,true),1.f);
+        neutralHDR=fit(neutralHDR,max(1.f,maximum(neutralHDR)));
+        float3 styledHDR=base*exp2(g);
+        if(p.flags.y) {
+            base=applyLUT(neutralBase,p,cube,table);
+            styledHDR=max(float3(0),(base+offset)*(neutralHDR+offset)/(neutralBase+offset)-offset);
+            if(p.lutInfo.w>2) base=fit(base/ max(1.f,maximum(base)),1.f);
+        }
+        float3 hdr=weight>0 ? mix(neutralHDR,styledHDR,weight) : neutralHDR;
+        base=weight>0 ? mix(neutralBase,base,weight) : neutralBase;
+        gain=log2((max(hdr,0.f)+offset)/(base+offset));
+        return {base,gain,pixel.a};
+    }
     if(weight>0 && weight<1) {
         float3 original=graphScene(baseline,p,cube,table);
         original=fit(original,max(1.f,maximum(original)));
@@ -275,7 +295,8 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
         auto v=preparePair(original,baseline.read(uint2(x,y)),p,cube,table,film,filmLUT,int2(x,y));
         float l=lum(v.base), request=sm(p.hdr.x,1.f,l), z=clamp(log2(l+1e-6f),-8.f,8.f);
         sum+=float4(l,request,z,z*z);
-        peak=max(peak,float4(maximum(v.base*exp2(v.gain)),maximum(v.base),maximum(v.gain),maximum(original.rgb)));
+        float offset=p.pair.x;
+        peak=max(peak,float4(maximum((v.base+offset)*exp2(v.gain)-offset),maximum(v.base),maximum(v.gain),maximum(original.rgb)));
     }
     float4 mean=sum/float((hi.x-lo.x)*(hi.y-lo.y));stats.write(mean,pos);peaks.write(peak,pos);
     masks.write(float4(sm(.4f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
@@ -369,8 +390,13 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
     if(p.mode.y)g=max(g,model.sample(s,uv).x);
     g*=p.color.w;
-    float peak=maximum(pair.base*exp2(g)), mapped=softPeak(peak,exp2(p.color.z),p.hdr.w!=0);
-    if(peak>0)g+=log2(max(mapped/peak,1e-30f));
+    float offset=p.pair.x;
+    float3 hdr=(pair.base+offset)*exp2(g)-offset;
+    float peak=maximum(hdr), mapped=softPeak(peak,exp2(p.color.z),p.hdr.w!=0);
+    if(peak>0 && mapped!=peak) {
+        if(p.flags.x==3)g=log2((max(hdr*(mapped/peak),0.f)+offset)/(pair.base+offset));
+        else g+=log2(max(mapped/peak,1e-30f));
+    }
     if(p.hdr.z>0 && p.flags.x!=0 && p.flags.x!=3) {
         float m=maximum(pair.base);
         if(m>.7f) {

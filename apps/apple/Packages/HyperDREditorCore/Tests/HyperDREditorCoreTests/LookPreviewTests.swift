@@ -138,8 +138,10 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         try await Task.sleep(for: .milliseconds(600))
         #expect(previews.images[LookPreviews.none] != nil)
         #expect(previews.images[lut.contentHash] != nil)
+        #expect(previews.images[LookPreviews.filmKey("portra400")] != nil)
+        // None, each built-in film stock, and the library's LUT.
         let requests = await fake.completed.dropFirst(before)
-        #expect(requests.count == 2)
+        #expect(requests.count == Adjustments.filmStocks.count + 1)
         #expect(requests.allSatisfy { $0.keepsSource && max($0.size.width, $0.size.height) == LookPreviews.side })
         let previewed = try #require(requests.first { $0.recipe.look != nil })
         #expect(previewed.recipe.conditionValue("look.input")?.stringValue == "rec709")
@@ -153,7 +155,7 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         previews.update(editor, looks: looks)
         try await Task.sleep(for: .milliseconds(400))
         await editor.settle()
-        #expect(await fake.completed.dropFirst(before).filter(\.keepsSource).count == 2)
+        #expect(await fake.completed.dropFirst(before).filter(\.keepsSource).count == Adjustments.filmStocks.count + 1)
     }
 
     @Test func theBaseLeavesOutTheLookButKeepsItsStrength() {

@@ -157,6 +157,26 @@ struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).count == 9)
     }
 
+    /// The crop pane's geometry: the export is the cropped photo, at the size
+    /// the editor plans with (`Geometry.outputSize`), for every writer.
+    @Test func aCroppedTurnedStraightenedPhotoExportsAtItsSize() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let service = env.realService()
+        var recipe = Recipe()
+        recipe.geometry = Geometry(angle: 8, vertical: 20, quarterTurns: 1, aspect: .square)
+        let size = recipe.geometry.outputSize(of: PixelSize(width: 96, height: 64))
+        #expect(size.width == size.height && size.width < 64)
+        for encoding in ExportEncoding.allCases {
+            let request = ExportPlanRequest(choice: .custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
+                                            source: .init(domain: .sdr, pixelSize: .init(width: size.width, height: size.height)),
+                                            edit: .init(peakStops: 2))
+            let result = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe), request: request)
+            #expect(result.verified, "\(encoding)")
+            #expect(result.size == ExportPixelSize(width: size.width, height: size.height), "\(encoding)")
+            #expect(result.resolved.snapshot.recipe.geometry == recipe.geometry)
+        }
+    }
+
     @Test func realFramedRenderSetsOnlyGainMapFrameRectangles() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let service = env.realService()

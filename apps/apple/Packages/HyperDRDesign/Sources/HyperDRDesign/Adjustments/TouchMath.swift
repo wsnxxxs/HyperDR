@@ -44,39 +44,49 @@ public struct DetentCrossing: Equatable, Sendable {
     public var any: Bool { defaultValue || majorTick || limit }
 }
 
-/// The iPhone ruler (p7-adjustments §5.4): a scale that fills the ruler's
-/// width, with a needle that follows the finger.
+/// The iPhone ruler (p7-adjustments §5.4): a fixed needle in the middle over
+/// a tape that the finger drags, the same rule for every range.
 ///
-/// - The whole range is one width, so the scale has no empty half: a signed
-///   control has its zero in the middle, a one-sided one starts at the left.
-/// - Drags are relative (touching never jumps), the needle moving with the
-///   finger; `FineTune` slows them down.
+/// - The needle is the value. The tape runs from the lower bound on the left
+///   to the upper bound on the right, and past a bound there is no tape: at
+///   0 of 0…100 the tape starts at the needle, at 100 of 0…100 it ends there,
+///   at 0 of −100…+100 it runs both ways.
+/// - Every control has the same feel: one `reach` of finger travel covers
+///   100 units of a percent or ±100 control, and otherwise the larger side
+///   of a signed range or the whole of a one-sided one. So +100 of a ±100
+///   control, 100 of 0…100 and 0 of a 100-default strength are all one reach
+///   from their defaults, and 1 % is the same distance on every control.
+/// - Drags are relative and move the tape with the finger, no momentum:
+///   dragging left raises the value. `FineTune` slows them down.
 /// - The value holds at the default for `detentPoints` of finger travel
-///   either side.
+///   either side. A control whose default is Auto takes what Auto resolves
+///   to as its default.
 public struct RulerScale: Equatable, Sendable {
     public let range: ClosedRange<Double>
     public let step: Double
     public let defaultValue: Double?
     public let majorTick: Double
-    /// Points from the lower to the upper bound.
-    public let length: Double
+    /// Points the tape moves per unit of the value.
+    public let pointsPerUnit: Double
 
-    /// Space left and right of the scale, so the needle stays whole at the ends.
-    public static let inset: CGFloat = 14
+    /// A reach is this much of the ruler's width, and no less than `minimumReach`.
+    public static let reachFraction: CGFloat = 0.75
+    public static let minimumReach: CGFloat = 260
     /// How far either side of the default the value holds there, in finger points.
     public static let detentPoints: CGFloat = 5
 
-    public init(range: ClosedRange<Double>, step: Double, defaultValue: Double?, majorTick: Double, length: CGFloat) {
+    public init(range: ClosedRange<Double>, step: Double, defaultValue: Double?, majorTick: Double,
+                pointsPerUnit: Double) {
         self.range = range
         self.step = step
         self.defaultValue = defaultValue
         self.majorTick = majorTick
-        self.length = Double(max(length, 1))
+        self.pointsPerUnit = max(pointsPerUnit, 1e-6)
     }
 
     /// For a declared parameter: exposure has a major tick every 1 EV, ±100
     /// and percent controls every 10, stops every 0.5, kelvin every 1000.
-    /// `width` is the ruler's, insets included.
+    /// `width` is the ruler's.
     public init?(_ control: AdjustmentControl, width: CGFloat) {
         guard let range = control.declaration.range, let spec = control.spec else { return nil }
         let major: Double
@@ -86,26 +96,40 @@ public struct RulerScale: Equatable, Sendable {
         case .kelvin: major = 1000
         default: major = 10 * spec.step
         }
-        self.init(range: range, step: spec.step, defaultValue: control.defaultNumber, majorTick: major,
-                  length: width - 2 * Self.inset)
+        let reach = Double(max(width * Self.reachFraction, Self.minimumReach))
+        // An Auto default is what Auto resolves to: the dot, the lit span and the detent sit there.
+        self.init(range: range, step: spec.step, defaultValue: control.defaultNumber ?? control.automaticNumber,
+                  majorTick: major,
+                  pointsPerUnit: reach / Self.reachUnits(range, format: control.declaration.format))
     }
 
-    /// Points the needle moves per unit of the value.
-    public var pointsPerUnit: Double { length / (range.upperBound - range.lowerBound) }
+    /// The units one reach covers: 100 for percent and ±100 controls, else
+    /// the larger side of a range signed about zero or the whole of any
+    /// other. It depends on the declaration only, so a source default
+    /// (as-shot white balance) never rescales the tape.
+    public static func reachUnits(_ range: ClosedRange<Double>, format: HyperDRRecipe.ParameterFormat?) -> Double {
+        if format == .percent || format == .signed { return 100 }
+        let units = range.lowerBound < 0 && range.upperBound > 0
+            ? max(-range.lowerBound, range.upperBound) : range.upperBound - range.lowerBound
+        return max(units, 1e-9)
+    }
 
-    /// Points from the lower bound; values outside the range sit at its ends.
-    public func position(of value: Double) -> Double {
-        (min(max(value, range.lowerBound), range.upperBound) - range.lowerBound) * pointsPerUnit
+    func clamped(_ value: Double) -> Double { min(max(value, range.lowerBound), range.upperBound) }
+
+    /// Points from the needle to `value` on the tape when the needle is at
+    /// `needle`; values outside the range sit at its ends.
+    public func offset(of value: Double, needle: Double) -> Double {
+        (clamped(value) - clamped(needle)) * pointsPerUnit
     }
 
     // MARK: Dragging
 
     /// The value after the finger moved `translation` points from where the
-    /// value was `start`: right raises it. `speed` is the fine-tune factor.
-    /// Clamped and held at the default, not yet snapped.
+    /// value was `start`: the tape follows the finger, so left raises it.
+    /// `speed` is the fine-tune factor. Clamped and held at the default, not
+    /// yet snapped.
     public func value(from start: Double, translation: CGFloat, speed: Double = 1) -> Double {
-        let clamped = min(max(start, range.lowerBound), range.upperBound)
-        let raw = min(max(clamped + Double(translation) * speed / pointsPerUnit, range.lowerBound), range.upperBound)
+        let raw = clamped(clamped(start) - Double(translation) * speed / pointsPerUnit)
         return DefaultDetent.apply(raw, defaultValue: defaultValue, pointsPerUnit: pointsPerUnit / max(speed, 1e-3),
                                    points: Self.detentPoints)
     }
@@ -131,10 +155,11 @@ public struct RulerScale: Equatable, Sendable {
         return crossing
     }
 
-    /// The spacing of the small ticks: a tenth of a major tick, or a fifth,
-    /// a half or the major tick itself when that would put them closer than 4 pt.
+    /// The spacing of the small ticks: a tenth of a major tick, or a fifth, a
+    /// quarter, a half or the major tick itself when that would put them
+    /// closer than 7 pt.
     public var minorTick: Double {
-        [10.0, 5, 2, 1].lazy.map { majorTick / $0 }.first { $0 * pointsPerUnit >= 4 } ?? majorTick
+        [10.0, 5, 4, 2, 1].lazy.map { majorTick / $0 }.first { $0 * pointsPerUnit >= 7 } ?? majorTick
     }
 
     /// The ticks to draw, the bounds always included as major ones.

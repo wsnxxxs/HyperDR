@@ -34,6 +34,7 @@ import UniformTypeIdentifiers
         let engine = try RenderEngine()
         #expect(await engine.preferredRAWDecoder(url) == nil)
         #expect(await engine.defaultRAWDecoder(url) == nil)
+        #expect(await engine.fallbackRAWDecoder(url) == nil)
         let session = RenderSession(engine: engine)
         let size = PixelSize(width: 48, height: 32)
         let source = try await session.open(url, previewSize: size)
@@ -49,8 +50,50 @@ import UniformTypeIdentifiers
                                           size: PixelSize(width: 24, height: 16))
         preview.keepsSource = true
         _ = try await session.render(preview)
+        // So is a film's: its scene-linear development only means something to RAW.
+        var film = preview.recipe
+        film.setValue(.string("portra400"), for: Recipe.filmID)
+        preview.recipe = film
+        _ = try await session.render(preview)
         #expect(await reloads.count == 0)
         await session.close()
+    }
+
+    /// The crop pane: the editor renders the cropped photo, and the whole one
+    /// while the crop is edited, without rendering again for each change.
+    @MainActor @Test func theCropIsRenderedAndEditedWhole() async throws {
+        let url = try Self.tinyPhoto(width: 96, height: 64, type: .png)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let editor = RecipeEditor(renderer: try RenderSession())
+        try await editor.open(url)
+        await editor.settle()
+        #expect(editor.source?.pixelSize == PixelSize(width: 96, height: 64))
+        var recipe = editor.recipe
+        // Turned, the frame is 64 × 96; the middle half of it is 32 × 48.
+        recipe.geometry = Geometry(quarterTurns: 1, crop: CropRect(centreX: 0, centreY: 0, width: 0.5, height: 0.5))
+        editor.setRecipe(recipe)
+        await editor.settle()
+        #expect(editor.photoSize == PixelSize(width: 32, height: 48))
+        #expect(editor.frame?.display.outputSize == PixelSize(width: 32, height: 48))
+        #expect(editor.recipe.original.geometry == recipe.geometry, "the comparison original is cropped alike")
+
+        editor.isEditingCrop = true
+        await editor.settle()
+        #expect(editor.canvasPhotoSize == PixelSize(width: 96, height: 64))
+        #expect(editor.frame?.request.recipe.geometry == .identity)
+        #expect(editor.frame?.display.outputSize == PixelSize(width: 96, height: 64))
+        let whole = try #require(editor.frame?.request)
+        recipe.geometry.angle = 5
+        editor.setRecipe(recipe)
+        await editor.settle()
+        #expect(editor.frame?.request.rendersSame(as: whole) == true, "straightening while cropping renders nothing new")
+        #expect(editor.photoSize == PixelSize(width: 32, height: 48), "a crop that still fits keeps its size")
+
+        editor.isEditingCrop = false
+        await editor.settle()
+        #expect(editor.frame?.request.recipe.geometry == recipe.geometry)
+        #expect(editor.frame?.display.outputSize == editor.photoSize)
+        await editor.close()
     }
 
     @MainActor @Test func jpegOriginalAndHDRContentFollowTheRenderedFrames() async throws {
@@ -476,7 +519,7 @@ extension RenderSessionTests {
 
     private static var fallbackFixtureSupported: Bool {
         guard let filter = CIRAWFilter(imageURL: fallbackFixtureURL) else { return false }
-        return filter.decoderVersion.rawValue == "8.dng"
+        return filter.supportedDecoderVersions.contains { $0.rawValue == "8.dng" }
             && filter.supportedDecoderVersions.contains { $0.rawValue == "9.dng" }
     }
 
@@ -486,7 +529,7 @@ extension RenderSessionTests {
         return url
     }
 
-    @MainActor @Test(.enabled(if: Self.fallbackFixtureSupported)) func aNewPhotosDecodeFailureRecordsTheSuccessfulDefaultWithoutReload() async throws {
+    @MainActor @Test(.enabled(if: Self.fallbackFixtureSupported)) func aNewPhotosDecodeFailureRecordsEightWithoutReload() async throws {
         let url = try fallbackFixture()
         defer { try? FileManager.default.removeItem(at: url) }
         let session = try RenderSession()
@@ -562,7 +605,7 @@ extension RenderSessionTests {
         #expect(await attempts.versions == ["9.dng"])
     }
 
-    @Test(.enabled(if: Self.fallbackFixtureSupported)) func aFailedDefaultIsNotRetriedAgain() async throws {
+    @Test(.enabled(if: Self.fallbackFixtureSupported)) func aFailedEightIsNotRetriedAgain() async throws {
         let url = try fallbackFixture()
         defer { try? FileManager.default.removeItem(at: url) }
         let session = try RenderSession(), attempts = OpenAttempts()

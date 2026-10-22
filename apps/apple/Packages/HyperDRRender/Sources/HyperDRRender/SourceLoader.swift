@@ -13,6 +13,8 @@ struct OpenedSource {
     let raw: RAWDevelopment?
     var nativeSize: PixelSize? = nil
     var rawPreviewSize: PixelSize? = nil
+    /// The full size before `applying(_:)`, once a geometry is applied.
+    var uncroppedSize: PixelSize? = nil
 
     /// Resolution never changes the native CIRAWFilter graph. Both ordinary
     /// opening and shared-graph analysis use this exact sizing/metadata policy.
@@ -30,7 +32,8 @@ struct OpenedSource {
             gain: gain, raw: raw.atPreviewScale(Float(scale)), nativeSize: nativeSize,
             rawPreviewSize: scale < 1 ? PixelSize(
                 width: max(1, Int((image.extent.width * scale).rounded())),
-                height: max(1, Int((image.extent.height * scale).rounded()))) : nil)
+                height: max(1, Int((image.extent.height * scale).rounded()))) : nil,
+            uncroppedSize: uncroppedSize)
     }
 
 }
@@ -141,29 +144,45 @@ extension RenderEngine {
             }
             let scaleX = base.extent.width/hdr.extent.width, scaleY = base.extent.height/hdr.extent.height
             let previewHDR = hdr.transformed(by:CGAffineTransform(scaleX:scaleX,y:scaleY))
-            return OpenedSource(domain: .dual, image: base, hdr: previewHDR,
+            return try OpenedSource(domain: .dual, image: base, hdr: previewHDR,
                                 baseSpace: nativeLinear, gain: gain, raw: nil, nativeSize:nativeSize)
+                .applying(options.geometry)
         }
-        return OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
+        return try OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
                             baseSpace: workingColorSpace, gain: nil, raw: nil, nativeSize:nativeSize)
+            .applying(options.geometry)
     }
 
-    /// New photos choose the known generation 9 when available; never opt into
-    /// future decoder generations without validation. Other files keep Apple's default.
+    /// New photos prefer generation 9, then 8 (including their DNG variants).
+    /// Older cameras without either retain their supported system default.
     public func preferredRAWDecoder(_ url: URL) -> String? {
         guard let filter = CIRAWFilter(imageURL: url) else { return nil }
-        // CIRAWFilter also opens ordinary rasters, reporting `.none` and/or
-        // an empty default. Those are not RAW development identities.
-        let supported = filter.supportedDecoderVersions.filter { $0 != .none && !$0.rawValue.isEmpty }
-        if let preferred = supported.first(where: { $0.rawValue.split(separator: ".").first == "9" }) {
-            return preferred.rawValue
-        }
-        let fallback = filter.decoderVersion
-        return supported.contains(fallback) ? fallback.rawValue : nil
+        return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
+                                     systemDefault: filter.decoderVersion.rawValue)
     }
 
-    /// Explicit fallback for a new photo only. Record this exact version if
-    /// the preferred generation cannot decode; saved recipes never call this.
+    /// Retry generation 8 explicitly: the system default may itself be 9.
+    public func fallbackRAWDecoder(_ url: URL) -> String? {
+        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+        return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
+                                     systemDefault: filter.decoderVersion.rawValue, allowing9: false)
+    }
+
+    nonisolated static func selectRAWDecoder(supported: [String], systemDefault: String,
+                                             allowing9: Bool = true) -> String? {
+        let versions = supported.filter { !$0.isEmpty && $0 != CIRAWDecoderVersion.none.rawValue }
+        for generation in allowing9 ? ["9", "8"] : ["8"] {
+            if let version = versions.first(where: { $0.split(separator: ".").first == Substring(generation) }) {
+                return version
+            }
+        }
+        // Never retry a known failed generation or silently select a future one.
+        guard versions.contains(systemDefault),
+              let generation = Int(systemDefault.split(separator: ".").first ?? ""), generation < 9 else { return nil }
+        return systemDefault
+    }
+
+    /// Used by legacy recipes that deliberately retain the system default.
     public func defaultRAWDecoder(_ url: URL) -> String? {
         guard let filter = CIRAWFilter(imageURL: url) else { return nil }
         let version = filter.decoderVersion
@@ -240,8 +259,10 @@ extension RenderEngine {
             supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported,
             nativeSize: nativeSize, developedExtent: output.extent.size,
             scaleFactor: 1, isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
-        // CIRAWFilter already applies the file's orientation.
+        // CIRAWFilter already applies the file's orientation. The geometry goes
+        // before the preview scale, which is then measured on the cropped photo.
         return try OpenedSource(domain: .rawEDR, image: output, hdr: output,
-                            baseSpace: workingColorSpace, gain: nil, raw: development).rawVariant(resolution: options.resolution)
+                            baseSpace: workingColorSpace, gain: nil, raw: development)
+            .applying(options.geometry).rawVariant(resolution: options.resolution)
     }
 }

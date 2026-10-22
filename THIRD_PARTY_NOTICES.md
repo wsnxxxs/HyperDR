@@ -21,8 +21,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 ## Platform codec configurations
 
-The native applications target macOS 26 and later on Apple Silicon, and
-iOS and iPadOS 26 and later. HEVC
+The native applications target macOS 27 and later on Apple Silicon, and
+iOS and iPadOS 27 and later. HEVC
 encoding and decoding use Apple's VideoToolbox framework, and HEIF reading and
 writing use HyperDR's own code. No LGPL or GPL library is linked or shipped;
 every dependency above is statically linked.

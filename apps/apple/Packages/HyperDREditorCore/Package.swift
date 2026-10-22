@@ -7,7 +7,7 @@ import PackageDescription
 // building or launching an app. The apps do not link this package.
 let package = Package(
     name: "HyperDREditorCore",
-    platforms: [.macOS(.v26), .iOS(.v26)],
+    platforms: [.macOS("27.0"), .iOS("27.0")],
     dependencies: [.package(path: "../HyperDRRecipe"), .package(path: "../HyperDRRender")],
     targets: [
         // The apps build with MainActor default isolation; so does this target.

@@ -118,8 +118,7 @@ RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑
 
 **iPhone 与 iPad** —— 用 Xcode 从源码构建，见[安装说明](apps/apple/README-iOS.md)。
 
-需要 Apple 芯片上的 iOS / iPadOS 26 或 macOS 26。RAW decoder 9 需要系统 27；
-更早的系统使用 Apple 提供的默认解码器。
+需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 27。
 
 > HyperDR 0.5.0 为测试版。iPhone 上 1.1 亿像素 RAW 的全尺寸处理仍在验证中，
 > iOS 暂不支持在后台继续导出。

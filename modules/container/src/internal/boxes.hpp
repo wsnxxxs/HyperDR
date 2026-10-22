@@ -8,6 +8,7 @@
 // header is encoded.
 
 #include <cstdint>
+#include "hyperdr/container/heif_limits.hpp"
 #include <limits>
 #include <stdexcept>
 #include <span>
@@ -74,6 +75,7 @@ inline std::vector<Box> children(std::span<const std::uint8_t> bytes, std::size_
   std::vector<Box> out;
   for (auto p = begin; p < end;) {
     const auto box = read_box(bytes, p, end);
+    if (out.size() >= heif_limits::boxes) throw std::runtime_error("HEIF contains too many boxes");
     out.push_back(box);
     p += box.size;
   }

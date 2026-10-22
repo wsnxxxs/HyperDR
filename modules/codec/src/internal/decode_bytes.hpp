@@ -19,13 +19,24 @@
 #include <vector>
 
 namespace hyperdr::codec {
+namespace testing {
+// Per-thread seam for deterministic cancellation inside libjpeg's input passes.
+void set_jpeg_progress_hook(void (*hook)(bool starting, unsigned components) noexcept);
+}
+
 
 // The authored JPEG primary of an Ultra HDR file, decoded without applying
 // its embedded gain map.
 [[nodiscard]] DecodedImage decode_jpeg_primary_bytes(
     const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
 
-// Ultra HDR JPEG/R: true when the file carries a gain map libultrahdr can read.
+[[nodiscard]] FloatImage decode_jpeg_gain_bytes(
+    const std::vector<std::uint8_t>& bytes, unsigned channels);
+[[nodiscard]] DecodedImage decode_iso_gain_map_jpeg_bytes(
+    const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
+
+// JPEG gain-map recognition and shared dispatch. ISO uses the deterministic
+// reader; XMP-only uses ImageIO auxiliary metadata and gain pixels.
 [[nodiscard]] bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] DecodedImage decode_ultrahdr_bytes(
     const std::vector<std::uint8_t>& bytes,

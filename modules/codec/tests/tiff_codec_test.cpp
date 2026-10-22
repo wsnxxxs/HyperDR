@@ -1,3 +1,5 @@
+#include <iostream>
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -26,9 +28,9 @@ struct TemporaryFile {
 };
 }
 
-int main() {
+int main() try {
   using namespace hyperdr;
-  const auto directory = std::filesystem::temp_directory_path();
+  const auto directory = hyperdr::test::temporary_directory();
   FloatImage original(2, 1, 3);
   original.pixels = {0.8F, 0.25F, 0.05F, 0.1F, 0.5F, 0.9F};
   PhotoMetadata metadata;
@@ -39,6 +41,9 @@ int main() {
   verify_sdr_tiff(bytes);
   TemporaryFile rgb{directory / "hyperdr-tiff-rgb-test.tif"};
   write_binary_file_atomic(rgb.path, bytes, true);
+#ifdef HYPERDR_TEST_INJECT_FAILURE
+  require(false, "injected TIFF failure");
+#endif
   {
     TIFF* tiff = TIFFOpen(rgb.path.string().c_str(), "r");
     require(tiff != nullptr, "cannot inspect encoded TIFF");
@@ -145,4 +150,10 @@ int main() {
                std::string::npos;
   }
   require(rejected, "unsupported TIFF layout was not clearly rejected");
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

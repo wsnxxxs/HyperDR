@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>叠放相纸场景</title>
+<style>
+  body { margin: 0; font: 14px -apple-system, sans-serif; }
+  section { padding: 28px 32px; }
+  .light { background: #F2F2F7; color: #1C1C1E; }
+  .dark { background: #000; color: #EBEBF5; }
+  .row { display: flex; align-items: flex-end; gap: 28px; margin: 18px 0 30px; }
+  .row h2 { width: 120px; font-size: 14px; font-weight: 500; margin: 0; align-self: center; }
+  img { display: block; }
+  .home { display: grid; grid-template-columns: repeat(4, 60px); gap: 24px 22px; }
+  .home span { display: block; width: 60px; height: 60px; border-radius: 14px; background: #8E8E93; opacity: .35; }
+</style>
+</head>
+<body>
+<script>
+  const icons = /*ICONS*/null;
+  const labels = /*LABELS*/null;
+  const sizes = [256, 120, 60, 29];
+  for (const appearance of ["light", "dark"]) {
+    const section = document.createElement("section");
+    section.className = appearance;
+    for (const [dir, label] of Object.entries(labels)) {
+      const src = icons[dir][appearance];
+      const sized = sizes.map(s => `<img src="${src}" width="${s}" height="${s}" alt="">`).join("");
+      const home = Array.from({ length: 8 }, (_, i) =>
+        i === 5 ? `<img src="${src}" width="60" height="60" alt="">` : "<span></span>").join("");
+      section.insertAdjacentHTML("beforeend",
+        `<div class="row"><h2>${label}</h2>${sized}<div class="home">${home}</div></div>`);
+    }
+    document.body.append(section);
+  }
+</script>
+</body>
+</html>

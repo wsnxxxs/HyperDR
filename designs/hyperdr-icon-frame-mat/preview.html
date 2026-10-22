@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>装裱图标变体</title>
+<style>
+  body { margin: 0; font: 14px -apple-system, sans-serif; }
+  section { padding: 28px 32px; }
+  .light { background: #F2F2F7; color: #1C1C1E; }
+  .dark { background: #000; color: #EBEBF5; }
+  .row { display: flex; align-items: flex-end; gap: 28px; margin: 18px 0 30px; }
+  .row h2 { width: 120px; font-size: 14px; font-weight: 500; margin: 0; align-self: center; }
+  img { display: block; }
+  .home { display: grid; grid-template-columns: repeat(4, 60px); gap: 24px 22px; }
+  .home span { display: block; width: 60px; height: 60px; border-radius: 14px; background: #8E8E93; opacity: .35; }
+</style>
+</head>
+<body>
+<script>
+  const icons = {"c1-square": {"light": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iI0VFRUJFNSIvPgo8cmVjdCB4PSIyMzIiIHk9IjE2OCIgd2lkdGg9IjU2MCIgaGVpZ2h0PSI1NjAiIHJ4PSIxMCIgZmlsbD0iIzE0MTQxNCIvPgo8cmVjdCB4PSIzMTYiIHk9IjU3MS40IiB3aWR0aD0iMzkyIiBoZWlnaHQ9IjIyIiByeD0iMTEiIGZpbGw9IiM2RTZFNzMiLz4KPHJlY3QgeD0iNDI4IiB5PSI4NDMiIHdpZHRoPSIxNjgiIGhlaWdodD0iMTgiIHJ4PSI5IiBmaWxsPSIjQTM5Rjk2Ii8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjQyMCIgcj0iNTAiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K", "dark": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iIzI2MjUyMyIvPgo8cmVjdCB4PSIyMzIiIHk9IjE2OCIgd2lkdGg9IjU2MCIgaGVpZ2h0PSI1NjAiIHJ4PSIxMCIgZmlsbD0iIzBBMEEwQSIvPgo8cmVjdCB4PSIzMTYiIHk9IjU3MS40IiB3aWR0aD0iMzkyIiBoZWlnaHQ9IjIyIiByeD0iMTEiIGZpbGw9IiM1QTVBNUUiLz4KPHJlY3QgeD0iNDI4IiB5PSI4NDMiIHdpZHRoPSIxNjgiIGhlaWdodD0iMTgiIHJ4PSI5IiBmaWxsPSIjNkE2NjVGIi8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjQyMCIgcj0iNTAiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K"}, "c2-landscape": {"light": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iI0VFRUJFNSIvPgo8cmVjdCB4PSIxOTIiIHk9IjIyMCIgd2lkdGg9IjY0MCIgaGVpZ2h0PSI0MjgiIHJ4PSIxMCIgZmlsbD0iIzE0MTQxNCIvPgo8cmVjdCB4PSIyODgiIHk9IjUxNy4xNiIgd2lkdGg9IjQ0OCIgaGVpZ2h0PSIyMiIgcng9IjExIiBmaWxsPSIjNkU2RTczIi8+CjxyZWN0IHg9IjQyOCIgeT0iNzkxIiB3aWR0aD0iMTY4IiBoZWlnaHQ9IjE4IiByeD0iOSIgZmlsbD0iI0EzOUY5NiIvPgo8Y2lyY2xlIGN4PSI1ODguOCIgY3k9IjM5OS43NiIgcj0iNDQiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K", "dark": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iIzI2MjUyMyIvPgo8cmVjdCB4PSIxOTIiIHk9IjIyMCIgd2lkdGg9IjY0MCIgaGVpZ2h0PSI0MjgiIHJ4PSIxMCIgZmlsbD0iIzBBMEEwQSIvPgo8cmVjdCB4PSIyODgiIHk9IjUxNy4xNiIgd2lkdGg9IjQ0OCIgaGVpZ2h0PSIyMiIgcng9IjExIiBmaWxsPSIjNUE1QTVFIi8+CjxyZWN0IHg9IjQyOCIgeT0iNzkxIiB3aWR0aD0iMTY4IiBoZWlnaHQ9IjE4IiByeD0iOSIgZmlsbD0iIzZBNjY1RiIvPgo8Y2lyY2xlIGN4PSI1ODguOCIgY3k9IjM5OS43NiIgcj0iNDQiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K"}, "c3-portrait": {"light": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iI0VFRUJFNSIvPgo8cmVjdCB4PSIyNzIiIHk9IjE1MiIgd2lkdGg9IjQ4MCIgaGVpZ2h0PSI2MDAiIHJ4PSIxMCIgZmlsbD0iIzE0MTQxNCIvPgo8cmVjdCB4PSIzNDQiIHk9IjU2MSIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMiIgcng9IjExIiBmaWxsPSIjNkU2RTczIi8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjM5MiIgcj0iNDYiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K", "dark": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iIzI2MjUyMyIvPgo8cmVjdCB4PSIyNzIiIHk9IjE1MiIgd2lkdGg9IjQ4MCIgaGVpZ2h0PSI2MDAiIHJ4PSIxMCIgZmlsbD0iIzBBMEEwQSIvPgo8cmVjdCB4PSIzNDQiIHk9IjU2MSIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMiIgcng9IjExIiBmaWxsPSIjNUE1QTVFIi8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjM5MiIgcj0iNDYiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K"}, "c4-wide-mat": {"light": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iI0VFRUJFNSIvPgo8cmVjdCB4PSIzMTIiIHk9IjIzMiIgd2lkdGg9IjQwMCIgaGVpZ2h0PSI0MDAiIHJ4PSIxMCIgZmlsbD0iIzE0MTQxNCIvPgo8cmVjdCB4PSIzNzIiIHk9IjUxOSIgd2lkdGg9IjI4MCIgaGVpZ2h0PSIxOCIgcng9IjkiIGZpbGw9IiM2RTZFNzMiLz4KPHJlY3QgeD0iNDUyIiB5PSI3NTIiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTYiIHJ4PSI4IiBmaWxsPSIjQTM5Rjk2Ii8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjQwOCIgcj0iMzgiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K", "dark": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgo8ZGVmcz48Y2xpcFBhdGggaWQ9Im0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjkiLz48L2NsaXBQYXRoPjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI20pIj4KPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgZmlsbD0iIzI2MjUyMyIvPgo8cmVjdCB4PSIzMTIiIHk9IjIzMiIgd2lkdGg9IjQwMCIgaGVpZ2h0PSI0MDAiIHJ4PSIxMCIgZmlsbD0iIzBBMEEwQSIvPgo8cmVjdCB4PSIzNzIiIHk9IjUxOSIgd2lkdGg9IjI4MCIgaGVpZ2h0PSIxOCIgcng9IjkiIGZpbGw9IiM1QTVBNUUiLz4KPHJlY3QgeD0iNDUyIiB5PSI3NTIiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTYiIHJ4PSI4IiBmaWxsPSIjNkE2NjVGIi8+CjxjaXJjbGUgY3g9IjUxMiIgY3k9IjQwOCIgcj0iMzgiIGZpbGw9IiNGRkZGRkYiLz4KPC9nPgo8L3N2Zz4K"}};
+  const labels = {"c1-square": "C1 方幅", "c2-landscape": "C2 横幅", "c3-portrait": "C3 竖幅", "c4-wide-mat": "C4 宽边"};
+  const sizes = [256, 120, 60, 29];
+  for (const appearance of ["light", "dark"]) {
+    const section = document.createElement("section");
+    section.className = appearance;
+    for (const [dir, label] of Object.entries(labels)) {
+      const src = icons[dir][appearance];
+      const sized = sizes.map(s => `<img src="${src}" width="${s}" height="${s}" alt="">`).join("");
+      const home = Array.from({ length: 8 }, (_, i) =>
+        i === 5 ? `<img src="${src}" width="60" height="60" alt="">` : "<span></span>").join("");
+      section.insertAdjacentHTML("beforeend",
+        `<div class="row"><h2>${label}</h2>${sized}<div class="home">${home}</div></div>`);
+    }
+    document.body.append(section);
+  }
+</script>
+</body>
+</html>

@@ -7,6 +7,8 @@
 // to notice that two sets of settings differ.
 
 #include <filesystem>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -14,5 +16,6 @@ namespace hyperdr {
 
 [[nodiscard]] std::string fnv1a_hex(std::string_view text);
 [[nodiscard]] std::string sha256_file_hex(const std::filesystem::path& path);
+[[nodiscard]] std::string sha256_hex(std::span<const std::uint8_t> bytes);
 
 }  // namespace hyperdr

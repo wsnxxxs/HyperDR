@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include <span>
 
 namespace hyperdr {
 
@@ -56,7 +57,7 @@ class GridView {
  public:
   GridView(const float* data, std::size_t size, std::uint32_t width,
            std::uint32_t height);
-  GridView(const std::vector<float>& grid, std::uint32_t width,
+  GridView(std::span<const float> grid, std::uint32_t width,
            std::uint32_t height)
       : GridView(grid.data(), grid.size(), width, height) {}
 
@@ -116,7 +117,7 @@ class BilinearGridSampler {
 
 // Convenience overload. It validates the buffer against the dimensions on
 // every call, which is a handful of integer comparisons against four lerps.
-[[nodiscard]] float sample_grid_bilinear(const std::vector<float>& grid,
+[[nodiscard]] float sample_grid_bilinear(std::span<const float> grid,
                                          std::uint32_t grid_width,
                                          std::uint32_t grid_height,
                                          std::uint32_t image_width,

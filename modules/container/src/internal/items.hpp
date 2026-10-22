@@ -1,9 +1,7 @@
 #pragma once
 
-// The item-description boxes both public entry points need to read: `iinf`
-// (which items exist and what type each one is) and `pitm` (which one is the
-// primary image). Inspection reads them; the tmap rewrite reads and rebuilds
-// them, so the readers are shared and the rebuilders are not.
+// The item-description boxes inspection reads: `iinf` (which items exist and
+// what type each one is) and `pitm` (which one is the primary image).
 
 #include "internal/boxes.hpp"
 

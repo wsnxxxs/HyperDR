@@ -1,0 +1,529 @@
+[
+  {
+    "id": 2414,
+    "camera": "Sony ILCE-7M3",
+    "status": 0,
+    "elapsed_ms": 886.2540840054862,
+    "decode_ms": 345.687791,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.01578539471,
+        "p99": 0.1943359375,
+        "max": 0.4140625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.01555513753,
+        "p99": 0.1588095427,
+        "max": 0.4097861052,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 3480,
+    "camera": "Sony ILCE-7RM4",
+    "status": 0,
+    "elapsed_ms": 1501.298749994021,
+    "decode_ms": 505.972375,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.05990414287,
+        "p99": 0.2719726562,
+        "max": 0.4267578125,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.065241707,
+        "p99": 0.3007086515,
+        "max": 0.3706780672,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 4465,
+    "camera": "Sony ILCE-1",
+    "status": 0,
+    "elapsed_ms": 1671.7922920361161,
+    "decode_ms": 753.845417,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.01785837218,
+        "p99": 0.052734375,
+        "max": 0.09228515625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.009421092036,
+        "p99": 0.03567379713,
+        "max": 0.05618160963,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 6233,
+    "camera": "Sony ILCE-7RM5",
+    "status": 0,
+    "elapsed_ms": 1904.4407079927623,
+    "decode_ms": 748.814458,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.01247805218,
+        "p99": 0.033203125,
+        "max": 0.1616210938,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.01539819049,
+        "p99": 0.04281049967,
+        "max": 0.1297246218,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 6735,
+    "camera": "Sony ILCE-6700",
+    "status": 0,
+    "elapsed_ms": 1031.9644170231186,
+    "decode_ms": 388.300083,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.04587528317,
+        "p99": 0.30859375,
+        "max": 0.6352539062,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.03804087009,
+        "p99": 0.3548345566,
+        "max": 0.7735833526,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 5418,
+    "camera": "Sony ILCE-7SM3",
+    "status": 0,
+    "elapsed_ms": 746.8787090037949,
+    "decode_ms": 296.407791,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.06713059891,
+        "p99": 0.3134765625,
+        "max": 0.4682617188,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.06527702511,
+        "p99": 0.5578728914,
+        "max": 0.6057244539,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 6869,
+    "camera": "Sony ILCE-7CM2",
+    "status": 0,
+    "elapsed_ms": 773.0783330043778,
+    "decode_ms": 320.580583,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.07185780725,
+        "p99": 0.3203125,
+        "max": 0.3608398438,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.05896965908,
+        "p99": 0.3852828741,
+        "max": 0.5727828145,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 983,
+    "camera": "Canon EOS 5D Mark IV",
+    "status": 0,
+    "elapsed_ms": 1253.3841249532998,
+    "decode_ms": 272.665875,
+    "decoder": "7",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.01323673337,
+        "p99": 0.1069335938,
+        "max": 0.4228515625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.01323673337,
+        "p99": 0.1069335938,
+        "max": 0.4228515625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 4692,
+    "camera": "Canon EOS R5",
+    "status": 0,
+    "elapsed_ms": 985.3164170053788,
+    "decode_ms": 379.759041,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.08645904896,
+        "p99": 0.4125976562,
+        "max": 0.4458007812,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.08645904896,
+        "p99": 0.4125976562,
+        "max": 0.4458007812,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 4693,
+    "camera": "Canon EOS R5",
+    "status": 0,
+    "elapsed_ms": 1575.197083002422,
+    "decode_ms": 585.394541,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.07953315557,
+        "p99": 0.3881835938,
+        "max": 0.494140625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.07953315557,
+        "p99": 0.3881835938,
+        "max": 0.494140625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 5051,
+    "camera": "Canon EOS R3",
+    "status": 0,
+    "elapsed_ms": 1346.4779169880785,
+    "decode_ms": 517.480625,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.007069964742,
+        "p99": 0.02587890625,
+        "max": 0.0380859375,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.007069964742,
+        "p99": 0.02587890625,
+        "max": 0.0380859375,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 6402,
+    "camera": "Canon EOS R6 Mark II",
+    "status": 0,
+    "elapsed_ms": 1235.4557079961523,
+    "decode_ms": 402.702292,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.04132523648,
+        "p99": 0.1708984375,
+        "max": 0.3095703125,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.04132523648,
+        "p99": 0.1708984375,
+        "max": 0.3095703125,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 6645,
+    "camera": "Canon EOS R50",
+    "status": 0,
+    "elapsed_ms": 1340.5280419974588,
+    "decode_ms": 467.70675,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.07518271513,
+        "p99": 0.134765625,
+        "max": 0.166015625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.07518271513,
+        "p99": 0.134765625,
+        "max": 0.166015625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 1840,
+    "camera": "Nikon D850",
+    "status": 0,
+    "elapsed_ms": 1282.1274170419201,
+    "decode_ms": 309.085,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.01013715877,
+        "p99": 0.05615234375,
+        "max": 0.103515625,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.00532908899,
+        "p99": 0.02979683876,
+        "max": 0.05811715126,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 3582,
+    "camera": "Nikon Z 6",
+    "status": 0,
+    "elapsed_ms": 1004.1198750259355,
+    "decode_ms": 294.069167,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.03962397021,
+        "p99": 0.2561035156,
+        "max": 0.5922851562,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.02511572459,
+        "p99": 0.1325147748,
+        "max": 0.3191453815,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 4213,
+    "camera": "Nikon Z 7_2",
+    "status": 0,
+    "elapsed_ms": 1295.9376249928027,
+    "decode_ms": 353.45025,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.0240308185,
+        "p99": 0.1259765625,
+        "max": 0.177734375,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.02167102135,
+        "p99": 0.1040688753,
+        "max": 0.1607095003,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 5148,
+    "camera": "Nikon Z 9",
+    "status": 1,
+    "elapsed_ms": 8.381458057556301,
+    "error": "LibRaw unpack: Unsupported file format or not RAW file\n"
+  },
+  {
+    "id": 6885,
+    "camera": "Nikon Z f",
+    "status": 0,
+    "elapsed_ms": 980.9281660127454,
+    "decode_ms": 282.2655,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.02786742809,
+        "p99": 0.1201171875,
+        "max": 0.216796875,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.02198192967,
+        "p99": 0.1023696661,
+        "max": 0.2195571661,
+        "legacy_effective": "research-exif-v1",
+        "own_effective": "research-exif-v1"
+      }
+    ]
+  },
+  {
+    "id": 2783,
+    "camera": "Fujifilm X-T3",
+    "status": 0,
+    "elapsed_ms": 1401.8167909816839,
+    "decode_ms": 359.615208,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.08544815418,
+        "p99": 0.2990722656,
+        "max": 0.4858398438,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.08544815418,
+        "p99": 0.2990722656,
+        "max": 0.4858398438,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 3914,
+    "camera": "Fujifilm X-T4",
+    "status": 0,
+    "elapsed_ms": 1465.4498749878258,
+    "decode_ms": 357.318459,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.0268596383,
+        "p99": 0.1689453125,
+        "max": 0.537109375,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.0268596383,
+        "p99": 0.1689453125,
+        "max": 0.537109375,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  },
+  {
+    "id": 6123,
+    "camera": "Fujifilm X-T5",
+    "status": 0,
+    "elapsed_ms": 2158.0416670185514,
+    "decode_ms": 432.857833,
+    "decoder": "8",
+    "models": [
+      {
+        "id": "research-cnn-v1",
+        "mean": 0.05354557481,
+        "p99": 0.2578125,
+        "max": 0.3095703125,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      },
+      {
+        "id": "research-exif-v1",
+        "mean": 0.05354557481,
+        "p99": 0.2578125,
+        "max": 0.3095703125,
+        "legacy_effective": "research-cnn-v1",
+        "own_effective": "research-cnn-v1"
+      }
+    ]
+  }
+]

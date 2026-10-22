@@ -3,7 +3,81 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
-## Unreleased
+## 0.5.0 - 2026-10-22 (Apple pre-release)
+
+- Add measured film-stock looks with grain, halation and emulsion scatter.
+- Preview LUTs on the current photo; preserve their input/output spaces, camera
+  Log curves and undo, and blend look strength in linear light.
+- Preserve HDR colour and camera metadata in HEIC exports.
+- Prefer RAW decoder 9 when supported, keep its exact version in the recipe,
+  and retry the system default once for a new photo that decoder 9 cannot open.
+- Show embedded photo previews and opening stages; improve cancellation,
+  original comparison, RAW detail controls and the iOS adjustment ruler.
+- Distribute an ad-hoc-signed Apple Silicon Mac build (macOS 26+). iPhone and
+  iPad source is included; installation still requires Xcode signing.
+
+## Development history before the native Apple releases
+
+- Remove libheif and libde265. HEIC and HEIF inputs are parsed by HyperDR's own
+  reader and decoded by VideoToolbox, and the write-time check of HEIC exports
+  uses the same reader. The app and the command-line tool no longer carry any
+  LGPL library, and the app bundle embeds no dylibs.
+- Delete the Python panel, the LAN server, the web front end, the Tauri shell,
+  the Windows launch and certificate scripts and their tests. The last
+  revision that contains them is `5cd997fd`; the Windows version stays at
+  `6949167`. The engine's `panel-v1` request adapter is unchanged.
+
+- Remove external RAW DCP/XMP/LCP profiles, highlight-mode controls and sensor
+  calibration flags from the engine and Kit. RAW gain and automatic Apple lens
+  correction remain available. Obsolete highlight request keys are ignored.
+
+- Read XMP-only gain-map JPEG inputs through ImageIO and the shared HDR
+  reconstruction pipeline. MPF segments after quantization tables are moved
+  only in a private memory copy. Some older Android JPEGs may fall back to SDR
+  when ImageIO cannot expose their gain map or translate its metadata.
+
+- Develop RAW inputs with Apple's default CIRAWFilter decoder on Metal, with
+  neutral scene-linear settings, automatic lens correction and cancellable
+  render blocks. RAW dimensions, colours and exported bytes intentionally change;
+  decode caches and model bindings are invalidated. Unsupported RAW files report
+  `raw_unsupported` with structured container/model details (C ABI version 2).
+  Reports use schema 13 and RAW models use `raw-neutral-v2`.
+
+- Cancel progressive JPEG input during libjpeg input scans, including the
+  pre-scanline startup phase; repaired MPF inspection includes recorded values.
+
+- Decode ISO gain-map JPEG inputs with our MPF/ISO parser, libjpeg-turbo and
+  pixel-centred reconstruction. Re-exported bytes and previews may change;
+  decoder caches are invalidated. Duplicate ISO metadata opens as SDR with a
+  diagnostic. Stale third-party MPF records may use validated JPEG boundaries.
+  The initial migration retained libultrahdr pending ImageIO corroboration; both
+  input paths now use native components and the old dependency is removed.
+
+- The gain-map JPEG encoding is now called `iso-gainmap-jpeg` and writes only
+  ISO 21496-1 metadata, without the Ultra HDR `hdrgm` XMP. Reports, schema
+  output and generated command lines use the new name. `ultrahdr` is still
+  accepted as input until the Web panel is retired; the other old encoding
+  aliases (`gain-map`, `ultra-hdr`, `jpegr`, `avif`, `sdr`, `tiff`) are
+  rejected. Reports no longer carry `gain_map.encoder` or
+  `gain_map.distribution_measured`. The resume fingerprint stores the
+  encoding name, so `--skip-existing` converts an existing gain-map JPEG
+  export once more after this change. `HyperDR verify` reports an ISO gain-map
+  JPEG as such and rejects a JPEG whose gain map is described only in XMP.
+
+- In a gain-map JPEG the gain map relates the uncompressed SDR and HDR
+  renditions, so the HDR rendition is as faithful as the SDR base at the
+  chosen quality. The base is 4:2:0 like an SDR JPEG and the gain map is
+  stored at quality max(90, quality). Three gain channels are written only
+  when they differ; a photo without headroom gets a constant, shrunk map and
+  a file about the size of an SDR JPEG.
+
+- Exports can carry a presentation frame: a paper mat, an optional print shadow
+  and a caption with the photograph's exposure, camera and lens. The frame is
+  written identically into the SDR and HDR renditions, so it carries no gain:
+  on an HDR display it stays at reference white while the photograph keeps its
+  headroom. The CLI accepts `--frame <frame.json>`; `HyperDR frame-layout`
+  prints the pixel layout, and reports record where the photo sits on the
+  canvas. The macOS app previews five styles in File > Frame….
 
 - RAW photos can use supported static XMP looks from the local Adobe installation
   on top of their matching DCP. The panel discovers compatible looks; the CLI

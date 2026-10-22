@@ -1,0 +1,1676 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "adjust.noProfile" : {
+      "comment" : "In place of the lens correction switch when the system has no lens profile for this camera. Do not claim the photo is corrected automatically.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No profile available" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无配置文件" } }
+      }
+    },
+    "design.lut.library" : {
+      "comment" : "Button beside the LUT menu that opens the LUT library.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT Library" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 库" } }
+      }
+    },
+    "ctrl.color.saturation.help" : {
+      "comment" : "Adjustment control help (color.saturation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scales all colours evenly; −100 is black and white, with HDR highlights kept." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "均匀缩放所有颜色；−100 为黑白，高光仍是 HDR。" } }
+      }
+    },
+    "ctrl.color.saturation.label" : {
+      "comment" : "Adjustment control name (color.saturation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saturation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "饱和度" } }
+      }
+    },
+    "ctrl.color.tint.help" : {
+      "comment" : "Adjustment control help (color.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shifts colours towards green or magenta; brightness stays the same." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让颜色偏绿或偏品红；亮度不变。" } }
+      }
+    },
+    "ctrl.color.tint.label" : {
+      "comment" : "Adjustment control name (color.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tint" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色调" } }
+      }
+    },
+    "ctrl.color.vibrance.help" : {
+      "comment" : "Adjustment control help (color.vibrance).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Changes muted colours more than saturated ones." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "优先改变不饱和的颜色。" } }
+      }
+    },
+    "ctrl.color.vibrance.label" : {
+      "comment" : "Adjustment control name (color.vibrance).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Vibrance" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自然饱和度" } }
+      }
+    },
+    "ctrl.color.warmth.help" : {
+      "comment" : "Adjustment control help (color.warmth).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Makes the photo warmer or cooler; brightness, HDR highlights included, stays the same." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让照片更暖或更冷；亮度（包括 HDR 高光）不变。" } }
+      }
+    },
+    "ctrl.color.warmth.label" : {
+      "comment" : "Adjustment control name (color.warmth).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Temperature" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色温" } }
+      }
+    },
+    "ctrl.develop.colorNR.help" : {
+      "comment" : "Adjustment control help (develop.colorNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Colour noise reduction while the RAW file is developed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RAW 冲洗时的色彩降噪。" } }
+      }
+    },
+    "ctrl.develop.colorNR.label" : {
+      "comment" : "Adjustment control name (develop.colorNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color noise reduction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色彩降噪" } }
+      }
+    },
+    "ctrl.develop.lensCorrection.help" : {
+      "comment" : "Adjustment control help (develop.lensCorrection).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Corrects the lens's distortion and vignetting as the camera describes them." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按相机记录校正镜头畸变和暗角。" } }
+      }
+    },
+    "ctrl.develop.lensCorrection.label" : {
+      "comment" : "Adjustment control name (develop.lensCorrection).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Lens correction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "镜头校正" } }
+      }
+    },
+    "ctrl.develop.luminanceNR.help" : {
+      "comment" : "Adjustment control help (develop.luminanceNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luminance noise reduction while the RAW file is developed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RAW 冲洗时的亮度降噪。" } }
+      }
+    },
+    "ctrl.develop.luminanceNR.label" : {
+      "comment" : "Adjustment control name (develop.luminanceNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Noise reduction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "降噪" } }
+      }
+    },
+    "ctrl.develop.sharpness.help" : {
+      "comment" : "Adjustment control help (develop.sharpness).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sharpening while the RAW file is developed. Halos show more on an HDR display." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RAW 冲洗时的锐化。锐化光晕在 HDR 屏上更显眼。" } }
+      }
+    },
+    "ctrl.develop.sharpness.label" : {
+      "comment" : "Adjustment control name (develop.sharpness).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sharpness" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "锐度" } }
+      }
+    },
+    "ctrl.develop.temperature.help" : {
+      "comment" : "Adjustment control help (develop.temperature).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The white balance the RAW file is developed with, in kelvin." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RAW 冲洗所用的白平衡，单位开尔文。" } }
+      }
+    },
+    "ctrl.develop.temperature.label" : {
+      "comment" : "Adjustment control name (develop.temperature).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Temperature" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色温" } }
+      }
+    },
+    "ctrl.develop.tint.help" : {
+      "comment" : "Adjustment control help (develop.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The green–magenta part of the RAW white balance." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RAW 白平衡的绿—品红分量。" } }
+      }
+    },
+    "ctrl.develop.tint.label" : {
+      "comment" : "Adjustment control name (develop.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tint" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色调" } }
+      }
+    },
+    "ctrl.hdr.coverage.help" : {
+      "comment" : "Adjustment control help (hdr.coverage).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "How much gain broad bright areas such as sky get; low values keep it to small lights and reflections. A weighting, not a share of the image." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "大片亮区（天空、白墙）得到多少增益；低时增益集中在小光源和反光上。这是权重，不是画面面积百分比。" } }
+      }
+    },
+    "ctrl.hdr.coverage.label" : {
+      "comment" : "Adjustment control name (hdr.coverage).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Area coverage" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "覆盖面积" } }
+      }
+    },
+    "ctrl.hdr.enabled.help" : {
+      "comment" : "Adjustment control help (hdr.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn the HDR rendition on or off. Off, the photo is exported as its SDR base only." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开或关闭 HDR 版本。关闭后只输出 SDR 底图。" } }
+      }
+    },
+    "ctrl.hdr.enabled.label" : {
+      "comment" : "Adjustment control name (hdr.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } }
+      }
+    },
+    "ctrl.hdr.expansionStart.help" : {
+      "comment" : "Adjustment control help (hdr.expansionStart).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only parts of the base brighter than this get HDR gain. Auto uses 25% for expansion and keeps the model's result for AI." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "底图亮度高于这个值的地方才得到增益。自动：扩展取 25%，AI 保持模型结果。" } }
+      }
+    },
+    "ctrl.hdr.expansionStart.label" : {
+      "comment" : "Adjustment control name (hdr.expansionStart).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expansion start" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扩展起点" } }
+      }
+    },
+    "ctrl.hdr.model.help" : {
+      "comment" : "Adjustment control help (hdr.model).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The AI model that predicts the highlights." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预测高光所用的 AI 模型。" } }
+      }
+    },
+    "ctrl.hdr.model.label" : {
+      "comment" : "Adjustment control name (hdr.model).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Model" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "模型" } }
+      }
+    },
+    "ctrl.hdr.range.help" : {
+      "comment" : "Adjustment control help (hdr.range).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "How many stops the brightest highlights may rise above SDR white. Auto follows the content, up to 3 stops." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最亮的高光最多比 SDR 白亮几档。自动：按内容取，最多 3 档。" } }
+      }
+    },
+    "ctrl.hdr.range.label" : {
+      "comment" : "Adjustment control name (hdr.range).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Range" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "范围" } }
+      }
+    },
+    "ctrl.hdr.sdrRolloff.help" : {
+      "comment" : "Adjustment control help (hdr.sdrRolloff).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compresses highlights smoothly in the SDR version so the sky keeps its detail there. The HDR version does not change." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让 SDR 版本里的高光平滑过渡，保留天空和云的层次。HDR 版本不变。" } }
+      }
+    },
+    "ctrl.hdr.sdrRolloff.label" : {
+      "comment" : "Adjustment control name (hdr.sdrRolloff).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SDR highlight rolloff" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "SDR 高光过渡" } }
+      }
+    },
+    "ctrl.hdr.source.help" : {
+      "comment" : "Adjustment control help (hdr.source).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Where the HDR highlights come from." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR 高光从哪里来。" } }
+      }
+    },
+    "ctrl.hdr.source.label" : {
+      "comment" : "Adjustment control name (hdr.source).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "来源" } }
+      }
+    },
+    "ctrl.hdr.strength.help" : {
+      "comment" : "Adjustment control help (hdr.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scales the HDR gain. 0% shows the SDR base; above 100% is brighter than the source, up to the range." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "缩放 HDR 增益。0% 等于 SDR 底图；高于 100% 比来源更亮，最高到“范围”。" } }
+      }
+    },
+    "ctrl.hdr.strength.label" : {
+      "comment" : "Adjustment control name (hdr.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "强度" } }
+      }
+    },
+    "ctrl.look.enabled.help" : {
+      "comment" : "Adjustment control help (look.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn the chosen LUT on or off without removing it." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "临时开关所选 LUT，不移除它。" } }
+      }
+    },
+    "ctrl.look.enabled.label" : {
+      "comment" : "Adjustment control name (look.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable LUT" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用 LUT" } }
+      }
+    },
+    "ctrl.look.film.help" : {
+      "comment" : "Adjustment control help (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Emulates a film stock from its measured data: exposure, development and, for a negative, the print on paper. It changes the SDR base; HDR highlights are kept." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按胶片的实测数据模拟：曝光、显影，负片还会印放到相纸上。它改变 SDR 底图，HDR 高光保留。" } }
+      }
+    },
+    "ctrl.look.film.label" : {
+      "comment" : "Adjustment control name (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片" } }
+      }
+    },
+    "ctrl.look.filmAntihalation.help" : {
+      "comment" : "Adjustment control help (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The film's antihalation layer. Off removes it, as CineStill does to Vision3, for a much stronger glow." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片的防光晕层。关闭即去除该层（CineStill 对 Vision3 的做法），光晕会强得多。" } }
+      }
+    },
+    "ctrl.look.filmAntihalation.label" : {
+      "comment" : "Adjustment control name (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Antihalation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "防光晕层" } }
+      }
+    },
+    "ctrl.look.filmExposure.help" : {
+      "comment" : "Adjustment control help (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "How much light the film receives. Auto meters the original photo centre-weighted to middle grey; the light adjustments still apply on top." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片接受的曝光量。自动会以中央加权方式对原图测光，使其落在中灰；光线调整仍叠加在其上。" } }
+      }
+    },
+    "ctrl.look.filmExposure.label" : {
+      "comment" : "Adjustment control name (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片曝光" } }
+      }
+    },
+    "ctrl.look.filmGrain.help" : {
+      "comment" : "Adjustment control help (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The film's grain, from its particle structure on a 35 mm frame. 100% is the stock's own grain; 0% is none." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片颗粒，按其在 35 mm 画幅上的颗粒结构计算。100% 为该胶片本身的颗粒；0% 为无颗粒。" } }
+      }
+    },
+    "ctrl.look.filmGrain.label" : {
+      "comment" : "Adjustment control name (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Grain" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颗粒" } }
+      }
+    },
+    "ctrl.look.filmHalation.help" : {
+      "comment" : "Adjustment control help (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The reddish glow light reflected from the film base adds around bright highlights. 100% is the stock's own." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "片基反射的光在明亮高光周围形成的偏红辉光。100% 为该胶片本身的光晕。" } }
+      }
+    },
+    "ctrl.look.filmHalation.label" : {
+      "comment" : "Adjustment control name (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "光晕" } }
+      }
+    },
+    "ctrl.look.filmStrength.help" : {
+      "comment" : "Adjustment control help (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blends the original and the film's result in linear light. 0% bypasses the film; 100% applies it fully." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在线性光中混合原图与胶片结果。0% 关闭胶片；100% 完全应用。" } }
+      }
+    },
+    "ctrl.look.filmStrength.label" : {
+      "comment" : "Adjustment control name (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片强度" } }
+      }
+    },
+    "ctrl.look.input.help" : {
+      "comment" : "Adjustment control help (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The colour space the LUT expects." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 期望的输入色彩空间。" } }
+      }
+    },
+    "ctrl.look.input.label" : {
+      "comment" : "Adjustment control name (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Input space" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入空间" } }
+      }
+    },
+    "ctrl.look.lut.help" : {
+      "comment" : "Adjustment control help (look.lut).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A colour look from the LUT library." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 库里的一种调色风格。" } }
+      }
+    },
+    "ctrl.look.lut.label" : {
+      "comment" : "Adjustment control name (look.lut).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT" } }
+      }
+    },
+    "ctrl.look.output.help" : {
+      "comment" : "Adjustment control help (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The colour space the LUT produces." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 输出的色彩空间。" } }
+      }
+    },
+    "ctrl.look.output.label" : {
+      "comment" : "Adjustment control name (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Output space" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输出空间" } }
+      }
+    },
+    "ctrl.look.strength.help" : {
+      "comment" : "Adjustment control help (look.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blends the original and the LUT's result in linear light. 0% bypasses the LUT; 100% applies it fully." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在线性光中混合原图与 LUT 结果。0% 关闭 LUT；100% 完全应用。" } }
+      }
+    },
+    "ctrl.look.strength.label" : {
+      "comment" : "Adjustment control name (look.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "强度" } }
+      }
+    },
+    "ctrl.tone.blacks.help" : {
+      "comment" : "Adjustment control help (tone.blacks).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Positive values crush the darkest parts to black; negative values lift black." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正值把最暗的部分压成黑，负值把黑抬起。" } }
+      }
+    },
+    "ctrl.tone.blacks.label" : {
+      "comment" : "Adjustment control name (tone.blacks).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Black point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "黑点" } }
+      }
+    },
+    "ctrl.tone.contrast.help" : {
+      "comment" : "Adjustment control help (tone.contrast).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "An S-curve around middle grey; black and SDR white stay put, HDR highlights do not change." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "以中灰为支点的 S 形曲线；黑和 SDR 白固定，HDR 高光不变。" } }
+      }
+    },
+    "ctrl.tone.contrast.label" : {
+      "comment" : "Adjustment control name (tone.contrast).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Contrast" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比度" } }
+      }
+    },
+    "ctrl.tone.exposure.help" : {
+      "comment" : "Adjustment control help (tone.exposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brightens or darkens the whole photo, highlights included." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "整体提亮或压暗照片，高光一起变化。" } }
+      }
+    },
+    "ctrl.tone.exposure.label" : {
+      "comment" : "Adjustment control name (tone.exposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曝光" } }
+      }
+    },
+    "ctrl.tone.highlights.help" : {
+      "comment" : "Adjustment control help (tone.highlights).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Darkens or brightens the bright parts; negative values recover detail near white." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "压暗或提亮亮部；负值找回接近白的层次。" } }
+      }
+    },
+    "ctrl.tone.highlights.label" : {
+      "comment" : "Adjustment control name (tone.highlights).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Highlights" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光" } }
+      }
+    },
+    "ctrl.tone.shadows.help" : {
+      "comment" : "Adjustment control help (tone.shadows).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brightens or darkens the dark parts; the black point stays put." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "提亮或压暗暗部；黑点不动。" } }
+      }
+    },
+    "ctrl.tone.shadows.label" : {
+      "comment" : "Adjustment control name (tone.shadows).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shadows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阴影" } }
+      }
+    },
+    "design.adjust.fineTune.half" : {
+      "comment" : "Hint above a touch slider while the finger is 40 pt off the track.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fine-tune · half speed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "微调 · 半速" } }
+      }
+    },
+    "design.adjust.fineTune.quarter" : {
+      "comment" : "Hint above a touch slider while the finger is 100 pt off the track.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fine-tune · quarter speed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "微调 · 四分之一速" } }
+      }
+    },
+    "design.adjust.resetAll" : {
+      "comment" : "Resets every adjustment.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部重置" } }
+      }
+    },
+    "design.curve.sdrWhite" : {
+      "comment" : "Right end of the curve editor's SDR axis: SDR white.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SDR white" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "SDR 白" } }
+      }
+    },
+    "design.curve.stops %@" : {
+      "comment" : "Top of the curve editor's gain axis, e.g. \"3 stops\".",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ stops" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 档" } }
+      }
+    },
+    "design.export.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Details" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "详细信息" } }
+      }
+    },
+    "design.export.dismiss" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dismiss" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "design.export.earlier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Earlier edit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上一版的结果" } }
+      }
+    },
+    "design.export.exported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已导出" } }
+      }
+    },
+    "design.export.exporting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在导出" } }
+      }
+    },
+    "design.export.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出失败" } }
+      }
+    },
+    "design.export.lockNote" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjustments are locked. You can continue when the export finishes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整已锁定，导出完成后可以继续。" } }
+      }
+    },
+    "design.export.openSettings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开设置…" } }
+      }
+    },
+    "design.export.progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export progress" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出进度" } }
+      }
+    },
+    "design.export.saveAs" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save As…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另存为…" } }
+      }
+    },
+    "design.export.saveFailedShort" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not saved: can’t write to the chosen location." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有保存：无法写入所选位置。" } }
+      }
+    },
+    "design.export.savedTo %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved to %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存到 %@" } }
+      }
+    },
+    "design.export.saving" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存…" } }
+      }
+    },
+    "design.export.showInFinder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示" } }
+      }
+    },
+    "design.export.showInFinder.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This version was saved in an earlier session, so HyperDR can’t show it. Drag it out, share it, or use Save As… to save it again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一版是之前保存的，HyperDR 不能再显示它。可以直接拖出、共享，或用“另存为…”再存一次。" } }
+      }
+    },
+    "design.export.staleNote" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You changed the photo after this export. Export again to include the changes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出之后又调整过画面。再次导出才会包含这些改动。" } }
+      }
+    },
+    "design.export.stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop Export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止导出" } }
+      }
+    },
+    "design.export.stopPending" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopping…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在停止…" } }
+      }
+    },
+    "design.export.stopping" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopping Export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在停止导出" } }
+      }
+    },
+    "design.export.toolbar.exporting %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出中 %@" } }
+      }
+    },
+    "design.export.toolbar.indeterminate" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出中…" } }
+      }
+    },
+    "design.export.viewDetails" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Details" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看详情" } }
+      }
+    },
+    "design.group.collapsed" : {
+      "comment" : "VoiceOver value of a collapsed inspector group.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Collapsed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已折叠" } }
+      }
+    },
+    "design.group.expanded" : {
+      "comment" : "VoiceOver value of an expanded inspector group.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expanded" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } }
+      }
+    },
+    "design.legend.highlights" : {
+      "comment" : "Canvas legend row for the highlight stripes.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Highlights: clipped on export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光：导出时截断" } }
+      }
+    },
+    "design.legend.mask %@" : {
+      "comment" : "Canvas legend row for the mask; the argument is the control name.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Affected area: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作用区域：%@" } }
+      }
+    },
+    "design.legend.shadows" : {
+      "comment" : "Canvas legend row for the shadow stripes.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shadows: pure black in the SDR version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暗部：SDR 版本中为纯黑" } }
+      }
+    },
+    "design.lut.inUse" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "In use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前照片在用" } }
+      }
+    },
+    "design.lut.remove" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除" } }
+      }
+    },
+    "design.lut.spaces" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Spaces…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "空间…" } }
+      }
+    },
+    "design.scope.ceiling %@" : {
+      "comment" : "Export limit label on the scope; the argument is a formatted number of stops, e.g. 2.5.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Limit +%@ EV" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上限 +%@ EV" } }
+      }
+    },
+    "design.scope.ceilingSDR" : {
+      "comment" : "Export limit label when processing is colour-only.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Limit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上限" } }
+      }
+    },
+    "design.scope.channels" : {
+      "comment" : "VoiceOver name of the luma / RGB switch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Histogram channels" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直方图通道" } }
+      }
+    },
+    "design.scope.collapse" : {
+      "comment" : "Collapse button of the scopes panel (tooltip, VoiceOver).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起示波器" } }
+      }
+    },
+    "design.scope.edited" : {
+      "comment" : "Histogram legend: the photo after adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整后" } }
+      }
+    },
+    "design.scope.expand" : {
+      "comment" : "Collapsed scopes row (tooltip, VoiceOver hint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开示波器" } }
+      }
+    },
+    "design.scope.histogram" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Histogram" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直方图" } }
+      }
+    },
+    "design.scope.kind" : {
+      "comment" : "VoiceOver name of the histogram / waveform switch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "示波器类型" } }
+      }
+    },
+    "design.scope.luma" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luma" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度" } }
+      }
+    },
+    "design.scope.measuring" : {
+      "comment" : "Shown in the scope while the first measurement is pending.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Measuring…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在统计…" } }
+      }
+    },
+    "design.scope.original" : {
+      "comment" : "Histogram legend: the photo before adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Original" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原图" } }
+      }
+    },
+    "design.scope.rgb" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "RGB" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RGB" } }
+      }
+    },
+    "design.scope.title" : {
+      "comment" : "Title of the collapsed scopes row; VoiceOver name of the panel.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "示波器" } }
+      }
+    },
+    "design.scope.unavailable" : {
+      "comment" : "Shown in the scope when the preview failed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No preview to measure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可统计的预览" } }
+      }
+    },
+    "design.scope.waveform" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Waveform" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度波形" } }
+      }
+    },
+    "design.scope.waveformLegend" : {
+      "comment" : "Waveform legend.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edited · across the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整后 · 横向位置" } }
+      }
+    },
+    "design.slider.auto" : {
+      "comment" : "The Auto state of a slider: its readout, field placeholder and the small button.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
+      }
+    },
+    "design.slider.autoValue %@" : {
+      "comment" : "Readout of an Auto control whose current automatic value is known.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动 · %@" } }
+      }
+    },
+    "design.slider.maskHint" : {
+      "comment" : "Tooltip of the mask mark after a slider title.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hover to see where this acts on the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "悬停可在画面上查看作用区域" } }
+      }
+    },
+    "design.slider.reset" : {
+      "comment" : "Context menu item and VoiceOver action: return a slider to its default.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset to Default" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复默认值" } }
+      }
+    },
+    "design.slider.setAuto" : {
+      "comment" : "Tooltip of the small Auto button, context menu item and VoiceOver action.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set to Auto" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设为自动" } }
+      }
+    },
+    "design.slider.valueHint" : {
+      "comment" : "VoiceOver hint of a slider's value field.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Type an exact value. Up and Down Arrow change it by one step." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入精确数值；上下方向键按步长调整。" } }
+      }
+    },
+    "design.split.divider" : {
+      "comment" : "VoiceOver name of the compare divider.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Comparison divider" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比分界线" } }
+      }
+    },
+    "design.zebra.highlights" : {
+      "comment" : "Switch under the scope: stripe the highlights that export will clip.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clipped highlights" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光截断" } }
+      }
+    },
+    "design.zebra.highlights.help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stripes highlights that will be clipped on export. Also in the View menu." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "给导出时会被截断的高光加斜纹。也可在“显示”菜单里开关。" } }
+      }
+    },
+    "design.zebra.shadows" : {
+      "comment" : "Switch under the scope: stripe the shadows that are pure black in the SDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crushed shadows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暗部死黑" } }
+      }
+    },
+    "design.zebra.shadows.help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stripes areas that are pure black in the SDR version. Also in the View menu." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "给 SDR 版本里是纯黑的区域加斜纹。也可在“显示”菜单里开关。" } }
+      }
+    },
+    "export.reason.alphaOnBlack" : {
+      "comment" : "Export plan notice: the photo has transparency, which the export fills.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Transparent areas will be filled with black." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "透明区域会铺黑色。" } }
+      }
+    },
+    "export.reason.ceiling %@" : {
+      "comment" : "Export plan notice: a destination holds the output's peak, in stops (\"+3\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This export goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+      }
+    },
+    "export.reason.ceilingFormat %@" : {
+      "comment" : "Export plan notice: the format holds the output's peak, in stops (\"+3\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This format goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这种格式最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+      }
+    },
+    "export.reason.hdrOff" : {
+      "comment" : "Export blocked: a BT.2100 format needs HDR on.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn HDR on to export this BT.2100 format." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启 HDR 后才能导出此 BT.2100 格式。" } }
+      }
+    },
+    "export.reason.hevcMain10Unavailable" : {
+      "comment" : "Export blocked: no 10-bit HEVC encoder on this device.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This device can't encode 10-bit HEVC, so this format can't be exported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这台设备不支持 10 位 HEVC 编码，不能导出这种格式。" } }
+      }
+    },
+    "export.reason.hevcProbeFailed" : {
+      "comment" : "Export blocked: the HEVC encoder check failed at launch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking the HEVC encoder failed, so this format can't be exported for now." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检测 HEVC 编码能力时出错，暂时不能导出这种格式。" } }
+      }
+    },
+    "export.reason.hevcUnavailable" : {
+      "comment" : "Export blocked: no HEVC encoder on this device.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This device can't encode HEVC, so this format can't be exported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这台设备无法进行 HEVC 编码，不能导出这种格式。" } }
+      }
+    },
+    "export.reason.memory %@ %@" : {
+      "comment" : "Export blocked: not enough memory; what the export needs and what is available (\"3.1 GB\").",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not enough memory: this export needs about %@, %@ is available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内存不够：这次导出约需 %@，可用 %@。" } }
+      }
+    },
+    "export.reason.notYetAvailable" : {
+      "comment" : "Short reason on an export option that cannot be chosen yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not available yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未开放" } }
+      }
+    },
+    "export.reason.photosAddOnly" : {
+      "comment" : "Photos saving: add-only permission cannot replace a photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add-only permission does not allow replacement." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅添加权限不允许替换照片。" } }
+      }
+    },
+    "export.reason.photosFileSource" : {
+      "comment" : "Photos saving: a photo opened from Files has no library photo to replace.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A photo opened from Files has no library photo to replace." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从文件打开的照片无法替换图库原图。" } }
+      }
+    },
+    "export.reason.photosFramed" : {
+      "comment" : "Photos saving: a framed export is saved as a new photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A framed export must be saved as a new photo." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "带边框的导出需存为新照片。" } }
+      }
+    },
+    "export.reason.photosLibraryAccess" : {
+      "comment" : "Photos saving: the permission does not cover this photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permission does not allow replacing this photo." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前权限不允许替换此照片。" } }
+      }
+    },
+    "export.reason.photosNotVerified" : {
+      "comment" : "Export blocked: saving to Photos is not open yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving to Photos is not available yet." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "存到“照片”尚未开放。" } }
+      }
+    },
+    "export.reason.photosPermission" : {
+      "comment" : "Export blocked: no permission to save to the photo library.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photo library permission is required." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要照片图库权限。" } }
+      }
+    },
+    "export.reason.sdrVersion" : {
+      "comment" : "Export plan notice: HDR is off, so a gain-map format writes its SDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR is off. An SDR version will be written." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR 已关闭，将写出 SDR 版本。" } }
+      }
+    },
+    "export.reason.socialAspect" : {
+      "comment" : "Export plan notice: the social destination may crop the photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Instagram may crop this photo to 4:5 or 1.91:1." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Instagram 会把这张照片裁成 4:5 或 1.91:1。" } }
+      }
+    },
+    "export.reason.unsupportedPair" : {
+      "comment" : "Export blocked: the photo's gain map cannot be written in this combination.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This output combination is not supported." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持此输出组合。" } }
+      }
+    },
+    "export.reason.useLongEdge %@" : {
+      "comment" : "Action when memory blocks the export: set the largest long edge that fits, in pixels.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change to long edge %@ px" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "改为长边 %@ px" } }
+      }
+    },
+    "group.color" : {
+      "comment" : "Adjustment group title.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颜色" } }
+      }
+    },
+    "group.detail" : {
+      "comment" : "Adjustment group title: RAW noise reduction, sharpness and lens correction.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Detail" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "细节" } }
+      }
+    },
+    "group.hdr" : {
+      "comment" : "Adjustment group title.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } }
+      }
+    },
+    "group.hdrOnly" : {
+      "comment" : "Badge under the HDR group title: these controls only change what lies above SDR white.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Affects HDR only" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只影响 HDR" } }
+      }
+    },
+    "group.light" : {
+      "comment" : "Adjustment group title.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Light" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "光线" } }
+      }
+    },
+    "group.look" : {
+      "comment" : "Adjustment group title: LUTs.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Look" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "风格" } }
+      }
+    },
+    "group.reset" : {
+      "comment" : "Resets every control in the group to its default.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Group" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置本组" } }
+      }
+    },
+    "group.summary.item %@ %@" : {
+      "comment" : "One changed control in a collapsed group's summary: name, then value.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ %2$@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ %2$@" } }
+      }
+    },
+    "group.summary.more %@" : {
+      "comment" : "How many more controls a collapsed group's summary leaves out.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "+%@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "+%@" } }
+      }
+    },
+    "group.summary.none" : {
+      "comment" : "Summary of a collapsed group that holds its defaults.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No changes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未调整" } }
+      }
+    },
+    "group.summary.off %@" : {
+      "comment" : "A switched-off control in a collapsed group's summary.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ off" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 关" } }
+      }
+    },
+    "group.summary.on %@" : {
+      "comment" : "A switched-on control in a collapsed group's summary.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ on" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 开" } }
+      }
+    },
+    "hdr.source.ai" : {
+      "comment" : "HDR source option: predict the highlights with a model.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "AI" } }
+      }
+    },
+    "hdr.source.aiNote" : {
+      "comment" : "Note under the HDR source segments when the source uses AI.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI predicts the highlights from the picture; it can take a moment." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "AI 根据画面预测高光，可能需要片刻。" } }
+      }
+    },
+    "hdr.source.builtIn" : {
+      "comment" : "Read-only line in place of the HDR source for HDR and gain-map photos.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This photo has its own HDR; strength and range start from the original at 100%." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "照片自带 HDR；强度和范围以原片为 100%。" } }
+      }
+    },
+    "hdr.source.captured" : {
+      "comment" : "HDR source option for RAW: the highlights the sensor captured.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Captured" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "真实高光" } }
+      }
+    },
+    "hdr.source.capturedAI" : {
+      "comment" : "HDR source option for RAW: captured highlights plus AI.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "+ AI" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "+ AI" } }
+      }
+    },
+    "hdr.source.capturedExpand" : {
+      "comment" : "HDR source option for RAW: captured highlights plus expansion.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "+ Expand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "+ 扩展" } }
+      }
+    },
+    "hdr.source.expand" : {
+      "comment" : "HDR source option: expand the SDR photo's highlights analytically.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扩展" } }
+      }
+    },
+    "look.film.family.cinema" : {
+      "comment" : "Film menu heading: motion-picture negatives, printed on print film.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Motion Picture" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电影胶片" } }
+      }
+    },
+    "look.film.family.negative" : {
+      "comment" : "Film menu heading: colour negative films, printed on paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Colour Negative" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "彩色负片" } }
+      }
+    },
+    "look.film.family.slide" : {
+      "comment" : "Film menu heading: slide (reversal) films, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Slide" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "反转片" } }
+      }
+    },
+    "look.film.gold200" : {
+      "comment" : "Film stock option (look.film): a consumer colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Gold 200" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Gold 200" } }
+      }
+    },
+    "look.film.kodachrome64" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Kodachrome 64" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Kodachrome 64" } }
+      }
+    },
+    "look.film.none" : {
+      "comment" : "Film stock option (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "None" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
+      }
+    },
+    "look.film.portra400" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } }
+      }
+    },
+    "look.film.velvia100" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Velvia 100" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Velvia 100" } }
+      }
+    },
+    "look.film.vision3-500t" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } }
+      }
+    },
+    "look.input.clog3-cinemagamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } }
+      }
+    },
+    "look.input.flog2-fgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } }
+      }
+    },
+    "look.input.hlg" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } }
+      }
+    },
+    "look.input.logc3-awg3" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } }
+      }
+    },
+    "look.input.logc4-awg4" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } }
+      }
+    },
+    "look.input.p3" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display P3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Display P3" } }
+      }
+    },
+    "look.input.pq" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "PQ" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PQ" } }
+      }
+    },
+    "look.input.rec709" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } }
+      }
+    },
+    "look.input.slog3-sgamut3" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } }
+      }
+    },
+    "look.input.slog3-sgamut3cine" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3.Cine" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3.Cine" } }
+      }
+    },
+    "look.input.srgb" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } }
+      }
+    },
+    "look.input.vlog-vgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } }
+      }
+    },
+    "look.lut.none" : {
+      "comment" : "LUT menu and swatch: no LUT.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "None" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
+      }
+    },
+    "look.output.clog3-cinemagamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Canon Log 3 / Cinema Gamut" } }
+      }
+    },
+    "look.output.flog2-fgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "F-Log2 / F-Gamut" } }
+      }
+    },
+    "look.output.hlg" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HLG" } }
+      }
+    },
+    "look.output.logc3-awg3" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC3 / ARRI Wide Gamut 3" } }
+      }
+    },
+    "look.output.logc4-awg4" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LogC4 / ARRI Wide Gamut 4" } }
+      }
+    },
+    "look.output.p3" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display P3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Display P3" } }
+      }
+    },
+    "look.output.pq" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "PQ" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PQ" } }
+      }
+    },
+    "look.output.rec709" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Rec. 709" } }
+      }
+    },
+    "look.output.slog3-sgamut3" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3" } }
+      }
+    },
+    "look.output.slog3-sgamut3cine" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3.Cine" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "S-Log3 / S-Gamut3.Cine" } }
+      }
+    },
+    "look.output.srgb" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "sRGB" } }
+      }
+    },
+    "look.output.vlog-vgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "V-Log / V-Gamut" } }
+      }
+    },
+    "look.space.display" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示" } }
+      }
+    },
+    "look.space.hdr" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR" } }
+      }
+    },
+    "look.space.log" : {
+      "comment" : "Heading in the LUT space menus (look.input, look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Camera Log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "相机 Log" } }
+      }
+    },
+    "undo.color.saturation" : {
+      "comment" : "Undo action name (color.saturation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Saturation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整饱和度" } }
+      }
+    },
+    "undo.color.tint" : {
+      "comment" : "Undo action name (color.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Tint" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整色调" } }
+      }
+    },
+    "undo.color.vibrance" : {
+      "comment" : "Undo action name (color.vibrance).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Vibrance" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整自然饱和度" } }
+      }
+    },
+    "undo.color.warmth" : {
+      "comment" : "Undo action name (color.warmth).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Temperature" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整色温" } }
+      }
+    },
+    "undo.develop.colorNR" : {
+      "comment" : "Undo action name (develop.colorNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Color Noise Reduction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整色彩降噪" } }
+      }
+    },
+    "undo.develop.lensCorrection" : {
+      "comment" : "Undo action name (develop.lensCorrection).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch Lens Correction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开关镜头校正" } }
+      }
+    },
+    "undo.develop.luminanceNR" : {
+      "comment" : "Undo action name (develop.luminanceNR).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Noise Reduction" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整降噪" } }
+      }
+    },
+    "undo.develop.sharpness" : {
+      "comment" : "Undo action name (develop.sharpness).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Sharpness" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整锐度" } }
+      }
+    },
+    "undo.develop.temperature" : {
+      "comment" : "Undo action name (develop.temperature).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Temperature" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整色温" } }
+      }
+    },
+    "undo.develop.tint" : {
+      "comment" : "Undo action name (develop.tint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Tint" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整色调" } }
+      }
+    },
+    "undo.hdr.coverage" : {
+      "comment" : "Undo action name (hdr.coverage).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Area Coverage" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整覆盖面积" } }
+      }
+    },
+    "undo.hdr.enabled" : {
+      "comment" : "Undo action name (hdr.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch HDR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开关 HDR" } }
+      }
+    },
+    "undo.hdr.expansionStart" : {
+      "comment" : "Undo action name (hdr.expansionStart).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Expansion Start" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整扩展起点" } }
+      }
+    },
+    "undo.hdr.model" : {
+      "comment" : "Undo action name (hdr.model).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Model" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更换模型" } }
+      }
+    },
+    "undo.hdr.range" : {
+      "comment" : "Undo action name (hdr.range).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change HDR Range" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 HDR 范围" } }
+      }
+    },
+    "undo.hdr.sdrRolloff" : {
+      "comment" : "Undo action name (hdr.sdrRolloff).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change SDR Highlight Rolloff" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 SDR 高光过渡" } }
+      }
+    },
+    "undo.hdr.source" : {
+      "comment" : "Undo action name (hdr.source).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change HDR Source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更改 HDR 来源" } }
+      }
+    },
+    "undo.hdr.strength" : {
+      "comment" : "Undo action name (hdr.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change HDR Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 HDR 强度" } }
+      }
+    },
+    "undo.look.enabled" : {
+      "comment" : "Undo action name (look.enabled).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch LUT" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开关 LUT" } }
+      }
+    },
+    "undo.look.film" : {
+      "comment" : "Undo action name (look.film).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Film" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择胶片" } }
+      }
+    },
+    "undo.look.filmAntihalation" : {
+      "comment" : "Undo action name (look.filmAntihalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Antihalation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更改防光晕层" } }
+      }
+    },
+    "undo.look.filmExposure" : {
+      "comment" : "Undo action name (look.filmExposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Film Exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整胶片曝光" } }
+      }
+    },
+    "undo.look.filmGrain" : {
+      "comment" : "Undo action name (look.filmGrain).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Grain" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整颗粒" } }
+      }
+    },
+    "undo.look.filmHalation" : {
+      "comment" : "Undo action name (look.filmHalation).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整光晕" } }
+      }
+    },
+    "undo.look.filmStrength" : {
+      "comment" : "Undo action name (look.filmStrength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Film Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整胶片强度" } }
+      }
+    },
+    "undo.look.input" : {
+      "comment" : "Undo action name (look.input).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change LUT Input Space" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更改 LUT 输入空间" } }
+      }
+    },
+    "undo.look.lut" : {
+      "comment" : "Undo action name (look.lut).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose LUT" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择 LUT" } }
+      }
+    },
+    "undo.look.output" : {
+      "comment" : "Undo action name (look.output).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change LUT Output Space" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更改 LUT 输出空间" } }
+      }
+    },
+    "undo.look.strength" : {
+      "comment" : "Undo action name (look.strength).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change LUT Strength" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 LUT 强度" } }
+      }
+    },
+    "undo.resetAll" : {
+      "comment" : "Undo action name of Reset All.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部重置" } }
+      }
+    },
+    "undo.resetGroup %@" : {
+      "comment" : "Undo action name of ↺ on a group; the argument is the group's name.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置%@" } }
+      }
+    },
+    "undo.tone.blacks" : {
+      "comment" : "Undo action name (tone.blacks).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Black Point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整黑点" } }
+      }
+    },
+    "undo.tone.contrast" : {
+      "comment" : "Undo action name (tone.contrast).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Contrast" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整对比度" } }
+      }
+    },
+    "undo.tone.exposure" : {
+      "comment" : "Undo action name (tone.exposure).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Exposure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整曝光" } }
+      }
+    },
+    "undo.tone.highlights" : {
+      "comment" : "Undo action name (tone.highlights).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Highlights" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整高光" } }
+      }
+    },
+    "undo.tone.shadows" : {
+      "comment" : "Undo action name (tone.shadows).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Shadows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整阴影" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

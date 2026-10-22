@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include "hyperdr/foundation/raster_budget.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include <limits>
 #include <stdexcept>
 
@@ -9,8 +11,8 @@ namespace hyperdr::codec {
 // The product supports raster inputs up to 11656x8742 in either orientation.
 // Keep the dimensions explicit: an area-only check would accept an image with
 // one axis beyond the supported decoder geometry.
-inline constexpr std::uint64_t kMaxRasterWidth = 11656ULL;
-inline constexpr std::uint64_t kMaxRasterHeight = 8742ULL;
+inline constexpr std::uint64_t kMaxRasterWidth = kRasterWidthLimit;
+inline constexpr std::uint64_t kMaxRasterHeight = kRasterHeightLimit;
 inline constexpr std::uint64_t kMaxRasterPixels =
     kMaxRasterWidth * kMaxRasterHeight;
 // The raster pipeline's working-set estimate is 15 bytes per input pixel. It
@@ -38,30 +40,14 @@ inline constexpr std::uint64_t kMaxRawPixels =
   return pixel_count_ok(width, height, kMaxRawPixels);
 }
 
-// LibRaw always unpacks the complete sensor mosaic, including margins.  Its
-// half-size option reduces demosaic/output allocations only; treating the
-// entire working set as quarter-sized admits exactly the large-margin files
-// most likely to exhaust memory.
-[[nodiscard]] inline std::uint64_t raw_pipeline_bytes(
-    std::uint64_t raw_width, std::uint64_t raw_height,
-    std::uint64_t output_width, std::uint64_t output_height) {
-  if (!pixel_count_ok(raw_width, raw_height, kMaxRawPixels) ||
-      !pixel_count_ok(output_width, output_height, kMaxRawPixels)) {
+// CIRAWFilter's GPU working set plus output and one RGBA render block.
+[[nodiscard]] inline std::uint64_t ciraw_pipeline_bytes(std::uint64_t source_width,
+    std::uint64_t source_height,std::uint64_t output_width,std::uint64_t output_height,
+    std::uint64_t block_rows) {
+  if(!raw_input_budget_ok(source_width,source_height) || !raw_input_budget_ok(output_width,output_height) || !block_rows || block_rows>512)
     return std::numeric_limits<std::uint64_t>::max();
-  }
-  constexpr std::uint64_t kMosaicBytesPerPixel = 8;
-  constexpr std::uint64_t kOutputBytesPerPixel = 24;
-  const auto mosaic_pixels = raw_width * raw_height;
-  const auto output_pixels = output_width * output_height;
-  if (mosaic_pixels > std::numeric_limits<std::uint64_t>::max() /
-                          kMosaicBytesPerPixel ||
-      output_pixels > (std::numeric_limits<std::uint64_t>::max() -
-                       mosaic_pixels * kMosaicBytesPerPixel) /
-                          kOutputBytesPerPixel) {
-    return std::numeric_limits<std::uint64_t>::max();
-  }
-  return mosaic_pixels * kMosaicBytesPerPixel +
-         output_pixels * kOutputBytesPerPixel;
+  return 150ULL*1024*1024+16*source_width*source_height+12*output_width*output_height+
+      16*output_width*block_rows;
 }
 
 // Keep this non-throwing so it is also safe to use at the C decoder boundaries
@@ -95,15 +81,7 @@ inline constexpr std::uint64_t kMaxRawPixels =
 
 [[nodiscard]] inline bool raster_budget_ok(std::uint64_t width,
                                            std::uint64_t height) {
-  const bool dimensions_ok =
-      (width <= kMaxRasterWidth && height <= kMaxRasterHeight) ||
-      (height <= kMaxRasterWidth && width <= kMaxRasterHeight);
-  if (!dimensions_ok || !pixel_count_ok(width, height, kMaxRasterPixels)) {
-    return false;
-  }
-  const auto pixels = width * height;
-  return pixels <= kMaxRasterPixels &&
-         pixels <= kMaxRasterPeakBytes / 15U;
+  return raster_input_budget_ok(width, height);
 }
 
 struct RasterDecodePlan {

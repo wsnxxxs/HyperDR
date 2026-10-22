@@ -37,20 +37,8 @@ secrets/
 __pycache__/
 *.pyc
 /.pytest_cache/
-/hdr-workspace/
 /output/
-/.playwright-cli/
-/dist/
-/dist-release-*/
-/release-stage/
 /.workbuddy/
-/apps/desktop/node_modules/
-/apps/desktop/src-tauri/target/
-/apps/desktop/src-tauri/gen/
-/apps/desktop/build-sidecar/
-/apps/desktop/dist-sidecar/
-/apps/desktop/src-tauri/binaries/*
-!/apps/desktop/src-tauri/binaries/.gitkeep
 
 # Resume sidecars and decode caches live beside conversion output.
 .hyperdr/
@@ -73,3 +61,9 @@ __pycache__/
 
 # Keep documentation local.
 /docs/
+
+# Finder metadata
+.DS_Store
+
+# SwiftPM build output of the Swift packages.
+apps/apple/Packages/*/.build/

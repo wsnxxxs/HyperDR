@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/image/color.hpp"
@@ -94,7 +95,7 @@ std::vector<unsigned char> encode(const Fixture& f) {
 }
 hyperdr::DecodedImage decode(const Fixture& f, unsigned preview = 0,
                             hyperdr::ColorGamut fallback = hyperdr::ColorGamut::kSrgb) {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-png-decode-test.png";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-png-decode-test.png";
   hyperdr::write_binary_file_atomic(path, encode(f), true);
   hyperdr::RawDecodeOptions options;
   options.preview_max_edge = preview;
@@ -264,7 +265,7 @@ void check_preview() {
          "Adam7 changed the preview reduction kernel");
 }
 void check_decode_errors() {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-png-truncated-test.png";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-png-truncated-test.png";
   auto bytes = encode(Fixture{});
   bytes.resize(bytes.size() - 16);
   hyperdr::write_binary_file_atomic(path, bytes, true);
@@ -360,7 +361,11 @@ void check_content_peak() {
 }
 }  // namespace
 
-int main() {
+
+// A caption overlay is read as drawn: straight alpha, no colour conversion,
+// no compositing against black, and full alpha for an opaque file.
+
+int main() try {
   int failures = 0;
   for (auto test : {check_gamma, check_srgb, check_chrm, check_hdr_priority, check_narrow_range, check_preview,
                     check_decode_errors, check_block_boundaries, check_alpha, check_content_peak}) {
@@ -369,4 +374,10 @@ int main() {
   }
   if (!failures) std::cout << "PNG color and linear preview tests passed\n";
   return failures ? 1 : 0;
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

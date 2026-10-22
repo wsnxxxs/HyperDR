@@ -3,10 +3,14 @@
 hyperdr_add_module(container
   SOURCES
     src/exif.cpp
+    src/hvcc.cpp
+    src/heif_reader.cpp
+    src/annexb.cpp
+    src/heif_writer.cpp
     src/heif_tmap.cpp
-    src/heif_grid.cpp
     src/inspect.cpp
     src/iso_gain_map.cpp
+    src/gain_map_jpeg.cpp
   DEPENDS HyperDR::foundation
   PRIVATE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

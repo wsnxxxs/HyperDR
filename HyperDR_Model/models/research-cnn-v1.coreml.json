@@ -1,0 +1,98 @@
+{
+  "schema": "hyperdr.coreml-model/v1",
+  "modelId": "research-cnn-v1",
+  "version": "research-demo-fold0-seed908/v1",
+  "source": {
+    "onnx": "HyperDR_Model/models/research-cnn-v1.features.onnx",
+    "sha256": "5f630fd0922312af05b396d3b7a0a8189634a2c8792b6d894cc3bc4a0ee4f388"
+  },
+  "operators": [
+    "Add",
+    "AveragePool",
+    "Conv",
+    "InstanceNormalization",
+    "Mul",
+    "Reshape",
+    "Shape",
+    "Sigmoid"
+  ],
+  "input": {
+    "name": "features",
+    "shape": [
+      "1",
+      "5",
+      "16..4096 (x192)",
+      "16..4096 (x256)"
+    ],
+    "stride": 16
+  },
+  "output": {
+    "name": "gain_stops",
+    "scale": "signed-log2-gain",
+    "unit": "stops"
+  },
+  "computePrecision": "float16",
+  "minimumDeploymentTarget": "iOS26/macOS26",
+  "mlpackageBytes": 1316275,
+  "weightsSha256": "3df046f7fa63ca40ea4056e8631c52557ae6e7d0084eb819e816dadd5a6059a1",
+  "installed": "apps/apple/Packages/HyperDRRender/Sources/HyperDRRender/Resources/research-cnn-v1.mlpackage",
+  "translationChecks": [
+    {
+      "grid": [
+        12,
+        16
+      ],
+      "tensor": [
+        192,
+        256
+      ],
+      "maxAbsStops": 0.010568022727966309,
+      "meanAbsStops": 0.004617215599864721,
+      "gainMaxStops": 0.9323030710220337
+    },
+    {
+      "grid": [
+        6,
+        9
+      ],
+      "tensor": [
+        96,
+        144
+      ],
+      "maxAbsStops": 0.0008481144905090332,
+      "meanAbsStops": 0.0003074782725889236,
+      "gainMaxStops": 0.9197685122489929
+    },
+    {
+      "grid": [
+        32,
+        32
+      ],
+      "tensor": [
+        512,
+        512
+      ],
+      "maxAbsStops": 0.0012794137001037598,
+      "meanAbsStops": 0.00033761037047952414,
+      "gainMaxStops": 0.940671980381012
+    },
+    {
+      "grid": [
+        43,
+        64
+      ],
+      "tensor": [
+        688,
+        1024
+      ],
+      "maxAbsStops": 0.0015088915824890137,
+      "meanAbsStops": 0.00033714412711560726,
+      "gainMaxStops": 0.9560220241546631
+    }
+  ],
+  "tool": {
+    "coremltools": "9.0",
+    "onnx": "1.23.2",
+    "numpy": "2.5.4"
+  }
+}

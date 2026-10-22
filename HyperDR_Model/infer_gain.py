@@ -297,14 +297,10 @@ def main() -> None:
         gain_size = [int(gain_stops.shape[1]), int(gain_stops.shape[0])]
         report["model_binding"] = {
             "contract": "hyperdr.model-gain-binding/v2",
+            # Forward the engine identity verbatim, including the Apple RAW OS build.
             "preprocessing_fingerprint": model_input_descriptor["preprocessing_fingerprint"],
             "source": {
                 "sha256": model_input_descriptor["source_sha256"],
-                **({"raw_profile_sha256": model_input_descriptor["raw_profile_sha256"]}
-                   if model_input_descriptor.get("raw_profile_sha256") else {}),
-                **({"raw_lens_profile_sha256": model_input_descriptor["raw_lens_profile_sha256"]}
-                   if model_input_descriptor.get("raw_lens_profile_sha256") else {}),
-                "highlight_recovery": model_input_descriptor["highlight_recovery"],
                 "orientation": model_input_descriptor["orientation"],
                 "sensor_size": model_input_descriptor["sensor_size"],
                 "requested_crop": model_input_descriptor["requested_crop"],
@@ -315,7 +311,8 @@ def main() -> None:
                 "delivered_crop_origin_sensor": model_input_descriptor[
                     "delivered_crop_origin_sensor"
                 ],
-                "raw_half_size": model_input_descriptor["raw_half_size"],
+                "raw_decoder_version": model_input_descriptor.get("raw_decoder_version", ""),
+                "raw_scale": model_input_descriptor.get("raw_scale", 1),
             },
             "development_recipe": model_input_descriptor["development_recipe"],
             "geometry": {

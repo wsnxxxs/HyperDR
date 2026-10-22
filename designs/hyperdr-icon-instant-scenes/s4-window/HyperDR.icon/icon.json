@@ -1,0 +1,116 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "extended-srgb:0.13333,0.12941,0.12157,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "extended-srgb:0.05490,0.05490,0.05098,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "window",
+          "image-name": "window.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:1.00000,0.96471,0.90196,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "floor-light",
+          "image-name": "floor-light.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.14902,0.14118,0.12157,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "room",
+          "image-name": "room.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.04706,0.04314,0.03922,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "card",
+          "image-name": "card.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.85098,0.83922,0.81176,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "name": "back",
+          "image-name": "back.svg",
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.49412,0.47843,0.45098,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

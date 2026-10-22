@@ -1,5 +1,9 @@
 # HyperDR-ML
 
+> P7-4: product inference now uses Core ML in HyperDRRender. The native ncnn
+> runtime, ncnn deployment assets and CLI were removed. Native deployment
+> commands below are historical; training, ONNX and Core ML tools remain.
+
 Training workspace for predicting Apple-style perceptual HDR gain maps from SDR
 photographs. HyperDR already derives a gain map from image content; this project
 learns to predict Apple-style gain maps from a corpus of Apple-rendered SDR
@@ -237,7 +241,7 @@ PYTHONPATH=. .venv/bin/python infer_gain.py \
 ```
 
 The research inference command above remains useful for evaluating checkpoints
-and sidecar compatibility; it is not used by the packaged panel. Production
+and sidecar compatibility; it is not used by the application. Production
 deployment exports inference-only ONNX with `export_onnx.py`, converts the
 five-plane ONNX view with `scripts/convert_ncnn.py`, and embeds the resulting
 ncnn param/bin in `HyperDR.exe`.
@@ -347,5 +351,40 @@ PYTHONPATH=. .venv/bin/python infer_gain.py --help
 
 There is no separate model test suite in this runtime copy. During an iteration,
 run the dataset audit, training, evaluation, or inference command that owns the
-behaviour being changed. The panel's model orchestration contract is covered by
-the repository's focused Python checks under `tests/python/`.
+behaviour being changed. The deployment-cache resume contract is covered by
+`tests/test_deployment_cache.py` (run with `python3 -m unittest discover -s tests`).
+
+## Core ML export (P7)
+
+HyperDR's native runtime embeds the frozen feature graph as ncnn today; the P7
+GPU pipeline runs the same weights through Core ML on Mac, iPhone and iPad.
+`scripts/convert_coreml.py` translates `models/research-cnn-v1.features.onnx`
+into `models/research-cnn-v1.mlpackage`:
+
+```bash
+python3 scripts/convert_coreml.py \
+  --install apps/apple/Packages/HyperDRRender/Sources/HyperDRRender/Resources
+```
+
+- Weights come from the ONNX asset, not from a second PyTorch export: that file
+  is the checkpoint the shipped ncnn model was produced from, and its sha256 is
+  recorded both in the model manifest and in the Core ML metadata.
+- The script translates the graph operator by operator into MIL and fails closed
+  on any operator it does not know, so a new export cannot silently drop a layer.
+- The spatial extent stays flexible (multiples of 16). The native caller chooses
+  the analysis grid from the photograph's size, and the network's group
+  normalisation makes the prediction depend on that grid, so a fixed-shape export
+  would change the result for every other aspect ratio.
+- Precision is float16, which is what the neural engine uses; the ONNX graph in
+  fp32 is the conversion reference. `--precision float32` exists for bisecting a
+  difference.
+- `models/research-cnn-v1.coreml.json` records the conversion: source hash,
+  operator list, input/output contract, weights hash and the per-grid translation
+  check against onnxruntime.
+
+The Xcode-side `ModelGainTests` retain frozen references captured before P7-4
+(`hyperdr.model-gain-references/v1`). They compare Core ML with the former ncnn
+backend on the same stored inputs. The old CLI fixture producer retired with the
+C++ runtime; the frozen test inputs and grids remain in HyperDRRender. Model
+updates should validate new references against the offline ONNX/Core ML tools,
+without restoring the retired native renderer.

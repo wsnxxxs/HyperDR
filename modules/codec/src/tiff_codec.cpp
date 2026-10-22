@@ -1,4 +1,5 @@
 #include "hyperdr/codec/encoders.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -8,6 +9,8 @@
 #include "internal/metadata.hpp"
 
 #include <tiffio.h>
+#include "internal/verify_pixels.hpp"
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -28,10 +31,10 @@ namespace {
 
 struct MemoryFile {
   std::vector<std::uint8_t> bytes;
-  const std::vector<std::uint8_t>* input{};
+  std::span<const std::uint8_t> input{};
   std::uint64_t position{};
   bool writable{};
-  const std::vector<std::uint8_t>& contents() const { return input ? *input : bytes; }
+  std::span<const std::uint8_t> contents() const { return input.empty() ? std::span<const std::uint8_t>(bytes) : input; }
 };
 
 tmsize_t read_memory(thandle_t handle, void* destination, tmsize_t count) {
@@ -103,7 +106,7 @@ DecodedImage decode_tiff_bytes(const std::vector<std::uint8_t>& bytes,
                                std::uint32_t preview_max_edge,
                                ColorGamut default_gamut) {
   MemoryFile file;
-  file.input = &bytes;
+  file.input = bytes;
   auto tiff = open_tiff(file, "rm");
   if (TIFFIsTiled(tiff.get())) throw std::runtime_error("tiled TIFF is not supported");
   std::uint32_t width = 0, height = 0;
@@ -258,6 +261,7 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
     TIFFSetField(tiff.get(), TIFFTAG_SOFTWARE, "HyperDR");
     std::vector<std::uint16_t> row(static_cast<std::size_t>(image.width) * 3);
     for (std::uint32_t y = 0; y < image.height; ++y) {
+      check_cancelled();
       for (std::size_t x = 0; x < image.width; ++x) {
         const auto i = static_cast<std::size_t>(y) * row.size() + x * 3;
         auto color = fit_linear_p3_gamut(image.pixels[i], image.pixels[i+1], image.pixels[i+2],
@@ -275,10 +279,107 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
   return std::move(file.bytes);
 }
 
-void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes) {
-  const auto result = codec::decode_tiff_bytes(bytes, 0, ColorGamut::kSrgb);
-  if (!result.linear_p3.width || !result.linear_p3.height || result.decode.resolution_reduced)
-    throw std::runtime_error("SDR TIFF verification failed");
+void write_sdr_tiff_rows(const EncodingRows& image, const PhotoMetadata& metadata,
+                         ColorGamut gamut, const std::filesystem::path& path) {
+  if (image.channels != 3) throw std::invalid_argument("SDR TIFF requires RGB pixels");
+  if (gamut != ColorGamut::kSrgb && gamut != ColorGamut::kDisplayP3)
+    throw std::invalid_argument("SDR TIFF supports sRGB or Display P3");
+  {
+    codec::TiffHandle tiff(TIFFOpen(path.c_str(),"wl"));
+    if(!tiff) throw std::runtime_error("cannot open streaming TIFF");
+    if (!TIFFSetField(tiff.get(), TIFFTAG_IMAGEWIDTH, image.width) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_IMAGELENGTH, image.height) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_SAMPLESPERPIXEL, 3) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_BITSPERSAMPLE, 16) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_UINT) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_COMPRESSION, COMPRESSION_ADOBE_DEFLATE) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT) ||
+        !TIFFSetField(tiff.get(), TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tiff.get(), 0)))
+      throw std::runtime_error("cannot configure SDR TIFF");
+    const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
+    if (!TIFFSetField(tiff.get(), TIFFTAG_ICCPROFILE,
+                      static_cast<std::uint32_t>(icc.size()), icc.data()))
+      throw std::runtime_error("cannot attach colour ICC to TIFF");
+    if (!metadata.make.empty()) TIFFSetField(tiff.get(), TIFFTAG_MAKE, metadata.make.c_str());
+    if (!metadata.model.empty()) TIFFSetField(tiff.get(), TIFFTAG_MODEL, metadata.model.c_str());
+    if (!metadata.artist.empty()) TIFFSetField(tiff.get(), TIFFTAG_ARTIST, metadata.artist.c_str());
+    if (!metadata.copyright.empty()) TIFFSetField(tiff.get(), TIFFTAG_COPYRIGHT, metadata.copyright.c_str());
+    if (!metadata.date_time.empty()) TIFFSetField(tiff.get(), TIFFTAG_DATETIME, metadata.date_time.c_str());
+    TIFFSetField(tiff.get(), TIFFTAG_SOFTWARE, "HyperDR");
+    std::vector<std::uint16_t> row(static_cast<std::size_t>(image.width) * 3);
+    std::vector<float> linear(row.size());
+    for (std::uint32_t y = 0; y < image.height; ++y) {
+      check_cancelled();
+      image.read(y,linear);
+      for (std::size_t x = 0; x < image.width; ++x) {
+        const auto i = x * 3;
+        if(gamut==ColorGamut::kSrgb) {
+          const auto fitted=compress_linear_p3_to_srgb(linear[i],linear[i+1],linear[i+2]);
+          std::copy(fitted.begin(),fitted.end(),linear.begin()+i);
+        }
+        auto color = fit_linear_p3_gamut(linear[i], linear[i+1], linear[i+2],
+                                         1.0F, gamut == ColorGamut::kSrgb);
+        if (gamut == ColorGamut::kSrgb) color = linear_p3_to_rec709(color[0], color[1], color[2]);
+        for (unsigned c = 0; c < 3; ++c) {
+          const float encoded = srgb_oetf(std::clamp(color[c], 0.0F, 1.0F));
+          row[x * 3 + c] = static_cast<std::uint16_t>(std::lround(encoded * 65535.0F));
+        }
+      }
+      if (TIFFWriteScanline(tiff.get(), row.data(), y) < 0)
+        throw std::runtime_error("SDR TIFF scanline encoding failed");
+    }
+    // TIFFClose cannot report failure. Commit the final strip and IFD while
+    // failures can still prevent publication, then close the owned fd explicitly.
+    if (!TIFFWriteDirectory(tiff.get()) || !TIFFFlush(tiff.get()))
+      throw std::runtime_error("SDR TIFF finalization failed");
+    const int fd = TIFFFileno(tiff.get());
+    TIFFCleanup(tiff.release());
+    if (::close(fd) != 0) throw std::runtime_error("SDR TIFF close failed");
+  }
 }
 
-}  // namespace hyperdr
+namespace codec {
+VerificationResult verify_tiff_pixels(std::span<const std::uint8_t> bytes) {
+  MemoryFile file;file.input=bytes;
+  auto tiff=open_tiff(file,"rm");
+  if(TIFFIsTiled(tiff.get()))throw std::runtime_error("tiled TIFF is not supported");
+  unsigned width=0,height=0;
+  std::uint16_t bits=0,samples=0,photo=0,planar=0,format=0;
+  if(!TIFFGetField(tiff.get(),TIFFTAG_IMAGEWIDTH,&width)||!TIFFGetField(tiff.get(),TIFFTAG_IMAGELENGTH,&height))
+    throw std::runtime_error("TIFF has no image dimensions");
+  TIFFGetFieldDefaulted(tiff.get(),TIFFTAG_BITSPERSAMPLE,&bits);
+  TIFFGetFieldDefaulted(tiff.get(),TIFFTAG_SAMPLESPERPIXEL,&samples);
+  TIFFGetFieldDefaulted(tiff.get(),TIFFTAG_PHOTOMETRIC,&photo);
+  TIFFGetFieldDefaulted(tiff.get(),TIFFTAG_PLANARCONFIG,&planar);
+  TIFFGetFieldDefaulted(tiff.get(),TIFFTAG_SAMPLEFORMAT,&format);
+  // This is an export validator: the writer emits unsigned contiguous RGB16.
+  if(!width||!height||bits!=16||samples!=3||photo!=PHOTOMETRIC_RGB||
+     planar!=PLANARCONFIG_CONTIG||format!=SAMPLEFORMAT_UINT)
+    throw std::runtime_error("SDR TIFF verification requires unsigned contiguous RGB16");
+  const auto stride=std::size_t(width)*6;
+  if(TIFFScanlineSize(tiff.get())!=static_cast<tmsize_t>(stride))throw std::runtime_error("unsupported TIFF scanline layout");
+  SourceColor color(ColorGamut::kSrgb);
+  unsigned iccSize=0;void* icc=nullptr;
+  if(TIFFGetField(tiff.get(),TIFFTAG_ICCPROFILE,&iccSize,&icc)&&iccSize&&icc) {
+    color.icc.assign(static_cast<std::uint8_t*>(icc),static_cast<std::uint8_t*>(icc)+iccSize);color.source="icc";
+  }
+  const RgbRowTransform transform(color,16,false,false);
+  std::vector<std::uint8_t> row(stride);
+  std::vector<float> linear(std::size_t(width)*3);
+  VerificationPixels check(width,height,{});
+  for(unsigned y=0;y<height;++y) {
+    check_cancelled();
+    if(TIFFReadScanline(tiff.get(),row.data(),y)<0)throw std::runtime_error("TIFF scanline decode failed");
+    if constexpr(std::endian::native==std::endian::big)
+      for(std::size_t i=0;i<stride;i+=2)std::swap(row[i],row[i+1]);
+    transform.convert(row.data(),linear.data(),width);check.row(0,y,linear);
+  }
+  return check.result;
+}
+} // namespace codec
+void verify_sdr_tiff(std::span<const std::uint8_t> bytes) { (void)codec::verify_tiff_pixels(bytes); }
+
+} // namespace hyperdr

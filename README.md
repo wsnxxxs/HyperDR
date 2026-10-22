@@ -6,6 +6,12 @@ graph between preview and export. ImageIO and CIRAWFilter decode, HyperDRRecipe
 stores edits, HyperDRRender processes linear Display P3 and Core ML supplies AI
 gain. The app picks photos from Files or the system photo library.
 
+RAW decoder 9 requires iOS/iPadOS 27 or macOS 27 and a supported camera/file.
+On system version 26, new photos use the system's available RAW decoder. The
+app queries each photo's supported decoders without referencing RAW 9 symbols
+that are missing on older systems. Saved edits that require an unavailable
+decoder report an error instead of silently changing their appearance.
+
 Exports include Adaptive HDR HEIC, ISO 21496-1 gain-map JPEG, PQ/HLG HEIC and
 AVIF, SDR JPEG/TIFF, and ordinary SDR HEIC through ImageIO. Frame composition
 is in Render; the native package writers enforce zero gain on SDR mats and

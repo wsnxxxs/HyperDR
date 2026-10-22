@@ -1,3 +1,12 @@
+## Platform compatibility
+
+RAW 9 requires iOS/iPadOS 27 or macOS 27 and per-file support. The app's minimum
+OS remains 26. `preferredRAWDecoder` checks `supportedDecoderVersions` and selects
+its existing entries by raw value, avoiding references to `.version9` or
+`.version9DNG` symbols that can fail to load on older systems. New photos on 26
+keep Apple's available default; restoring an unavailable recorded decoder fails
+explicitly. See Apple's DTS explanation: https://developer.apple.com/forums/thread/843445
+
 # Opening feedback and RAW preview reuse
 
 ## UI contract (shared RecipeEditor)

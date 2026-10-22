@@ -129,8 +129,9 @@ photo-dependent HDR content into the mat.
 ## Current pipeline
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
-CIRAWFilter decode; Core ML supplies AI gain. New RAW photos select decoder 9
-when the file supports it (including `9.dng`), otherwise Apple's default; the exact
+CIRAWFilter decode; Core ML supplies AI gain. RAW decoder 9 requires iOS/iPadOS 27 or macOS 27; the app still supports OS 26.
+New RAW photos select decoder 9
+when the system and file support it (including `9.dng`), otherwise Apple's default; the exact
 version is stored in `Recipe.rawDecoderVersion`. A new photo whose decoder 9
 cannot decode retries Apple's default once and records that exact version.
 Saved recipes never downgrade. Old recipes without this field keep the system

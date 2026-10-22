@@ -31,9 +31,7 @@ struct FrameExportPlan {
     static func make(settings: FrameSettings, facts: CaptureFacts, photoSize: PixelSize,
                      choice: ExportChoice = .custom(CustomExportFormat())) throws -> FrameExportPlan? {
         guard settings.isEnabled else { return nil }
-        // Whether there is text does not depend on the layout the engine picks.
-        let hasCaption = !settings.style.caption(settings, facts: facts).isEmpty
-        let frame = settings.engineFrame(hasCaption: hasCaption)
+        let frame = settings.engineFrame()
         let layout = FramePixelLayout(try ExportPlanner.frameLayout(
             frame: frame, choice: choice, photo: ExportPixelSize(width: photoSize.width, height: photoSize.height)))
         let caption = settings.style.caption(settings, facts: facts, variant: layout.variant,

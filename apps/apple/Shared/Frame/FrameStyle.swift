@@ -177,16 +177,17 @@ struct FrameSettings: Equatable, Codable {
     var showsDate = false
     var signature = ""
 
-    /// The hyperdr.frame/v1 document. Without caption text the band is
-    /// dropped, so a gallery mat with nothing to say is even on all sides.
-    func engineFrame(hasCaption: Bool, overlay: URL? = nil) -> [String: JSONValue] {
+    /// The hyperdr.frame/v1 document. The caption band is the style's own,
+    /// with or without caption text, so a photo without EXIF keeps the same
+    /// card as one with it.
+    func engineFrame(overlay: URL? = nil) -> [String: JSONValue] {
         let geometry = style.geometry
         var frame: [String: JSONValue] = [
             "schema": .string("hyperdr.frame/v1"),
             "background": .string(tone.background.hex),
             "margins": .object(["top": .number(geometry.top), "right": .number(geometry.right),
                                 "bottom": .number(geometry.bottom), "left": .number(geometry.left)]),
-            "caption": .number(hasCaption ? geometry.caption : 0),
+            "caption": .number(geometry.caption),
             "reference": .string("short"),
         ]
         if !geometry.variants.isEmpty {
@@ -199,9 +200,7 @@ struct FrameSettings: Equatable, Codable {
                     entry["margins"] = .object(["top": .number(margins.top), "right": .number(margins.right),
                                                 "bottom": .number(margins.bottom), "left": .number(margins.left)])
                 }
-                // Without a caption the band goes in every layout, not just the default.
-                if let caption = variant.caption { entry["caption"] = .number(hasCaption ? caption : 0) }
-                else if !hasCaption { entry["caption"] = .number(0) }
+                if let caption = variant.caption { entry["caption"] = .number(caption) }
                 if variant.referencesLongEdge { entry["reference"] = .string("long") }
                 return (variant.name, .object(entry))
             }))

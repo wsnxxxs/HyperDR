@@ -2,9 +2,9 @@
 
 namespace hyperdr {
 
-// One place for the version that the CLI banner, the run report, the Exif
-// Software tag, and the resumable-batch fingerprint all have to agree on.
-inline constexpr char kVersion[] = "1.0.0";
+// Product version shared by engine diagnostics, the C ABI and the Exif
+// Software tag. Keep it aligned with the native apps and release metadata.
+inline constexpr char kVersion[] = "0.5.0";
 
 // Resume sidecars use this separate revision because a renderer change can
 // invalidate an existing output without being a user-visible product release.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 1.0.0 LANGUAGES CXX)
+project(HyperDR VERSION 0.5.0 LANGUAGES CXX)
 
 # Core modules are also linked into the C ABI shared library.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

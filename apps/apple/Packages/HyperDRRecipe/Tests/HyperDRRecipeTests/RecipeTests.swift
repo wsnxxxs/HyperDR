@@ -4,7 +4,7 @@ import Testing
 
 @Test func parameterTableIsComplete() throws {
     let all = Adjustments.all
-    #expect(all.count == 28)
+    #expect(all.count == 32)
     #expect(Set(all.map(\.id)).count == all.count, "duplicate parameter ids")
     #expect(Adjustments.byID.count == all.count)
 

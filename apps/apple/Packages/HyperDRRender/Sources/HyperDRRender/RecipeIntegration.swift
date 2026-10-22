@@ -89,6 +89,11 @@ extension RenderAdjustments {
         look.strength = try values.number("look.strength")
         look.input = try values.space("look.input")
         look.output = try values.space("look.output")
+        film.strength = try values.number("look.filmStrength")
+        film.grain = try values.number("look.filmGrain")
+        film.exposure = try values.optionalNumber("look.filmExposure")
+        guard let stock = values.value("look.film")?.stringValue, Adjustments.filmStocks.contains(stock) else { throw RenderError.invalidAdjustment }
+        film.stock = FilmStockID(rawValue: stock)
         if !options.bypassedGroups.contains(.look), let reference = recipe.look {
             if let lut, lut.contentHash != reference.contentHash { throw RenderError.invalidLUT("LUT content hash mismatch") }
             if look.enabled && look.strength != 0 && lut == nil { throw RenderError.invalidLUT("Resolve recipe.look before rendering") }
@@ -111,12 +116,16 @@ extension SourceOptions {
         raw.sharpness = try values.optionalNumber("develop.sharpness")
     }
 
-    /// A log look that will actually be applied (the recipe has a LUT, it is
-    /// enabled, and its strength is not zero). A bypassed look group reads as
-    /// the sRGB default, so the comparison original stays on Apple's curve.
+    /// A film, or a log look, that will actually be applied (a film is chosen with a
+    /// strength above zero; or the recipe has a LUT, it is enabled, and its strength is
+    /// not zero). Film exposes the scene, so it takes RAW without Apple's tone curve.
+    /// A bypassed look group reads as the defaults, so the comparison original stays
+    /// on Apple's curve.
     static func sceneLinearDevelopment(recipe: Recipe, options: RenderOptions) -> Bool {
-        guard recipe.look != nil else { return false }
         let values = RecipeValues(recipe:recipe,options:options)
+        if let film = values.value("look.film")?.stringValue, film != Adjustments.filmStocks[0],
+           let strength = try? values.number("look.filmStrength"), strength != 0 { return true }
+        guard recipe.look != nil else { return false }
         guard (try? values.bool("look.enabled")) == true,
               let strength = try? values.number("look.strength"), strength != 0,
               let space = try? values.space("look.input"), space.isLog else { return false }

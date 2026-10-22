@@ -48,6 +48,8 @@ public actor RenderEngine {
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
     var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var filmMeterCache: (id: UUID, ev: Float)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
     private var sourceFamily: (key: SourceKey, id: UUID)?
@@ -81,7 +83,9 @@ public actor RenderEngine {
         let adjustmentURL = Bundle.module.url(forResource: "Adjustments", withExtension: "metal", subdirectory: "Shaders")!
         let displayURL = Bundle.module.url(forResource: "Display", withExtension: "metal", subdirectory: "Shaders")!
         let exportURL = Bundle.module.url(forResource:"Export",withExtension:"metal",subdirectory:"Shaders")!
-        let shader = try String(contentsOf: url, encoding: .utf8) + "\n" + String(contentsOf: adjustmentURL, encoding: .utf8)
+        let filmURL = Bundle.module.url(forResource:"Film",withExtension:"metal",subdirectory:"Shaders")!
+        let shader = try String(contentsOf: url, encoding: .utf8) + "\n" + String(contentsOf: filmURL, encoding: .utf8)
+            + "\n" + String(contentsOf: adjustmentURL, encoding: .utf8)
             + "\n" + String(contentsOf:displayURL,encoding:.utf8) + "\n" + String(contentsOf:exportURL,encoding:.utf8)
         let options = MTLCompileOptions()
         options.mathMode = .safe
@@ -111,6 +115,8 @@ public actor RenderEngine {
         outputCache = nil
         analysisCache = nil
         lutCache = nil
+        filmCache = nil
+        filmMeterCache = nil
         authorCache = nil
         displayMatrices.removeAll()
         context.clearCaches()

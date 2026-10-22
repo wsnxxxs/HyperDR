@@ -61,19 +61,21 @@ public struct RenderAdjustments: Hashable, Sendable {
     public var tone = ToneAdjustments()
     public var color = ColorAdjustments()
     public var look = LookAdjustments()
+    public var film = FilmAdjustments()
     public var hdr = HDRAdjustments()
     public init() {}
-    public var wholeImageIsIdentity: Bool { tone.isIdentity && color.isIdentity && look.isIdentity }
+    public var wholeImageIsIdentity: Bool { tone.isIdentity && color.isIdentity && look.isIdentity && film.isIdentity }
 
     func validate(domain: InputDomain) throws {
         for (id,value) in [("tone.exposure",tone.exposure),("tone.contrast",tone.contrast),
             ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.blacks",tone.blacks),
             ("color.warmth",color.warmth),("color.tint",color.tint),("color.vibrance",color.vibrance),
             ("color.saturation",color.saturation),("hdr.strength",hdr.strength),("hdr.coverage",hdr.coverage),
-            ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength)] {
+            ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength),("look.filmStrength",film.strength),("look.filmGrain",film.grain)] {
             try RenderParameter.check(value,id:id)
         }
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
+        if let exposure = film.exposure { try RenderParameter.check(exposure,id:"look.filmExposure") }
         if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
         if !look.isIdentity {
             guard !look.input.isLog || domain == .rawEDR else { throw RenderError.invalidAdjustment }

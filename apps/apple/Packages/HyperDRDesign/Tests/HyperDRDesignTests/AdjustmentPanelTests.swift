@@ -114,14 +114,26 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 @Test func lookControlsAppearOnceALUTIsChosen() {
     var recipe = Recipe(inputDomain: .sdr)
-    #expect(ids(recipe, .look) == ["look.lut"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film"])
     panel.set("look.lut", reference: "sha256:01", in: &recipe)
     #expect(recipe.look?.name == "Kodak 2383")
-    #expect(ids(recipe, .look) == ["look.lut", "look.enabled", "look.strength", "look.input", "look.output"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.enabled", "look.strength", "look.input", "look.output", "look.film"])
     #expect(AdjustmentText.summary(panel.group(group: .look, in: recipe)!, locale: english) == "Kodak 2383")
     let input = panel.control("look.input", in: recipe)
     #expect(input?.options.contains { $0.id == "slog3-sgamut3cine" } == false, "S-Log3 input is RAW only")
     #expect(input?.options.contains { AdjustmentText.LookSpaceFamily($0.id) == .log } == false, "Log input is RAW only")
+}
+
+@Test func filmStrengthAppearsOnceAFilmIsChosen() throws {
+    var recipe = Recipe(inputDomain: .sdr)
+    panel.set(Recipe.filmID, option: "velvia100", in: &recipe)
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmGrain"])
+    let film = try #require(panel.control(Recipe.filmID, in: recipe))
+    let sections = AdjustmentText.optionSections(film)
+    #expect(sections.count == 1 && sections[0].family == nil, "film stocks are not LUT spaces")
+    #expect(sections[0].options.map(\.id) == Adjustments.filmStocks)
+    panel.set(Recipe.filmID, option: "none", in: &recipe)
+    #expect(ids(recipe, .look) == ["look.lut", "look.film"])
 }
 
 @Test func choosingALUTStartsItsSpacesFromTheLibrary() {
@@ -285,8 +297,8 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 @Test func everyDeclaredKeyIsInTheCatalogueInBothLanguages() {
     let keys = AdjustmentText.declaredKeys
-    // `12 * 2`: the twelve LUT spaces, for look.input and look.output.
-    #expect(keys.count == Adjustments.all.count * 3 + 6 + 12 * 2 + 5)
+    // `12 * 2`: the twelve LUT spaces, for look.input and look.output; then the film stocks.
+    #expect(keys.count == Adjustments.all.count * 3 + 6 + 12 * 2 + Adjustments.filmStocks.count + 5)
     for locale in [english, Locale(identifier: "zh-Hans")] {
         for key in keys.sorted() {
             #expect(DesignStrings.string(key, locale: locale) != key, "\(key) missing in \(locale.identifier)")

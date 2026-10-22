@@ -138,9 +138,8 @@ public struct TouchParameterSlider: View {
                 }
             }
             .overlay(alignment: .top) {
-                if dragStart != nil, speed != .full {
-                    Text(speed == .half ? "design.adjust.fineTune.half" : "design.adjust.fineTune.quarter",
-                         bundle: .module)
+                if dragStart != nil, let hint = speed.hint {
+                    hint
                         .font(.hdr.caption)
                         .padding(.horizontal, Space.s2)
                         .padding(.vertical, 2)
@@ -221,6 +220,17 @@ public struct TouchParameterSlider: View {
         guard new != value else { return }
         if !spec.isAutomatic(spec.defaultValue), new == spec.defaultValue { detentHits += 1 }
         value = new
+    }
+}
+
+extension FineTune {
+    /// What the slowed-down speed is called while a drag lasts; nil at full speed.
+    public var hint: Text? {
+        switch self {
+        case .full: return nil
+        case .half: return Text("design.adjust.fineTune.half", bundle: .module)
+        case .quarter: return Text("design.adjust.fineTune.quarter", bundle: .module)
+        }
     }
 }
 

@@ -1,11 +1,17 @@
 import HyperDRDesign
 import SwiftUI
 
-/// The ruler under the iPhone's ring row (p7-adjustments §5.4): a fixed needle
-/// over a scale that the finger drags left and right, the full range about
-/// two and a half widths of the ruler (also in the standing bar of landscape). It keeps moving after a flick and settles on the step
-/// grid; passing the default gives a light tap and holds there for 2 pt,
-/// passing a major tick a selection tick. Double-tap resets.
+/// The ruler under the iPhone's ring row (p7-adjustments §5.4): the control's
+/// whole range laid across the ruler, and a needle at the value.
+///
+/// - A signed control has its zero in the middle, a one-sided one starts at
+///   the left end; the ticks between the default and the value are lit.
+/// - Dragging anywhere moves the needle with the finger, from where it was:
+///   touching never jumps. Moving the finger 40 pt above or below the ruler
+///   halves the speed, 100 pt quarters it, with a hint while that lasts.
+/// - The value holds at the default for a few points, with a light tap; a
+///   major tick gives a selection tick, an end of the range a firmer one.
+/// - Double-tap resets.
 ///
 /// The math is `RulerScale` (HyperDRDesign, unit-tested); this view draws
 /// it and turns gestures into values.
@@ -15,17 +21,18 @@ struct AdjustmentRuler: View {
     let reset: () -> Void
     var onEditingChanged: (Bool) -> Void = { _ in }
 
-    /// The unsnapped value while a drag or a flick is under way, so the scale
-    /// follows the finger between steps.
+    /// The unsnapped value while a drag is under way, so the needle follows
+    /// the finger between steps.
     @State private var moving: Double?
-    @State private var dragStart: Double?
-    @State private var flick: Task<Void, Never>?
-    /// Between the first touch and the end of the flick: one editing session,
-    /// also when a new drag catches the scale mid-flick.
-    @State private var editing = false
+    /// Where the current speed took over: the value then and the finger's x.
+    @State private var anchor: (value: Double, x: CGFloat)?
+    @State private var speed = FineTune.full
     @State private var tickHits = 0
     @State private var defaultHits = 0
+    @State private var limitHits = 0
     @Environment(\.isEnabled) private var isEnabled
+
+    private var tint: Color { control.group == .hdr ? Color.hdr.amber : Color.hdr.accent }
 
     private var value: Double {
         moving ?? control.number ?? control.defaultNumber ?? control.declaration.range?.lowerBound ?? 0
@@ -33,125 +40,122 @@ struct AdjustmentRuler: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if let scale = RulerScale(control, referenceWidth: geometry.size.width) {
+            if let scale = RulerScale(control, width: geometry.size.width) {
                 Canvas { context, size in draw(scale, in: &context, size: size) }
                     .contentShape(.rect)
-                    .gesture(drag(scale))
+                    .gesture(drag(scale, height: geometry.size.height))
                     .onTapGesture(count: 2) {
-                        stop()
+                        end()
                         reset()
                         defaultHits += 1
                     }
-                    .mask(fade)
+                    .overlay(alignment: .top) { hint }
                     .accessibilityElement()
                     .accessibilityLabel(AdjustmentText.label(control.declaration))
                     .accessibilityValue(Text(verbatim: control.readout()))
                     .accessibilityAdjustableAction { direction in
                         let step = control.spec?.step ?? scale.step
-                        write(value + (direction == .increment ? step : -step))
+                        write(scale.settled(value + (direction == .increment ? step : -step)))
                     }
             }
         }
         .opacity(isEnabled ? 1 : 0.4)
-        .onDisappear(perform: stop)
+        .onDisappear(perform: end)
         .sensoryFeedback(.selection, trigger: tickHits)
         .sensoryFeedback(.impact(weight: .light), trigger: defaultHits)
+        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.7), trigger: limitHits)
     }
 
-    private var fade: some View {
-        LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.15),
-                               .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
-                       startPoint: .leading, endPoint: .trailing)
+    @ViewBuilder private var hint: some View {
+        if anchor != nil, let hint = speed.hint {
+            hint
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, Space.s2)
+                .padding(.vertical, 2)
+                .background(.regularMaterial, in: .capsule)
+                .fixedSize()
+                .offset(y: -24)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
     }
 
     // MARK: Gesture
 
-    private func drag(_ scale: RulerScale) -> some Gesture {
+    private func drag(_ scale: RulerScale, height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { drag in
-                if dragStart == nil {
-                    flick?.cancel()
-                    dragStart = value
-                    if !editing {
-                        editing = true
-                        onEditingChanged(true)
-                    }
+                if anchor == nil {
+                    anchor = (value, drag.startLocation.x)
+                    onEditingChanged(true)
                 }
-                guard let dragStart else { return }
-                move(to: scale.value(from: dragStart, translation: drag.translation.width), scale)
-            }
-            .onEnded { drag in
-                guard let start = dragStart else { return }
-                dragStart = nil
-                let target = scale.settled(scale.value(from: start, translation: drag.predictedEndTranslation.width))
-                let from = value
-                flick = Task { @MainActor in
-                    // A short ease-out from where the finger left to where the flick ends.
-                    let frames = abs(target - from) * scale.pointsPerUnit > 8 ? 20 : 1
-                    for frame in 1...frames {
-                        let t = Double(frame) / Double(frames)
-                        move(to: from + (target - from) * (1 - pow(1 - t, 3)), scale)
-                        if frame < frames { try? await Task.sleep(for: .milliseconds(16)) }
-                        if Task.isCancelled { return }
-                    }
-                    stop()
+                // A new speed applies from where the finger is now, not to the whole drag.
+                let newSpeed = FineTune(verticalDistance: drag.location.y - height / 2)
+                if newSpeed != speed {
+                    speed = newSpeed
+                    anchor = (value, drag.location.x)
                 }
+                guard let anchor else { return }
+                move(to: scale.value(from: anchor.value, translation: drag.location.x - anchor.x, speed: speed.factor),
+                     scale)
             }
+            .onEnded { _ in end() }
     }
 
-    /// Ends the flick and the editing session, if any.
-    private func stop() {
-        flick?.cancel()
-        flick = nil
+    /// Ends the drag, if any, leaving the value on the step grid.
+    private func end() {
+        guard anchor != nil else { return }
+        anchor = nil
+        speed = .full
         moving = nil
-        dragStart = nil
-        if editing {
-            editing = false
-            onEditingChanged(false)
-        }
+        onEditingChanged(false)
     }
 
     private func move(to raw: Double, _ scale: RulerScale) {
         let old = value
-        let new = DefaultDetent.apply(raw, defaultValue: scale.defaultValue, pointsPerUnit: scale.pointsPerUnit)
-        moving = new
-        let crossing = scale.crossing(from: old, to: new)
-        if crossing.defaultValue { defaultHits += 1 } else if crossing.majorTick { tickHits += 1 }
-        write(new)
+        moving = raw
+        let crossing = scale.crossing(from: old, to: raw)
+        if crossing.defaultValue { defaultHits += 1 } else if crossing.limit { limitHits += 1 } else if crossing.majorTick { tickHits += 1 }
+        let settled = scale.settled(raw)
+        if settled != control.number { write(settled) }
     }
 
     // MARK: Drawing
 
     private func draw(_ scale: RulerScale, in context: inout GraphicsContext, size: CGSize) {
         let depth = size.height
-        let centre = size.width / 2
-        let ppu = scale.pointsPerUnit
-        let position = { (tick: Double) in centre + (tick - value) * ppu }
-        let lowest = max(scale.range.lowerBound, value - Double(centre) / ppu)
-        let highest = min(scale.range.upperBound, value + Double(centre) / ppu)
-        let minor = scale.minorTick
-        var index = ((lowest - scale.range.lowerBound) / minor).rounded(.up)
-        var tick = scale.range.lowerBound + index * minor
-        var ticks = Path(), majors = Path()
-        while tick <= highest + 1e-9 {
-            let ratio = tick / scale.majorTick
-            let isMajor = abs(ratio - ratio.rounded()) < 1e-6
-            let extent = depth * (isMajor ? 0.5 : 0.28)
-            let at = position(tick)
+        let left = Double(RulerScale.inset)
+        let x = { (value: Double) in left + scale.position(of: value) }
+        // Lit from the default (else the fill's origin) to the value.
+        let base = scale.defaultValue ?? control.spec?.origin ?? scale.range.lowerBound
+        let lit = control.isAutomatic ? nil : (min(base, value)...max(base, value))
+        var ticks = Path(), majors = Path(), litTicks = Path()
+        for tick in scale.ticks {
+            let extent = depth * (tick.isMajor ? 0.5 : 0.28)
+            let at = x(tick.value)
             let line = Path {
                 $0.move(to: CGPoint(x: at, y: (depth - extent) / 2))
                 $0.addLine(to: CGPoint(x: at, y: (depth + extent) / 2))
             }
-            if isMajor { majors.addPath(line) } else { ticks.addPath(line) }
-            index += 1
-            tick = scale.range.lowerBound + index * minor
+            if let lit, lit.contains(tick.value), lit.lowerBound != lit.upperBound {
+                litTicks.addPath(line)
+            } else if tick.isMajor {
+                majors.addPath(line)
+            } else {
+                ticks.addPath(line)
+            }
         }
-        context.stroke(ticks, with: .color(.white.opacity(0.35)), lineWidth: 1)
-        context.stroke(majors, with: .color(.white.opacity(0.75)), lineWidth: 1)
-        if let defaultValue = scale.defaultValue, (lowest...highest).contains(defaultValue) {
-            let at = position(defaultValue)
-            context.fill(Path(ellipseIn: CGRect(x: at - 2, y: depth * 0.12 - 2, width: 4, height: 4)), with: .color(.white))
+        context.stroke(ticks, with: .color(.white.opacity(0.3)), lineWidth: 1)
+        context.stroke(majors, with: .color(.white.opacity(0.65)), lineWidth: 1)
+        context.stroke(litTicks, with: .color(tint.opacity(0.85)), lineWidth: 1)
+        if let defaultValue = scale.defaultValue {
+            let at = x(defaultValue)
+            context.fill(Path(ellipseIn: CGRect(x: at - 2, y: depth * 0.1 - 2, width: 4, height: 4)),
+                         with: .color(.white.opacity(0.9)))
         }
-        context.fill(Path(CGRect(x: centre - 1, y: 0, width: 2, height: depth)), with: .color(control.group == .hdr ? Color.hdr.amber : Color.hdr.accent))
+        // Auto has no value of its own to hold: a quieter needle at what it resolves to.
+        let needle = Path(roundedRect: CGRect(x: x(value) - 1.5, y: depth * 0.18, width: 3, height: depth * 0.64),
+                          cornerRadius: 1.5)
+        context.fill(needle, with: .color(control.isAutomatic ? .white.opacity(0.55) : tint))
     }
 }

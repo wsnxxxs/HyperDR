@@ -316,13 +316,15 @@ struct AdjustmentControls: View {
 
     private func ring(_ control: AdjustmentControl, isCurrent: Bool) -> some View {
         AdjustmentRing(control: control, isCurrent: isCurrent, tint: group.id == .hdr ? Color.hdr.amber : Color.hdr.accent)
-            .onTapGesture(count: 2) {
-                panel.reset(control.id, in: &recipe)
-                resets += 1
-            }
+            // Selects on the first touch: a double-tap first in line would hold
+            // every single tap back until it failed.
             .onTapGesture {
                 withAnimation(.smooth(duration: 0.2)) { selected[group.id] = control.id }
             }
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                panel.reset(control.id, in: &recipe)
+                resets += 1
+            })
             .contextMenu {
                 Button { panel.reset(control.id, in: &recipe) } label: {
                     Label { AdjustmentText.command(.resetToDefault) } icon: { Image(systemName: "arrow.uturn.backward") }

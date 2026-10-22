@@ -136,7 +136,7 @@ combine_slice() {
   # stamped with the same minimum as its members instead of a copy of it.
   local deployment
   deployment="$(sed -n 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]*=\(.*\)$/\1/p' "$work/CMakeCache.txt" | head -1)"
-  deployment="${deployment:-26.0}"
+  deployment="${deployment:-27.0}"
   python3 - "$work" "$out/$slice" "$(slice_link_platform "$slice")" \
     "$(slice_closure_target "$slice")" "$deployment" <<'PY'
 import pathlib, shlex, subprocess, sys

@@ -36,7 +36,7 @@ def main() -> None:
     kit = repo / "apps/apple/Packages/HyperDRKit"
     (package / "Package.swift").write_text(
         '// swift-tools-version: 6.2\nimport PackageDescription\n'
-        'let package = Package(name: "FolderSandbox", platforms: [.macOS(.v26)], '
+        'let package = Package(name: "FolderSandbox", platforms: [.macOS(\"27.0\")], '
         f'dependencies: [.package(path: {json.dumps(str(kit))})], targets: ['
         '.executableTarget(name: "FolderSandbox", dependencies: ['
         '.product(name: "HyperDRKit", package: "HyperDRKit")], path: "Sources")])\n'

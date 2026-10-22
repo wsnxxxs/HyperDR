@@ -127,8 +127,7 @@ macOS blocks the first launch, choose *Open Anyway* in System Settings → Priva
 **iPhone and iPad** — build from source with Xcode; see the
 [installation notes](apps/apple/README-iOS.md).
 
-Requires iOS / iPadOS 26 or macOS 26 on Apple silicon. RAW decoder 9 needs
-version 27; older systems use the default decoder Apple provides.
+Requires iOS / iPadOS 27, or macOS 27 on Apple silicon.
 
 > HyperDR 0.5.0 is a pre-release. Full-size 110 MP RAW on iPhone is still being
 > verified, and iOS does not yet continue an export in the background.

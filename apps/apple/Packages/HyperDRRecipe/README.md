@@ -1,7 +1,7 @@
 # HyperDRRecipe
 
 Platform-independent recipe and parameter declarations: `Foundation` only, no
-AppKit, UIKit or Photos. Minimum macOS 26 / iOS 26. The inspector, undo, the GPU
+AppKit, UIKit or Photos. Minimum macOS 27 / iOS 27. The inspector, undo, the GPU
 nodes and `PHAdjustmentData` all read the same table (p7-adjustments §2.2).
 
 ## Parameters (`Adjustments.all`, 34 declarations)

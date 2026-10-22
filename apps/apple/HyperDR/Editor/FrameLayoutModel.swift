@@ -6,7 +6,7 @@ extension EditorModel {
     /// computation (§3.1).
     var frameLayout: FramePixelLayout? {
         guard let size = document?.pixelSize else { return nil }
-        let spec = frame.isEnabled ? frame.engineFrame(hasCaption: !frameCaption.isEmpty) : [:]
+        let spec = frame.isEnabled ? frame.engineFrame() : [:]
         return (try? Engine.frameLayout(frame: spec, photoWidth: size.width, photoHeight: size.height))
             .map(FramePixelLayout.init)
     }
@@ -32,7 +32,7 @@ extension EditorModel {
                             photoHeight: Int = 1500) -> FramePixelLayout? {
         var settings = FrameSettings()
         settings.style = style
-        let layout = try? Engine.frameLayout(frame: settings.engineFrame(hasCaption: style.hasCaption),
+        let layout = try? Engine.frameLayout(frame: settings.engineFrame(),
                                              photoWidth: photoWidth, photoHeight: photoHeight)
         return layout.map(FramePixelLayout.init)
     }

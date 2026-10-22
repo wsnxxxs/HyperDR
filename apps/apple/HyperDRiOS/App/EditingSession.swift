@@ -176,7 +176,7 @@ import SwiftUI
     /// photo's proportions (`frameMisfits`).
     var frameLayout: FramePixelLayout? {
         guard frame.isEnabled, let size = editor?.source?.pixelSize else { return nil }
-        return FrameLayouts.layout(frame, facts: facts, width: size.width, height: size.height)
+        return FrameLayouts.layout(frame, width: size.width, height: size.height)
     }
 
     /// The frame is on but does not fit this photo.

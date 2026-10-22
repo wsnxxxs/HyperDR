@@ -5,9 +5,9 @@ import HyperDREngine
 enum FrameLayouts {
     /// `settings` around a photo of this size; nil when the frame is off or
     /// the engine refuses the style for these proportions.
-    static func layout(_ settings: FrameSettings, facts: CaptureFacts, width: Int, height: Int) -> FramePixelLayout? {
+    static func layout(_ settings: FrameSettings, width: Int, height: Int) -> FramePixelLayout? {
         guard settings.isEnabled else { return nil }
-        let spec = settings.engineFrame(hasCaption: !settings.style.caption(settings, facts: facts).isEmpty)
+        let spec = settings.engineFrame()
         return (try? Engine.frameLayout(frame: spec, photoWidth: width, photoHeight: height)).map(FramePixelLayout.init)
     }
 
@@ -17,7 +17,7 @@ enum FrameLayouts {
         var settings = FrameSettings()
         settings.isEnabled = true
         settings.style = style
-        let spec = settings.engineFrame(hasCaption: style.hasCaption)
+        let spec = settings.engineFrame()
         return (try? Engine.frameLayout(frame: spec, photoWidth: width ?? 1000, photoHeight: height ?? 1500))
             .map(FramePixelLayout.init)
     }

@@ -89,17 +89,15 @@ import UniformTypeIdentifiers
     func testEngineDocumentFollowsTheSettings() {
         var settings = FrameSettings()
         settings.isEnabled = true
-        let gallery = settings.engineFrame(hasCaption: true)
+        let gallery = settings.engineFrame()
         XCTAssertEqual(gallery["background"], .string("#F5F3EE"))
         XCTAssertEqual(gallery["caption"], .number(0.13))
         XCTAssertNotNil(gallery["shadow"])
         XCTAssertNil(gallery["aspect"])
-        // No text, no band: the gallery mat is then even on every side.
-        XCTAssertEqual(settings.engineFrame(hasCaption: false)["caption"], .number(0))
         settings.showsShadow = false
         settings.style = .story
         settings.tone = .ink
-        let story = settings.engineFrame(hasCaption: true, overlay: URL(fileURLWithPath: "/tmp/caption.png"))
+        let story = settings.engineFrame(overlay: URL(fileURLWithPath: "/tmp/caption.png"))
         XCTAssertEqual(story["background"], .string("#0D0D0F"))
         XCTAssertEqual(story["aspect"], .object(["width": .number(9), "height": .number(16), "topShare": .number(0.42)]))
         XCTAssertNil(story["shadow"])
@@ -127,7 +125,7 @@ import UniformTypeIdentifiers
     func testEngineLaysOutTheSettings() throws {
         var settings = FrameSettings()
         settings.isEnabled = true
-        let layout = try Engine.frameLayout(frame: settings.engineFrame(hasCaption: true),
+        let layout = try Engine.frameLayout(frame: settings.engineFrame(),
                                             photoWidth: 6000, photoHeight: 9000)
         // 6% and 13% of the 6000-pixel short edge.
         XCTAssertEqual(layout.width, 6720)
@@ -140,7 +138,7 @@ import UniformTypeIdentifiers
     func testGeometryMirrorsTheEngineLayout() throws {
         var settings = FrameSettings()
         settings.isEnabled = true
-        let layout = try Engine.frameLayout(frame: settings.engineFrame(hasCaption: true),
+        let layout = try Engine.frameLayout(frame: settings.engineFrame(),
                                             photoWidth: 6000, photoHeight: 9000)
         let pixels = FramePixelLayout(layout)
         XCTAssertEqual(pixels, FramePixelLayout(
@@ -152,7 +150,7 @@ import UniformTypeIdentifiers
         for style in FrameStyle.allCases {
             var styled = FrameSettings()
             styled.style = style
-            let expected = try Engine.frameLayout(frame: styled.engineFrame(hasCaption: style.hasCaption),
+            let expected = try Engine.frameLayout(frame: styled.engineFrame(),
                                                   photoWidth: 1000, photoHeight: 1500)
             XCTAssertEqual(EditorModel.frameLayout(for: style), FramePixelLayout(expected), "\(style)")
         }
@@ -177,6 +175,11 @@ import UniformTypeIdentifiers
         XCTAssertEqual(bigEndian(16), plan.layout.caption.width)
         XCTAssertEqual(bigEndian(20), plan.layout.caption.height)
 
+        // A photo without EXIF keeps the style's band, with no overlay to draw in it.
+        let bare = try XCTUnwrap(FrameExportPlan.make(settings: settings, facts: CaptureFacts(), photoSize: size))
+        XCTAssertEqual(bare.layout, plan.layout)
+        XCTAssertNil(bare.overlayPNG)
+
         // No caption, no overlay; the frame off, no plan.
         settings.style = .hairline
         XCTAssertNil(try XCTUnwrap(FrameExportPlan.make(settings: settings, facts: sony, photoSize: size)).overlayPNG)
@@ -184,11 +187,11 @@ import UniformTypeIdentifiers
         XCTAssertNil(try FrameExportPlan.make(settings: settings, facts: sony, photoSize: size))
     }
 
-    private func storyLayout(_ width: Int, _ height: Int, hasCaption: Bool = true) throws -> FramePixelLayout {
+    private func storyLayout(_ width: Int, _ height: Int) throws -> FramePixelLayout {
         var settings = FrameSettings()
         settings.isEnabled = true
         settings.style = .story
-        return FramePixelLayout(try Engine.frameLayout(frame: settings.engineFrame(hasCaption: hasCaption),
+        return FramePixelLayout(try Engine.frameLayout(frame: settings.engineFrame(),
                                                        photoWidth: width, photoHeight: height))
     }
 
@@ -218,16 +221,13 @@ import UniformTypeIdentifiers
                caption: [0, 9054, 1108, 200], reference: 1000, variant: "tall")
         expect(try storyLayout(6000, 4000), 6440, 11450, photo: [220, 2920, 6000, 4000],
                caption: [0, 6920, 6440, 4530], reference: 4000, variant: nil)
-        // Without text the band shrinks to the mat, in the variant as well.
-        expect(try storyLayout(4000, 1000, hasCaption: false), 4160, 1160, photo: [80, 80, 4000, 1000],
-               caption: [0, 1080, 4160, 80], reference: 4000, variant: "wide")
     }
 
-    private func instantLayout(_ width: Int, _ height: Int, hasCaption: Bool = true) throws -> FramePixelLayout {
+    private func instantLayout(_ width: Int, _ height: Int) throws -> FramePixelLayout {
         var settings = FrameSettings()
         settings.isEnabled = true
         settings.style = .instant
-        return FramePixelLayout(try Engine.frameLayout(frame: settings.engineFrame(hasCaption: hasCaption),
+        return FramePixelLayout(try Engine.frameLayout(frame: settings.engineFrame(),
                                                        photoWidth: width, photoHeight: height))
     }
 
@@ -243,10 +243,6 @@ import UniformTypeIdentifiers
                caption: [0, 1180, 10360, 880], reference: 10000, variant: "wide")
         expect(try instantLayout(45000, 1000), 46620, 5770, photo: [810, 810, 45000, 1000],
                caption: [0, 1810, 46620, 3960], reference: 45000, variant: "wide")
-        // The band keeps the bottom mat when there is no text.
-        let plain = try instantLayout(4000, 1000, hasCaption: false)
-        XCTAssertEqual(plain.variant, "wide")
-        XCTAssertEqual(plain.caption.height, plain.height - plain.photo.y - plain.photo.height)
     }
 
     /// At 2.5:1 and below (and in portrait) the layout is what it was before the
@@ -289,14 +285,10 @@ import UniformTypeIdentifiers
                 "margins": .object(["top": .number(0.018), "right": .number(0.018), "bottom": .number(0.012), "left": .number(0.018)]),
             ])]),
         ]
-        XCTAssertEqual(settings.engineFrame(hasCaption: true), expected)
-        // No text: the band goes in the variant too.
-        guard case .object(let variants)? = settings.engineFrame(hasCaption: false)["variants"],
-              case .object(let wide)? = variants["wide"] else { return XCTFail("no wide variant") }
-        XCTAssertEqual(wide["caption"], .number(0))
+        XCTAssertEqual(settings.engineFrame(), expected)
         // Story's variants are written as before, with the forced proportion dropped.
         settings.style = .story
-        guard case .object(let story)? = settings.engineFrame(hasCaption: true)["variants"],
+        guard case .object(let story)? = settings.engineFrame()["variants"],
               case .object(let storyWide)? = story["wide"] else { return XCTFail("no story variant") }
         XCTAssertEqual(storyWide["aspect"], .null)
         XCTAssertEqual(storyWide["margins"], .object(["top": .number(0.02), "right": .number(0.02),
@@ -358,24 +350,20 @@ import UniformTypeIdentifiers
     func testEngineDocumentWritesTheVariants() {
         var settings = FrameSettings()
         settings.style = .story
-        func variants(_ hasCaption: Bool) -> [String: [String: JSONValue]] {
-            guard case .object(let all)? = settings.engineFrame(hasCaption: hasCaption)["variants"] else { return [:] }
+        func variants() -> [String: [String: JSONValue]] {
+            guard case .object(let all)? = settings.engineFrame()["variants"] else { return [:] }
             return all.compactMapValues { if case .object(let entry) = $0 { entry } else { nil } }
         }
-        let wide = variants(true)["wide"]
+        let wide = variants()["wide"]
         XCTAssertEqual(wide?["minRatio"], .number(2.5))
         XCTAssertEqual(wide?["reference"], .string("long"))
         XCTAssertEqual(wide?["caption"], .number(0.06))
         XCTAssertEqual(wide?["aspect"], .null)
-        XCTAssertEqual(variants(true)["tall"]?["maxRatio"], .number(0.125))
-        XCTAssertNil(variants(true)["tall"]?["caption"])
-        // No text: the top level and every variant lose the band.
-        XCTAssertEqual(settings.engineFrame(hasCaption: false)["caption"], .number(0))
-        XCTAssertEqual(variants(false)["wide"]?["caption"], .number(0))
-        XCTAssertEqual(variants(false)["tall"]?["caption"], .number(0))
+        XCTAssertEqual(variants()["tall"]?["maxRatio"], .number(0.125))
+        XCTAssertNil(variants()["tall"]?["caption"])
         // The other styles have none.
         settings.style = .gallery
-        XCTAssertNil(settings.engineFrame(hasCaption: true)["variants"])
+        XCTAssertNil(settings.engineFrame()["variants"])
     }
 
     /// Captions that fit are set exactly as before long text was bounded:
@@ -402,9 +390,8 @@ import UniformTypeIdentifiers
                         settings.showsCamera = mask == 16 || mask & 2 != 0
                         settings.showsDate = mask == 16 || mask & 4 != 0
                         settings.signature = mask == 16 ? "林伟" : (mask & 8 != 0 ? "Lin Wei" : "")
-                        let hasCaption = !style.caption(settings, facts: sony).isEmpty
                         let layout = FramePixelLayout(try Engine.frameLayout(
-                            frame: settings.engineFrame(hasCaption: hasCaption), photoWidth: width, photoHeight: height))
+                            frame: settings.engineFrame(), photoWidth: width, photoHeight: height))
                         guard layout.caption.height > 0, layout.caption.width > 0 else { continue }
                         XCTAssertNil(layout.variant)
                         let caption = style.caption(settings, facts: sony, variant: layout.variant,
@@ -567,7 +554,7 @@ import UniformTypeIdentifiers
         settings.showsExposure = false
         settings.showsCamera = false
         settings.signature = ""
-        let layout = try storyLayout(4000, 1000, hasCaption: false)
+        let layout = try storyLayout(4000, 1000)
         let empty = settings.style.caption(settings, facts: sony, variant: "wide")
         XCTAssertTrue(empty.isEmpty)
         XCTAssertEqual(FrameSheet.previewScale(fit: 0.2, layout: layout, settings: settings, caption: empty), 0.2)

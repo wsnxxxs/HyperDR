@@ -21,6 +21,23 @@ extension EditorModel {
         lut.isEnabled = editor.recipe.conditionValue("look.enabled")?.boolValue ?? true
     }
 
+    /// The library's LUTs with their spaces, for `lookPreviews`.
+    var lookPreviewLooks: [LookPreviews.Look] {
+        lut.library.compactMap { item in
+            lutReferences[item.id].map { LookPreviews.Look(reference: $0, input: item.input.rawValue, output: item.output.rawValue) }
+        }
+    }
+
+    /// Records the spaces a control chose on the look (`Recipe.chosenLookSpaces`)
+    /// for its LUT, so the next choice of it starts from them.
+    func recordLookSpaces(from old: Recipe, to new: Recipe) {
+        guard let chosen = Recipe.chosenLookSpaces(from: old, to: new),
+              let id = lutReferences.first(where: { $0.value.contentHash == chosen.contentHash })?.key,
+              let item = lut.library.first(where: { $0.id == id }) else { return }
+        enqueueLUTSpaces(id, input: chosen.input.flatMap(LUTColorSpace.init(rawValue:)) ?? item.input,
+                         output: chosen.output.flatMap(LUTColorSpace.init(rawValue:)) ?? item.output)
+    }
+
     /// The library's LUTs as the inspector offers them, in library order.
     var lutChoices: [LUTReference] { lut.library.compactMap { lutReferences[$0.id] } }
 
@@ -52,14 +69,17 @@ extension EditorModel {
         }
     }
 
+    /// Imports `.cube` files. One file imported with a photo open becomes its
+    /// look: a LUT is imported to be used.
     func importLUTs(_ urls: [URL]) async {
         guard editingLockReason == nil, !lut.isBusy else { return }
         invalidateLUTLibraryReads()
         lut.isBusy = true; lut.failures = []
         defer { lut.isBusy = false }
+        var imported: [String] = []
         for url in urls {
             guard !Task.isCancelled else { break }
-            do { _ = try await services.importLUT(url) }
+            do { imported.append(try await services.importLUT(url).id) }
             catch {
                 let failure = UserFacingError.service(error)
                 lut.failures.append(UserFacingError(code: failure.code,
@@ -68,9 +88,22 @@ extension EditorModel {
             invalidateLUTLibraryReads()
         }
         await refreshLUTLibrary()
+        if urls.count == 1, let id = imported.first, document != nil { await chooseLibraryLUT(id) }
     }
+
+    /// Makes a library LUT the photo's look, with its spaces, once the
+    /// renderer has it.
+    func chooseLibraryLUT(_ id: String) async {
+        await lutInstallTask?.value
+        guard let item = lut.library.first(where: { $0.id == id }), let reference = lutReferences[id] else { return }
+        editor.chooseLook(reference, input: item.input.rawValue, output: item.output.rawValue)
+    }
+
+    /// Removes a LUT from the library, and the open photo's look when it is
+    /// on that LUT (one undo step).
     func removeLUT(_ id: String) {
         guard !isEditingLocked else { return }
+        if let reference = lutReferences[id] { editor.dropLook(reference.contentHash) }
         invalidateLUTLibraryReads()
         Task { [weak self, services] in
             do { try await services.removeLUT(id) }

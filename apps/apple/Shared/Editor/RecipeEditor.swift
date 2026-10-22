@@ -572,6 +572,24 @@ import Observation
         return request
     }
 
+    /// A small SDR render of `recipe` for a LUT preview, its long edge `side`
+    /// pixels: from the source the preview has open (`keepsSource`), with no
+    /// group bypassed. A recipe that needs another development throws
+    /// `needsDevelopment` rather than developing the photo again.
+    func lookPreview(_ recipe: Recipe, side: Int) async throws -> CGImage {
+        guard let source else { throw EditorRenderingError.noSource }
+        let native = source.pixelSize, long = max(native.width, native.height, 1)
+        let size = HyperDRRender.PixelSize(width: max(1, native.width * side / long),
+                                           height: max(1, native.height * side / long))
+        guard var request = request(for: recipe, size: size, interactive: false) else {
+            throw EditorRenderingError.noSource
+        }
+        request.bypassedGroups = []
+        request.keepsSource = true
+        let frame = try await renderer.render(request)
+        return try await renderer.sdrThumbnail(frame, maximumSize: size)
+    }
+
     /// An SDR thumbnail of the shown frame, or of `frame`.
     func sdrThumbnail(of frame: EditorFrame? = nil,
                       maximumSize: HyperDRRender.PixelSize = HyperDRRender.PixelSize(width: 512, height: 512)) async throws -> CGImage {

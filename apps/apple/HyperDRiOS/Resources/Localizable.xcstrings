@@ -2585,13 +2585,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Swipe left to remove a LUT. Edits that use a removed LUT cannot be exported until it is imported again."
+            "value" : "Tap a LUT to use it on this photo. Swipe left to remove one; removing the LUT in use also takes it off this photo."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "向左轻扫可以移除 LUT。用到已移除 LUT 的编辑，要重新导入它才能导出。"
+            "value" : "轻点 LUT 即可用在这张照片上。向左轻扫可以移除；移除正在用的 LUT，这张照片也会去掉它。"
+          }
+        }
+      }
+    },
+    "ios.lut.footer.noPhoto" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open a photo to see each LUT on it. Swipe left to remove a LUT."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开一张照片，就能看到每个 LUT 用在它上面的样子。向左轻扫可以移除 LUT。"
           }
         }
       }

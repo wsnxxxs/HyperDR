@@ -26,6 +26,8 @@ import Observation
     private(set) var entries: [LUTEntry] = []
     private(set) var failures: [Failure] = []
     private(set) var isBusy = false
+    /// Each LUT on the open photo, for the look pickers and the list.
+    let previews = LookPreviews()
     /// References of the installed entries, by library id.
     private var references: [String: LUTReference] = [:]
     /// The latest space write of each LUT; the next one waits for it.
@@ -48,6 +50,36 @@ import Observation
     var spaces: [String: AdjustmentLookSpaces] {
         Dictionary(entries.map { ($0.contentHash, AdjustmentLookSpaces(input: $0.input.rawValue, output: $0.output.rawValue)) },
                    uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The library's LUTs with their spaces, for `previews`.
+    var looks: [LookPreviews.Look] {
+        entries.compactMap { entry in
+            references[entry.id.rawValue].map { LookPreviews.Look(reference: $0, input: entry.input.rawValue, output: entry.output.rawValue) }
+        }
+    }
+
+    /// Chooses an entry as the photo's look, with its spaces; nil for none.
+    func choose(_ entry: LUTEntry?, in editor: RecipeEditor) {
+        guard let entry else { return editor.chooseLook(nil, input: "", output: "") }
+        guard let reference = references[entry.id.rawValue] else { return }
+        editor.chooseLook(reference, input: entry.input.rawValue, output: entry.output.rawValue)
+    }
+
+    /// Sets a LUT's spaces in the library, and on the look in use.
+    func setSpaces(_ id: LUTID, input: LUTSpace? = nil, output: LUTSpace? = nil, in editor: RecipeEditor) {
+        update(id, input: input, output: output)
+        guard let entry = entries.first(where: { $0.id == id }) else { return }
+        editor.adoptLookSpaces(entry.contentHash, input: entry.input.rawValue, output: entry.output.rawValue)
+    }
+
+    /// Records the spaces a control chose on the look (`Recipe.chosenLookSpaces`)
+    /// for its LUT, so the next choice of it starts from them.
+    func record(from old: Recipe, to new: Recipe) {
+        guard let chosen = Recipe.chosenLookSpaces(from: old, to: new),
+              let entry = entries.first(where: { $0.contentHash == chosen.contentHash }) else { return }
+        update(entry.id, input: chosen.input.flatMap(LUTSpace.init(rawValue:)),
+               output: chosen.output.flatMap(LUTSpace.init(rawValue:)))
     }
 
     /// The recipe's look when its LUT is not in the library (or, for a look
@@ -84,15 +116,18 @@ import Observation
     }
 
     /// Imports `.cube` files picked in Files, each failure by its file name.
+    /// One file imported with a photo open becomes its look: a LUT is
+    /// imported to be used.
     func importLUTs(_ urls: [URL], into editor: RecipeEditor) async {
         guard !isBusy else { return }
         isBusy = true
         failures = []
         defer { isBusy = false }
+        var imported: [LUTID] = []
         do {
             let library = try await library().value
             for url in urls {
-                do { _ = try await library.importLUT(url) } catch {
+                do { imported.append(try await library.importLUT(url).id) } catch {
                     failures.append(Failure(name: url.lastPathComponent, detail: Self.detail(error)))
                 }
             }
@@ -100,6 +135,10 @@ import Observation
             failures.append(Failure(name: "", detail: Self.detail(error)))
         }
         await refresh(into: editor)
+        if urls.count == 1, let id = imported.first, editor.source != nil,
+           let entry = entries.first(where: { $0.id == id }) {
+            choose(entry, in: editor)
+        }
     }
 
     /// Records one of a LUT's spaces: `input` or `output`, whichever is
@@ -145,13 +184,15 @@ import Observation
         }
     }
 
-    /// Removes a LUT from the library. The editor keeps it until relaunch,
-    /// but an export of a look on it is blocked from now on.
-    func remove(_ entry: LUTEntry) async {
+    /// Removes a LUT from the library, and the photo's look when it is on
+    /// that LUT (one undo step; an undone look stays unexportable until the
+    /// LUT is imported again).
+    func remove(_ entry: LUTEntry, from editor: RecipeEditor) async {
         do {
             try await library().value.remove(entry.id)
             references[entry.id.rawValue] = nil
             entries.removeAll { $0.id == entry.id }
+            editor.dropLook(entry.contentHash)
         } catch {
             failures = [Failure(name: entry.name, detail: Self.detail(error))]
         }

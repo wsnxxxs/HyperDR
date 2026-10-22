@@ -24,12 +24,14 @@ struct LUTLibrarySheet: View {
 }
 
 /// What is in the LUT library, with the import from Files in the toolbar,
-/// failures at the top, and removal by swiping. A look chooses from it in
-/// the editor's Look group. Pushed by Settings, wrapped by the sheet.
+/// failures at the top, and removal by swiping. With a photo open each LUT
+/// is shown on it, and a tap makes it the photo's look (the Look group
+/// chooses from the same library). Pushed by Settings, wrapped by the sheet.
 struct LUTLibraryList: View {
     let library: IOSLUTLibrary
     let editor: RecipeEditor
     @State private var importing = false
+    @Environment(\.lookPickerShown) private var shown
 
     var body: some View {
         List {
@@ -54,30 +56,38 @@ struct LUTLibraryList: View {
             if !library.entries.isEmpty {
                 Section {
                     ForEach(library.entries) { entry in
+                        let inUse = editor.recipe.look?.contentHash == entry.contentHash
                         HStack(spacing: Space.s3) {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(LUTSwatches.colour(entry.contentHash).gradient)
-                                .frame(width: 36, height: 36)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: entry.name)
-                                Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                LUTSpacesMenu(entry: entry,
-                                              setInput: { library.update(entry.id, input: $0) },
-                                              setOutput: { library.update(entry.id, output: $0) })
+                            Button { library.choose(entry, in: editor) } label: {
+                                HStack(spacing: Space.s3) {
+                                    LUTThumbnail(image: library.previews.images[entry.contentHash], contentHash: entry.contentHash,
+                                                 side: 52, isSelected: inUse, selection: .accentColor)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(verbatim: entry.name).foregroundStyle(Color.primary).lineLimit(2)
+                                        Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .contentShape(.rect)
                             }
+                            .buttonStyle(.plain)
+                            .disabled(editor.source == nil)
+                            .accessibilityAddTraits(inUse ? .isSelected : [])
                             Spacer(minLength: 0)
-                            if editor.recipe.activeLook?.contentHash == entry.contentHash {
+                            LUTSpacesMenu(entry: entry,
+                                          setInput: { library.setSpaces(entry.id, input: $0, in: editor) },
+                                          setOutput: { library.setSpaces(entry.id, output: $0, in: editor) })
+                            if inUse {
                                 Image(systemName: "checkmark").foregroundStyle(.tint)
                             }
                         }
                     }
                     .onDelete { offsets in
                         let entries = offsets.map { library.entries[$0] }
-                        Task { for entry in entries { await library.remove(entry) } }
+                        Task { for entry in entries { await library.remove(entry, from: editor) } }
                     }
                 } footer: {
-                    Text("ios.lut.footer")
+                    Text(editor.source == nil ? LocalizedStringKey("ios.lut.footer.noPhoto") : LocalizedStringKey("ios.lut.footer"))
                 }
             }
         }
@@ -93,6 +103,8 @@ struct LUTLibraryList: View {
                 }
             }
         }
+        .onAppear { shown(true) }
+        .onDisappear { shown(false) }
         .navigationTitle(Text("ios.lut.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -125,12 +137,16 @@ private struct LUTSpacesMenu: View {
             picker("look.input", selection: entry.input, choose: setInput)
             picker("look.output", selection: entry.output, choose: setOutput)
         } label: {
-            HStack(spacing: 4) {
+            VStack(alignment: .trailing, spacing: 1) {
                 name("look.input", entry.input)
-                Image(systemName: "arrow.right").imageScale(.small)
-                name("look.output", entry.output)
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.turn.down.right").imageScale(.small)
+                    name("look.output", entry.output)
+                }
             }
             .font(.caption)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
         }
     }
 

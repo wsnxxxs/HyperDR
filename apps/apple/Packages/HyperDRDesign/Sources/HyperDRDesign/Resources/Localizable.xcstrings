@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.lut.library" : {
+      "comment" : "Button beside the LUT menu that opens the LUT library.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT Library" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 库" } }
+      }
+    },
     "ctrl.color.saturation.help" : {
       "comment" : "Adjustment control help (color.saturation).",
       "localizations" : {

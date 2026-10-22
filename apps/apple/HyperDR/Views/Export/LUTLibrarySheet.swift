@@ -16,6 +16,7 @@ struct LUTLibrarySheet: View {
     @State private var importedCount: Int?
     @State private var removing: LUTItem?
     @State private var spacesFor: String?
+    @Environment(\.lookPickerShown) private var shown
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,8 @@ struct LUTLibrarySheet: View {
             Divider()
             footer
         }
+        .onAppear { shown(true) }
+        .onDisappear { shown(false) }
         .frame(width: 560)
         .frame(minHeight: 340, maxHeight: 620)
         .background(Color.hdr.surfacePanel)
@@ -43,8 +46,9 @@ struct LUTLibrarySheet: View {
             get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { item in
             Button("lut.library.remove", role: .destructive) { model.removeLUT(item.id) }
             Button("export.action.cancel", role: .cancel) {}
-        } message: { _ in
-            Text("lut.library.removeMessage")
+        } message: { item in
+            Text(model.editor.recipe.look?.contentHash == "sha256:" + item.id
+                 ? LocalizedStringKey("lut.library.removeMessage.inUse") : LocalizedStringKey("lut.library.removeMessage"))
         }
     }
 
@@ -134,6 +138,8 @@ struct LUTLibrarySheet: View {
                         LUTLibraryRow(name: item.name, spaces: Text(verbatim: LUTSpaces.string(item, locale: locale)),
                                       size: item.byteCount.formatted(.byteCount(style: .file).locale(locale)),
                                       isInUse: model.lut.selection?.id == item.id,
+                                      contentHash: "sha256:" + item.id,
+                                      preview: model.lookPreviews.images["sha256:" + item.id],
                                       onSpaces: { spacesFor = item.id }, onRemove: { removing = item })
                             .popover(isPresented: Binding(get: { spacesFor == item.id },
                                                           set: { if !$0, spacesFor == item.id { spacesFor = nil } }),

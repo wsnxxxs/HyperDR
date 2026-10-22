@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import HyperDRRecipe
 
@@ -34,11 +35,14 @@ public struct AdjustmentContext: Equatable, Sendable {
     public var lookSpaces: [String: AdjustmentLookSpaces]
     /// Models for `hdr.model`: id and display name.
     public var models: [AdjustmentModelChoice]
+    /// Each LUT's preview on the open photo, by content hash; the empty key is
+    /// the photo with no LUT. A LUT without one shows its colour mark.
+    public var lutPreviews: [String: CGImage]
 
     public init(sourceValues: [String: Double] = [:], automaticValues: [String: Double] = [:],
                 capabilities: Set<String> = [], unavailableOptions: [String: Set<String>] = [:],
                 luts: [LUTReference] = [], lookSpaces: [String: AdjustmentLookSpaces] = [:],
-                models: [AdjustmentModelChoice] = []) {
+                models: [AdjustmentModelChoice] = [], lutPreviews: [String: CGImage] = [:]) {
         self.sourceValues = sourceValues
         self.automaticValues = automaticValues
         self.capabilities = capabilities
@@ -46,6 +50,7 @@ public struct AdjustmentContext: Equatable, Sendable {
         self.luts = luts
         self.lookSpaces = lookSpaces
         self.models = models
+        self.lutPreviews = lutPreviews
     }
 }
 

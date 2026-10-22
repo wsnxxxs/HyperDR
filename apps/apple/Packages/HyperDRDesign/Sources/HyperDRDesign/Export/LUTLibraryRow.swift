@@ -1,3 +1,4 @@
+import CoreGraphics
 import SwiftUI
 
 /// One look in the LUT library: a swatch, its name (tagged when the open
@@ -8,11 +9,18 @@ public struct LUTLibraryRow: View {
     private let spaces: Text
     private let size: String?
     private let isInUse: Bool
+    private let contentHash: String?
+    private let preview: CGImage?
     private let onSpaces: () -> Void
     private let onRemove: () -> Void
 
-    public init(name: String, spaces: Text, size: String? = nil, isInUse: Bool, onSpaces: @escaping () -> Void,
+    /// `contentHash` gives the row the LUT's colour mark, and `preview` its
+    /// preview on the open photo (`LUTThumbnail`).
+    public init(name: String, spaces: Text, size: String? = nil, isInUse: Bool,
+                contentHash: String? = nil, preview: CGImage? = nil, onSpaces: @escaping () -> Void,
                 onRemove: @escaping () -> Void) {
+        self.contentHash = contentHash
+        self.preview = preview
         self.name = name
         self.spaces = spaces
         self.size = size
@@ -29,13 +37,17 @@ public struct LUTLibraryRow: View {
 
     public var body: some View {
         HStack(spacing: Space.s3) {
-            // Only a mark for the row; it does not preview the look.
-            RoundedRectangle(cornerRadius: Radius.xs)
-                .fill(LinearGradient(colors: [Color(red: 0.24, green: 0.38, blue: 0.62), Color(red: 0.93, green: 0.66, blue: 0.42)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .frame(width: 36, height: 24)
-                .overlay { RoundedRectangle(cornerRadius: Radius.xs).strokeBorder(Color.hdr.line) }
-                .accessibilityHidden(true)
+            if let contentHash {
+                LUTThumbnail(image: preview, contentHash: contentHash, side: 40)
+            } else {
+                // Only a mark for the row; it does not preview the look.
+                RoundedRectangle(cornerRadius: Radius.xs)
+                    .fill(LinearGradient(colors: [Color(red: 0.24, green: 0.38, blue: 0.62), Color(red: 0.93, green: 0.66, blue: 0.42)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: 36, height: 24)
+                    .overlay { RoundedRectangle(cornerRadius: Radius.xs).strokeBorder(Color.hdr.line) }
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(verbatim: name).font(.system(size: TypeScale.Size.control, weight: .semibold))

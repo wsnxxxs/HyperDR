@@ -175,10 +175,25 @@ Grain (`look.filmGrain`, 100 % = the stock's own) follows spektrafilm's sublayer
 through its variance: per channel, variance × pixel area against density, with a 35 mm frame
 spanning the render's long edge, times unit noise blurred by 0.65 pixels (3×3, scaled to the
 5×5 kernel's deviation). The noise hashes output pixel coordinates, so regions and stripes of a
-render agree; analysis cells are grainless. Halation, glare and other spatial effects are not
-modelled. Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs
-included (`Fixtures/film-reference.json`, < 1e-6), the grain RMS with spektrafilm's stochastic
-grain (< 5 %), and the GPU with the double reference, grain included (≤ 1 10-bit code).
+render agree; analysis cells are grainless.
+
+Halation (`look.filmHalation`, 100 % = the stock's own; `look.filmAntihalation` off uses
+spektrafilm's strengths for a film without its antihalation layer, as CineStill does to Vision3)
+is back-reflected light: film exposure plus strength × a sum of three Gaussians (sigma 65 µm for
+still film, 50 µm for motion picture, × √k, weights halving), divided by 1 + strength. The glow is
+low-frequency, so analysis records each cell's mean film exposure and `filmHalation` convolves it
+(`FilmStock.halationKernel`, truncated at five of the widest sigma, mirrored at the edges); the
+render samples that map bilinearly, so preview, export, regions and stripes share it. In-emulsion
+scatter, glare and other spatial effects are not modelled. Tests compare the double reference with spektrafilm's per-pixel outputs, HDR inputs
+included (`Fixtures/film-reference.json`, within a 10-bit code), the grain RMS with spektrafilm's
+stochastic grain (< 5 %), the halation profile across a bright square with spektrafilm's (within
+1e-3 of the square; spektrafilm's recursive blur approximates the far tail), and the GPU with the
+double reference, grain and halation included (≤ 1 10-bit code).
+
+Known input issue: on `build/fixtures/canon-eos-5d-iii-lossy.dng` the fixed analysis source
+(1024 px) sometimes comes back from `rasterizeRAWPreview` with transparent zero blocks (the count
+differs between runs), which every analysis product, the halation map included, then reads as
+black.
 
 ## Caches, limits and P7-1b
 

@@ -71,7 +71,7 @@ public struct RenderAdjustments: Hashable, Sendable {
             ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.blacks",tone.blacks),
             ("color.warmth",color.warmth),("color.tint",color.tint),("color.vibrance",color.vibrance),
             ("color.saturation",color.saturation),("hdr.strength",hdr.strength),("hdr.coverage",hdr.coverage),
-            ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength),("look.filmStrength",film.strength),("look.filmGrain",film.grain)] {
+            ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength),("look.filmStrength",film.strength),("look.filmGrain",film.grain),("look.filmHalation",film.halation)] {
             try RenderParameter.check(value,id:id)
         }
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }

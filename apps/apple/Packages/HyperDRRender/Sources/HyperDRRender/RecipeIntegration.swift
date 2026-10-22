@@ -92,6 +92,8 @@ extension RenderAdjustments {
         film.strength = try values.number("look.filmStrength")
         film.grain = try values.number("look.filmGrain")
         film.exposure = try values.optionalNumber("look.filmExposure")
+        film.halation = try values.number("look.filmHalation")
+        film.antihalation = try values.bool("look.filmAntihalation")
         guard let stock = values.value("look.film")?.stringValue, Adjustments.filmStocks.contains(stock) else { throw RenderError.invalidAdjustment }
         film.stock = FilmStockID(rawValue: stock)
         if !options.bypassedGroups.contains(.look), let reference = recipe.look {

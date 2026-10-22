@@ -212,6 +212,8 @@ public enum AdjustmentSymbols {
         Entry(id: "look.filmStrength", symbol: "film"),
         Entry(id: "look.filmExposure", symbol: "camera.metering.center.weighted"),
         Entry(id: "look.filmGrain", symbol: "circle.grid.3x3"),
+        Entry(id: "look.filmHalation", symbol: "sun.haze"),
+        Entry(id: "look.filmAntihalation", symbol: "shield.lefthalf.filled"),
         Entry(id: "develop.luminanceNR", symbol: "aqi.low"),
         Entry(id: "develop.colorNR", symbol: "circle.hexagongrid"),
         Entry(id: "develop.sharpness", symbol: "triangle"),

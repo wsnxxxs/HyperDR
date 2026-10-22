@@ -38,7 +38,7 @@ Volpato (https://github.com/andreavolpato/spektrafilm), licensed CC BY-SA 4.0
 Kodak Portra 400, Kodak Gold 200, Kodak Portra Endura, Fujifilm Velvia 100,
 Kodak Kodachrome 64, Kodak Vision3 500T and Kodak 2383 profiles with `scripts/convert_spektrafilm_stocks.py` (spectral
 upsampling baked per film, illuminants, neutral print filters, scanner levels
-and fitted curves resolved, grain variance tabulated); the converted data in `HyperDRRender/Resources/Film` remains
+and fitted curves resolved, grain variance and halation parameters tabulated); the converted data in `HyperDRRender/Resources/Film` remains
 CC BY-SA 4.0. No spektrafilm code is included. Stock names are trademarks of
 their owners and only name the look's reference.
 

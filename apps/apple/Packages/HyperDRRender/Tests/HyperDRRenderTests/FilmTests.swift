@@ -6,9 +6,16 @@ import HyperDRRecipe
 
 private struct FilmReference: Decodable {
     struct Grain: Decodable { let size: Int; let densityMean, densityRMS: [[Double]] }
+    struct Halation: Decodable {
+        let size, square, row, start: Int
+        let level, background: Double
+        let removed: Bool
+        let logExposure: [[Double]]
+    }
     let inputs: [[Double]]
     let outputs: [String: [[Double]]]
     let grain: [String: Grain]
+    let halation: [String: Halation]
 }
 
 private func reference() throws -> FilmReference {
@@ -127,6 +134,75 @@ private func code(_ value: Double) -> Int {
         }
     }
 
+    /// The halation kernel against spektrafilm's film exposure across a bright square. Its
+    /// recursive blur approximates the Gaussian's far tail to about 1e-3 of the peak.
+    @Test func halationMatchesSpektrafilm() throws {
+        let fixture = try reference()
+        #expect(fixture.halation.count == 2)
+        for (name, case_) in fixture.halation {
+            let id = try #require(FilmStockID(rawValue: name)), film = try FilmStock.named(id)
+            var settings = FilmAdjustments(); settings.stock = id; settings.antihalation = !case_.removed
+            let strength = film.halationStrength(settings)
+            let background = film.filmRaw(SIMD3(repeating: case_.background)), square = film.filmRaw(SIMD3(repeating: case_.level))
+            let kernel = film.halationKernel(longEdge: case_.size), r = kernel.radius, side = 2 * r + 1
+            let low = (case_.size - case_.square) / 2, high = low + case_.square
+            func inside(_ i: Int) -> Double { (low..<high).contains(i) ? 1 : 0 }
+            var worst = SIMD3<Double>.zero
+            for (i, expected) in case_.logExposure.enumerated() {
+                let x = case_.start + i
+                var cover = 0.0
+                for dy in -r...r { for dx in -r...r {
+                    cover += Double(kernel.weights[(dy + r) * side + dx + r]) * inside(x + dx) * inside(case_.row + dy)
+                } }
+                let raw = background + (square - background) * inside(x) * inside(case_.row)
+                let glow = background + (square - background) * cover
+                let actual = (raw + strength * glow) / (1 + strength)
+                for c in 0..<3 { worst[c] = max(worst[c], abs(actual[c] - pow(10, expected[c]))) }
+            }
+            let peak = square
+            for c in 0..<3 { #expect(worst[c] / peak[c] < 1e-3, "\(name) channel \(c): \(worst[c] / peak[c]) of the peak") }
+        }
+    }
+
+    /// Halation on the GPU: with one analysis cell per pixel, the map equals the reference's
+    /// convolution, and the glow reddens the dark field next to a highlight.
+    @Test func gpuHalationMatchesTheDoubleReference() async throws {
+        let engine = try RenderEngine()
+        let width = 720, height = 24, dark = SIMD3<Double>(repeating: 0.05), bright = SIMD3<Double>(repeating: 40)
+        var values = [SIMD3<Double>](repeating: dark, count: width * height)
+        for y in 4..<20 { for x in 352..<368 { values[y * width + x] = bright } }
+        let rgba = values.map { SIMD4(Float($0.x), Float($0.y), Float($0.z), 1) }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
+        let source = try await engine.source(image: image, domain: .hdr)
+        var edit = RenderAdjustments()
+        edit.film.stock = .vision3500T; edit.film.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false
+        let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+        let film = try FilmStock.named(.vision3500T), strength = film.halationStrength(edit.film)
+        let kernel = film.halationKernel(longEdge: width), r = kernel.radius, side = 2 * r + 1
+        let raw = values.map { film.filmRaw($0) }
+        func mirror(_ i: Int, _ n: Int) -> Int { min(max(i < 0 ? -i : i >= n ? 2 * (n - 1) - i : i, 0), n - 1) }
+        var worst = 0
+        for y in 0..<height { for x in 320..<400 {
+            var glow = SIMD3<Double>.zero
+            for dy in -r...r { for dx in -r...r {
+                glow += Double(kernel.weights[(dy + r) * side + dx + r]) * raw[mirror(y + dy, height) * width + mirror(x + dx, width)]
+            } }
+            let v = values[y * width + x]
+            let expected = DoubleReference.fitP3(film.apply(v, halation: (glow, strength)))
+            for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[(y * width + x) * 4 + c])) - code(expected[c]))) }
+        } }
+        #expect(worst <= 1, "\(worst) codes from the double reference")
+        edit.film.halation = 0
+        let none = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+        let near = (12 * width + 348) * 4
+        #expect(pixels.baseRGBA[near] > none.baseRGBA[near] + 0.01, "a red glow beside the highlight")
+        #expect(pixels.baseRGBA[near] - none.baseRGBA[near] > pixels.baseRGBA[near + 2] - none.baseRGBA[near + 2])
+        edit.film.halation = 1; edit.film.antihalation = true
+        let layered = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+        #expect(layered.baseRGBA[near] < pixels.baseRGBA[near], "the antihalation layer holds the glow back")
+    }
+
     /// Grain is deterministic per output pixel: the GPU draws the reference's noise, and a
     /// region of the render agrees with the whole.
     @Test func gpuGrainMatchesTheDoubleReference() async throws {
@@ -175,6 +251,7 @@ private func code(_ value: Double) -> Int {
         recipe.setValue(.number(60), for: "look.filmStrength")
         let edit = try RenderAdjustments(recipe: recipe)
         #expect(edit.film.stock == .vision3500T && edit.film.strength == 0.6 && edit.film.grain == 1)
+        #expect(edit.film.halation == 1 && edit.film.antihalation)
         #expect(!edit.wholeImageIsIdentity)
         #expect(try RenderAdjustments(recipe: recipe, options: RenderOptions(bypassedGroups: [.look])).film.isIdentity)
         recipe.setValue(.string("kodachrome"), for: "look.film")

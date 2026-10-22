@@ -51,7 +51,7 @@ public enum FilmFamily: String, CaseIterable, Sendable {
 
 /// The adjustment declarations. This table is the single source for the inspector,
 /// undo names, localization keys and the GPU nodes (product-vision principle 4,
-/// p7-adjustments §2.2–§2.7). 32 parameters: 6 of them RAW-only.
+/// p7-adjustments §2.2–§2.7). 34 parameters: 6 of them RAW-only.
 public enum Adjustments {
     /// Ceiling for HDR HyperDR generates itself: the analytic expansion on an `sdr`
     /// base and `rawEDR` (C1). Sources that already have HDR (`hdr`, `dual`) keep
@@ -196,6 +196,14 @@ public enum Adjustments {
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
         ParameterDeclaration(id: "look.filmGrain", group: .look, kind: .float, range: 0...200, step: 1,
             default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
+        // Back-reflection halation around highlights; 100 % is the stock's own.
+        ParameterDeclaration(id: "look.filmHalation", group: .look, kind: .float, range: 0...200, step: 1,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
+        // Off: the film without its antihalation layer, as CineStill does to Vision3.
+        ParameterDeclaration(id: "look.filmAntihalation", group: .look, kind: .bool,
+            default: .constant(.bool(true)),
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
     ]
 

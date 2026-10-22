@@ -62,6 +62,14 @@ lower-resolution source approximations; preview/export share a fixed 1024-edge s
 and 768-edge analysis, independent of the last loaded variant. Export must load `.full`
 before rendering at export size rather than enlarging a preview texture.
 
+Every RAW raster (native preview tiles, full development, export regions) must come back
+opaque. Core Image's RAW decoder returns parts of some cropped regions transparent: on the lossy
+DNG fixture, its last internal tile column (from x 4800) when a crop enters it from the column
+before, always at some crops and now and then at others. `rasterize(opaque:)` counts transparent
+texels on the GPU, renders a region again (three times), then splits it in two along its longer
+side, recursively; a piece under 32 pixels that stays incomplete fails with `cannotDecodeSource`
+rather than reading as black.
+
 Processing is RGBA32Float extended-linear Display P3, SDR white 1. Generated pairs have
 RGBA32Float SDR base and R32Float log2 gain, zero offsets: `HDR = base * exp2(gain)`.
 Source decomposition is unlimited max-channel division; downstream HDR range applies a soft
@@ -189,12 +197,6 @@ included (`Fixtures/film-reference.json`, within a 10-bit code), the grain RMS w
 stochastic grain (< 5 %), the halation profile across a bright square with spektrafilm's (within
 1e-3 of the square; spektrafilm's recursive blur approximates the far tail), and the GPU with the
 double reference, grain and halation included (≤ 1 10-bit code).
-
-Known input issue: on `build/fixtures/canon-eos-5d-iii-lossy.dng` the fixed analysis source
-(1024 px) sometimes comes back from `rasterizeRAWPreview` with transparent zero blocks (the count
-differs between runs), which every analysis product, the halation map included, then reads as
-black.
-
 ## Caches, limits and P7-1b
 
 The engine retains full and the latest preview for one asset/development family, plus a

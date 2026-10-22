@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import HyperDRRecipe
 import HyperDRRender
@@ -24,6 +25,32 @@ import UniformTypeIdentifiers
         CGImageDestinationAddImage(destination, context.makeImage()!, nil)
         #expect(CGImageDestinationFinalize(destination))
         return url
+    }
+
+    @Test(arguments: [UTType.jpeg, .heic, .png])
+    func nonRAWRendersReuseTheInitiallyOpenedSource(type: UTType) async throws {
+        let url = try Self.tinyPhoto(type: type)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let engine = try RenderEngine()
+        #expect(await engine.preferredRAWDecoder(url) == nil)
+        #expect(await engine.defaultRAWDecoder(url) == nil)
+        let session = RenderSession(engine: engine)
+        let size = PixelSize(width: 48, height: 32)
+        let source = try await session.open(url, previewSize: size)
+        #expect(source.rawDecoderVersion == nil)
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        let request = EditorRenderRequest(sourceID: source.id, recipe: Recipe(inputDomain: source.domain), size: size)
+        _ = try await session.render(request)
+        #expect(await reloads.count == 0, "The first canvas render must reuse the opened raster")
+        // A small look preview must also be accepted before any redevelopment.
+        let fresh = try await session.open(url, previewSize: size)
+        var preview = EditorRenderRequest(sourceID: fresh.id, recipe: Recipe(inputDomain: fresh.domain),
+                                          size: PixelSize(width: 24, height: 16))
+        preview.keepsSource = true
+        _ = try await session.render(preview)
+        #expect(await reloads.count == 0)
+        await session.close()
     }
 
     @MainActor @Test func jpegOriginalAndHDRContentFollowTheRenderedFrames() async throws {
@@ -300,5 +327,252 @@ private actor Gate {
     func open() {
         waiter?.resume()
         waiter = nil
+    }
+}
+
+extension RenderSessionTests {
+    @MainActor @Test func rawDecoderSurvivesOriginalResetAndLegacyRestore() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".dng")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng"), to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try RenderEngine()
+        let editor = RecipeEditor(renderer: RenderSession(engine: engine))
+        try await editor.open(url)
+        await editor.settle()
+        let preferred = await engine.preferredRAWDecoder(url)
+        #expect(editor.recipe.rawDecoderVersion == preferred)
+        #expect(editor.recipe.original.rawDecoderVersion == preferred)
+        #expect(editor.frame?.request.recipe.rawDecoderVersion == preferred)
+        #expect(editor.originalFrame?.request.recipe.rawDecoderVersion == preferred)
+        #expect(editor.renderFailure == nil)
+        editor.resetAll()
+        #expect(editor.recipe.rawDecoderVersion == preferred)
+        let nineDevelopment = editor.recipe.development
+        let legacy = Recipe(inputDomain: .rawEDR)
+        #expect(nineDevelopment != legacy.development)
+        try await editor.open(url, restoring: legacy)
+        await editor.settle()
+        #expect(editor.recipe.rawDecoderVersion == nil)
+        #expect(editor.frame?.request.recipe.rawDecoderVersion == nil)
+        #expect(editor.renderFailure == nil)
+        let source = try #require(editor.source)
+        let baseline = try await engine.load(url, options: SourceOptions(recipe: legacy, resolution: .preview(maximumSize: PixelSize(width: 64, height: 64)))).rawSettings
+        #expect(source.rawDecoderVersion == baseline?.decoderVersion)
+        #expect(source.capabilities.contains("CIRAWFilter.isColorNoiseReductionSupported") == baseline?.supportsColorNR)
+        await editor.close()
+    }
+}
+
+extension RenderSessionTests {
+    @Test func embeddedPreviewIsBoundedOrientedAndNeverGeneratedWhenAbsent() async throws {
+        let url = try Self.tinyPhoto(width: 1600, height: 800, type: .heic)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let absent = try Self.tinyPhoto(width: 320, height: 160, type: .png)
+        defer { try? FileManager.default.removeItem(at: absent.deletingLastPathComponent()) }
+        #expect(await EmbeddedPreview.load(absent, maximumDimension: 64) == nil)
+        #expect(await EmbeddedPreview.load(url, maximumDimension: 64) == nil)
+        let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let rotated = url.deletingLastPathComponent().appendingPathComponent("embedded.heic")
+        let destination = try #require(CGImageDestinationCreateWithURL(rotated as CFURL, UTType.heic.identifier as CFString, 1, nil))
+        CGImageDestinationSetProperties(destination, [kCGImageDestinationEmbedThumbnail: true] as CFDictionary)
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6,
+            kCGImageDestinationEmbedThumbnail: true] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        let embedded = try #require(await EmbeddedPreview.read(rotated, maximumDimension: 64))
+        let preview = embedded.image
+        #expect(embedded.pixelSize == PixelSize(width: 800, height: 1600))
+        #expect(preview.contentHeadroom <= 1)
+        #expect(max(preview.width, preview.height) <= 64)
+        #expect(preview.height > preview.width)
+        #expect(await EmbeddedPreview.load(rotated, maximumDimension: 0) == nil)
+    }
+}
+
+// Explicit local benchmark; normal tests never depend on a user's photo.
+extension RenderSessionTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_RAW"] != nil))
+    func rawOpeningBenchmark() async throws {
+        let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_RAW"]!)
+        let decoder = ProcessInfo.processInfo.environment["HYPERDR_OPEN_DECODER"]
+        let clock = ContinuousClock()
+        for run in 1...2 {
+            let started = clock.now
+            let engine = try RenderEngine()
+            let session = RenderSession(engine: engine)
+            let initialized = clock.now
+            let preview = await session.openingPreview(url)
+            let thumbnail = clock.now
+            let restoring = decoder.map { Recipe(inputDomain: .rawEDR, rawDecoderVersion: $0) }
+            let source = try await session.open(url, previewSize: PixelSize(width: 1280, height: 1280), restoring: restoring)
+            let opened = clock.now
+            var recipe = Recipe(inputDomain: source.domain, rawDecoderVersion: source.rawDecoderVersion)
+            let size = RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 1280)
+            var request = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size)
+            let initialRecipe = recipe
+            let initialFrame = try await session.render(request)
+            let first = clock.now
+            recipe.setHDRSource(.capturedAI)
+            request.recipe = recipe
+            try await session.predictModelGain(request)
+            let predicted = clock.now
+            request.usesModelGain = true
+            _ = try await session.render(request)
+            let finished = clock.now
+            print("OPEN_BENCH run=\(run) decoder=\(source.rawDecoderVersion ?? "default") init=\(started.duration(to: initialized)) thumbnail=\(initialized.duration(to: thumbnail)) thumbnailPixels=\(preview?.image.width ?? 0)x\(preview?.image.height ?? 0) native=\(preview?.pixelSize.width ?? 0)x\(preview?.pixelSize.height ?? 0) open=\(thumbnail.duration(to: opened)) firstFrame=\(opened.duration(to: first)) ai=\(first.duration(to: predicted)) aiFrame=\(predicted.duration(to: finished))")
+            let referenceSource = try await engine.load(url, options: SourceOptions(recipe: initialRecipe, resolution: .preview(maximumSize: size)))
+            let reference = try await engine.render(referenceSource, recipe: initialRecipe, size: size)
+            let pixels = RenderEngine.readPixels(initialFrame.planes), expected = RenderEngine.readPixels(reference)
+            let baseError = zip(pixels.baseRGBA, expected.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+            let gainError = zip(pixels.gain, expected.gain).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+            print("OPEN_REUSE_DIFF base=\(baseError) gain=\(gainError)")
+            #expect(baseError == 0 && gainError == 0)
+            await session.close()
+        }
+    }
+}
+
+extension RenderSessionTests {
+    @Test func aSquareRAWOpenReusesItsExactFittedRaster() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".dng")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng"), to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try RenderEngine(), session = RenderSession(engine: engine)
+        let source = try await session.open(url, previewSize: PixelSize(width: 1280, height: 1280))
+        let recipe = Recipe(inputDomain: source.domain, rawDecoderVersion: source.rawDecoderVersion)
+        let size = RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 1280)
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        let frame = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
+        #expect(await reloads.count == 0)
+        // An explicit reopen remains the reference path; identical pixels must
+        // be produced when only the maximum preview rectangle changed.
+        let reopened = try await engine.load(url, options: SourceOptions(recipe: recipe, resolution: .preview(maximumSize: size)))
+        let reference = try await engine.render(reopened, recipe: recipe, size: size)
+        #expect(RenderEngine.readPixels(frame.planes).baseRGBA == RenderEngine.readPixels(reference).baseRGBA)
+        #expect(RenderEngine.readPixels(frame.planes).gain == RenderEngine.readPixels(reference).gain)
+        let changed = Recipe(inputDomain: source.domain, values: ["develop.sharpness": .number(90)], rawDecoderVersion: source.rawDecoderVersion)
+        #expect(!reopened.reusesRAWPreview(options: try SourceOptions(recipe: changed, resolution: .preview(maximumSize: size))))
+        #expect(!reopened.reusesRAWPreview(options: try SourceOptions(recipe: recipe, resolution: .preview(maximumSize: PixelSize(width: 64, height: 64)))))
+        await session.close()
+    }
+}
+
+extension RenderSessionTests {
+    private actor OpenAttempts {
+        private(set) var versions: [String] = []
+        func add(_ version: String?) { versions.append(version ?? "system-default") }
+    }
+
+    private static var fallbackFixtureURL: URL {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")
+    }
+
+    private static var fallbackFixtureSupported: Bool {
+        guard let filter = CIRAWFilter(imageURL: fallbackFixtureURL) else { return false }
+        return filter.decoderVersion.rawValue == "8.dng"
+            && filter.supportedDecoderVersions.contains { $0.rawValue == "9.dng" }
+    }
+
+    private func fallbackFixture() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".dng")
+        try FileManager.default.copyItem(at: Self.fallbackFixtureURL, to: url)
+        return url
+    }
+
+    @MainActor @Test(.enabled(if: Self.fallbackFixtureSupported)) func aNewPhotosDecodeFailureRecordsTheSuccessfulDefaultWithoutReload() async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession()
+        let attempts = OpenAttempts(), reloads = Counter()
+        await session.setBeforeOpenLoad { options in
+            await attempts.add(options.rawDecoderVersion)
+            if options.rawDecoderVersion == "9.dng" { throw RenderError.cannotDecodeSource }
+        }
+        await session.setBeforeReload { await reloads.add() }
+        let editor = RecipeEditor(renderer: session)
+        editor.canvasPixelSize = PixelSize(width: 64, height: 64)
+        try await editor.open(url)
+        await editor.settle()
+        #expect(await attempts.versions == ["9.dng", "8.dng"])
+        #expect(editor.recipe.rawDecoderVersion == "8.dng")
+        #expect(try Recipe.decode(editor.recipe.encoded()).rawDecoderVersion == "8.dng")
+        #expect(try editor.exportCapture().recipe.rawDecoderVersion == "8.dng")
+        #expect(editor.source?.rawDecoderVersion == "8.dng")
+        #expect(editor.source?.rawDecoderFallback == RAWDecoderFallback(requested: "9.dng", used: "8.dng"))
+        #expect(editor.frame?.request.recipe.rawDecoderVersion == "8.dng")
+        #expect(editor.originalFrame?.request.recipe.rawDecoderVersion == "8.dng")
+        #expect(editor.renderFailure == nil)
+        #expect(await reloads.count == 0)
+        let source = try #require(editor.source)
+        var look = EditorRenderRequest(sourceID: source.id, recipe: editor.recipe, size: PixelSize(width: 16, height: 16))
+        look.keepsSource = true
+        _ = try await session.render(look)
+        #expect(await reloads.count == 0)
+        // A failed device/camera attempt does not blacklist future photos or
+        // change the decoder policy for an explicit subsequent open.
+        await session.setBeforeOpenLoad(nil)
+        try await editor.open(url)
+        await editor.settle()
+        #expect(editor.recipe.rawDecoderVersion == "9.dng")
+        #expect(editor.source?.rawDecoderFallback == nil)
+        await editor.close()
+    }
+
+    @Test(.enabled(if: Self.fallbackFixtureSupported), arguments: [false, true])
+    func savedRecipesNeverDowngradeTheirDecoder(legacy: Bool) async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in
+            await attempts.add(options.rawDecoderVersion)
+            throw RenderError.cannotDecodeSource
+        }
+        let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: legacy ? nil : "9.dng")
+        await #expect(throws: (any Error).self) {
+            try await session.open(url, previewSize: PixelSize(width: 64, height: 64), restoring: recipe)
+        }
+        #expect(await attempts.versions == [legacy ? "system-default" : "9.dng"])
+    }
+
+    @Test(.enabled(if: Self.fallbackFixtureSupported), arguments: ["cancelled", "allocation", "gpu", "changed", "invalid"])
+    func unrelatedInitialFailuresNeverDowngradeDecoder(kind: String) async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in
+            await attempts.add(options.rawDecoderVersion)
+            switch kind {
+            case "cancelled": throw CancellationError()
+            case "allocation": throw RenderError.allocationFailed
+            case "gpu": throw RenderError.gpu("test")
+            case "changed": throw RenderError.sourceChanged
+            default: throw RenderError.invalidSize
+            }
+        }
+        await #expect(throws: (any Error).self) {
+            try await session.open(url, previewSize: PixelSize(width: 64, height: 64))
+        }
+        #expect(await attempts.versions == ["9.dng"])
+    }
+
+    @Test(.enabled(if: Self.fallbackFixtureSupported)) func aFailedDefaultIsNotRetriedAgain() async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in
+            await attempts.add(options.rawDecoderVersion)
+            throw RenderError.cannotDecodeSource
+        }
+        await #expect(throws: (any Error).self) {
+            try await session.open(url, previewSize: PixelSize(width: 64, height: 64))
+        }
+        #expect(await attempts.versions == ["9.dng", "8.dng"])
     }
 }

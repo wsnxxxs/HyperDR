@@ -2890,6 +2890,60 @@
         }
       }
     },
+    "stage.loadingDecoder" : {
+      "comment" : "Opening a photo: the system RAW decoder is being set up. Do not mention AI models.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing the RAW decoder…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备 RAW 解码器…"
+          }
+        }
+      }
+    },
+    "stage.decoding" : {
+      "comment" : "Opening a photo: its pixels are being decoded (a RAW developed).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decoding the photo…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在解码照片…"
+          }
+        }
+      }
+    },
+    "stage.analyzing" : {
+      "comment" : "Opening a photo: the decoded photo is being analysed for its preview and automatic values.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing the photo…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在分析照片…"
+          }
+        }
+      }
+    },
     "stage.generating" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9371,6 +9425,42 @@
       }
     },
     "ai.status.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
+          }
+        }
+      }
+    },
+    "preview.originalFailed" : {
+      "comment" : "Banner over the canvas: the unedited original's preview failed, so Original/Split/hold show the edit instead. Has a Retry button.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t show the original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原图预览失败"
+          }
+        }
+      }
+    },
+    "preview.retry" : {
+      "comment" : "Button on the banner over the canvas when the preview failed to follow an edit: render it again.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {

@@ -13,14 +13,36 @@ struct OpenedSource {
     let raw: RAWDevelopment?
     var nativeSize: PixelSize? = nil
     var rawPreviewSize: PixelSize? = nil
+
+    /// Resolution never changes the native CIRAWFilter graph. Both ordinary
+    /// opening and shared-graph analysis use this exact sizing/metadata policy.
+    func rawVariant(resolution: SourceResolution) throws -> Self {
+        guard let raw else { throw RenderError.cannotDecodeSource }
+        let scale: Double
+        switch resolution {
+        case .full: scale = 1
+        case .preview(let bound):
+            guard bound.width > 0, bound.height > 0 else { throw RenderError.invalidSize }
+            scale = min(1, Double(bound.width) / Double(raw.nativeSize.width),
+                        Double(bound.height) / Double(raw.nativeSize.height))
+        }
+        return Self(domain: domain, image: image, hdr: hdr, baseSpace: baseSpace,
+            gain: gain, raw: raw.atPreviewScale(Float(scale)), nativeSize: nativeSize,
+            rawPreviewSize: scale < 1 ? PixelSize(
+                width: max(1, Int((image.extent.width * scale).rounded())),
+                height: max(1, Int((image.extent.height * scale).rounded()))) : nil)
+    }
+
 }
 
 extension RenderEngine {
-    static func open(_ url: URL, options: SourceOptions, deferred: Bool = false) throws -> OpenedSource {
+    static func open(_ url: URL, options: SourceOptions, deferred: Bool = false,
+                     progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> OpenedSource {
         try Task.checkCancellation()
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw RenderError.cannotOpenSource }
         let type = CGImageSourceGetType(source).flatMap { UTType($0 as String) }
         if options.kind == .raw || (options.kind == .automatic && type?.conforms(to: .rawImage) == true) {
+            progress?(.loadingDecoder)
             return try openRAW(url, options: options)
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
@@ -126,8 +148,39 @@ extension RenderEngine {
                             baseSpace: workingColorSpace, gain: nil, raw: nil, nativeSize:nativeSize)
     }
 
+    /// New photos choose the known generation 9 when available; never opt into
+    /// future decoder generations without validation. Other files keep Apple's default.
+    public func preferredRAWDecoder(_ url: URL) -> String? {
+        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+        // CIRAWFilter also opens ordinary rasters, reporting `.none` and/or
+        // an empty default. Those are not RAW development identities.
+        let supported = filter.supportedDecoderVersions.filter { $0 != .none && !$0.rawValue.isEmpty }
+        if let preferred = supported.first(where: { $0.rawValue.split(separator: ".").first == "9" }) {
+            return preferred.rawValue
+        }
+        let fallback = filter.decoderVersion
+        return supported.contains(fallback) ? fallback.rawValue : nil
+    }
+
+    /// Explicit fallback for a new photo only. Record this exact version if
+    /// the preferred generation cannot decode; saved recipes never call this.
+    public func defaultRAWDecoder(_ url: URL) -> String? {
+        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+        let version = filter.decoderVersion
+        guard version != .none, !version.rawValue.isEmpty,
+              filter.supportedDecoderVersions.contains(version) else { return nil }
+        return version.rawValue
+    }
+
     static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
         guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
+        // An unavailable recorded decoder must fail rather than silently change a saved edit.
+        if let version = options.rawDecoderVersion {
+            guard let supported = filter.supportedDecoderVersions.first(where: { $0.rawValue == version }) else {
+                throw RenderError.unsupportedRAWDecoder(version)
+            }
+            filter.decoderVersion = supported
+        }
         // AE-2 G2: leave file baselineExposure untouched. Apple's boost is a tone
         // curve (2026-10-22: scene 0.18 lands near 0.385, ratio ~1.29 at 0.90), so a
         // log look develops at boost 0 and keeps that baseline. Measured on Sony,
@@ -145,14 +198,6 @@ extension RenderEngine {
         let native = filter.nativeSize
         let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
                                    height:Int(rotated ? native.width : native.height))
-        let previewScale: Double
-        switch options.resolution {
-        case .full: previewScale = 1
-        case .preview(let maximumSize):
-            guard maximumSize.width > 0, maximumSize.height > 0 else { throw RenderError.invalidSize }
-            previewScale = min(1,Double(maximumSize.width)/Double(nativeSize.width),
-                               Double(maximumSize.height)/Double(nativeSize.height))
-        }
         // Keep RAW development native. Reduced filter graphs can still allocate
         // native-area float buffers; materialize downsamples bounded native ROIs.
         filter.scaleFactor = 1
@@ -183,8 +228,6 @@ extension RenderEngine {
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
         try Task.checkCancellation()
         guard let output = filter.outputImage else { throw RenderError.cannotDecodeSource }
-        let previewSize = previewScale < 1 ? PixelSize(width:max(1,Int((output.extent.width*previewScale).rounded())),
-            height:max(1,Int((output.extent.height*previewScale).rounded()))) : nil
         let development = RAWDevelopment(boost: filter.boostAmount, boostShadow: filter.boostShadowAmount,
             baselineExposure: filter.baselineExposure, localToneMap: filter.localToneMapAmount,
             extendedDynamicRange: filter.extendedDynamicRangeAmount,
@@ -195,9 +238,10 @@ extension RenderEngine {
             luminanceNR: filter.luminanceNoiseReductionAmount, colorNR: filter.colorNoiseReductionAmount,
             sharpness: filter.sharpnessAmount, supportsLuminanceNR: filter.isLuminanceNoiseReductionSupported,
             supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported,
-            nativeSize: nativeSize, scaleFactor: Float(previewScale), isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
+            nativeSize: nativeSize, developedExtent: output.extent.size,
+            scaleFactor: 1, isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
         // CIRAWFilter already applies the file's orientation.
-        return OpenedSource(domain: .rawEDR, image: output, hdr: output,
-                            baseSpace: workingColorSpace, gain: nil, raw: development,rawPreviewSize:previewSize)
+        return try OpenedSource(domain: .rawEDR, image: output, hdr: output,
+                            baseSpace: workingColorSpace, gain: nil, raw: development).rawVariant(resolution: options.resolution)
     }
 }

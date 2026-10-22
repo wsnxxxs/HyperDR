@@ -99,6 +99,17 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(!ids(Recipe(inputDomain: .sdr), .hdr).contains("hdr.model"), "one model: no model choice")
 }
 
+@Test func aLensCorrectionTheDecoderDoesNotOfferIsShownUnavailable() throws {
+    let raw = Recipe(inputDomain: .rawEDR)
+    #expect(panel.group(group: .detail, in: raw)?.unsupported.isEmpty == true, "lens correction is offered")
+    let bare = AdjustmentPanel(context: AdjustmentContext(capabilities: ["CIRAWFilter.isLuminanceNoiseReductionSupported"]))
+    let detail = try #require(bare.group(group: .detail, in: raw))
+    #expect(detail.unsupported.map(\.id) == ["develop.lensCorrection"], "missing sliders are not listed")
+    #expect(!detail.controls.map(\.id).contains("develop.lensCorrection"))
+    #expect(panel.group(group: .hdr, in: Recipe(inputDomain: .sdr))?.unsupported.isEmpty == true)
+    #expect(bare.group(group: .detail, in: Recipe(inputDomain: .sdr)) == nil, "no detail group off RAW")
+}
+
 @Test func theHDRSwitchSitsInTheHeaderAndHidesTheGroup() throws {
     var recipe = Recipe(inputDomain: .sdr)
     let on = try #require(panel.group(group: .hdr, in: recipe))

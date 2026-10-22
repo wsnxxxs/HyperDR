@@ -38,7 +38,7 @@ extension RenderEngine {
                                 let native = CGRect(x:pixels.minX+Double(nx),y:pixels.minY+Double(ny),width:Double(nw),height:Double(nh))
                                 let crop = CGRect(x:bounds.minX+native.minX,y:bounds.maxY-native.maxY,
                                                   width:native.width,height:native.height)
-                                let source = try rasterize(image.cropped(to:crop),space:space,maximumRows:limit.height,opaque:true)
+                                let source = try rasterize(image.cropped(to:crop),space:space,maximumRows:limit.height,opaque:true,raw:true)
                                 guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
                                 let node = nodeContext(domain:.rawEDR,buffer:command)
                                 let tile = try node.texture(width:width,height:height)

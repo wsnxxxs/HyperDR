@@ -64,7 +64,7 @@ struct HomeScreen: View {
         }
         // An export may have been written while the editor was up.
         .task(id: session.isEditing) { if !session.isEditing { await loadHistory() } }
-        .alert(Text("ios.error.load"), isPresented: Binding(get: { session.openFailed }, set: { session.openFailed = $0 })) {
+        .alert(Text("ios.error.load"), isPresented: Binding(get: { session.showsOpenFailure }, set: { session.showsOpenFailure = $0 })) {
             Button("ios.common.ok", role: .cancel) {}
         }
     }
@@ -77,11 +77,14 @@ struct HomeScreen: View {
         .photosPickerDisabledCapabilities([.selectionActions, .search])
         .photosPickerAccessoryVisibility(.hidden, edges: .bottom)
         .ignoresSafeArea(edges: .bottom)
-        .dropDestination(for: ImportedPhoto.self) { photos, _ in
-            guard let photo = photos.first else { return false }
-            session.open(.imported(photo))
+        // The provider rather than the photo: the editor comes up as the
+        // drop lands and shows the copy arriving, instead of nothing at all
+        // until a large file (or an iCloud download) has been copied.
+        .onDrop(of: [.image], isTargeted: $dropTargeted) { providers in
+            guard let provider = providers.first else { return false }
+            session.open(.dropped(provider))
             return true
-        } isTargeted: { dropTargeted = $0 }
+        }
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 28)

@@ -438,6 +438,20 @@ struct RecipeExportEnvironment {
         #expect(evidence.writerReason == initial.writerReason && evidence.imageIO != nil)
     }
 
+    @Test func rawDecoderVersionSurvivesStoredExportIntent() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: "9.dng")
+        let snapshot = try env.snapshot(recipe: recipe)
+        try await env.sessions.saveRecipe(snapshot, for: env.session.id)
+        let saved = try #require(await env.sessions.recipe(for: env.session.id))
+        #expect(saved.recipe.rawDecoderVersion == "9.dng")
+        let encoded = try JSONEncoder().encode(saved)
+        #expect(try JSONDecoder().decode(RecipeExportSnapshot.self, from: encoded).recipe == recipe)
+        let legacy = try env.snapshot(recipe: Recipe(inputDomain: .rawEDR))
+        #expect(try JSONDecoder().decode(RecipeExportSnapshot.self,
+            from: JSONEncoder().encode(legacy)).recipe.rawDecoderVersion == nil)
+    }
+
     @Test func sdrHEICContainsNoAuxiliaryAndRoundTripsTheSnapshot() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         var recipe = Recipe(); recipe.setValue(.bool(false), for: "hdr.enabled")

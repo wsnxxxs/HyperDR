@@ -660,7 +660,7 @@ import UniformTypeIdentifiers
         editorObserver = Task { [weak self] in
             for await _ in Observations({
                 // Everything the model mirrors; `editorChanged` reads the values again.
-                (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure,
+                (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure, editor.originalFailure,
                  editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
                  editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request)
             }) {
@@ -692,6 +692,14 @@ import UniformTypeIdentifiers
            referenceFrame?.request != frame.request {
             referenceFrame = frame
             hasReferenceFrame = true
+            changed = true
+        } else if referenceFrame?.request.sourceID == source.id,
+                  editor.originalFrame.map({ $0.request.sourceID != source.id }) ?? true {
+            // The editor dropped its original (a new development, or a
+            // failure): an older one must not stand in for it. The canvas
+            // falls back to the edit and the Original badge goes.
+            referenceFrame = nil
+            hasReferenceFrame = false
             changed = true
         }
         if let frame = editor.frame, frame.request.sourceID == source.id,

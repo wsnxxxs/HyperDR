@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import HyperDRRecipe
 import HyperDRRender
@@ -637,5 +638,366 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(capture.recipe.conditionValue("hdr.model")?.stringValue == "research-cnn-v1")
         #expect(capture.lut == lut)
         #expect(capture.peakStops == capture.automaticValues["hdr.range"] ?? 3)
+    }
+}
+
+extension RecipeEditorAITests {
+    @Test(arguments: ["hdr-off", "source", "bypass"])
+    func noModelNeededCancelsThePredictionAndClearsComputing(stop: String) async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.holdPredictions()
+        chooseAI(h)
+        while await h.fake.heldPredictionCount == 0 { await Task.yield() }
+        var recipe = h.editor.recipe
+        switch stop {
+        case "hdr-off": recipe.setValue(.bool(false), for: "hdr.enabled"); h.editor.setRecipe(recipe)
+        case "source": recipe.setHDRSource(.expand); h.editor.setRecipe(recipe)
+        default: h.editor.bypassedGroups = [.hdr]
+        }
+        #expect(h.editor.aiStatus == .idle)
+        while await h.fake.heldPredictionCount != 0 { await Task.yield() }
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .idle)
+        h.editor.bypassedGroups = []
+        recipe = h.editor.recipe
+        recipe.setHDRSource(.ai)
+        recipe.setValue(.bool(true), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .computing)
+        await h.fake.releasePredictions()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+        #expect(await h.fake.predictions.count == 2)
+    }
+
+    @Test func rawDragCancelsTheObsoletePredictionAndHDRCanStayOff() async throws {
+        let h = Harness()
+        try await h.open(.rawEDR, name: "drag.dng")
+        await h.fake.holdPredictions()
+        var recipe = h.editor.recipe
+        recipe.setHDRSource(.capturedAI)
+        h.editor.setRecipe(recipe)
+        while await h.fake.heldPredictionCount == 0 { await Task.yield() }
+        let temperature = declaration("develop.temperature")
+        h.editor.editingChanged(temperature, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 5500))
+        while await h.fake.heldPredictionCount != 0 { await Task.yield() }
+        #expect(h.editor.aiStatus == .computing)
+        #expect(await h.fake.predictions.count == 1)
+        recipe = h.editor.recipe
+        recipe.setValue(.bool(false), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .idle)
+        h.editor.editingChanged(temperature, false)
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .idle)
+        #expect(await h.fake.predictions.count == 1)
+        recipe.setValue(.bool(true), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .computing)
+        await h.fake.releasePredictions()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+    }
+
+    @Test func undoRedoOfHDRRestoresTheAppropriateAIState() async throws {
+        let h = Harness(undo: true)
+        try await h.open()
+        await h.fake.holdPredictions()
+        h.step { chooseAI(h) }
+        while await h.fake.heldPredictionCount == 0 { await Task.yield() }
+        h.step {
+            var recipe = h.editor.recipe
+            recipe.setValue(.bool(false), for: "hdr.enabled")
+            h.editor.setRecipe(recipe)
+        }
+        #expect(h.editor.aiStatus == .idle)
+        h.undoManager.undo()
+        #expect(h.editor.aiStatus == .computing)
+        await h.fake.releasePredictions()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+        h.undoManager.redo()
+        #expect(h.editor.aiStatus == .idle)
+        h.undoManager.undo()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+    }
+
+    @Test func failedAndCancelledPredictionsDoNotLeaveAComputingState() async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.configure { $0.modelBehavior = .fail("test failure") }
+        chooseAI(h)
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .failed("test failure"))
+        var recipe = h.editor.recipe
+        recipe.setValue(.bool(false), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .idle)
+        recipe.setValue(.bool(true), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .failed("test failure"))
+        await h.fake.configure { $0.modelBehavior = .cancel }
+        h.editor.retryModelGain()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .idle)
+        await h.fake.configure { $0.modelBehavior = .succeed }
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.25))
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+    }
+
+    @Test(arguments: [false, true])
+    func pendingPredictionCannotUpdateAnotherPhotoOrAClosedEditor(close: Bool) async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.holdPredictions()
+        chooseAI(h)
+        while await h.fake.heldPredictionCount == 0 { await Task.yield() }
+        if close { await h.editor.close() } else { try await h.open(name: "next.jpg") }
+        await h.fake.releasePredictions()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .idle)
+        if close { #expect(h.editor.source == nil) }
+        else { #expect(h.editor.source?.url.lastPathComponent == "next.jpg") }
+    }
+
+    @Test func aFailedPhotoOpenRestartsOnlyThePreviousPhotosNeededPrediction() async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.holdPredictions()
+        chooseAI(h)
+        while await h.fake.heldPredictionCount == 0 { await Task.yield() }
+        await h.fake.holdOpens()
+        await h.fake.configure { $0.openError = .unsupported("test open failure") }
+        let opening = Task { try await h.editor.open(URL(fileURLWithPath: "/tmp/unreadable.jpg")) }
+        while await h.fake.heldOpenCount == 0 { await Task.yield() }
+        #expect(h.editor.aiStatus == .idle)
+        await h.fake.releaseOpens()
+        _ = await opening.result
+        #expect(h.editor.source?.url.lastPathComponent == "a.jpg")
+        #expect(h.editor.aiStatus == .computing)
+        await h.fake.releasePredictions()
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready)
+    }
+
+    @Test func unavailableRemainsUnavailableWhenHDRIsDisabledOrEditorCloses() async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.configure { $0.modelBehavior = .unavailable("unsupported device") }
+        chooseAI(h)
+        await h.editor.settle()
+        var recipe = h.editor.recipe
+        recipe.setValue(.bool(false), for: "hdr.enabled")
+        h.editor.setRecipe(recipe)
+        #expect(h.editor.aiStatus == .unavailable("unsupported device"))
+        await h.editor.close()
+        #expect(h.editor.aiStatus == .unavailable("unsupported device"))
+    }
+}
+
+@MainActor @Suite struct RecipeEditorOpeningTests {
+    private func preview(width: Int = 8) throws -> CGImage {
+        let context = try #require(CGContext(data: nil, width: width, height: 4,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        return try #require(context.makeImage())
+    }
+
+    @Test func embeddedPlaceholderPrecedesTheFirstFrameAndClearsWhenItArrives() async throws {
+        let h = Harness()
+        let image = try preview()
+        await h.fake.configure { $0.embeddedPreview = image }
+        await h.fake.holdOpens()
+        await h.fake.holdRenders()
+        let opening = Task { try await h.editor.open(URL(fileURLWithPath: "/tmp/placeholder.dng")) }
+        while await h.fake.heldOpenCount == 0 { await Task.yield() }
+        #expect(h.editor.isOpening)
+        #expect(h.editor.openingPhase == .reading)
+        #expect(h.editor.placeholder?.width == image.width)
+        #expect(h.editor.placeholderURL?.lastPathComponent == "placeholder.dng")
+        #expect(h.editor.placeholderID != nil)
+        #expect(h.editor.placeholderPixelSize == PixelSize(width: 6000, height: 4000))
+        #expect(h.editor.frame == nil)
+        await h.fake.releaseOpens()
+        try await opening.value
+        #expect(!h.editor.isOpening)
+        #expect(h.editor.openingPhase == .rendering)
+        #expect(h.editor.placeholder != nil)
+        await h.fake.releaseRenders()
+        await h.editor.settle()
+        #expect(h.editor.frame != nil)
+        #expect(h.editor.openingPhase == nil)
+        #expect(h.editor.placeholder == nil)
+    }
+
+    @Test func aFailedFirstFrameKeepsTheOldFrameSourceAndAnError() async throws {
+        let h = Harness()
+        try await h.open(name: "old.jpg")
+        let old = try #require(h.editor.frameSource)
+        let image = try preview()
+        await h.fake.configure { $0.embeddedPreview = image; $0.renderError = .unsupported("preview failed") }
+        try await h.editor.open(URL(fileURLWithPath: "/tmp/new.jpg"))
+        await h.editor.settle()
+        #expect(h.editor.source?.url.lastPathComponent == "new.jpg")
+        #expect(h.editor.frameSource?.id == old.id)
+        #expect(h.editor.frame?.request.sourceID == old.id)
+        #expect(h.editor.renderFailure != nil)
+        #expect(h.editor.openingPhase == nil)
+        #expect(h.editor.placeholder == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func aFailedOrCancelledOpenClearsItsPlaceholder(cancel: Bool) async throws {
+        let h = Harness()
+        let image = try preview()
+        await h.fake.configure { $0.embeddedPreview = image; $0.openError = .unsupported("test") }
+        await h.fake.holdOpens()
+        let opening = Task { try await h.editor.open(URL(fileURLWithPath: "/tmp/failure.dng")) }
+        while await h.fake.heldOpenCount == 0 { await Task.yield() }
+        #expect(h.editor.placeholder != nil)
+        if cancel { opening.cancel() } else { await h.fake.releaseOpens() }
+        _ = await opening.result
+        #expect(!h.editor.isOpening)
+        #expect(h.editor.openingPhase == nil)
+        #expect(h.editor.placeholder == nil)
+    }
+
+    @Test func aNewerOpenOwnsThePlaceholderAndCloseClearsIt() async throws {
+        let h = Harness()
+        let firstImage = try preview(), secondImage = try preview(width: 12)
+        await h.fake.configure { $0.embeddedPreview = firstImage }
+        await h.fake.holdOpens()
+        await h.fake.holdRenders()
+        let first = Task { try await h.editor.open(URL(fileURLWithPath: "/tmp/first.dng")) }
+        while await h.fake.heldOpenCount == 0 { await Task.yield() }
+        await h.fake.configure { $0.embeddedPreview = secondImage }
+        let second = Task { try await h.editor.open(URL(fileURLWithPath: "/tmp/second.dng")) }
+        _ = await first.result
+        while await h.fake.opened.count < 2 { await Task.yield() }
+        #expect(h.editor.placeholder?.width == secondImage.width)
+        await h.fake.releaseOpens()
+        try await second.value
+        #expect(h.editor.openingPhase == .rendering)
+        await h.editor.close()
+        await h.fake.releaseRenders()
+        await h.editor.settle()
+        #expect(h.editor.openingPhase == nil)
+        #expect(h.editor.placeholder == nil)
+    }
+}
+
+@MainActor @Suite struct RecipeEditorOriginalFailureTests {
+    @Test func failedOriginalDevelopmentCannotShowOldPixelsAndCanRetry() async throws {
+        let h = Harness()
+        try await h.open(.rawEDR, name: "original.dng")
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 1))
+        await h.editor.settle()
+        await h.fake.configure { fake in
+            fake.renderErrorForRequest = { request in
+                request.recipe.isDefault("tone.exposure") ? .unsupported("original failed") : nil
+            }
+        }
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 4500))
+        // Invalidated synchronously, before the replacement can fail.
+        #expect(h.editor.originalFrame == nil)
+        #expect(h.editor.shownOriginalDetail == nil)
+        await h.editor.settle()
+        #expect(h.editor.originalFrame == nil)
+        #expect(h.editor.originalFailure != nil)
+        #expect(h.editor.renderFailure == nil)
+        #expect(h.editor.frame?.request.recipe == h.editor.recipe)
+        let failedCount = await h.fake.requests.count
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 2))
+        await h.editor.settle()
+        #expect(await h.fake.requests.count == failedCount + 1)
+        #expect(h.editor.originalFailure != nil)
+        await h.fake.configure { $0.renderErrorForRequest = nil }
+        let recipe = h.editor.recipe
+        h.editor.retryRendering()
+        await h.editor.settle()
+        #expect(h.editor.originalFailure == nil)
+        #expect(h.editor.originalFrame?.request.recipe == recipe.original)
+        #expect(h.editor.recipe == recipe)
+    }
+
+    @Test func draggingInvalidatesOriginalBeforeFinalRenderAndUndoRedoFollowDevelopment() async throws {
+        let h = Harness(undo: true)
+        try await h.open(.rawEDR, name: "drag-original.dng")
+        let temperature = declaration("develop.temperature")
+        h.step {
+            h.editor.editingChanged(temperature, true)
+            h.editor.setRecipe(setting(h.editor.recipe, temperature.id, 4500))
+            #expect(h.editor.originalFrame == nil)
+            h.editor.editingChanged(temperature, false)
+        }
+        await h.editor.settle()
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+        h.undoManager.undo()
+        #expect(h.editor.originalFrame == nil)
+        await h.editor.settle()
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+        h.undoManager.redo()
+        #expect(h.editor.originalFrame == nil)
+        await h.editor.settle()
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+    }
+
+    @Test func newerDevelopmentAutomaticallyRetriesAndCloseClearsFailure() async throws {
+        let h = Harness()
+        await h.fake.configure { $0.renderError = .unsupported("temporary") }
+        try await h.open(.rawEDR)
+        #expect(h.editor.originalFailure != nil)
+        await h.fake.configure { $0.renderError = nil }
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 4700))
+        #expect(h.editor.originalFailure == nil)
+        await h.editor.settle()
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+        await h.fake.configure { $0.renderError = .unsupported("temporary") }
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 4800))
+        await h.editor.settle()
+        #expect(h.editor.originalFailure != nil)
+        await h.editor.close()
+        #expect(h.editor.originalFailure == nil)
+        #expect(h.editor.originalFrame == nil)
+    }
+
+    @Test func cancelledOriginalCannotPublishOverNewerDevelopment() async throws {
+        let h = Harness()
+        try await h.open(.rawEDR)
+        await h.fake.holdRenders()
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 4500))
+        while await h.fake.heldRenderCount < 2 { await Task.yield() }
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 4900))
+        #expect(h.editor.originalFrame == nil)
+        await h.fake.releaseRenders()
+        await h.editor.settle()
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+        #expect(h.editor.originalFailure == nil)
+        #expect(await h.fake.cancelled.contains { $0.recipe.value(for: "develop.temperature") == .number(4500) })
+    }
+
+    @Test func retryEditedPreviewKeepsLastFrameUntilSuccessWithoutUndoStep() async throws {
+        let h = Harness(undo: true)
+        try await h.open()
+        let old = h.editor.frame?.request
+        await h.fake.configure { $0.renderError = .unsupported("edited failed") }
+        h.step { h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 1)) }
+        await h.editor.settle()
+        #expect(h.editor.renderFailure != nil)
+        #expect(h.editor.frame?.request == old)
+        let recipe = h.editor.recipe
+        await h.fake.configure { $0.renderError = nil }
+        h.editor.retryRendering()
+        #expect(h.editor.renderFailure != nil)
+        await h.editor.settle()
+        #expect(h.editor.renderFailure == nil)
+        #expect(h.editor.frame?.request.recipe == recipe)
+        h.undoManager.undo()
+        #expect(h.editor.recipe.isDefault("tone.exposure"))
+        await h.editor.settle()
     }
 }

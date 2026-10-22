@@ -37,6 +37,8 @@ struct EditorDock<Frame: View>: View {
     var onReset: ((AdjustmentReset) -> Void)?
     var onBypass: (AdjustmentGroupID, Bool) -> Void = { _, _ in }
     var onLUTLibrary: () -> Void = {}
+    /// Why AI cannot be chosen, when it cannot (beside the HDR source).
+    var aiUnavailable: Text?
     @ViewBuilder let frame: () -> Frame
 
     var body: some View {
@@ -71,7 +73,8 @@ struct EditorDock<Frame: View>: View {
         case .group(let group):
             if let tab = groups.first(where: { $0.contains(group) }) ?? groups.first {
                 AdjustmentControls(recipe: $recipe, panel: panel, group: tab, axis: axis, large: large,
-                                   onEditingChanged: onEditingChanged, onReset: onReset, onLUTLibrary: onLUTLibrary)
+                                   onEditingChanged: onEditingChanged, onReset: onReset, onLUTLibrary: onLUTLibrary,
+                                   aiUnavailable: aiUnavailable)
                     .id(tab.id)
             }
         }

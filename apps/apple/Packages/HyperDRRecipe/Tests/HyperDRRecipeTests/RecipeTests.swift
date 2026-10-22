@@ -291,3 +291,15 @@ private extension ParameterDefault {
     recipe.setInputDomain(.sdr)
     #expect(!recipe.needsLookBaseline)
 }
+
+@Test func rawDecoderVersionIsOptionalSourceMetadata() throws {
+    let legacy = try Recipe.decode(Data("{\"version\":1,\"inputDomain\":\"rawEDR\"}".utf8))
+    #expect(legacy.rawDecoderVersion == nil)
+    #expect(!String(decoding: try legacy.encoded(), as: UTF8.self).contains("rawDecoderVersion"))
+    for version in ["8", "9", "8.dng", "9.dng", "future-version"] {
+        let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: version)
+        #expect(try Recipe.decode(recipe.encoded()) == recipe)
+        #expect(recipe.visibleParameters.map(\.id) == legacy.visibleParameters.map(\.id))
+        #expect(Recipe(adjustmentData: try recipe.adjustmentData())?.rawDecoderVersion == version)
+    }
+}

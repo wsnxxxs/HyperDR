@@ -19,8 +19,29 @@ import SwiftUI
     enum Source {
         case library(PhotosPickerItem)
         case file(URL)
-        /// Already copied in (a drop).
-        case imported(ImportedPhoto)
+        /// A drop, copied in once the editor is up so the copy shows progress.
+        case dropped(NSItemProvider)
+    }
+
+    /// What an open is waiting for, from the request until the photo's first
+    /// frame is on the canvas. After `fetching`, the editor's own
+    /// `openingPhase` (OPENING.md): coarse attribution, not a percentage.
+    enum OpeningStage: Equatable {
+        /// The original is being copied in: from the library (possibly a
+        /// download from iCloud), from Files or from a drop.
+        case fetching
+        /// The editor is reading the copy.
+        case reading
+        /// A RAW's decoder is being set up.
+        case loadingDecoder
+        /// The photo's pixels are being decoded or developed.
+        case developing
+        /// The photo is being analysed for its preview.
+        case preparingPreview
+        /// The photo is open; its first frame is rendering.
+        case rendering
+        /// The photo is open but its first frame failed to render.
+        case failed
     }
 
     /// Nil when this device cannot render (no Metal).
@@ -44,10 +65,18 @@ import SwiftUI
     }
     /// A photo is being copied or decoded.
     private(set) var loading = false
+    /// The original is being copied in (part of `loading`).
+    private(set) var fetching = false
+    /// How much of the copy has arrived, when the system reports it (a
+    /// download from iCloud); nil when unknown.
+    private(set) var fetchFraction: Double?
     /// The editor is on screen: from the first request until it is closed.
     var isEditing = false
     /// The last request failed before any photo was open.
-    var openFailed = false
+    private(set) var openFailed = false
+    /// Say so on the library: set once the editor has gone, since an alert
+    /// raised while the editor is still being dismissed is dropped.
+    var showsOpenFailure = false
     /// A failure over an open photo, shown for a moment.
     var notice: LocalizedStringKey?
 
@@ -68,6 +97,36 @@ import SwiftUI
     }
 
     var isAvailable: Bool { editor != nil }
+
+    /// Where the open in progress is, nil once the new photo's first frame
+    /// is shown (or nothing is opening).
+    var openingStage: OpeningStage? {
+        guard let editor else { return nil }
+        if loading, fetching { return .fetching }
+        switch editor.openingPhase {
+        case .reading: return .reading
+        case .loadingDecoder: return .loadingDecoder
+        case .developing: return .developing
+        case .preparingPreview: return .preparingPreview
+        case .rendering: return .rendering
+        case nil: break
+        }
+        // Between the copy and the editor's first phase.
+        if loading { return .reading }
+        // The phase is cleared when the first frame fails: the frame still
+        // belongs to the previous photo (or none).
+        guard let source = editor.source, editor.frameSource?.id != source.id else { return nil }
+        return editor.renderFailure == nil ? .rendering : .failed
+    }
+
+    /// The photo's preview failed to follow an edit: its first frame is on
+    /// screen but a later render failed, so the canvas lags the controls.
+    /// A first frame that fails is `openingStage == .failed` instead; a
+    /// changed file says so on its own.
+    var previewFailed: Bool {
+        guard let editor, !loading, let source = editor.source, editor.frameSource?.id == source.id else { return false }
+        return editor.renderFailure != nil && !editor.sourceChanged
+    }
 
     /// What export lays its frame out from.
     private var framing: IOSExportModel.Framing { .init(settings: frame, facts: facts) }
@@ -95,6 +154,9 @@ import SwiftUI
         exports.photoRequested(id)
         request = id
         openFailed = false
+        showsOpenFailure = false
+        // A notice belongs to the photo it was about.
+        notice = nil
         isEditing = true
         load?.cancel()
         load = Task { await self.load(source, id: id) }
@@ -110,22 +172,28 @@ import SwiftUI
         // An export that started meanwhile keeps its photo: drop the request.
         guard exports.canOpenPhoto, let editor else { return }
         loading = true
+        fetching = true
+        fetchFraction = nil
         // A newer request has started its own load; leave its spinner alone.
-        defer { if request == id { loading = false } }
+        defer { if request == id { loading = false; fetching = false; fetchFraction = nil } }
         var imported: ImportedPhoto?
         do {
             switch source {
             case .library(let item):
-                imported = try await item.loadTransferable(type: ImportedPhoto.self)
+                imported = try await transfer(id) { item.loadTransferable(type: ImportedPhoto.self, completionHandler: $0) }
             case .file(let url):
                 imported = try await Task.detached(priority: .userInitiated) { try ImportedPhoto.copyFromFiles(url) }.value
-            case .imported(let photo):
-                imported = photo
+            case .dropped(let provider):
+                imported = try await transfer(id) { done in
+                    provider.loadTransferable(type: ImportedPhoto.self) { done($0.map(Optional.some)) }
+                }
             }
             guard let imported else { throw CocoaError(.fileReadUnknown) }
             // The Files copy runs detached and ignores this task's cancellation:
             // a request superseded meanwhile stops here, and its copy is removed.
             try Task.checkCancellation()
+            fetching = false
+            fetchFraction = nil
             // The export session hashes the copy while the editor decodes it.
             exports.photoOpening(imported.url)
             try await editor.open(imported.url)
@@ -146,6 +214,29 @@ import SwiftUI
         }
     }
 
+    /// Runs a transfer that reports its `Progress`, publishing how far it
+    /// is while `id` is the current request. Cancelling the task cancels the
+    /// transfer and returns at once; a copy that still arrives is removed.
+    private func transfer(_ id: UUID,
+                          _ start: (@escaping @Sendable (Result<ImportedPhoto?, any Error>) -> Void) -> Progress)
+        async throws -> ImportedPhoto? {
+        let handoff = TransferHandoff()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                handoff.begin(continuation)
+                let progress = start { handoff.finish($0) }
+                handoff.watch(progress) { [weak self] fraction in
+                    Task { @MainActor in
+                        guard let self, self.request == id, self.fetching else { return }
+                        self.fetchFraction = fraction
+                    }
+                }
+            }
+        } onCancel: {
+            handoff.finish(.failure(CancellationError()))
+        }
+    }
+
     /// The Exif is read off the main actor; a newer photo replaces it.
     private func readFacts(_ url: URL) {
         factsTask?.cancel()
@@ -156,6 +247,12 @@ import SwiftUI
         }
     }
 
+    /// The editor has been dismissed: an open that failed can be reported now.
+    func editorDismissed() {
+        if openFailed { showsOpenFailure = true }
+        openFailed = false
+    }
+
     /// Back to the library: the photo, its copy and its export session go.
     /// Not while an export runs.
     func close() async {
@@ -163,6 +260,9 @@ import SwiftUI
         load?.cancel()
         request = nil
         loading = false
+        fetching = false
+        fetchFraction = nil
+        notice = nil
         isEditing = false
         factsTask?.cancel()
         await editor.close()
@@ -190,5 +290,65 @@ import SwiftUI
         frame.style.caption(frame, facts: facts, variant: layout.variant,
                             bandHeight: layout.referenceEdge > 0
                                 ? Double(layout.caption.height) / Double(layout.referenceEdge) : nil)
+    }
+}
+
+/// One transfer's continuation, resumed exactly once: by the transfer's
+/// completion or by cancellation, whichever comes first.
+private nonisolated final class TransferHandoff: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ImportedPhoto?, any Error>?
+    private var pending: Result<ImportedPhoto?, any Error>?
+    private var progress: Progress?
+    private var observation: NSKeyValueObservation?
+    private var done = false
+
+    func begin(_ continuation: CheckedContinuation<ImportedPhoto?, any Error>) {
+        lock.lock()
+        if let pending {
+            lock.unlock()
+            continuation.resume(with: pending)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    /// Follows the transfer's fraction; cancelled already, cancels it.
+    func watch(_ progress: Progress, _ report: @escaping @Sendable (Double) -> Void) {
+        let observation = progress.observe(\.fractionCompleted, options: [.initial, .new]) { progress, _ in
+            report(progress.fractionCompleted)
+        }
+        lock.lock()
+        let finished = done
+        if !finished {
+            self.progress = progress
+            self.observation = observation
+        }
+        lock.unlock()
+        if finished {
+            observation.invalidate()
+            progress.cancel()
+        }
+    }
+
+    func finish(_ result: Result<ImportedPhoto?, any Error>) {
+        lock.lock()
+        guard !done else {
+            lock.unlock()
+            // Cancelled first: the copy that arrived afterwards is nobody's.
+            if case .success(let photo?) = result { Task { @MainActor in photo.discard() } }
+            return
+        }
+        done = true
+        let continuation = self.continuation
+        self.continuation = nil
+        if continuation == nil { pending = result }
+        let progress = self.progress
+        observation?.invalidate()
+        observation = nil
+        lock.unlock()
+        if case .failure(let error) = result, error is CancellationError { progress?.cancel() }
+        continuation?.resume(with: result)
     }
 }

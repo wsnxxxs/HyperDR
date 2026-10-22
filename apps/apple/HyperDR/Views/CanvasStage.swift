@@ -43,11 +43,23 @@ struct CanvasStage: View {
         _peek = State(initialValue: peek)
         _hold = State(initialValue: PressAndHold(begin: { peek.hold(.pointer) }, end: { peek.release(.pointer) }))
     }
+    /// The editor's placeholder while the canvas has no frame of its own; a
+    /// photo replacing another keeps the old one on screen instead.
+    private var openingPlaceholder: OpeningPlaceholder.Content? {
+        let editor = model.editor
+        guard model.canvas.imageFrame == nil, let id = editor.placeholderID, let image = editor.placeholder else { return nil }
+        let size = editor.placeholderPixelSize.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
+        return OpeningPlaceholder.Content(id: id, image: image, pixelSize: size)
+    }
+
     /// The current focus was given by the canvas itself, not the keyboard.
     @State private var focusedByPointer = false
 
     var body: some View {
         PreviewCanvas(model: model, pointer: pointer)
+            // Until the first photo's first frame: its embedded thumbnail,
+            // fitted as the canvas will fit the photo, fading out as the frame lands.
+            .overlay { OpeningPlaceholder(openingPlaceholder) }
             .background { PhotoShadow(frame: model.canvas.imageFrame) }
             .overlay { PhotoCorners(frame: model.canvas.imageFrame) }
             .overlay { PhotoBadge(model: model) }
@@ -375,9 +387,18 @@ struct CanvasStatus: View {
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(Space.s3)
                     } else if let error = document.previewError {
-                        PreviewErrorBanner(text: ErrorText(error))
-                            .frame(maxHeight: .infinity, alignment: .top)
-                            .padding(Space.s3)
+                        let text = ErrorText(error)
+                        PreviewErrorBanner(title: Text(text.title), message: Text(text.message), detail: text.body) {
+                            model.editor.retryRendering()
+                        }
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(Space.s3)
+                    } else if let detail = originalFailure {
+                        PreviewErrorBanner(title: Text("preview.originalFailed"), message: nil, detail: detail) {
+                            model.editor.retryRendering()
+                        }
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(Space.s3)
                     }
                     if document.isPreparingCameraSupport {
                         CameraSupportCard(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
@@ -394,14 +415,17 @@ struct CanvasStatus: View {
                 } else {
                     switch document.phase {
                     case .opening, .rendering:
-                        if document.isPreparingCameraSupport {
-                            CameraSupportPanel(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
-                                .transition(.opacity)
-                        } else {
-                            FirstFrameProgress(label: busyLabel(document) ?? "stage.generating",
-                                               slowFileName: document.isOpeningSlowly && model.canCancelOpen ? document.name : nil,
-                                               cancel: cancelOpen)
+                        Group {
+                            if document.isPreparingCameraSupport {
+                                CameraSupportPanel(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                                    .transition(.opacity)
+                            } else {
+                                FirstFrameProgress(label: busyLabel(document) ?? "stage.generating",
+                                                   slowFileName: document.isOpeningSlowly && model.canCancelOpen ? document.name : nil,
+                                                   cancel: cancelOpen)
+                            }
                         }
+                        .modifier(OverPlaceholder(isOn: model.editor.placeholder != nil))
                     case .failed(let error):
                         FirstFrameFailure(text: ErrorText(error), engineFailed: model.engine.failure != nil) {
                             window.isImporting = true
@@ -431,6 +455,13 @@ struct CanvasStatus: View {
 
     private func cancelOpen() { OpenCancellation.cancel(model, locale: locale) }
 
+    /// The original preview failed while the original is asked for (Original,
+    /// Split or held): the canvas shows the edit in its place, so say so.
+    private var originalFailure: String? {
+        guard model.viewMode != .edited || model.isPeekingOriginal else { return nil }
+        return model.editor.originalFailure
+    }
+
     /// "Reading the photo…" in the corner; once it is slow, with Cancel.
     @ViewBuilder private func busyChip(_ label: LocalizedStringKey, document: DocumentState) -> some View {
         if document.isOpeningSlowly, model.canCancelOpen {
@@ -453,30 +484,78 @@ struct CanvasStatus: View {
 
     private func busyLabel(_ document: DocumentState) -> LocalizedStringKey? {
         switch document.phase {
-        case .opening: "stage.reading"
-        case .rendering: "stage.generating"
+        case .opening, .rendering:
+            // The editor's own phase once it has one (OPENING.md): coarse
+            // attribution, not a percentage.
+            switch model.editor.openingPhase {
+            case .reading: "stage.reading"
+            case .loadingDecoder: "stage.loadingDecoder"
+            case .developing: "stage.decoding"
+            case .preparingPreview: "stage.analyzing"
+            case .rendering: "stage.generating"
+            case nil: document.phase == .opening ? "stage.reading" : "stage.generating"
+            }
         case .ready, .failed: document.isRefreshing ? "mac.canvas.refreshing" : nil
         }
     }
 }
 
-/// A refresh failed; the previous frame stays on the canvas.
+/// Over the opening thumbnail the panel's light text needs a dark plate, as
+/// the canvas chips have; on the empty canvas it needs none.
+private struct OverPlaceholder: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(isOn ? Space.s5 : 0)
+            .background {
+                if isOn {
+                    RoundedRectangle(cornerRadius: Radius.xl)
+                        .fill(Color.hdr.overlay)
+                        .overlay { RoundedRectangle(cornerRadius: Radius.xl).strokeBorder(Color.hdr.overlayLine) }
+                        .transition(.opacity)
+                }
+            }
+            .animation(Motion.ease(), value: isOn)
+    }
+}
+
+/// A refresh failed; the previous frame stays on the canvas until Retry (or
+/// the next edit) renders the current recipe.
 private struct PreviewErrorBanner: View {
-    let text: ErrorText
+    let title: Text
+    let message: Text?
+    /// Developer-facing, in the tooltip.
+    let detail: String
+    let retry: () -> Void
+    @State private var hovered = false
 
     var body: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text.title).fontWeight(.semibold)
-                Text(text.message).foregroundStyle(Color.hdr.overlayMuted)
+        HStack(alignment: .center, spacing: Space.s3) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    title.fontWeight(.semibold)
+                    if let message { message.foregroundStyle(Color.hdr.overlayMuted) }
+                }
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
             }
-        } icon: {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
+            .accessibilityElement(children: .combine)
+            Button(action: retry) {
+                Text("preview.retry")
+                    .font(.system(size: TypeScale.Size.caption, weight: .semibold))
+                    .foregroundStyle(Color.hdr.overlayInk)
+                    .padding(.horizontal, Space.s2)
+                    .frame(height: BusyChip.height)
+                    .background(hovered ? Color.hdr.overlayHover : .clear, in: .rect(cornerRadius: Radius.md))
+                    .contentShape(.rect(cornerRadius: Radius.md))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
         }
-        .frame(maxWidth: 460, alignment: .leading)
+        .frame(maxWidth: 520, alignment: .leading)
         .hdrOverlayChip()
-        .help(Text(verbatim: text.body))
-        .accessibilityElement(children: .combine)
+        .help(Text(verbatim: detail))
     }
 }
 

@@ -8,6 +8,7 @@ public enum RenderError: Error, Sendable {
     case metalUnavailable, allocationFailed, invalidSize, invalidRegion
     case cannotOpenSource, cannotDecodeSource, missingGainMap, unsupportedGainColorSpace
     case sourceChanged
+    case unsupportedRAWDecoder(String)
     case gpu(String)
     case invalidAdjustment, invalidLUT(String), aiNotAvailable, duplicateHDRSplit
 }
@@ -178,6 +179,26 @@ public struct RenderSource: @unchecked Sendable {
     var gainSamplingRegion = CGRect(x:0,y:0,width:1,height:1)
 }
 
+extension RenderSource {
+    /// RAW stays native through CIRAWFilter; only the final area-downsample size
+    /// changes with a preview bound. Reuse pixels when a different bound rounds
+    /// to the exact same raster (e.g. first square bound vs fitted canvas).
+    public func reusesRAWPreview(options: SourceOptions) -> Bool {
+        guard domain == .rawEDR, let origin, let rawSettings,
+              samplingRegion == CGRect(x: 0, y: 0, width: 1, height: 1),
+              case .preview(let bound) = options.resolution,
+              bound.width > 0, bound.height > 0 else { return false }
+        var development = options
+        development.resolution = origin.options.resolution
+        guard development == origin.options else { return false }
+        let native = rawSettings.nativeSize, developed = rawSettings.developedExtent
+        let scale = min(1, Double(bound.width) / Double(native.width), Double(bound.height) / Double(native.height))
+        let expected = PixelSize(width: max(1, Int((Double(developed.width) * scale).rounded())),
+                                 height: max(1, Int((Double(developed.height) * scale).rounded())))
+        return expected == size
+    }
+}
+
 public struct RAWDevelopment: Sendable {
     public let boost: Float
     public let boostShadow: Float
@@ -197,8 +218,15 @@ public struct RAWDevelopment: Sendable {
     public let supportsSharpness: Bool
     /// Oriented native dimensions, independent of preview development scale.
     public let nativeSize: PixelSize
+    /// Native output extent after orientation/cropping, before preview downsampling.
+    public let developedExtent: CGSize
     /// Output scale relative to native pixels, after bounded RAW development.
-    public let scaleFactor: Float
+    public private(set) var scaleFactor: Float
+    func atPreviewScale(_ scale: Float) -> Self {
+        var copy = self
+        copy.scaleFactor = scale
+        return copy
+    }
     public let isDraft: Bool
     /// Camera white balance / Apple detail defaults, in Recipe units (K, tint,
     /// 0...100 percent). Captured before applying any RAW overrides.
@@ -236,9 +264,14 @@ public enum SourceResolution: Hashable, Sendable {
 /// Retained for callers of the original RAW preview API; the policy now covers all sources.
 public typealias RAWResolution = SourceResolution
 
+/// RAW graph setup can load a system model; developing begins at pixel materialization.
+public enum SourceLoadPhase: Sendable { case loadingDecoder, developing, preparingAnalysis }
+
 public struct SourceOptions: Hashable, Sendable {
     public static let parameters = Adjustments.all.filter { $0.cost == .redevelop }
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
+    /// Nil leaves CIRAWFilter on its legacy system default. Recorded versions must be supported.
+    public var rawDecoderVersion: String? = nil
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()

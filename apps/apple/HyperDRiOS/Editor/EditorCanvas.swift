@@ -53,7 +53,23 @@ struct EditorCanvas: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.smooth(duration: 0.35), value: placement)
         }
+        // The new photo's embedded thumbnail until its first frame; over a
+        // previous photo it covers that one entirely.
+        .overlay { OpeningPlaceholder(placeholder, backdrop: editor.frame != nil) }
         .overlay(alignment: .top) { status.padding(.top, Space.s2) }
+        // The card and the top capsule never show together: once there is
+        // something to see (a thumbnail, a frame) the card goes at once and
+        // the capsule carries the stage.
+        .overlay { if showsOpeningCard { OpeningCard(stage: session.openingStage, fraction: session.fetchFraction) } }
+    }
+
+    /// Nothing to show yet: the stage goes in the middle of the empty canvas.
+    private var showsOpeningCard: Bool { editor.frame == nil && editor.placeholder == nil }
+
+    private var placeholder: OpeningPlaceholder.Content? {
+        guard let id = editor.placeholderID, let image = editor.placeholder else { return nil }
+        let size = editor.placeholderPixelSize.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
+        return OpeningPlaceholder.Content(id: id, image: image, pixelSize: size)
     }
 
     // MARK: Frame
@@ -206,36 +222,168 @@ struct EditorCanvas: View {
 
     private var status: some View {
         VStack(spacing: Space.s2) {
-            if holdingOriginal, editor.originalFrame != nil { capsule(Text("ios.canvas.original")) }
+            if holdingOriginal, original != nil { capsule(Text("ios.canvas.original")) }
+            // The original is asked for but not there: the canvas shows the
+            // edit (unlabelled) until it is, or says it failed.
+            if wantsOriginal, original == nil, editor.frame != nil, session.openingStage == nil {
+                if editor.originalFailure != nil {
+                    capsule(Text("ios.original.failed"), warning: true, action: retryRender)
+                } else {
+                    capsule(Text("ios.original.loading"), progress: true)
+                }
+            }
             if editor.aiStatus == .computing { capsule(Text("ios.ai.computing"), progress: true) }
-            if case .failed = editor.aiStatus { capsule(Text("ios.ai.failed")) }
+            if case .failed = editor.aiStatus {
+                capsule(Text("ios.ai.failed"), action: (Text("ios.common.retry"), { editor.retryModelGain() }))
+            }
             if editor.sourceChanged { capsule(Text("ios.error.sourceChanged")) }
+            // An edit's render failed: the canvas still shows the last frame,
+            // which the controls no longer describe.
+            if session.previewFailed { capsule(Text("ios.preview.failed"), warning: true, action: retryRender) }
             if let notice = session.notice { capsule(Text(notice)) }
-            if session.loading, editor.frame != nil { capsule(Text("ios.canvas.opening"), progress: true) }
+            // Over the previous photo or the new one's thumbnail: say the new
+            // one is on its way.
+            if !showsOpeningCard, let stage = session.openingStage {
+                stageCapsule(stage)
+            }
         }
         .animation(.smooth(duration: 0.25), value: holdingOriginal)
-        .animation(.smooth(duration: 0.25), value: session.loading)
+        .animation(.smooth(duration: 0.25), value: session.openingStage)
+        .animation(.smooth(duration: 0.25), value: session.previewFailed)
+        .animation(.smooth(duration: 0.25), value: editor.originalFailure != nil)
+        .animation(.smooth(duration: 0.25), value: original == nil)
+        .animation(.smooth(duration: 0.25), value: editor.aiStatus)
         .task(id: session.notice) {
             guard session.notice != nil else { return }
             try? await Task.sleep(for: .seconds(3))
             if !Task.isCancelled { session.notice = nil }
         }
-        .allowsHitTesting(false)
     }
 
-    private func capsule(_ text: Text, progress: Bool = false) -> some View {
+    /// Original, Split or the canvas held.
+    private var wantsOriginal: Bool { holdingOriginal || comparison != .edited }
+
+    /// Renders the current recipe again after a failure (the next edit would too).
+    private var retryRender: (label: Text, run: () -> Void)? {
+        (Text("ios.common.retry"), { editor.retryRendering() })
+    }
+
+    /// The opening stage in one capsule that stays put while its words
+    /// change: the old words go at once and the new ones fade in, so two
+    /// stages never overlap.
+    private func stageCapsule(_ stage: EditingSession.OpeningStage) -> some View {
         HStack(spacing: Space.s2) {
-            if progress { ProgressView().controlSize(.mini) }
-            text
+            if stage == .failed {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
+            } else {
+                ProgressView().controlSize(.mini)
+            }
+            OpeningCard.swapping(stage)
         }
         .font(.footnote.weight(.medium))
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s2)
         .glassEffect(.regular, in: .capsule)
+        .allowsHitTesting(false)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// A status line in a glass capsule. One with an action is a button as
+    /// a whole, so the short capsule is easy to hit; the others let touches
+    /// through to the canvas.
+    @ViewBuilder
+    private func capsule(_ text: Text, progress: Bool = false, warning: Bool = false,
+                         action: (label: Text, run: () -> Void)? = nil) -> some View {
+        let content = HStack(spacing: Space.s2) {
+            if progress { ProgressView().controlSize(.mini) }
+            if warning { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn) }
+            text
+            if let action {
+                action.label
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.hdr.accent)
+                    .padding(.leading, Space.s1)
+            }
+        }
+        .font(.footnote.weight(.medium))
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s2)
+        .contentShape(.capsule)
+        if let action {
+            Button(action: action.run) { content }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        } else {
+            content
+                .glassEffect(.regular, in: .capsule)
+                .allowsHitTesting(false)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 
     static func headroom(_ value: CGFloat) -> String {
         Double(value).formatted(.number.precision(.fractionLength(1))) + "×"
+    }
+}
+
+/// Before a photo's first frame the canvas is empty: this says what the open
+/// is waiting for, in the middle of it. Getting the photo shows how much has
+/// arrived when the system reports it (a download from iCloud). With no
+/// stage yet (the request is being accepted) it reads as fetching.
+struct OpeningCard: View {
+    let stage: EditingSession.OpeningStage?
+    let fraction: Double?
+
+    var body: some View {
+        let stage = stage ?? .fetching
+        VStack(spacing: Space.s3) {
+            if stage == .failed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.hdr.warn)
+            } else {
+                ProgressView().controlSize(.large)
+            }
+            Self.swapping(stage)
+                .font(.subheadline.weight(.medium))
+                .multilineTextAlignment(.center)
+            if stage == .fetching, let fraction, fraction > 0, fraction < 1 {
+                ProgressView(value: fraction)
+                    .frame(width: 140)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, Space.s5)
+        .padding(.vertical, Space.s4)
+        .frame(minWidth: 180)
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .animation(.smooth(duration: 0.25), value: stage)
+        .animation(.smooth(duration: 0.25), value: fraction == nil)
+        .accessibilityElement(children: .combine)
+        .allowsHitTesting(false)
+        // Fades in on an empty canvas; leaves at once when a thumbnail or
+        // frame arrives, so it never overlaps the top capsule.
+        .transition(.asymmetric(insertion: .opacity, removal: .identity))
+    }
+
+    /// The stage's words, replaced in place: the old ones are removed
+    /// without a transition and the new ones fade in quickly.
+    static func swapping(_ stage: EditingSession.OpeningStage) -> some View {
+        text(stage)
+            .id(stage)
+            .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.15)), removal: .identity))
+    }
+
+    static func text(_ stage: EditingSession.OpeningStage) -> Text {
+        switch stage {
+        case .fetching: Text("ios.open.fetching")
+        case .reading: Text("ios.open.reading")
+        case .loadingDecoder: Text("ios.open.loadingDecoder")
+        case .developing: Text("ios.open.developing")
+        case .preparingPreview: Text("ios.open.preparingPreview")
+        case .rendering: Text("ios.open.rendering")
+        case .failed: Text("ios.open.failed")
+        }
     }
 }

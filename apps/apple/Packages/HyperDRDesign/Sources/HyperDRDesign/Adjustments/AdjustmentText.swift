@@ -61,6 +61,11 @@ public enum AdjustmentText {
         DesignStrings.string(declaration.labelKey, locale: locale)
     }
 
+    /// In place of a switch the photo does not offer
+    /// (`AdjustmentGroupState.unsupported`): no lens profile. It does not
+    /// claim the file is corrected some other way; that is unknown.
+    public static var noProfile: Text { Text("adjust.noProfile", bundle: .module) }
+
     /// The collapsed group's summary (§5.1): up to two changed controls with
     /// their values ("Exposure +0.30 · Contrast +10 · +1"), a switch as on or
     /// off, a choice by its option; the LUT's name for the look group; with

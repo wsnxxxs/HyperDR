@@ -2,7 +2,11 @@
 
 The row path follows HyperDRRender/EXPORT_MEMORY.md. Full-plane writers (AVIF,
 ImageIO) still price their actual whole-plane owners and may be refused.
-All figures below are estimates, not measured iPhone footprints.
+All figures below are estimates, not measured iPhone footprints. The RAW 9 Mac
+measurements (2026-10-22) fit the existing row allowance. Whole-plane RAW fallback
+now reserves the same 24N + 512 MiB decoder allowance beside its full source texture,
+rather than 16N alone; see Render's measurement table. No RAW 9 device measurement
+has been made.
 
 For native area N, canvas width W and callback height R:
 

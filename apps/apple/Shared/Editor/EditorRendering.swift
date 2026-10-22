@@ -3,6 +3,20 @@ import Foundation
 import HyperDRRecipe
 import HyperDRRender
 
+/// Loading progress; `.rendering` covers the first edited frame after the source opens.
+nonisolated enum EditorOpeningStage: String, Equatable, Sendable {
+    case reading, loadingDecoder, developing, preparingPreview, rendering
+    var order: Int {
+        switch self {
+        case .reading: 0
+        case .loadingDecoder: 1
+        case .developing: 2
+        case .preparingPreview: 3
+        case .rendering: 4
+        }
+    }
+}
+
 /// What the editor asks of the renderer (p7-2b §2, §6), so `RecipeEditor` runs
 /// on the real `RenderSession` in the apps and on `FakeEditorRendering` in
 /// tests and previews. Foundation, Recipe and Render only: no SwiftUI, AppKit
@@ -20,6 +34,11 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// first decode or development (nil: full size); later renders decode
     /// again only when they need more pixels or another development.
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?) async throws -> EditorSource
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource
+    func openingPreview(_ url: URL) async -> EmbeddedPreview.Image?
+
 
     /// Renders the open photo, with the display pair the canvas draws. The
     /// recipe's input domain must be the source's. A region renders from the
@@ -64,6 +83,13 @@ nonisolated enum EditorRenderingError: Error, Equatable, Sendable {
     case unsupported(String)
 }
 
+/// A new photo's preferred decoder failed before it opened. The successful
+/// version is recorded in the recipe; hosts may explain the downgrade.
+nonisolated struct RAWDecoderFallback: Equatable, Sendable {
+    let requested: String
+    let used: String
+}
+
 /// The open photo, as the editor and the controls need it.
 nonisolated struct EditorSource: Equatable, Sendable {
     let id: UUID
@@ -82,6 +108,8 @@ nonisolated struct EditorSource: Equatable, Sendable {
     /// The file carries transparency, which an export fills (Kit's
     /// `ExportSource.hasAlpha`).
     var hasAlpha = false
+    var rawDecoderVersion: String? = nil
+    var rawDecoderFallback: RAWDecoderFallback? = nil
 }
 
 /// One render of the open photo.
@@ -144,7 +172,7 @@ extension Recipe {
     /// The comparison recipe retains the source's range and the same RAW
     /// development. An SDR original must not acquire the default HDR expansion.
     nonisolated var original: Recipe {
-        var original = Recipe(inputDomain: inputDomain)
+        var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion)
         if inputDomain == .sdr { original.setValue(.bool(false), for: "hdr.enabled") }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             original.setValue(value(for: declaration.id), for: declaration.id)
@@ -164,9 +192,25 @@ extension Recipe {
     /// The values that need a new development of the source.
     nonisolated var development: [String: ParameterValue] {
         var values: [String: ParameterValue] = [:]
+        values["raw.decoderVersion"] = rawDecoderVersion.map(ParameterValue.string)
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             values[declaration.id] = value(for: declaration.id)
         }
         return values
+    }
+}
+
+// Test renderers without decoder graphs may keep their existing open implementation.
+extension EditorRendering {
+    func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
+
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource {
+        await progress(.reading)
+        return try await open(url, previewSize: previewSize, restoring: restoring)
+    }
+
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?) async throws -> EditorSource {
+        try await open(url, previewSize: previewSize)
     }
 }

@@ -55,7 +55,20 @@ import Observation
     private(set) var frameSource: EditorSource?
     /// The defaults under the same development (p7-2b §5).
     private(set) var originalFrame: EditorFrame?
+    /// Original-preview failure, separate from the edited preview. Old
+    /// developments are removed immediately, including while dragging.
+    private(set) var originalFailure: String?
+    @ObservationIgnored private var failedOriginalRequest: EditorRenderRequest?
     private(set) var isOpening = false
+    /// MainActor/Observation state. Nil after the first frame, failure or close.
+    /// May remain `.rendering` after `isOpening` becomes false.
+    private(set) var openingPhase: EditorOpeningStage?
+    /// Oriented embedded pixels for display only, cleared with openingPhase.
+    /// It can be nil when the file has no embedded thumbnail.
+    private(set) var placeholder: CGImage?
+    private(set) var placeholderPixelSize: HyperDRRender.PixelSize?
+    private(set) var placeholderURL: URL?
+    private(set) var placeholderID: UUID?
     private(set) var aiStatus: AIStatus = .idle
     /// The last render failure (not a cancellation), developer-facing; nil once a render succeeds.
     private(set) var renderFailure: String?
@@ -211,17 +224,42 @@ import Observation
         openGeneration += 1
         let generation = openGeneration
         isOpening = true
-        defer { if generation == openGeneration { isOpening = false } }
+        updateModelGain()
+        openingPhase = .reading
+        clearPlaceholder()
+        var succeeded = false
+        defer {
+            if generation == openGeneration {
+                isOpening = false
+                if !succeeded { openingPhase = nil; clearPlaceholder() }
+                updateModelGain()
+            }
+        }
         // Opens reach the renderer one after another, so the photo it holds
         // last is the one asked for last.
         let previous = opening
         previous?.cancel()
         let renderer = self.renderer
         let hint = Self.previewSize(source: nil, canvasSide: previewFloor(canvasPixelSize))
-        let task = Task {
+        let task = Task { [self] in
+            try Task.checkCancellation()
+            let preview = await renderer.openingPreview(url)
+            try Task.checkCancellation()
+            if generation == self.openGeneration, let preview {
+                self.placeholder = preview.image
+                self.placeholderPixelSize = preview.pixelSize
+                self.placeholderURL = url
+                self.placeholderID = UUID()
+            }
+            // A cancelled native decode can take time to unwind. Fetch the
+            // next photo's small placeholder before waiting for that decode.
             _ = await previous?.result
             try Task.checkCancellation()
-            return try await renderer.open(url, previewSize: hint)
+            return try await renderer.open(url, previewSize: hint, restoring: restoring) { @MainActor [weak self] stage in
+                guard let self, generation == self.openGeneration, self.isOpening,
+                      stage.order >= (self.openingPhase?.order ?? 0) else { return }
+                self.openingPhase = stage
+            }
         }
         opening = task
         let opened = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
@@ -241,7 +279,7 @@ import Observation
             restoring.setInputDomain(opened.domain)
             recipe = restoring
         } else {
-            recipe = Recipe(inputDomain: opened.domain)
+            recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion)
         }
         if restoring == nil || historyURL != url { undo.clear() }
         historyURL = url
@@ -254,13 +292,28 @@ import Observation
         repredicted = nil
         if case .unavailable = aiStatus {} else { aiStatus = .idle }
         renderFailure = nil
+        originalFrame = nil
+        originalFailure = nil
+        failedOriginalRequest = nil
+        if placeholder != nil { placeholderPixelSize = opened.pixelSize }
+        openingPhase = .rendering
+        succeeded = true
         updatePreviewSize(force: true)
+    }
+
+    private func clearPlaceholder() {
+        placeholder = nil
+        placeholderPixelSize = nil
+        placeholderURL = nil
+        placeholderID = nil
     }
 
     /// No photo: the empty state.
     func close() async {
         openGeneration += 1
         isOpening = false
+        openingPhase = nil
+        clearPlaceholder()
         abandoned = nil
         // Behind any open still on its way to the renderer, ahead of any later one.
         let previous = opening
@@ -283,6 +336,8 @@ import Observation
         frame = nil
         frameSource = nil
         originalFrame = nil
+        originalFailure = nil
+        failedOriginalRequest = nil
         recipe = Recipe()
         bypassedGroups = []
         modelTask?.cancel()
@@ -490,6 +545,21 @@ import Observation
         guard let size = previewSize,
               let request = request(for: recipe, size: size, interactive: drag != nil) else { return }
         pending = request
+        if let wanted = renderRequest(size: size, original: true) {
+            // Source identity alone does not distinguish RAW developments.
+            if let shown = originalFrame, !shown.request.rendersSame(as: wanted) {
+                originalFrame = nil
+                originalDetailFrame = nil
+            }
+            if let flight = originalFlight, !flight.request.rendersSame(as: wanted) {
+                flight.task.cancel()
+                originalFlight = nil
+            }
+            if let failed = failedOriginalRequest, !failed.rendersSame(as: wanted) {
+                failedOriginalRequest = nil
+                originalFailure = nil
+            }
+        }
         detailTask?.cancel()
         if !isDragging { scheduleOriginalIfNeeded(size: size) }
         guard pacing == nil else { return }
@@ -532,12 +602,16 @@ import Observation
             frame = rendered
             if source?.id == rendered.request.sourceID {
                 frameSource = source
+                if !isOpening { openingPhase = nil; clearPlaceholder() }
             }
             renderFailure = nil
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
             frameLacksModelGain(rendered)
         case .failure(let error):
-            if !(error is CancellationError) { renderFailure = String(describing: error) }
+            if !(error is CancellationError) {
+                renderFailure = String(describing: error)
+                if !isOpening { openingPhase = nil; clearPlaceholder() }
+            }
             noteFailure(error)
         }
         if pending != nil, pacing == nil { submitPending() }
@@ -549,9 +623,12 @@ import Observation
         var wanted = original
         wanted.bypassedGroups = []
         wanted.usesModelGain = false
+        if failedOriginalRequest == wanted { return }
         if let flight = originalFlight, flight.request == wanted { return }
         if originalFlight == nil, let shown = originalFrame?.request, shown == wanted { return }
         originalFlight?.task.cancel()
+        originalFailure = nil
+        failedOriginalRequest = nil
         renderGeneration += 1
         let generation = renderGeneration
         let renderer = self.renderer
@@ -560,15 +637,34 @@ import Observation
             do { result = .success(try await renderer.render(wanted)) } catch { result = .failure(error) }
             guard let self, self.originalFlight?.generation == generation else { return }
             self.originalFlight = nil
-            if case .success(let rendered) = result {
+            switch result {
+            case .success(let rendered):
+                self.originalFailure = nil
+                self.failedOriginalRequest = nil
                 self.originalFrame = rendered
                 if let detail = self.originalDetailFrame, !detail.request.rendersSame(as: rendered.request) {
                     self.originalDetailFrame = nil
                 }
                 self.scheduleDetails()
+            case .failure(let error):
+                if !(error is CancellationError) {
+                    self.originalFailure = String(describing: error)
+                    self.failedOriginalRequest = wanted
+                }
+                self.noteFailure(error)
             }
         }
         originalFlight = Flight(generation: generation, request: wanted, task: task)
+    }
+
+    /// Retries edited and original previews without changing the recipe or
+    /// undo history. Errors stay visible until success (original clears when
+    /// its retry starts). A changed file must be reopened instead.
+    func retryRendering() {
+        guard source != nil, !isOpening, !sourceChanged else { return }
+        failedOriginalRequest = nil
+        scheduleRender()
+        updateModelGain()
     }
 
     private func cancelRenders() {
@@ -778,7 +874,7 @@ import Observation
     /// Render, so its prediction is a new one; preview and full size share it).
     /// Log look is not in `development`: AI stays on the Apple-boost photograph.
     private func modelKey(_ recipe: Recipe, bypassed: Set<ParameterGroup>) -> ModelKey? {
-        guard wantsModel(recipe), let source else { return nil }
+        guard !isOpening, wantsModel(recipe), !bypassed.contains(.hdr), let source else { return nil }
         return ModelKey(source: source.id, model: modelID(recipe), development: recipe.development, bypassed: bypassed)
     }
 
@@ -793,7 +889,12 @@ import Observation
     /// computing while it is, started when it is not (after a drag, not
     /// during one). A failed prediction is not retried by itself (`retryModelGain`).
     private func updateModelGain() {
-        guard let key = currentModelKey else { return }
+        guard let key = currentModelKey else {
+            cancelPrediction()
+            if case .unavailable = aiStatus {} else { aiStatus = .idle }
+            return
+        }
+        if let active = modelKey, active != key { cancelPrediction() }
         if case .unavailable = aiStatus { return }
         if predicted.contains(key) {
             aiStatus = .ready
@@ -832,6 +933,12 @@ import Observation
         updateModelGain()
     }
 
+    private func cancelPrediction() {
+        modelTask?.cancel()
+        modelTask = nil
+        modelKey = nil
+    }
+
     private func startPrediction(_ key: ModelKey) {
         guard let size = previewSize ?? source?.pixelSize,
               let request = request(for: recipe, size: size, interactive: false) else { return }
@@ -850,6 +957,10 @@ import Observation
                 self.aiStatus = .unavailable(detail)
                 return
             } catch is CancellationError {
+                guard let self, self.modelKey == key, !Task.isCancelled else { return }
+                self.modelTask = nil
+                self.modelKey = nil
+                if case .unavailable = self.aiStatus {} else { self.aiStatus = .idle }
                 return
             } catch {
                 reason = String(describing: error)

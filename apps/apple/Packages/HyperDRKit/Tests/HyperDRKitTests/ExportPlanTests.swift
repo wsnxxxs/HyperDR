@@ -500,6 +500,17 @@ struct ExportMemoryPlanTests {
         #expect(memory.peak == memory.encode)
     }
 
+    @Test func wholeRAWDevelopmentKeepsTheMeasuredDecoderAllowance() {
+        let size = ExportPixelSize(width: 9504, height: 6336)
+        let estimate = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+            photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
+            writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
+            retainedBytes: 0, allowsRowInput: false))
+        // The full RGBAf source is alive beside the decoder and fixed scratch.
+        #expect(estimate.decode == size.pixels * (16 + 24) + (512 + 32) * 1024 * 1024)
+        #expect(estimate.decode > 2_847_263_048) // measured Mac RAW 9 whole development
+    }
+
     @Test func fullSizeRAWMemoryEstimates() {
         for size in [ExportPixelSize(width: 9504, height: 6336), ExportPixelSize(width: 12800, height: 8600)] {
             for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
@@ -801,7 +812,7 @@ struct ExportPlanGapTests {
 
     @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
         for (encoding, sourceSize, budget) in [
-            (ExportEncoding.avifPq, photo, 900_000_000),
+            (ExportEncoding.avifPq, photo, 1_800_000_000),
             (.isoGainMapJPEG, ExportPixelSize(width: 12800, height: 8600), 3 << 30)
         ] {
             let input = request(.custom(.init(encoding: encoding)), source: source(.rawEDR, size: sourceSize))

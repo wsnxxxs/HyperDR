@@ -122,11 +122,12 @@ struct EditorScreen: View {
             let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
                                   axis: axis, large: large,
                                   onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
-                                  onBypass: bypass, onLUTLibrary: { showingLUTs = true }) {
+                                  onBypass: bypass, onLUTLibrary: { showingLUTs = true },
+                                  aiUnavailable: aiUnavailable) {
                 FrameDock(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
                           photoSize: photoSize, misfits: session.frameMisfits, axis: axis, large: large)
             }
-            .disabled(session.exports.isRunning)
+            .disabled(locksEditing)
             if axis == .horizontal {
                 VStack(spacing: 0) {
                     canvas
@@ -145,9 +146,6 @@ struct EditorScreen: View {
         EditorCanvas(session: session, editor: editor, comparison: comparison, splitRatio: $splitRatio,
                      transform: $transform, framed: pane == .frame,
                      framePadding: isPad ? 56 : Space.s5, holdingOriginal: $holdingOriginal)
-            .overlay {
-                if editor.frame == nil { ProgressView().controlSize(.large).tint(.white) }
-            }
     }
 
     private var undoButton: some View {
@@ -186,6 +184,15 @@ struct EditorScreen: View {
                            output: session.frameLayout.map { ($0.width, $0.height) })
             } else {
                 ScrollView {
+                    if let aiUnavailable {
+                        Label { aiUnavailable } icon: { Image(systemName: "info.circle") }
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, Space.s2)
+                    }
                     AdjustmentInspector(recipe: recipe, panel: panel, style: .touch,
                                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                                         onLUTLibrary: { showingLUTs = true })
@@ -193,10 +200,17 @@ struct EditorScreen: View {
                 }
             }
         }
-        .disabled(session.exports.isRunning)
+        .disabled(locksEditing)
     }
 
     // MARK: - Editing
+
+    /// The controls rest while an export runs, and while a photo is on its
+    /// way in: before the first one there is nothing to adjust, and edits to
+    /// the photo being replaced would be dropped with it.
+    private var locksEditing: Bool {
+        session.exports.isRunning || editor.source == nil || session.loading
+    }
 
     /// The controls' writes; spaces chosen on the look are recorded in the
     /// library for its LUT.
@@ -210,6 +224,12 @@ struct EditorScreen: View {
             capabilities: editor.source?.capabilities ?? [], unavailableOptions: editor.unavailableOptions,
             luts: session.exports.luts.choices, lookSpaces: session.exports.luts.spaces,
             lutPreviews: session.exports.luts.previews.images))
+    }
+
+    /// Why AI cannot be chosen on this device, as on the Mac's AI status line.
+    private var aiUnavailable: Text? {
+        if case .unavailable = editor.aiStatus { return Text("ios.ai.unavailable") }
+        return nil
     }
 
     private var photoSize: (width: Int, height: Int)? {
@@ -257,8 +277,8 @@ struct EditorScreen: View {
         ToolbarItemGroup(placement: .topBarLeading) {
             // Read with the recipe, so the buttons follow every step.
             let _ = editor.recipe
-            undoButton.disabled(undoManager?.canUndo != true || session.exports.isRunning)
-            redoButton.disabled(undoManager?.canRedo != true || session.exports.isRunning)
+            undoButton.disabled(undoManager?.canUndo != true || locksEditing)
+            redoButton.disabled(undoManager?.canRedo != true || locksEditing)
         }
         ToolbarItem(placement: .topBarTrailing) {
             moreMenu
@@ -298,7 +318,9 @@ struct EditorScreen: View {
             Label("ios.compare.button", systemImage: "square.split.2x1")
         }
         .pickerStyle(.menu)
-        .disabled(!hasOriginal)
+        // Still open while Original or Split waits for its original (or it
+        // failed), so Adjusted can be chosen again.
+        .disabled(!hasOriginal && comparison == .edited)
     }
 
     private var moreMenu: some View {
@@ -317,7 +339,7 @@ struct EditorScreen: View {
                 Button(role: .destructive) { confirmingReset = true } label: {
                     Label { AdjustmentText.command(.resetAll) } icon: { Image(systemName: "arrow.counterclockwise") }
                 }
-                .disabled(session.exports.isRunning)
+                .disabled(locksEditing)
             }
         } label: {
             Label("ios.toolbar.more", systemImage: "ellipsis")

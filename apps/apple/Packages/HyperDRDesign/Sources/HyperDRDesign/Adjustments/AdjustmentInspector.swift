@@ -92,6 +92,9 @@ public struct AdjustmentInspector: View {
                     AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                                   onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
                 }
+                ForEach(state.unsupported, id: \.id) { declaration in
+                    UnsupportedRow(declaration: declaration, style: style)
+                }
             }
         } accessory: {
             HStack(spacing: Space.s2) {
@@ -184,6 +187,26 @@ public struct AdjustmentRow: View {
                 AdjustmentReferenceRow(control: control, panel: panel, style: style, selection: selection)
             }
         }
+    }
+}
+
+/// A switch the photo does not offer, where it would be: its name, and in
+/// the switch's place why not.
+struct UnsupportedRow: View {
+    let declaration: ParameterDeclaration
+    let style: AdjustmentControlStyle
+
+    var body: some View {
+        HStack(spacing: Space.s3) {
+            AdjustmentText.label(declaration)
+                .foregroundStyle(Color.hdr.inkDisabled)
+            Spacer(minLength: Space.s2)
+            AdjustmentText.noProfile
+                .foregroundStyle(Color.hdr.inkMuted)
+        }
+        .font(.hdr.caption)
+        .frame(minHeight: style == .touch ? 44 : 20)
+        .accessibilityElement(children: .combine)
     }
 }
 

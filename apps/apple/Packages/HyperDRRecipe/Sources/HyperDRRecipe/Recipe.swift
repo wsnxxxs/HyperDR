@@ -54,6 +54,9 @@ public struct Recipe: Equatable, Sendable {
     public static let lookID = "look.lut"
     public static let filmID = "look.film"
 
+    /// Exact CIRAWFilter version (including `.dng`). Nil preserves legacy system defaults.
+    public var rawDecoderVersion: String?
+
     public let version: Int
     public private(set) var inputDomain: InputDomain
     public private(set) var hdrSource: HDRSource
@@ -69,7 +72,8 @@ public struct Recipe: Equatable, Sendable {
 
     public init(version: Int = Recipe.currentVersion, inputDomain: InputDomain = .sdr,
                 hdrSource: HDRSource? = nil, look: LUTReference? = nil,
-                values: [String: ParameterValue] = [:]) {
+                values: [String: ParameterValue] = [:], rawDecoderVersion: String? = nil) {
+        self.rawDecoderVersion = rawDecoderVersion
         self.version = version
         self.inputDomain = inputDomain
         let requested = hdrSource ?? HDRSource.defaultSource(for: inputDomain)
@@ -183,7 +187,7 @@ public struct Recipe: Equatable, Sendable {
 
 extension Recipe: Codable {
     private enum CodingKeys: String, CodingKey {
-        case version, inputDomain, hdrSource, look, values
+        case version, inputDomain, hdrSource, look, values, rawDecoderVersion
     }
 
     public init(from decoder: any Decoder) throws {
@@ -193,11 +197,13 @@ extension Recipe: Codable {
         let source = try container.decodeIfPresent(HDRSource.self, forKey: .hdrSource)
         let look = try container.decodeIfPresent(LUTReference.self, forKey: .look)
         let values = try container.decodeIfPresent([String: ParameterValue].self, forKey: .values) ?? [:]
-        self.init(version: version, inputDomain: domain, hdrSource: source, look: look, values: values)
+        self.init(version: version, inputDomain: domain, hdrSource: source, look: look, values: values,
+                  rawDecoderVersion: try container.decodeIfPresent(String.self, forKey: .rawDecoderVersion))
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(rawDecoderVersion, forKey: .rawDecoderVersion)
         try container.encode(version, forKey: .version)
         try container.encode(inputDomain, forKey: .inputDomain)
         try container.encode(hdrSource, forKey: .hdrSource)

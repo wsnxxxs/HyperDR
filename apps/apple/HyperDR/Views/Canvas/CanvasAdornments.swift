@@ -47,7 +47,7 @@ struct CanvasAdornments: View {
                              onDrag: { model.setSplitRatio($0) }, onEditingChanged: onSplitEditing,
                              onNudge: { model.nudgeSplit(by: $0) })
             }
-            if peeking {
+            if peeking, model.hasReferenceFrame {
                 Label("canvas.peeking", systemImage: "eye")
                     .font(Font.hdr.caption)
                     .hdrOverlayChip()

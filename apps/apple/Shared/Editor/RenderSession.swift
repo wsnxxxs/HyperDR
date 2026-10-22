@@ -41,6 +41,10 @@ actor RenderSession: EditorRendering {
     private var beforeReload: (@Sendable () async -> Void)?
 
     func setBeforeReload(_ hook: (@Sendable () async -> Void)?) { beforeReload = hook }
+    /// Fault injection for the initial load, independent of a platform RAW model.
+    private var beforeOpenLoad: (@Sendable (SourceOptions) async throws -> Void)?
+    func setBeforeOpenLoad(_ hook: (@Sendable (SourceOptions) async throws -> Void)?) { beforeOpenLoad = hook }
+
 
     private var luts: [String: ColorLUT] = [:]
     private var provider: CoreMLModelGainProvider?
@@ -60,23 +64,82 @@ actor RenderSession: EditorRendering {
     }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
-        try await mapped { try await openSource(url, previewSize: previewSize) }
+        try await mapped { try await openSource(url, previewSize: previewSize, restoring: nil) }
     }
 
-    private func openSource(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?) async throws -> EditorSource {
+        try await mapped { try await openSource(url, previewSize: previewSize, restoring: restoring) }
+    }
+
+    func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
+        await EmbeddedPreview.read(url)
+    }
+
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource {
+        try await mapped { try await openSource(url, previewSize: previewSize, restoring: restoring, progress: progress) }
+    }
+
+    private func openSource(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+                            progress: @escaping @Sendable (EditorOpeningStage) async -> Void = { _ in }) async throws -> EditorSource {
         generation += 1
         let generation = self.generation
         let resolution: SourceResolution = previewSize.map { .preview(maximumSize: $0) } ?? .full
-        let options = try SourceOptions(recipe: Recipe(), resolution: resolution)
+        await progress(.reading)
+        let clock = ContinuousClock()
+        let began = clock.now
+        var options = try SourceOptions(recipe: restoring ?? Recipe(), resolution: resolution)
+        if restoring == nil { options.rawDecoderVersion = await engine.preferredRAWDecoder(url) }
+        let selected = clock.now
         let revision = try FileRevision(url)
-        let source = try await engine.load(url, options: options)
+        let loadProgress: @Sendable (SourceLoadPhase) -> Void = { phase in
+            if ProcessInfo.processInfo.environment["HYPERDR_OPEN_TIMINGS"] == "1" {
+                print("OPEN_PHASE phase=\(phase) elapsed=\(began.duration(to: clock.now))")
+            }
+            let stage: EditorOpeningStage = switch phase {
+            case .loadingDecoder: .loadingDecoder
+            case .developing: .developing
+            case .preparingAnalysis: .preparingPreview
+            }
+            Task { await progress(stage) }
+        }
+        var fallback: RAWDecoderFallback?
+        let source: RenderSource
+        do {
+            try await beforeOpenLoad?(options)
+            source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+        } catch {
+            // A listed decoder can still fail in Apple's camera/system model.
+            // Retry only a new photo's preferred 9 after a decode failure, once.
+            // Recorded versions, cancellation, memory/GPU errors and changed files
+            // retain their original failure semantics.
+            guard restoring == nil, case RenderError.cannotDecodeSource = error,
+                  let requested = options.rawDecoderVersion,
+                  requested.split(separator: ".").first == "9",
+                  let version = await engine.defaultRAWDecoder(url), version != requested else { throw error }
+            try Task.checkCancellation()
+            guard try FileRevision(url) == revision else { throw RenderError.sourceChanged }
+            options.rawDecoderVersion = version
+            if ProcessInfo.processInfo.environment["HYPERDR_OPEN_TIMINGS"] == "1" {
+                print("OPEN_RAW_DECODER_FALLBACK requested=\(requested) used=\(version)")
+            }
+            try await beforeOpenLoad?(options)
+            source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+            fallback = RAWDecoderFallback(requested: requested, used: version)
+        }
+        let developed = clock.now
+        await progress(.preparingPreview)
         let report = try await engine.sourceReport(source)
+        if ProcessInfo.processInfo.environment["HYPERDR_OPEN_TIMINGS"] == "1" {
+            print("OPEN_TIMING decoder_selection=\(began.duration(to: selected)) development=\(selected.duration(to: developed)) source_report=\(developed.duration(to: clock.now)) decoder=\(source.rawSettings?.decoderVersion ?? "none")")
+        }
         try Task.checkCancellation()
         guard generation == self.generation else { throw CancellationError() }
         let editor = EditorSource(id: UUID(), url: url, domain: source.domain, pixelSize: source.nativeSize,
                                   sourceValues: report.sourceValues,
                                   capabilities: Self.capabilities(report.capabilities),
-                                  hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url))
+                                  hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url),
+                                  rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback)
         opened = Opened(editor: editor, revision: revision, source: source, options: options)
         predictions = [:]
         predictionOrder = []
@@ -144,10 +207,14 @@ actor RenderSession: EditorRendering {
             var kept = sourceOptions
             kept.resolution = opened.options.resolution
             guard kept == opened.options else { throw EditorRenderingError.needsDevelopment }
+        } else if sourceOptions != opened.options && opened.source.reusesRAWPreview(options: sourceOptions) {
+            guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
+            opened.options = sourceOptions
+            self.opened = opened
         } else if sourceOptions != opened.options {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
-            let source = try await engine.load(opened.editor.url, options: sourceOptions)
+            let source = try await engine.load(opened.editor.url, options: sourceOptions, preparingAnalysis: true)
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
             try Task.checkCancellation()

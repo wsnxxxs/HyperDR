@@ -143,6 +143,8 @@ struct AdjustmentControls: View {
     var onReset: ((AdjustmentReset) -> Void)?
     /// Opens the LUT library, from the end of the look group's row.
     var onLUTLibrary: () -> Void = {}
+    /// Why AI cannot be chosen, when it cannot: an ⓘ beside the HDR source.
+    var aiUnavailable: Text?
 
     /// The chosen control of each group, kept while switching groups.
     @State private var selected: [AdjustmentGroupID: String] = [:]
@@ -205,6 +207,9 @@ struct AdjustmentControls: View {
             }
             if let lead {
                 leadChoice(lead).frame(maxWidth: .infinity).locked(off)
+                if lead.id == Recipe.hdrSourceID, let aiUnavailable {
+                    InfoButton(text: aiUnavailable)
+                }
             }
         }
         .frame(maxWidth: 420)
@@ -276,6 +281,11 @@ struct AdjustmentControls: View {
                     }
                 }
                 if !layout.more.isEmpty { moreButton(layout.more) }
+                // A switch this photo does not offer, where it would be, so
+                // it does not read as lost.
+                ForEach(layout.unsupported, id: \.id) { declaration in
+                    UnsupportedRing(declaration: declaration)
+                }
             }
             .padding(.horizontal, Space.s4)
             .frame(minWidth: axis == .horizontal ? nil : 0)
@@ -529,6 +539,63 @@ private struct SwitchRing: View {
     }
 }
 
+/// An ⓘ in a glass circle that explains something in a popover.
+private struct InfoButton: View {
+    let text: Text
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown = true } label: {
+            Image(systemName: "info")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 36, height: 36)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: .circle)
+        .popover(isPresented: $shown) {
+            text
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 260)
+                .padding(Space.s4)
+                .presentationCompactAdaptation(.popover)
+        }
+        .accessibilityLabel(text)
+    }
+}
+
+/// A switch this photo does not offer (lens correction without a lens
+/// profile), in its place in the row: greyed, with why under its name.
+private struct UnsupportedRing: View {
+    let declaration: ParameterDeclaration
+
+    var body: some View {
+        // Laid out as the rings beside it, so its circle lines up with
+        // theirs; the reason hangs under the name, in the space above the ruler.
+        VStack(spacing: 4) {
+            Image(systemName: AdjustmentSymbols.control(declaration))
+                .font(.system(size: 16))
+                .frame(width: 44, height: 44)
+                .overlay(Circle().stroke(Color.white.opacity(0.14), style: StrokeStyle(lineWidth: 1.5, dash: [2.5, 3])))
+            AdjustmentText.label(declaration)
+                .font(.system(size: 10))
+                .lineLimit(1)
+                .overlay(alignment: .top) {
+                    AdjustmentText.noProfile
+                        .font(.system(size: 9))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .offset(y: 14)
+                }
+        }
+        .foregroundStyle(.tertiary)
+        .frame(width: 62)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// How one group's controls split across the bar.
 private struct BarLayout {
     /// Numbers, each with a ring and the ruler.
@@ -546,6 +613,8 @@ private struct BarLayout {
     let switches: [AdjustmentControl]
     /// Everything else (the AI model, the LUT's input and output), behind "More".
     let more: [AdjustmentControl]
+    /// Switches the photo does not offer (`AdjustmentGroupState.unsupported`).
+    let unsupported: [ParameterDeclaration]
 
     init(_ group: DockGroup) {
         let controls = group.states.flatMap(\.controls)
@@ -559,6 +628,7 @@ private struct BarLayout {
         let rest = others.filter { $0.id != lead?.id && $0.id != lut?.id }
         switches = rest.filter { $0.kind == .bool }
         more = rest.filter { $0.kind != .bool }
+        unsupported = group.states.flatMap(\.unsupported)
     }
 }
 

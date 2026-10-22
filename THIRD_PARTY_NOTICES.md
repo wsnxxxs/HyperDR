@@ -1,5 +1,9 @@
 # Third-party notices
 
+HyperDR's own source code is available under the GNU Affero General Public
+License v3.0 or a commercial license (`LICENSE` and `LICENSING.md` in its
+repository). The components below keep their own licenses.
+
 A normal codec-enabled `HyperDR` build
 resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
@@ -17,7 +21,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 ## Platform codec configurations
 
-The native application targets macOS 26 and later on Apple Silicon. HEVC
+The native applications target macOS 26 and later on Apple Silicon, and
+iOS and iPadOS 26 and later. HEVC
 encoding and decoding use Apple's VideoToolbox framework, and HEIF reading and
 writing use HyperDR's own code. No LGPL or GPL library is linked or shipped;
 every dependency above is statically linked.

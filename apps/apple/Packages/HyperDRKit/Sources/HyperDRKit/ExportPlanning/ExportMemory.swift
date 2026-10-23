@@ -170,6 +170,7 @@ extension ExportMemoryEstimate {
         var quality: Int = 90
         var gainChannels: Int = 3
         var needsLookBaseline: Bool = false
+        var usesFilm: Bool = false
     }
 
     /// b-stage allocation model. Source, whole-plane owners, ABI copies and
@@ -202,6 +203,8 @@ extension ExportMemoryEstimate {
         let stripeCPUBytes = needsGain ? 56 : 28
         let stripe = input.canvas.width * min(input.writeRows, input.canvas.height)
             * (stripeGPUBytes + stripeCPUBytes)
+        // The whole-plane allowance also covers all three RGBAf film textures;
+        // the lazy row path prices their bounded workspace separately below.
         let render = resident + owner + stripe + input.photoSize.pixels * 64
         // Quantized planes, full-plane copies, HDR reconstruction and encoder
         // workspace. AVIF retains YUV cells and the canvas beside the codec.
@@ -248,6 +251,10 @@ extension ExportMemoryEstimate {
         // packing raises the tile high-water from 28 to 40 B/pixel (contract).
         let rgbScratch = channels > 1 ? 12 * PreparedExportRows.maximumSourceTileSize.width
             * PreparedExportRows.maximumReadRows : 0
+        let filmWorkspace = input.usesFilm
+            ? min(input.photoSize.width, PreparedExportRows.maximumSourceTileSize.width)
+                * min(input.photoSize.height, PreparedExportRows.maximumSourceTileSize.height)
+                * PreparedExportRows.filmWorkspaceBytesPerPixel : 0
         let heic = input.encoding == .adaptive || input.encoding.isBT2100
         // encode_heic_rows materializes one RGB Float slab (12 B/px), not
         // full-width YUV/float canvases. VT has at most four 512px pictures in
@@ -262,9 +269,11 @@ extension ExportMemoryEstimate {
         // 32 MiB allowance for bounded metadata/box construction and filebuf;
         // encoding slabs/VT pictures have finished before assembly.
         let rowResident = resident + rgbScratch + readback + packageBand
-        let encode = rowResident + codec + compressedCache
+        // A row callback renders while the writer's slab and row owners are alive.
+        // These textures are released before container assembly or verification.
+        let encode = rowResident + filmWorkspace + codec + compressedCache
         let assembly = heic ? rowResident + 32 * 1024 * 1024 + compressedCache : encode
-        let render = resident + rgbScratch
+        let render = resident + rgbScratch + filmWorkspace
         // Native verification releases input bands first and scans rows, or
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
         // reader's last ROI/graph priced while it remains alive in the caller.
@@ -282,12 +291,14 @@ extension ExportMemoryEstimate {
 
     /// GPU-only bound for a row export; decoder CPU caches are priced above.
     /// Tile sizes and device limits belong to Render, never to Kit policy.
-    static func rowGPUBytes(maximumTextureDimension: Int) -> Int {
+    static func rowGPUBytes(maximumTextureDimension: Int, usesFilm: Bool = false) -> Int {
         let source = PreparedExportRows.maximumSourceTileSize
         let width = min(source.width, maximumTextureDimension)
         let height = min(source.height, maximumTextureDimension)
         let outputRows = min(PreparedExportRows.maximumReadRows, maximumTextureDimension)
-        return width * height * 64 + width * outputRows * 64 + 1024 * 1024 * 48
+        let filmBytes = usesFilm ? PreparedExportRows.filmWorkspaceBytesPerPixel : 0
+        return width * height * (64 + filmBytes)
+            + width * outputRows * 64 + 1024 * 1024 * 48
     }
 
     /// HEIC row output enforces a 4 MiB maximum per encoded tile. Reserve

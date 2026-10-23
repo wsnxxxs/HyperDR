@@ -260,7 +260,8 @@ public actor RenderEngine {
             return texture
         }
         let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
-        guard weight > 0 && weight < 1, let origin = source.origin, origin.options.sceneLinear else {
+        guard source.domain == .rawEDR, weight > 0 && weight < 1,
+              let origin = source.origin, origin.options.sceneLinear else {
             lookBaselineCache = nil
             return source.texture
         }

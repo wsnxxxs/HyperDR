@@ -83,10 +83,9 @@ public actor RecipeExportService: RecipeExportServicing {
             var actualRequest = request
             actualRequest.capabilities = ExportEncodingCapabilities(try await engine.capabilities())
             actualRequest.allowsRowInput = request.allowsRowInput && rowRenderer != nil
-            // Recipe is authoritative for the SDR switch. The selection cannot
-            // turn processing back on or turn the recipe into legacy options.
-            actualRequest.edit.hdrEnabled = snapshot.recipe.conditionValue("hdr.enabled")?.boolValue ?? true
-            actualRequest.edit.needsLookBaseline = snapshot.recipe.needsLookBaseline
+            // The frozen recipe is authoritative for the SDR switch and the
+            // extra RAW development/film workspace admitted by the planner.
+            actualRequest.edit = ExportEditFacts(recipe: snapshot.recipe, peakStops: actualRequest.edit.peakStops)
             if let frame = snapshot.frame {
                 guard frame.width > 0, frame.height > 0, frame.width <= 1_048_576, frame.height <= 1_048_576,
                       frame.width <= (1 << 34) / frame.height else { throw RecipeExportError.invalidSnapshot }
@@ -440,7 +439,7 @@ public actor RecipeExportService: RecipeExportServicing {
         let gpu: Int
         if plan.memory.usesRowInput {
             let limit = await RenderEngine.maximumTextureDimension(device: renderEngine.device)
-            gpu = ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit)
+            gpu = ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit, usesFilm: request.edit.usesFilm)
         } else {
             gpu = sourcePixels * 48 + plan.photoSize.pixels * 64
                 + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 64

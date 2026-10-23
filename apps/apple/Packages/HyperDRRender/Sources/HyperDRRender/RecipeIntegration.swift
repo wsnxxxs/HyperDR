@@ -126,6 +126,9 @@ extension SourceOptions {
     /// A bypassed look group reads as the defaults, so the comparison original stays
     /// on Apple's curve.
     static func sceneLinearDevelopment(recipe: Recipe, options: RenderOptions) -> Bool {
+        // Raster photos already carry their display rendition. Film must not
+        // treat that input as a RAW development or reopen it through CIRAWFilter.
+        guard recipe.inputDomain == .rawEDR else { return false }
         let values = RecipeValues(recipe:recipe,options:options)
         if let film = values.value("look.film")?.stringValue, film != Adjustments.filmStocks[0],
            let strength = try? values.number("look.filmStrength"), strength != 0 { return true }

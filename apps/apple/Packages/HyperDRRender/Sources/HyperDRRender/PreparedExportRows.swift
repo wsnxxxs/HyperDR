@@ -11,6 +11,9 @@ public final class PreparedExportRows: Sendable {
     /// Includes the two-native-texel sampling halo on each side. A downscale
     /// splits further rather than materializing a taller native-source crop.
     public static let maximumSourceTileSize = PixelSize(width:4096,height:516)
+    /// Linear film exposure, its horizontal pass and the accumulated scatter.
+    /// All three are RGBA float32 and overlap until the render command completes.
+    public static let filmWorkspaceBytesPerPixel = 3 * 4 * MemoryLayout<Float>.stride
     public let report: ExportRenderReport
     private let readRows: @Sendable (Int,Int) throws -> ExportStripe
 

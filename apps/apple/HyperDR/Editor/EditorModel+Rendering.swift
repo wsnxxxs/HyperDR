@@ -25,13 +25,39 @@ extension EditorModel {
         guard let edited = editedPair ?? referencePair else { return nil }
         let mode: CanvasComposition.Mode = !hasEditedFrame || isPeekingOriginal || viewMode == .original ? .original
             : (viewMode == .compare ? .compare : .edited)
+        let crop = cropLayout
         return CanvasComposition(original: referencePair, edited: edited,
             originalDetail: originalDetailPair, editedDetail: editedDetailPair,
-            mode: referencePair == nil ? .edited : mode, splitRatio: splitRatio,
+            mode: referencePair == nil || crop != nil ? .edited : mode, splitRatio: splitRatio,
             headroom: display.currentHeadroom,
             overlays: CanvasOverlays(highlights: showsHighlightZebra, shadows: showsShadowZebra,
                                      hdrRange: Float(outputCeilingStops)),
-            previewsAsSDR: previewsAsSDR || editor.previewsAsSDR)
+            previewsAsSDR: previewsAsSDR || editor.previewsAsSDR,
+            geometry: crop?.display(clipsToCrop: !isCropping, dimsOutsideCrop: isCropping))
+    }
+
+    /// Room around the crop in the crop pane, for its corners.
+    static let cropMargin: CGFloat = 40
+
+    /// The crop pane's placement of the photo; also, once it is left, until
+    /// the cropped frame arrives (the whole photo drawn through the crop, so
+    /// it never shows uncropped). Nil when the frame shown is not the whole photo.
+    var cropLayout: CropLayout? {
+        let viewport = canvas.transform.viewport
+        guard let frame = editedFrame, let source = editor.source, frame.request.sourceID == source.id,
+              frame.request.recipe.geometry == .identity, isCropping || !editor.recipe.geometry.isIdentity,
+              viewport.width > 0, viewport.height > 0 else { return nil }
+        if isCropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
+        let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
+        return CropLayout(photo: photo, geometry: editor.recipe.geometry, viewport: viewport,
+                          margin: isCropping ? Self.cropMargin : 0)
+    }
+
+    /// The crop pane's writes, through the recipe so they are undo steps.
+    func setGeometry(_ geometry: Geometry) {
+        var recipe = editor.recipe
+        recipe.geometry = geometry
+        editor.setRecipe(recipe)
     }
 
     /// The full-size renders of the visible part (the editor's detail

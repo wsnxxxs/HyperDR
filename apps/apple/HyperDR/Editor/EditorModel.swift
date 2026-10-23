@@ -215,6 +215,18 @@ import UniformTypeIdentifiers
     var showsHighlightZebra = false { didSet { if showsHighlightZebra != oldValue { bumpFrameRevision() } } }
     var showsShadowZebra = false { didSet { if showsShadowZebra != oldValue { bumpFrameRevision() } } }
     var previewsAsSDR = false { didSet { if previewsAsSDR != oldValue { bumpFrameRevision() } } }
+    /// The inspector's Crop pane is open: the canvas shows the whole photo
+    /// with the crop box over it, and the editor renders it uncropped.
+    var isCropping = false {
+        didSet {
+            guard isCropping != oldValue else { return }
+            cropFreeze = nil
+            editor.isEditingCrop = isCropping
+            bumpFrameRevision()
+        }
+    }
+    /// The crop pane's placement while its box is dragged (`CropOverlay`).
+    var cropFreeze: CropLayout?
 
     private struct OpenSnapshot {
         var document: DocumentState?
@@ -707,6 +719,12 @@ import UniformTypeIdentifiers
             editedFrame = frame
             hasEditedFrame = true
             changed = true
+            // A crop changes the photo's size; the canvas fits the new one.
+            let shown = PixelSize(frame.request.recipe.geometry.outputSize(of: source.pixelSize))
+            if canvas.transform.imageSize != CGSize(width: shown.width, height: shown.height) {
+                canvas.setImageSize(shown)
+            }
+            if !isCropping, document?.pixelSize != shown { document?.pixelSize = shown }
             cameraSupportTask?.cancel()
             cameraSupportTask = nil
             document?.isPreparingCameraSupport = false

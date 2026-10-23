@@ -1,6 +1,9 @@
 import HyperDRDesign
 import HyperDRRecipe
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Over the canvas in the crop pane: the crop box with its corners, and
 /// thirds while it is dragged. The canvas dims the photo outside it
@@ -34,9 +37,40 @@ struct CropOverlay: View {
         }
         .contentShape(.rect)
         .gesture(gesture(box))
+        #if os(macOS)
+        // The pointer says what a press would take hold of.
+        .onContinuousHover { phase in
+            guard drag == nil else { return }
+            switch phase {
+            case .active(let point): Self.cursor(CropDrag.at(point, box: box)).set()
+            case .ended: NSCursor.arrow.set()
+            }
+        }
+        #endif
         .allowsHitTesting(true)
         .accessibilityHidden(true)
     }
+
+    #if os(macOS)
+    static func cursor(_ kind: CropDrag?) -> NSCursor {
+        switch kind {
+        case .move: return .openHand
+        case .resize(let x, let y):
+            let position: NSCursor.FrameResizePosition = switch (x, y) {
+            case (-1, -1): .topLeft
+            case (1, -1): .topRight
+            case (-1, 1): .bottomLeft
+            case (1, 1): .bottomRight
+            case (-1, _): .left
+            case (1, _): .right
+            case (_, -1): .top
+            default: .bottom
+            }
+            return .frameResize(position: position, directions: .all)
+        case nil: return .arrow
+        }
+    }
+    #endif
 
     private func thirds(_ box: CGRect) -> some View {
         Path { path in

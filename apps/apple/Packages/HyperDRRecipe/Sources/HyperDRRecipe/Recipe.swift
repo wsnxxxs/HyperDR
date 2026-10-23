@@ -53,6 +53,10 @@ public struct Recipe: Equatable, Sendable {
     public static let hdrSourceID = "hdr.source"
     public static let lookID = "look.lut"
     public static let filmID = "look.film"
+    /// The film's exposure (Auto meters the photo) and its antihalation layer,
+    /// which choosing a stock puts back to their defaults.
+    public static let filmExposureID = "look.filmExposure"
+    public static let filmAntihalationID = "look.filmAntihalation"
 
     /// Exact CIRAWFilter version (including `.dng`). Nil preserves legacy system defaults.
     public var rawDecoderVersion: String?

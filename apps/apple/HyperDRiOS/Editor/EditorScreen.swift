@@ -122,8 +122,7 @@ struct EditorScreen: View {
             canvas
         case .dock(let axis, let large):
             let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
-                                  photo: editor.source.map { GeometrySize(width: Double($0.pixelSize.width),
-                                                                          height: Double($0.pixelSize.height)) },
+                                  photo: photo,
                                   axis: axis, large: large,
                                   onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                                   onBypass: bypass, onGeometryEditing: { editor.editingGeometry($0) },
@@ -172,24 +171,28 @@ struct EditorScreen: View {
     }
 
     private var inspector: some View {
-        VStack(spacing: 0) {
-            Picker(selection: Binding(get: { pane == .frame }, set: { pane = $0 ? .frame : .group(.hdr) })) {
-                Label("ios.inspector.adjust", systemImage: "slider.horizontal.3").tag(false)
-                Label("ios.frame.title", systemImage: "photo.artframe").tag(true)
-            } label: {
-                Text("ios.inspector.pane")
-            }
-            .pickerStyle(.segmented)
-            .labelStyle(.titleAndIcon)
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            if pane == .frame {
+        let groups = DockGroup.tabs(panel.groups(for: editor.recipe))
+        return VStack(spacing: 0) {
+            SidebarTabs(groups: groups, pane: $pane, cropOn: !editor.recipe.geometry.isIdentity,
+                        frameOn: session.frame.isEnabled, onBypass: bypass)
+                .padding(.horizontal, Space.s4)
+                .padding(.top, Space.s2)
+                .padding(.bottom, Space.s3)
+            switch pane {
+            case .frame:
                 FramePanel(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
                            photoSize: photoSize, misfits: session.frameMisfits,
                            output: session.frameLayout.map { ($0.width, $0.height) })
-            } else {
+            case .crop:
                 ScrollView {
-                    if let aiUnavailable {
+                    GeometryInspector(geometry: geometry, photo: photo, style: .touch,
+                                      onEditingChanged: { editor.editingGeometry($0) })
+                        .padding(.bottom, Space.s5)
+                }
+            case .group(let group):
+                let tab = groups.first { $0.contains(group) } ?? groups.first
+                ScrollView {
+                    if let aiUnavailable, tab?.id == .hdr {
                         Label { aiUnavailable } icon: { Image(systemName: "info.circle") }
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -199,13 +202,29 @@ struct EditorScreen: View {
                             .padding(.bottom, Space.s2)
                     }
                     AdjustmentInspector(recipe: recipe, panel: panel, style: .touch,
+                                        only: tab.map { Set($0.states.map(\.group)) },
                                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                                         onLUTLibrary: { showingLUTs = true })
+                        .id(tab?.id)
                         .padding(.bottom, Space.s5)
                 }
             }
         }
         .disabled(locksEditing)
+    }
+
+    /// The photo's own size, for the crop pane.
+    private var photo: GeometrySize? {
+        editor.source.map { GeometrySize(width: Double($0.pixelSize.width), height: Double($0.pixelSize.height)) }
+    }
+
+    /// The crop pane's writes, through the recipe so they are undo steps.
+    private var geometry: Binding<Geometry> {
+        Binding(get: { editor.recipe.geometry }, set: { geometry in
+            var recipe = editor.recipe
+            recipe.geometry = geometry
+            editor.setRecipe(recipe)
+        })
     }
 
     // MARK: - Editing

@@ -65,6 +65,11 @@ struct PreviewCanvas: NSViewRepresentable {
         _ = model.display.currentHeadroom
         _ = model.canvas.imageFrame
         _ = model.canvas.zoom
+        _ = model.isCropping
+        _ = model.cropFreeze
+        _ = model.editor.recipe.geometry
+        // The crop pane has the pointer; the photo stays fitted.
+        view.allowsZoom = !model.isCropping
         view.compositionProvider = { [weak model] in model?.canvasComposition }
         install(pointer, on: view)
         view.showsOriginal = model.viewMode == .original || !model.hasEditedFrame

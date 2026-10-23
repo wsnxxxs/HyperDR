@@ -60,9 +60,16 @@ struct CanvasStage: View {
             // Until the first photo's first frame: its embedded thumbnail,
             // fitted as the canvas will fit the photo, fading out as the frame lands.
             .overlay { OpeningPlaceholder(openingPlaceholder) }
-            .background { PhotoShadow(frame: model.canvas.imageFrame) }
-            .overlay { PhotoCorners(frame: model.canvas.imageFrame) }
-            .overlay { PhotoBadge(model: model) }
+            .background { PhotoShadow(frame: photoFrame) }
+            .overlay { PhotoCorners(frame: photoFrame) }
+            .overlay { if model.cropLayout == nil { PhotoBadge(model: model) } }
+            .overlay {
+                if model.isCropping, let crop = model.cropLayout {
+                    CropOverlay(layout: crop, adjusting: model.editor.editingParameter == RecipeEditor.geometryDragID,
+                                freeze: Bindable(model).cropFreeze, write: { model.setGeometry($0) },
+                                onEditing: { model.editor.editingGeometry($0) })
+                }
+            }
             .overlay {
                 CanvasFloating(model: model, window: window, hint: hint, showsInspector: showsInspector,
                                dropNotice: dropNotice) { editing in
@@ -112,6 +119,12 @@ struct CanvasStage: View {
             .onChange(of: model.document?.name, initial: true) {
                 if model.document != nil { takeFocus() } else { focused = false }
             }
+    }
+
+    /// The photo's rectangle for its shadow and corners: none while the crop
+    /// pane draws through the geometry, which is not the canvas's rectangle.
+    private var photoFrame: CGRect? {
+        model.cropLayout == nil ? model.canvas.imageFrame : nil
     }
 
     /// What the canvas reports of the pointer: a press starts the 240 ms

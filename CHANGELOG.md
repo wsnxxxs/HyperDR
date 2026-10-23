@@ -20,6 +20,12 @@ semantic versioning; dates use ISO 8601.
   and its strength, built-in films apart from imported LUTs) and Crop, then
   Frame. A film's exposure is set automatically and Adjust's exposure adds to
   it; anti-halation is on for films. The export button reads Export.
+- Mac and iPad: the Crop pane in the inspector — ratio tiles drawn in their
+  shape, a quarter turn, mirroring and sliders for rotation and perspective,
+  with the crop box on the canvas. The inspector's look group keeps built-in
+  films (with previews) apart from imported LUTs.
+- iPad: the sidebar has the iPhone's tabs (HDR, Adjust, Style, Crop, Frame)
+  and shows one at a time; Reset All stays in the More menu.
 - Light and colour edits on imported HDR gain-map photos keep the photo's own
   SDR rendition, and an edit no longer switches it to another reconstruction.
 - New RAW photos fall back to decoder 8 when 9 is unavailable or fails.

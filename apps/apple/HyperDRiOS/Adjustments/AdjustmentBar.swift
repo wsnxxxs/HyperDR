@@ -357,8 +357,8 @@ struct AdjustmentControls: View {
                     // and its antihalation layer back on, neither having a control here.
                     var edited = recipe
                     panel.set(film.id, option: stock, in: &edited)
-                    panel.setAutomatic("look.filmExposure", in: &edited)
-                    panel.reset("look.filmAntihalation", in: &edited)
+                    panel.setAutomatic(Recipe.filmExposureID, in: &edited)
+                    panel.reset(Recipe.filmAntihalationID, in: &edited)
                     recipe = edited
                 }
             }

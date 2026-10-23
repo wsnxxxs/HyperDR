@@ -2734,40 +2734,6 @@
         }
       }
     },
-    "ios.inspector.adjust" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjust"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "调整"
-          }
-        }
-      }
-    },
-    "ios.inspector.pane" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inspector"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "检查器"
-          }
-        }
-      }
-    },
     "ios.look.builtIn" : {
       "extractionState" : "manual",
       "localizations" : {

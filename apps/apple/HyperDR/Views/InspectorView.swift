@@ -39,10 +39,16 @@ struct InspectorContent: View {
                 Divider()
                 ExportLockRegion(model: model, window: window) {
                     VStack(alignment: .leading, spacing: 0) {
+                        PaneSwitch(model: model)
                         DecodeWarning(document: document)
-                        AIStatusLine(editor: model.editor)
-                        Adjustments(model: model, window: window)
-                            .disabled(model.isEditingLocked)
+                        if model.isCropping {
+                            Crop(model: model)
+                                .disabled(model.isEditingLocked)
+                        } else {
+                            AIStatusLine(editor: model.editor)
+                            Adjustments(model: model, window: window)
+                                .disabled(model.isEditingLocked)
+                        }
                     }
                 }
             } else {
@@ -169,6 +175,36 @@ private struct Adjustments: View {
             },
             onLUTLibrary: { window.showsLUTLibrary = true })
         .environment(\.lookPickerShown, model.lookPreviews.shown)
+    }
+}
+
+/// Adjust or Crop: which controls the inspector shows. Crop also puts the
+/// crop box on the canvas.
+private struct PaneSwitch: View {
+    let model: EditorModel
+
+    var body: some View {
+        ParameterSegmented("inspector.pane",
+                           selection: Binding(get: { model.isCropping }, set: { model.isCropping = $0 }),
+                           choices: [SegmentedChoice("inspector.adjust", value: false, systemImage: "slider.horizontal.3"),
+                                     SegmentedChoice("inspector.crop", value: true, systemImage: "crop.rotate")])
+            .padding(.horizontal, Layout.panelPadding)
+            .padding(.vertical, Space.s3)
+    }
+}
+
+/// The crop pane's controls on the editor's recipe; each button and each
+/// drag is one undo step.
+private struct Crop: View {
+    let model: EditorModel
+
+    var body: some View {
+        let editor = model.editor
+        GeometryInspector(geometry: Binding(get: { editor.recipe.geometry }, set: { model.setGeometry($0) }),
+                          photo: editor.source.map { GeometrySize(width: Double($0.pixelSize.width),
+                                                                  height: Double($0.pixelSize.height)) },
+                          style: .pointer,
+                          onEditingChanged: { editor.editingGeometry($0) })
     }
 }
 

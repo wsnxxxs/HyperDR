@@ -82,7 +82,7 @@ nonisolated struct DisplayLayerParams {
     var gainToP3: simd_float3x3
     var weight: Float = 1
     var gainChannelCount: UInt32 = 1
-    var coding: UInt32 = 0 // 0 log2, 1 alternate rendition
+    var coding: UInt32 = 0 // bit 0 alternate rendition, bit 1 native HDR base
     var firstSlice: UInt32 = 0
     var firstPlane: UInt32 = 0
     var identity: UInt32 = 1
@@ -93,7 +93,8 @@ nonisolated struct DisplayLayerParams {
         p3ToGain = pair.p3ToGain; gainToP3 = pair.gainToP3
         identity = pair.p3ToGain == matrix_identity_float3x3 && pair.gainToP3 == matrix_identity_float3x3 ? 1 : 0
         coding = pair.coding == .alternate ? 1 : 0
-        self.weight = min(1, max(0, weight))
+        if pair.coding == .log2 && pair.baseHeadroom > pair.alternateHeadroom { coding |= 2 }
+        self.weight = min(1, max(-1, weight))
         gainChannelCount = UInt32(pair.gainChannelCount)
         firstSlice = slice
         firstPlane = weightedOnly ? 2 : 0

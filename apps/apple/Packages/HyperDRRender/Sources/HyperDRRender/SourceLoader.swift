@@ -38,6 +38,59 @@ struct OpenedSource {
 
 }
 
+/// ImageIO sizes the untransformed image. A preview bound, however, describes
+/// the photo after its crop/turn/perspective, just like a RAW preview's bound.
+private struct RasterPreviewPlan {
+    let maximumDimension: Int
+    let outputSize: PixelSize?
+
+    init(bound: PixelSize, native: PixelSize, geometry: Geometry) throws {
+        guard bound.width > 0, bound.height > 0, native.width > 0, native.height > 0 else {
+            throw RenderError.invalidSize
+        }
+        let longSide = max(native.width, native.height)
+        guard !geometry.isIdentity else {
+            let scale = min(1, Double(bound.width) / Double(native.width), Double(bound.height) / Double(native.height))
+            maximumDimension = max(1, Int((Double(longSide) * scale).rounded(.down)))
+            outputSize = nil
+            return
+        }
+        let photo = GeometrySize(width: Double(native.width), height: Double(native.height))
+        let full = geometry.outputSize(of: photo)
+        let scale = min(1, Double(bound.width) / Double(full.width), Double(bound.height) / Double(full.height))
+        let target = PixelSize(width: max(1, Int((Double(full.width) * scale).rounded())),
+                               height: max(1, Int((Double(full.height) * scale).rounded())))
+        // The thumbnail's short edge and geometry's crop round independently.
+        // Keep two output pixels of support, then resize the transformed photo
+        // to the exact target. This also leaves support for edge interpolation.
+        let crop = geometry.cropRect(for: photo)
+        let decodeScale = min(1, max(Double(target.width + 2) / crop.width,
+                                     Double(target.height + 2) / crop.height))
+        maximumDimension = min(longSide, max(1, Int((Double(longSide) * decodeScale).rounded(.up))))
+        outputSize = target
+    }
+
+    func applying(to opened: OpenedSource) -> OpenedSource {
+        guard let outputSize else { return opened }
+        let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+        func resize(_ image: CIImage) -> CIImage {
+            let extent = image.extent
+            guard extent != bounds else { return image }
+            return image.clampedToExtent()
+                .transformed(by: CGAffineTransform(scaleX: bounds.width / extent.width,
+                                                  y: bounds.height / extent.height)
+                    .translatedBy(x: -extent.minX, y: -extent.minY))
+                .cropped(to: bounds)
+        }
+        let image = resize(opened.image)
+        return OpenedSource(domain: opened.domain, image: image,
+            hdr: opened.hdr === opened.image ? image : resize(opened.hdr),
+            baseSpace: opened.baseSpace, gain: opened.gain, raw: opened.raw,
+            nativeSize: opened.nativeSize, rawPreviewSize: opened.rawPreviewSize,
+            uncroppedSize: opened.uncroppedSize)
+    }
+}
+
 extension RenderEngine {
     static func open(_ url: URL, options: SourceOptions, deferred: Bool = false,
                      progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> OpenedSource {
@@ -56,11 +109,20 @@ extension RenderEngine {
         }
         let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue ?? 0
         let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue ?? 0
+        // Missing source dimensions are malformed input, not an invalid
+        // preview size supplied by the caller.
+        guard width > 0, height > 0 else { throw RenderError.cannotDecodeSource }
         let nativeSize = PixelSize(width: orientation >= 5 ? height : width, height: orientation >= 5 ? width : height)
-        // ImageIO's deferred TIFF provider re-decodes strips for each CI ROI.
-        // Detach its native bitmap once; this is decoder storage, not a full-size
-        // float Render texture. All subsequent GPU work still uses bounded ROIs.
-        let cacheTIFF = deferred && type == .tiff && max(nativeSize.width,nativeSize.height) > 4096
+        let preview: RasterPreviewPlan?
+        switch options.resolution {
+        case .full: preview = nil
+        case .preview(let bound): preview = try RasterPreviewPlan(bound: bound, native: nativeSize, geometry: options.geometry)
+        }
+        // Core Image can omit a large TIFF provider's final tile under concurrent
+        // rendering, even for a full load. Detach its complete native bitmap for
+        // both full and lazy sources; this also avoids re-decoding strips per ROI.
+        // This is decoder storage, not a full-size float Render texture.
+        let cacheTIFF = type == .tiff && max(nativeSize.width,nativeSize.height) > 4096
             && !auxiliary.contains { $0.1 != nil }
         let baseCG: CGImage
         switch options.resolution {
@@ -75,13 +137,17 @@ extension RenderEngine {
                     shouldInterpolate:decoded.shouldInterpolate,intent:decoded.renderingIntent) {
                 baseCG = CGImageCreateCopyWithContentHeadroom(decoded.contentHeadroom,bitmap) ?? bitmap
             } else { baseCG = decoded }
-        case .preview(let maximumSize):
-            guard maximumSize.width > 0, maximumSize.height > 0, width > 0, height > 0 else { throw RenderError.invalidSize }
-            let scale = min(1,Double(maximumSize.width)/Double(nativeSize.width),Double(maximumSize.height)/Double(nativeSize.height))
-            let decodeOptions: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+        case .preview:
+            var decodeOptions: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: false,
-                kCGImageSourceDecodeRequest: auxiliary.contains { $0.1 != nil } ? kCGImageSourceDecodeToSDR : kCGImageSourceDecodeToHDR,
-                kCGImageSourceThumbnailMaxPixelSize: max(1,Int((Double(max(width,height))*scale).rounded(.down)))]
+                kCGImageSourceThumbnailMaxPixelSize: preview!.maximumDimension]
+            // The default decode retains the native base of an authored pair,
+            // including a PQ/HLG HDR base. DecodeToSDR would tone-map that base
+            // while retaining its original gain metadata; DecodeToHDR would
+            // reconstruct the pair and then apply its gain a second time.
+            if !auxiliary.contains(where: { $0.1 != nil }) {
+                decodeOptions[kCGImageSourceDecodeRequest] = kCGImageSourceDecodeToHDR
+            }
             guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, decodeOptions as CFDictionary) else {
                 throw RenderError.cannotDecodeSource
             }
@@ -144,13 +210,15 @@ extension RenderEngine {
             }
             let scaleX = base.extent.width/hdr.extent.width, scaleY = base.extent.height/hdr.extent.height
             let previewHDR = hdr.transformed(by:CGAffineTransform(scaleX:scaleX,y:scaleY))
-            return try OpenedSource(domain: .dual, image: base, hdr: previewHDR,
+            let opened = try OpenedSource(domain: .dual, image: base, hdr: previewHDR,
                                 baseSpace: nativeLinear, gain: gain, raw: nil, nativeSize:nativeSize)
                 .applying(options.geometry)
+            return preview?.applying(to: opened) ?? opened
         }
-        return try OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
+        let opened = try OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
                             baseSpace: workingColorSpace, gain: nil, raw: nil, nativeSize:nativeSize)
             .applying(options.geometry)
+        return preview?.applying(to: opened) ?? opened
     }
 
     /// New photos prefer generation 9, then 8 (including their DNG variants).

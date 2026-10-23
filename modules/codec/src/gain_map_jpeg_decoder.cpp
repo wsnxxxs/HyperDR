@@ -120,7 +120,9 @@ DecodedImage decode_iso_gain_map_jpeg_bytes(const std::vector<std::uint8_t>& byt
       INTENT_RELATIVE_COLORIMETRIC,cmsFLAGS_NOCACHE|cmsFLAGS_NOOPTIMIZE));
   if (!to_native || !to_p3) throw std::runtime_error("cannot transform gain-map colour space");
   transform(base,to_native.get());
-  auto hdr = reconstruct_gain_map(base,gain,jpeg.metadata,rational_value(jpeg.metadata.alternate_headroom));
+  const float hdr_headroom = std::max(rational_value(jpeg.metadata.base_headroom),
+                                    rational_value(jpeg.metadata.alternate_headroom));
+  auto hdr = reconstruct_gain_map(base,gain,jpeg.metadata,hdr_headroom);
   transform(hdr,to_p3.get());
   DecodedImage result = std::move(primary);
   result.authored_sdr = std::move(result.linear_p3);

@@ -132,7 +132,11 @@ import XCTest
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         await services.fakeRendering!.configure { $0.renderError = .sourceChanged }
         model.adjustRecipe(exposure.id, to: 0.5)
-        await eventually { model.sourceChanged }
+        // sourceChanged reads the shared editor directly. Wait for the Mac
+        // observer to publish the failure before checking its export state.
+        await eventually("changed-file failure reaches the Mac model") {
+            model.sourceChanged && model.document?.previewError != nil
+        }
         XCTAssertEqual(model.export.blockerKey, "export.blocker.sourceChanged")
         await services.fakeRendering!.configure { $0.renderError = nil }
         model.reopenChangedSource()

@@ -43,14 +43,25 @@ extension RenderEngine {
         let opened = try Self.open(url,options:fullOptions,deferred:true)
         let size = opened.nativeSize ?? opened.raw!.nativeSize
         try validate(size)
-        let scale = min(1,1024/Double(max(size.width,size.height)))
         var analysisOptions = fullOptions
-        analysisOptions.resolution = .preview(maximumSize:PixelSize(width:max(1,Int((Double(size.width)*scale).rounded(.up))),
-                                                                    height:max(1,Int((Double(size.height)*scale).rounded(.up)))))
+        analysisOptions.resolution = Self.analysisResolution(native:size)
         clearImageCaches()
-        let analysis = try load(url,options:analysisOptions)
-        // This is exactly fixedAnalysisSource's 1024 policy; bind it directly
-        // instead of constructing a second identical CIRAWFilter development.
+        let analysis: RenderSource
+        if opened.raw != nil && !fullOptions.sceneLinear {
+            // The lazy export already owns a native RAW graph. Develop its fixed
+            // analysis variant from that graph, retaining the native decode for
+            // subsequent ROIs rather than developing and discarding a second one.
+            let origin = (url:url.standardizedFileURL,options:fullOptions,revision:revision)
+            let id = sourceIdentity(url:origin.url,revision:revision,options:fullOptions)
+            analysis = try autoreleasepool {
+                try materialize(opened.rawVariant(resolution:analysisOptions.resolution),id:id,origin:origin)
+            }
+        } else {
+            // Scene-linear Log/film developments keep the independent analysis
+            // graph: retaining its warmed native cache raised the measured
+            // opening footprint, reducing the full-size export memory margin.
+            analysis = try load(url,options:analysisOptions)
+        }
         analysisSource = analysis
         try revision.validate(url)
         return ExportSource(id:analysis.id,domain:opened.domain,nativeSize:size,rawSettings:opened.raw,
@@ -109,6 +120,6 @@ extension RenderEngine {
         result.samplingRegion = normalized; result.gainSamplingRegion = gainRegion
         result.geometryUncroppedSize = opened.uncroppedSize
         try source.revision.validate(source.url)
-        return result
+        return try canonicalizeAuthoredSource(result)
     }
 }

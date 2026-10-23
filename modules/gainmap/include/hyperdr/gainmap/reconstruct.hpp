@@ -29,6 +29,14 @@ struct ReconstructionStats {
   std::uint64_t clamp_pixels{};
 };
 
+// Reuses a caller-owned reconstruction plane across native rows. Pixel math,
+// gain coding and interpolation are identical to reconstruct_gain_map. The
+// output must be distinct from both inputs; aliasing is rejected.
+void reconstruct_gain_map_into(FloatImage& output, const FloatImage& base,
+    const FloatImage& gain, const GainMapMetadata& metadata,
+    float display_headroom_stops, ReconstructionStats* stats = nullptr,
+    bool clamp_srgb = false);
+
 [[nodiscard]] FloatImage reconstruct_gain_map(
     const FloatImage& base, const FloatImage& gain,
     const GainMapMetadata& metadata, float display_headroom_stops,

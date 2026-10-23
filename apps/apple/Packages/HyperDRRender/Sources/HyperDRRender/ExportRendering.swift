@@ -6,7 +6,7 @@ import simd
 import Accelerate
 import HyperDRRecipe
 
-private struct ExportUniform {
+struct ExportUniform {
     var toGain,toP3: simd_float3x3
     var baseOffset,alternateOffset: SIMD4<Float>
     var info: SIMD4<UInt32>
@@ -17,6 +17,33 @@ private struct ExportUniform {
         baseOffset = SIMD4(pair.baseOffset,0); alternateOffset = SIMD4(pair.alternateOffset,0)
         info = SIMD4(UInt32(pair.gainChannelCount),resplit ? 1 : 0,flatten ? 1 : 0,sdrOnly ? 1 : 0)
         controls = SIMD4(ceiling,shoulder ? 1 : 0,0,0)
+    }
+}
+private struct ExportPackedUniform {
+    var pair: ExportUniform
+    var channels: SIMD4<UInt32>
+}
+
+/// The command has completed before this owner escapes the rendering pool.
+/// Reading produces independent Swift arrays, never borrowed GPU storage.
+struct ExportPackedReadback: @unchecked Sendable {
+    private var base: (any MTLBuffer)?
+    private var gain: (any MTLBuffer)?
+    private let pixels, gainChannels: Int
+
+    init(base: any MTLBuffer, gain: (any MTLBuffer)?, pixels: Int, gainChannels: Int) {
+        self.base = base; self.gain = gain; self.pixels = pixels; self.gainChannels = gainChannels
+    }
+
+    mutating func read() -> (base: [Float], gain: [Float]) {
+        func copy(_ buffer: any MTLBuffer, count: Int) -> [Float] {
+            Array(UnsafeBufferPointer(start: buffer.contents().bindMemory(to: Float.self, capacity: count), count: count))
+        }
+        let rgb = copy(base!, count: pixels * 3)
+        base = nil
+        let gains = gain.map { copy($0, count: pixels * gainChannels) } ?? []
+        gain = nil
+        return (rgb, gains)
     }
 }
 /// Preparation retains metadata, never a first band's GPU textures.
@@ -103,13 +130,32 @@ extension RenderEngine: ExportStripeRendering {
             if automatic["hdr.range"] != nil { automatic["hdr.range"] = Double(limit) }
         }
         let caption = try exportCaption(request.frame,photoSize:request.photoSize)
-        // Header must be global, including signed gain and transparency that a
+        // Gain headers must be global, including signed gain and transparency that a
         // fixed-scale analysis can miss. Scan GPU bands, retain only five words.
         var summary = SIMD8<UInt32>.zero
         var firstPair: ExportPairInfo?, provenance = PairProvenance.identity
         let halo = edit.film.sourceHalo(size:request.photoSize)
         let tileSize = exportTileSize(lazy,request:request,halo:halo)
         let scanRows = min(rows,tileSize.height)
+        if !request.includesGain {
+            // SDR has no gain header that needs a whole-photo maximum. Render
+            // one real tile for provenance and validate/flatten each tile when
+            // it is read, instead of developing the entire photo twice.
+            let sourceProvenance = try autoreleasepool {
+                let region = CGRect(x:0,y:0,width:min(tileSize.width,request.photoSize.width),
+                                    height:min(scanRows,request.photoSize.height))
+                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,halo:halo) } ?? source
+                let planes = try render(tile,adjustments:edit,size:request.photoSize,region:region)
+                guard !planes.aiPending else { throw RenderError.aiNotAvailable }
+                return planes.provenance
+            }
+            let report = ExportRenderReport(canvasSize:request.canvasSize,gain:nil,
+                sourceProvenance:sourceProvenance,provenance:sourceProvenance,resplitReasons:[],
+                rangeBeforeCeiling:naturalRange,rangeAfterCeiling:edit.hdr.range ?? naturalRange,
+                resolvedAutomatic:automatic,presentationFrame:request.frame != nil,framePhoto:request.frame?.photo)
+            return ExportPreparation(source:source,lazy:lazy,request:request,edit:edit,caption:caption,report:report,
+                transparent:true,resplit:false,shoulder:false,ceiling:request.ceilingStops.map { exp2($0) } ?? .infinity)
+        }
         for y in stride(from:0,to:request.photoSize.height,by:scanRows) {
             try Task.checkCancellation()
             for x in stride(from:0,to:request.photoSize.width,by:tileSize.width) {
@@ -118,9 +164,14 @@ extension RenderEngine: ExportStripeRendering {
                     let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,halo:halo) } ?? source
                     let planes = try render(tile,adjustments:edit,size:request.photoSize,region:region)
                     guard !planes.aiPending else { throw RenderError.aiNotAvailable }
-                    let pair = try displayPair(planes,source:tile)
-                    if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
                     guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                    // Preserve the first authored band's measured fallback for
+                    // legacy files without tagged headroom. Later bands' local
+                    // peaks are unused; exportSummary remains the global scan.
+                    let pair = try firstPair == nil && source.domain == .dual && edit.hdr.enabled
+                        ? displayPair(planes,source:tile)
+                        : encodeExportDisplayPair(planes,source:tile,into:command)
+                    if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
                     let node = nodeContext(domain:source.domain,buffer:command)
                     guard let stats = device.makeBuffer(length:32,options:.storageModeShared) else { throw RenderError.allocationFailed }
                     stats.contents().initializeMemory(as:UInt8.self,repeating:0,count:32)
@@ -237,6 +288,25 @@ extension RenderEngine: ExportStripeRendering {
         }
         try Task.checkCancellation()
         if let lazy { try lazy.revision.validate(lazy.url) }
+        if request.frame == nil {
+            // Release the completed command and its render textures before copying
+            // the packed buffers. They must not overlap both CPU plane owners.
+            var packed = try autoreleasepool {
+                let region = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+                let tile = try lazy.map { try materializeExportRegion($0, outputSize: request.photoSize, region: region,
+                    halo: edit.film.sourceHalo(size: request.photoSize)) } ?? source
+                let rendered = try render(tile, adjustments: edit, size: request.photoSize, region: region)
+                guard !rendered.aiPending else { throw RenderError.aiNotAvailable }
+                guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                let pair = try encodeExportDisplayPair(rendered, source: tile, into: command)
+                return try exportPackedPair(pair, domain: source.domain, channels: metadata?.channelCount ?? 0,
+                    resplit: resplit, flatten: transparent, sdrOnly: !request.includesGain,
+                    ceiling: ceiling, shoulder: shoulder, command: command)
+            }
+            let pixels = packed.read()
+            try Task.checkCancellation()
+            return ExportStripe(rect: rect, baseRGB: pixels.base, gain: pixels.gain)
+        }
         return try autoreleasepool {
             let height = count
             let photo = request.frame?.photo ?? ExportRect(x:0,y:0,width:request.photoSize.width,height:request.photoSize.height)
@@ -248,9 +318,11 @@ extension RenderEngine: ExportStripeRendering {
                 let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,
                                                                       halo:edit.film.sourceHalo(size:request.photoSize)) } ?? source
                 let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
-                let pair = try displayPair(rendered,source:tile)
+                guard !rendered.aiPending else { throw RenderError.aiNotAvailable }
+                guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                let pair = try encodeExportDisplayPair(rendered,source:tile,into:command)
                 photoPlanes = try exportNormalize(pair,source:source,channels:metadata?.channelCount ?? 1,
-                    resplit:resplit,flatten:transparent,sdrOnly:!request.includesGain,ceiling:ceiling,shoulder:shoulder)
+                    resplit:resplit,flatten:transparent,sdrOnly:!request.includesGain,ceiling:ceiling,shoulder:shoulder,command:command)
             }
             let output: RenderPlanes
             if let frame = request.frame {
@@ -259,6 +331,7 @@ extension RenderEngine: ExportStripeRendering {
             } else { output = photoPlanes! }
             let rgb = Self.readRGB(output.base)
             let gain = metadata.map { $0.channelCount == 1 ? Self.readTexture(output.gain) : Self.readRGB(output.gain) } ?? []
+            guard rgb.allSatisfy(\.isFinite), gain.allSatisfy(\.isFinite) else { throw RenderError.invalidAdjustment }
             try Task.checkCancellation()
             return ExportStripe(rect:rect,baseRGB:rgb,gain:gain)
         }
@@ -285,14 +358,28 @@ extension RenderEngine: ExportStripeRendering {
     }
 
     private func exportNormalize(_ pair: DisplayGainPair, source: RenderSource, channels: Int,
-                                 resplit: Bool, flatten: Bool, sdrOnly: Bool, ceiling: Float, shoulder: Bool) throws -> RenderPlanes {
-        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                                 resplit: Bool, flatten: Bool, sdrOnly: Bool, ceiling: Float, shoulder: Bool,
+                                 command: any MTLCommandBuffer) throws -> RenderPlanes {
         let node = nodeContext(domain:source.domain,buffer:command)
         let base = try node.texture(width:pair.base.width,height:pair.base.height)
         let gain = try node.texture(width:base.width,height:base.height,format:channels == 1 ? .r32Float : .rgba32Float)
         var p = ExportUniform(pair,resplit:resplit,flatten:flatten,sdrOnly:sdrOnly,ceiling:ceiling,shoulder:shoulder)
+        let validation: (any MTLBuffer)?
+        if sdrOnly {
+            // SDR preparation skips the whole-photo scan. Keep its finite-input
+            // contract at read time, before flattening could hide a NaN alpha,
+            // and share the pair/normalization command's single completion.
+            guard let stats = device.makeBuffer(length:32,options:.storageModeShared) else { throw RenderError.allocationFailed }
+            stats.contents().initializeMemory(as:UInt8.self,repeating:0,count:32)
+            try node.dispatch("exportSummary",width:pair.base.width,height:pair.base.height,
+                              textures:[pair.base,pair.gain],buffers:[stats],value:&p)
+            validation = stats
+        } else { validation = nil }
         try node.dispatch("exportPair",width:base.width,height:base.height,textures:[pair.base,pair.gain,base,gain],value:&p)
         try finish(command)
+        if let validation, validation.contents().bindMemory(to:UInt32.self,capacity:8)[4] != 0 {
+            throw RenderError.invalidAdjustment
+        }
         return RenderPlanes(base:base,gain:gain,gainChannelCount:channels,baseColorSpace:Self.workingColorSpace,
                             provenance:.identity,region:pair.region,outputSize:pair.outputSize)
     }
@@ -356,6 +443,30 @@ extension RenderEngine: ExportStripeRendering {
 }
 
 extension RenderEngine {
+    /// A fused export boundary for unframed rows. The pixel operator is shared
+    /// with exportPair; only its destination is packed RGB rather than RGBA.
+    func exportPackedPair(_ pair: DisplayGainPair, domain: InputDomain, channels: Int,
+                          resplit: Bool, flatten: Bool, sdrOnly: Bool, ceiling: Float, shoulder: Bool,
+                          command: any MTLCommandBuffer) throws -> ExportPackedReadback {
+        guard [0, 1, 3].contains(channels) else { throw RenderError.invalidAdjustment }
+        let pixels = pair.base.width * pair.base.height
+        guard let base = device.makeBuffer(length: pixels * 12, options: .storageModeShared),
+              let gain = device.makeBuffer(length: max(4, pixels * channels * 4), options: .storageModeShared),
+              let validation = device.makeBuffer(length: 4, options: .storageModeShared) else {
+            throw RenderError.allocationFailed
+        }
+        validation.contents().storeBytes(of: UInt32(0), as: UInt32.self)
+        let node = nodeContext(domain: domain, buffer: command)
+        var p = ExportPackedUniform(pair: ExportUniform(pair, resplit: resplit, flatten: flatten,
+            sdrOnly: sdrOnly, ceiling: ceiling, shoulder: shoulder), channels: SIMD4(UInt32(channels), 0, 0, 0))
+        try node.dispatch("exportPackedPair", width: pair.base.width, height: pair.base.height,
+            textures: [pair.base, pair.gain], buffers: [base, gain, validation], value: &p)
+        try finish(command)
+        guard validation.contents().load(as: UInt32.self) == 0 else { throw RenderError.invalidAdjustment }
+        return ExportPackedReadback(base: base, gain: channels == 0 ? nil : gain,
+            pixels: pixels, gainChannels: channels)
+    }
+
     nonisolated static func readRGB(_ texture: any MTLTexture) -> [Float] {
         let rgba = readTexture(texture)
         return [Float](unsafeUninitializedCapacity: texture.width*texture.height*3) { output, count in

@@ -45,6 +45,16 @@ public struct DisplayGainPair: @unchecked Sendable {
 private struct DisplayISOUniform {
     var minimum, maximum, inverseGamma: SIMD4<Float>
     var channels: SIMD4<UInt32>
+    var output: SIMD4<UInt32>
+    var sourceRegion: SIMD4<Float>
+}
+private struct CanonicalISOUniform {
+    var baseToGain, gainToBase: simd_float3x3
+    var minimum, maximum, inverseGamma: SIMD4<Float>
+    var baseOffset, alternateOffset: SIMD4<Float>
+    var output: SIMD4<UInt32>
+    var gainRegion: SIMD4<Float>
+    var channels: SIMD4<UInt32>
 }
 private struct DisplayLegacyUniform {
     var gainToP3: simd_float3x3
@@ -59,6 +69,57 @@ private struct DisplayHDRUniform {
 }
 
 extension RenderEngine {
+    /// Preserve reverse ISO's complete display curve while giving the editor its
+    /// SDR endpoint. If S=(B+oB)*2^-g-oA, then (S+oA)*2^(w*g)-oA equals the
+    /// native negative-weight reconstruction at w-1, including unequal offsets.
+    /// The original encoded gain and metadata dictionaries stay available.
+    func canonicalizeAuthoredSource(_ source: RenderSource) throws -> RenderSource {
+        guard var metadata = source.authoredGainMap, metadata.needsSDRBaseNormalization else { return source }
+        guard metadata.nativeISOChannels != nil else { throw RenderError.missingGainMap }
+        let baseWindow = sourceSampling(source.texture, source.samplingRegion)
+        let base = try canonicalISOBase(source.texture, source: source,
+            size: PixelSize(width: Int(baseWindow.z), height: Int(baseWindow.w)),
+            origin: SIMD2(UInt32(baseWindow.x), UInt32(baseWindow.y)))
+        metadata.hasCanonicalSDRBase = true
+        let image = CIImage(mtlTexture: base, options: [.colorSpace: source.baseSpace])!
+            .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(base.height)))
+        var normalized = RenderSource(id: source.id, renderID: source.renderID, origin: source.origin,
+            domain: source.domain, size: source.size, nativeSize: source.nativeSize,
+            authoredGainMap: metadata, hdrImage: source.hdrImage, authoredBaseImage: image,
+            rawSettings: source.rawSettings, texture: base, baseSpace: source.baseSpace, gainTexture: source.gainTexture)
+        normalized.samplingRegion = source.samplingRegion
+        normalized.gainSamplingRegion = source.gainSamplingRegion
+        normalized.geometryUncroppedSize = source.geometryUncroppedSize
+        return normalized
+    }
+
+    /// Normalize at the requested pixel grid. Resizing a previously normalized
+    /// SDR image and gain independently would change the HDR endpoint near edges.
+    func canonicalISOBase(_ base: any MTLTexture, source: RenderSource, size: PixelSize,
+                          origin: SIMD2<UInt32>) throws -> any MTLTexture {
+        guard let metadata = source.authoredGainMap, let channels = metadata.isoChannels,
+              let encoded = source.gainTexture else { throw RenderError.missingGainMap }
+        let gainSpace = metadata.gainWorkingColorSpace ?? source.baseSpace
+        let baseToGain = CFEqual(gainSpace, source.baseSpace) ? matrix_identity_float3x3
+            : simd_inverse(try displayMatrixToP3(gainSpace)) * (try displayMatrixToP3(source.baseSpace))
+        func vector(_ key: KeyPath<ISOGainChannel, Double>) -> SIMD4<Float> {
+            SIMD4(Float(channels[0][keyPath: key]), Float(channels[channels.count == 1 ? 0 : 1][keyPath: key]),
+                  Float(channels[channels.count == 1 ? 0 : 2][keyPath: key]), 0)
+        }
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let node = nodeContext(domain: source.domain, buffer: command)
+        let result = try node.texture(width: base.width, height: base.height)
+        var p = CanonicalISOUniform(baseToGain: baseToGain, gainToBase: simd_inverse(baseToGain),
+            minimum: vector(\.minimum), maximum: vector(\.maximum), inverseGamma: 1 / vector(\.gamma),
+            baseOffset: vector(\.baseOffset), alternateOffset: vector(\.alternateOffset),
+            output: SIMD4(UInt32(size.width), UInt32(size.height), origin.x, origin.y),
+            gainRegion: sourceSampling(encoded, source.gainSamplingRegion), channels: SIMD4(UInt32(metadata.channelCount), 0, 0, 0))
+        try node.dispatch("canonicalISOBase", width: result.width, height: result.height,
+            textures: [base, encoded, result], value: &p)
+        try finish(command)
+        return result
+    }
+
     func reconstructAuthoredHDR(_ source: RenderSource) throws -> any MTLTexture {
         guard let metadata = source.authoredGainMap, let gain = source.gainTexture else { throw RenderError.missingGainMap }
         let n = source.samplingRegion
@@ -70,6 +131,40 @@ extension RenderEngine {
             region: region, outputSize: source.size)
         let pair = try displayPair(planes, source: source)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let output = try encodeDisplayHDR(pair, into: command)
+        try finish(command)
+        return output
+    }
+
+    /// A reverse pair's SDR and HDR must enter edits on the same output grid.
+    /// Sampling the native normalized SDR separately would introduce a visible
+    /// jump on the first nonzero light/color edit at a smaller output size.
+    func authoredSourceAtOutputGrid(_ source: RenderSource, size: PixelSize, region: CGRect) throws
+        -> (source: RenderSource, hdr: any MTLTexture)? {
+        guard source.authoredGainMap?.hasCanonicalSDRBase == true, size != source.size else { return nil }
+        let planes = try renderRegion(source, size: size, region: region, nodes: [])
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let pair = try encodeExportDisplayPair(planes, source: source, into: command)
+        let hdr = try encodeDisplayHDR(pair, into: command)
+        try finish(command)
+        func image(_ texture: any MTLTexture) -> CIImage {
+            CIImage(mtlTexture: texture, options: [.colorSpace: Self.workingColorSpace])!
+                .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(texture.height)))
+        }
+        var target = RenderSource(id: source.id, renderID: UUID(), origin: source.origin,
+            domain: source.domain, size: size, nativeSize: source.nativeSize,
+            authoredGainMap: source.authoredGainMap,
+            hdrImage: image(hdr).settingContentHeadroom(source.hdrImage.contentHeadroom),
+            authoredBaseImage: image(pair.base), rawSettings: source.rawSettings,
+            texture: pair.base, baseSpace: Self.workingColorSpace, gainTexture: source.gainTexture)
+        target.samplingRegion = CGRect(x: region.minX / Double(size.width), y: region.minY / Double(size.height),
+                                       width: region.width / Double(size.width), height: region.height / Double(size.height))
+        target.gainSamplingRegion = source.gainSamplingRegion
+        target.geometryUncroppedSize = source.geometryUncroppedSize
+        return (target, hdr)
+    }
+
+    private func encodeDisplayHDR(_ pair: DisplayGainPair, into command: any MTLCommandBuffer) throws -> any MTLTexture {
         let node = nodeContext(domain: .dual, buffer: command)
         let output = try node.texture(width: pair.base.width, height: pair.base.height)
         var p = DisplayHDRUniform(p3ToGain: pair.p3ToGain, gainToP3: pair.gainToP3,
@@ -77,14 +172,28 @@ extension RenderEngine {
             channels: SIMD4(UInt32(pair.gainChannelCount), 0, 0, 0))
         try node.dispatch("displayHDR", width: output.width, height: output.height,
             textures: [pair.base, pair.gain, output], value: &p)
-        try finish(command)
         return output
     }
 
     /// Normalize a rendered pair for display, retaining the export pair unchanged.
     /// `source` supplies the system HDR reconstruction for legacy Apple metadata.
     public func displayPair(_ planes: RenderPlanes, source: RenderSource) throws -> DisplayGainPair {
+        try normalizedDisplayPair(planes, source: source, into: nil)
+    }
+
+    /// Export already scans the complete image for its header. Encode only the
+    /// pair conversion into the consumer's command, without a local peak/readback.
+    /// The returned headroom is declarative; callers needing an untagged measured
+    /// headroom must use displayPair for that first header-bearing band.
+    func encodeExportDisplayPair(_ planes: RenderPlanes, source: RenderSource,
+                                 into command: any MTLCommandBuffer) throws -> DisplayGainPair {
+        try normalizedDisplayPair(planes, source: source, into: command)
+    }
+
+    private func normalizedDisplayPair(_ planes: RenderPlanes, source: RenderSource,
+                                       into consumer: (any MTLCommandBuffer)?) throws -> DisplayGainPair {
         try Task.checkCancellation()
+        let measuresPeak = consumer == nil
         var baseOffset = SIMD3<Float>.zero, alternateOffset = SIMD3<Float>.zero
         var baseHeadroom: Float = 0, taggedHeadroom: Float?
         var gainSpace = Self.workingColorSpace
@@ -123,7 +232,7 @@ extension RenderEngine {
         let gainToP3 = try displayMatrixToP3(gainSpace)
         let p3ToGain = simd_inverse(gainToP3)
         let baseMatrix = try displayMatrixToP3(planes.baseColorSpace)
-        guard let command = queue.makeCommandBuffer(),
+        guard let command = consumer ?? queue.makeCommandBuffer(),
               let peak = device.makeBuffer(length:MemoryLayout<UInt32>.size,options:.storageModeShared) else {
             throw RenderError.allocationFailed
         }
@@ -140,27 +249,21 @@ extension RenderEngine {
         let count: Int
         if let iso, let channels = iso.isoChannels {
             count = max(planes.gainChannelCount,channels.count)
-            // Decode before interpolation. A cropped/resized export pair contains
-            // encoded samples; start from the native source gain for display.
+            // ISO/Apple decode the filtered encoded samples, not filtered log2
+            // samples. Keep native gain coordinates for whole, resized and ROI.
             let encoded = source.gainTexture ?? planes.gain
-            let decoded = try node.texture(width:encoded.width,height:encoded.height,
-                                           format:count == 1 ? .r32Float : .rgba32Float)
+            gain = try node.texture(width:base.width,height:base.height,
+                                    format:count == 1 ? .r32Float : .rgba32Float)
             func vector(_ key: KeyPath<ISOGainChannel,Double>) -> SIMD4<Float> {
                 SIMD4(Float(channels[0][keyPath:key]),Float(channels[channels.count == 1 ? 0 : 1][keyPath:key]),
                       Float(channels[channels.count == 1 ? 0 : 2][keyPath:key]),0)
             }
             var p = DisplayISOUniform(minimum:vector(\.minimum),maximum:vector(\.maximum),
-                                      inverseGamma:1/vector(\.gamma),channels:SIMD4(UInt32(planes.gainChannelCount),0,0,0))
-            try node.dispatch("displayISOGain",width:decoded.width,height:decoded.height,
-                              textures:[encoded,decoded],buffers:[peak],value:&p)
-            let bounds = CGRect(x:0,y:0,width:planes.outputSize.width,height:planes.outputSize.height)
-            if source.gainSamplingRegion == CGRect(x:0,y:0,width:1,height:1) && planes.region == bounds && planes.outputSize == source.size { gain = decoded }
-            else {
-                gain = try node.texture(width:base.width,height:base.height,format:decoded.pixelFormat)
-                var sampling = SourceSampling(width:UInt32(planes.outputSize.width),height:UInt32(planes.outputSize.height),
-                                               x:UInt32(planes.region.minX),y:UInt32(planes.region.minY),sourceRegion:sourceSampling(encoded,source.gainSamplingRegion))
-                try node.dispatch("sampleSource",width:gain.width,height:gain.height,textures:[decoded,gain],value:&sampling)
-            }
+                inverseGamma:1/vector(\.gamma),channels:SIMD4(UInt32(planes.gainChannelCount),measuresPeak ? 1 : 0,0,0),
+                output:SIMD4(UInt32(planes.outputSize.width),UInt32(planes.outputSize.height),UInt32(planes.region.minX),UInt32(planes.region.minY)),
+                sourceRegion:sourceSampling(encoded,source.gainSamplingRegion))
+            try node.dispatch("displayISOGain",width:gain.width,height:gain.height,
+                              textures:[encoded,gain],buffers:[peak],value:&p)
         } else if legacy {
             let working = try authorWorking(source)
             count = 3
@@ -168,17 +271,19 @@ extension RenderEngine {
             // Match a cropped preview or detail region against the original source.
             var p = DisplayLegacyUniform(gainToP3:gainToP3,baseOffset:SIMD4(baseOffset,0),alternateOffset:SIMD4(alternateOffset,0),
                 region:SIMD4(Float(planes.region.minX),Float(planes.region.minY),Float(planes.region.width),Float(planes.region.height)),
-                size:SIMD4(Float(planes.outputSize.width),Float(planes.outputSize.height),0,0),inputRegion:sourceSampling(source.texture,source.samplingRegion))
+                size:SIMD4(Float(planes.outputSize.width),Float(planes.outputSize.height),measuresPeak ? 1 : 0,0),inputRegion:sourceSampling(source.texture,source.samplingRegion))
             try node.dispatch("displayLegacyGain",width:gain.width,height:gain.height,
                               textures:[working.base,working.hdr,gain],buffers:[peak],value:&p)
         } else {
             count = planes.gainChannelCount; gain = planes.gain
-            var channels = UInt32(count)
-            try node.dispatch("displayGainPeak",width:gain.width,height:gain.height,
-                              textures:[gain],buffers:[peak],value:&channels)
+            if measuresPeak {
+                var channels = UInt32(count)
+                try node.dispatch("displayGainPeak",width:gain.width,height:gain.height,
+                                  textures:[gain],buffers:[peak],value:&channels)
+            }
         }
-        try finish(command)
-        let measuredHeadroom = Float(bitPattern:peak.contents().load(as:UInt32.self))
+        if measuresPeak { try finish(command) }
+        let measuredHeadroom = measuresPeak ? Float(bitPattern:peak.contents().load(as:UInt32.self)) : 0
         let alternateHeadroom = taggedHeadroom ?? max(measuredHeadroom, legacy ? log2(max(1,source.hdrImage.contentHeadroom)) : 0)
         return DisplayGainPair(base:base,gain:gain,gainChannelCount:count,baseOffset:baseOffset,alternateOffset:alternateOffset,
             baseHeadroom:baseHeadroom,alternateHeadroom:alternateHeadroom,p3ToGain:p3ToGain,gainToP3:gainToP3,region:planes.region,outputSize:planes.outputSize)

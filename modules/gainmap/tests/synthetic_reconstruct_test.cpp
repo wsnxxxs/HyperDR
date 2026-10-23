@@ -91,15 +91,25 @@ void test_negative_gain_clamp() {
   }
 }
 
-void test_reverse_headroom_order_uses_the_same_endpoint_weight() {
+void test_hdr_base_uses_reverse_gain_at_sdr_and_intermediate_headrooms() {
   auto metadata = positive_metadata();
   metadata.base_headroom = {2, 1};
   metadata.alternate_headroom = {0, 1};
 
-  const auto rendered = hyperdr::reconstruct_gain_map(
+  for (const auto& [headroom, expected] : {
+           std::pair{0.0F, 0.25F}, std::pair{1.0F, 0.5F}, std::pair{2.0F, 1.0F},
+           std::pair{3.0F, 1.0F}}) {
+    const auto rendered = hyperdr::reconstruct_gain_map(
+        base_image(1.0F), gain_image(1.0F), metadata, headroom);
+    require_close(rendered.pixels[0], expected, 1.0e-6F,
+                  "HDR base did not apply the ISO HDR/SDR gain in reverse");
+  }
+  metadata.base_offset = {1, 16};
+  metadata.alternate_offset = {1, 32};
+  const auto intermediate = hyperdr::reconstruct_gain_map(
       base_image(1.0F), gain_image(1.0F), metadata, 1.0F);
-  require_close(rendered.pixels[0], 2.0F, 1.0e-6F,
-                "reverse headroom order inverted the interpolation weight");
+  require_close(intermediate.pixels[0], (1.0F+1.0F/16.0F)*0.5F-1.0F/32.0F,
+                1.0e-6F, "reverse reconstruction lost the native affine offsets");
 }
 
 void test_gamma_interpolation_order_is_code_domain() {
@@ -301,19 +311,61 @@ void test_large_image_uses_shared_double_precision_coordinates() {
   }
 }
 
+void test_reused_output_keeps_pixels_stats_and_storage() {
+  hyperdr::FloatImage base(1025, 1, 3), gain(1025, 1, 1), output;
+  auto metadata = positive_metadata();
+  metadata.gain_min = {-1, 2}; metadata.gain_max = {3, 2}; metadata.gamma = {2, 1};
+  metadata.base_offset = {1, 64}; metadata.alternate_offset = {1, 32};
+  for (unsigned x = 0; x < base.width; ++x) {
+    gain.pixels[x] = float((x * 1237) % 65536) / 65535;
+    for (unsigned c = 0; c < 3; ++c) base.at(x, 0, c) = float(x + c) / 1028;
+  }
+  hyperdr::ReconstructionStats stats;
+  hyperdr::reconstruct_gain_map_into(output, base, gain, metadata, 1, &stats);
+  const auto* storage = output.pixels.data();
+  for (unsigned x = 0; x < base.width; ++x) {
+    const double multiplier = std::exp2((-0.5 + 2 * std::sqrt(double(gain.pixels[x]))) * 0.5);
+    for (unsigned c = 0; c < 3; ++c) {
+      const auto expected = float(std::max(0., (double(base.at(x, 0, c)) + 1./64) * multiplier - 1./32));
+      require_close(output.at(x, 0, c), expected, 2e-6f,
+                    "same-size row reconstruction disagreed with the double reference");
+    }
+  }
+  std::fill(base.pixels.begin(), base.pixels.end(), -1.f);
+  hyperdr::reconstruct_gain_map_into(output, base, gain, metadata, 2, &stats);
+  require(output.pixels.data() == storage, "replaying a native row reallocated the output plane");
+  require(std::all_of(output.pixels.begin(), output.pixels.end(), [](float v) { return v == 0; }),
+          "the reused output retained pixels from the previous row");
+  require(stats.clamp_pixels == base.width && stats.clamp_values == base.width * 3,
+          "clamp statistics did not reset with a reused output");
+  // Changing size must resize the workspace, and lower-resolution gain maps
+  // must still use code-domain filtering instead of the identity-grid shortcut.
+  hyperdr::FloatImage small(3, 2, 3), reduced(2, 1, 1);
+  std::fill(small.pixels.begin(), small.pixels.end(), .25f); reduced.pixels = {0, 1};
+  hyperdr::reconstruct_gain_map_into(output, small, reduced, positive_metadata(), 2);
+  require(output.width == 3 && output.height == 2 && output.pixels.size() == 18,
+          "the row workspace did not resize");
+  require_close(output.at(1, 1, 1), .5f, 1e-6f, "the resized workspace lost gain interpolation");
+  bool rejected = false;
+  try { hyperdr::reconstruct_gain_map_into(small, small, reduced, positive_metadata(), 2); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  require(rejected, "an aliased reconstruction output was accepted");
+}
+
 }  // namespace
 
 int main() {
   try {
     test_physical_headroom_weight();
     test_negative_gain_clamp();
-    test_reverse_headroom_order_uses_the_same_endpoint_weight();
+    test_hdr_base_uses_reverse_gain_at_sdr_and_intermediate_headrooms();
     test_gamma_interpolation_order_is_code_domain();
     test_clamp_statistics_are_reported();
     test_three_channel_reconstruction_uses_each_channel();
     test_channel_mismatch_is_rejected();
     test_small_positive_gamma_uses_its_actual_value();
     test_large_image_uses_shared_double_precision_coordinates();
+    test_reused_output_keeps_pixels_stats_and_storage();
     std::cout << "synthetic reconstruction tests passed\n";
     return 0;
   } catch (const std::exception& error) {

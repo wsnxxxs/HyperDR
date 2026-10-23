@@ -330,11 +330,11 @@ void write_heic_rows(const EncodingRows& base,const EncodingRows& codes,
     output.close();
     return;
   }
-  FloatImage b(base.width,1,3),g(base.width,1,codes.channels);
+  FloatImage b(base.width,1,3),g(base.width,1,codes.channels),reconstructed(base.width,1,3);
   float peak=0;double sum=0;
   EncodingRows hdr{base.width,base.height,3,[&](unsigned y,std::span<float> out) {
     base.read(y,b.pixels);codes.read(y,g.pixels);
-    const auto reconstructed=reconstruct_gain_map(b,g,metadata,headroom);
+    reconstruct_gain_map_into(reconstructed,b,g,metadata,headroom);
     std::copy(reconstructed.pixels.begin(),reconstructed.pixels.end(),out.begin());
     // The slab producer visits each native row exactly once, in order. Measure
     // CLLI here instead of replaying the entire HDR reconstruction and renderer

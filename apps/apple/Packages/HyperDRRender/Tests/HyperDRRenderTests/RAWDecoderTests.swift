@@ -167,6 +167,47 @@ final class RAWDecoderTests: XCTestCase {
         }
     }
 
+    func testLazyRAWExportKeepsTheRecordedGeometryAndAnalysis() async throws {
+        let url = try fixture("canon-eos-5d-iii-lossy.dng"), version = try version9(url)
+        for linear in [false, true] {
+            var options = SourceOptions(sceneLinear: linear)
+            options.rawDecoderVersion = version
+            options.geometry = Geometry(angle: 5, quarterTurns: 1,
+                crop: CropRect(centreX: 0.03, centreY: -0.02, width: 0.75, height: 0.75))
+            let independent = try RenderEngine(), shared = try RenderEngine()
+            let coldOpened = try RenderEngine.openRAW(url, options: options)
+            var analysisOptions = options
+            analysisOptions.resolution = .preview(maximumSize: PixelSize(width: 1024, height: 1024))
+            let expected = try await independent.load(url, options: analysisOptions)
+            let lazy = try await shared.openExportSource(url, options: options)
+            XCTAssertEqual(lazy.id, expected.id)
+            XCTAssertEqual(lazy.analysisSource.modelSourceID, expected.modelSourceID)
+            XCTAssertEqual(lazy.analysisSource.nativeSize, expected.nativeSize)
+            XCTAssertEqual(lazy.analysisSource.rawSettings?.decoderVersion, version)
+            XCTAssertEqual(lazy.analysisSource.rawSettings?.scaleFactor, expected.rawSettings?.scaleFactor)
+            XCTAssertEqual(RenderEngine.readTexture(lazy.analysisSource.texture).map(\.bitPattern),
+                           RenderEngine.readTexture(expected.texture).map(\.bitPattern))
+            if linear {
+                // Log/film retains the independent load path, whose analysis
+                // variant is cached, rather than retaining a warmed full graph.
+                var cachedOptions = options
+                cachedOptions.resolution = RenderEngine.analysisResolution(native: lazy.nativeSize)
+                let cached = try await shared.load(url, options: cachedOptions)
+                XCTAssertTrue(cached.texture === lazy.analysisSource.texture)
+            }
+            // The independent native graph has not developed its analysis grid.
+            // Compare its cold ROI with the graph retained after shared analysis.
+            let cold = ExportSource(id: expected.id, domain: expected.domain, nativeSize: expected.nativeSize,
+                rawSettings: coldOpened.raw, analysisSource: expected, opened: coldOpened,
+                url: url, revision: try SourceRevision(url: url))
+            let region = CGRect(x: 211, y: 333, width: 257, height: 67)
+            let reference = try await independent.materializeExportRegion(cold, outputSize: cold.nativeSize, region: region)
+            let actual = try await shared.materializeExportRegion(lazy, outputSize: lazy.nativeSize, region: region)
+            XCTAssertEqual(RenderEngine.readTexture(actual.texture).map(\.bitPattern),
+                           RenderEngine.readTexture(reference.texture).map(\.bitPattern))
+        }
+    }
+
     func testDecoder9NativeRegionsMatchWholeAndRepeat() async throws {
         let url = try fixture("canon-eos-5d-iii-lossy.dng"), version = try version9(url)
         let engine = try RenderEngine()

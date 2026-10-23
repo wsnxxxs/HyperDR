@@ -1,7 +1,7 @@
 struct ExportUniform {
     float3x3 toGain,toP3;
     float4 baseOffset,alternateOffset;
-    uint4 info; // source channels, resplit, flatten alpha, unused
+    uint4 info; // source channels, resplit, flatten alpha, SDR-only / validate-only
     float4 controls; // output ceiling in linear white, apply shoulder, unused
 };
 float3 exportHDR(float3 b,float3 g,constant ExportUniform& p) {
@@ -16,6 +16,11 @@ kernel void exportSummary(texture2d<float,access::read> base [[texture(0)]],
     float4 b=base.read(pos);float3 g=gain.sample(s,(float2(pos)+.5f)/float2(base.get_width(),base.get_height())).rgb;
     if(p.info.x==1)g=g.rrr;
     if(!all(isfinite(b)) || !all(isfinite(g)))atomic_store_explicit(stats+4,1,memory_order_relaxed);
+    if(p.info.w) {
+        float3 h=exportHDR(b.rgb,g,p)*clamp(b.a,0.f,1.f);
+        if(!all(isfinite(h)))atomic_store_explicit(stats+4,1,memory_order_relaxed);
+        return;
+    }
     atomic_fetch_max_explicit(stats,as_type<uint>(max(0.f,maximum(g))),memory_order_relaxed);
     if(any(g<0))atomic_store_explicit(stats+1,1,memory_order_relaxed);
     if(b.a<1)atomic_store_explicit(stats+2,1,memory_order_relaxed);
@@ -23,6 +28,19 @@ kernel void exportSummary(texture2d<float,access::read> base [[texture(0)]],
     if(!all(isfinite(h)))atomic_store_explicit(stats+4,1,memory_order_relaxed);
     float peak=max(0.f,maximum(h));
     atomic_fetch_max_explicit(stats+3,as_type<uint>(peak),memory_order_relaxed);
+}
+struct ExportPixel { float4 base;float3 gain; };
+ExportPixel exportPairPixel(float4 b,float3 g,constant ExportUniform& p) {
+    if(p.info.y && !p.info.w) {
+        float3 h=exportHDR(b.rgb,g,p);
+        if(p.info.z)h*=clamp(b.a,0.f,1.f); // legacy black matte, after ISO reconstruction
+        float peak=maximum(h), rawGain=log2(max(1.f,peak));
+        // Determine base before applying the output ceiling (H1/R10-001).
+        b.rgb=fit(h*exp2(-rawGain),1.f);
+        float mapped=softPeak(peak,p.controls.x,p.controls.y!=0);
+        g=float3(max(0.f,rawGain+(peak>0 ? log2(max(mapped,1e-20f)/peak) : 0.f)));
+    } else if(p.info.z) b.rgb*=clamp(b.a,0.f,1.f);
+    return {float4(b.rgb,1),g};
 }
 kernel void exportPair(texture2d<float,access::read> base [[texture(0)]],
                        texture2d<float,access::sample> gain [[texture(1)]],
@@ -33,16 +51,8 @@ kernel void exportPair(texture2d<float,access::read> base [[texture(0)]],
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
     float4 b=base.read(pos);float3 g=gain.sample(s,(float2(pos)+.5f)/float2(base.get_width(),base.get_height())).rgb;
     if(p.info.x==1)g=g.rrr;
-    if(p.info.y && !p.info.w) {
-        float3 h=exportHDR(b.rgb,g,p);
-        if(p.info.z)h*=clamp(b.a,0.f,1.f); // legacy black matte, after ISO reconstruction
-        float peak=maximum(h), rawGain=log2(max(1.f,peak));
-        // Determine base before applying the output ceiling (H1/R10-001).
-        b.rgb=fit(h*exp2(-rawGain),1.f);
-        float mapped=softPeak(peak,p.controls.x,p.controls.y!=0);
-        g=float3(max(0.f,rawGain+(peak>0 ? log2(max(mapped,1e-20f)/peak) : 0.f)));
-    } else if(p.info.z) b.rgb*=clamp(b.a,0.f,1.f);
-    outputBase.write(float4(b.rgb,1),pos);outputGain.write(float4(g,0),pos);
+    ExportPixel value=exportPairPixel(b,g,p);
+    outputBase.write(value.base,pos);outputGain.write(float4(value.gain,0),pos);
 }
 struct FrameUniform {
     uint4 photo,caption; // canvas rectangles
@@ -80,4 +90,34 @@ kernel void exportFrame(texture2d<float,access::read> photoBase [[texture(0)]],
         color=mix(color,clamp(ink.rgb,0.f,1.f),clamp(ink.a,0.f,1.f));
     }
     base.write(float4(color,1),pos);gain.write(float4(0),pos);
+}
+
+struct ExportPackedUniform { ExportUniform pair;uint4 channels; };
+kernel void exportPackedPair(texture2d<float,access::read> base [[texture(0)]],
+                             texture2d<float,access::sample> gain [[texture(1)]],
+                             constant ExportPackedUniform& p [[buffer(0)]],
+                             device packed_uint3* outputBase [[buffer(1)]],
+                             device uint* outputGain [[buffer(2)]],device atomic_uint* invalid [[buffer(3)]],
+                             uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
+    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
+    float4 b=base.read(pos);float3 g=gain.sample(s,(float2(pos)+.5f)/float2(base.get_width(),base.get_height())).rgb;
+    if(p.pair.info.x==1)g=g.rrr;
+    bool bad=!all(isfinite(b)) || !all(isfinite(g));
+    // Preserve SDR's finite-input check before flattening can hide NaN alpha,
+    // including a finite gain whose affine HDR reconstruction overflows.
+    if(p.pair.info.w) {
+        float3 h=exportHDR(b.rgb,g,p.pair)*clamp(b.a,0.f,1.f);
+        bad=bad || !all(isfinite(h));
+    }
+    ExportPixel value=exportPairPixel(b,g,p.pair);
+    bad=bad || !all(isfinite(value.base)) || !all(isfinite(value.gain));
+    uint i=pos.y*base.get_width()+pos.x;
+    outputBase[i]=packed_uint3(as_type<uint3>(value.base.rgb));
+    if(p.channels.x==1)outputGain[i]=as_type<uint>(value.gain.x);
+    else if(p.channels.x==3) {
+        uint3 bits=as_type<uint3>(value.gain);
+        outputGain[3*i]=bits.x;outputGain[3*i+1]=bits.y;outputGain[3*i+2]=bits.z;
+    }
+    if(bad)atomic_store_explicit(invalid,1u,memory_order_relaxed);
 }

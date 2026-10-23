@@ -472,7 +472,8 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
           result.gain_map.base_offset[c] = rational_value(channel.base_offset);
           result.gain_map.alternate_offset[c] = rational_value(channel.alternate_offset);
         }
-        result.linear_p3 = reconstruct_gain_map(*result.authored_sdr, encoded, metadata, headroom);
+        const float hdr_headroom = std::max(headroom, rational_value(metadata.base_headroom));
+        result.linear_p3 = reconstruct_gain_map(*result.authored_sdr, encoded, metadata, hdr_headroom);
         result.source_color.name = "Adaptive HDR (base: " + result.source_color.name + ")";
       } else {
         result.gain_map.channels = 1;

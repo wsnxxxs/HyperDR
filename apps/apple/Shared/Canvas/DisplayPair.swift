@@ -58,6 +58,7 @@ nonisolated struct DisplayPair: @unchecked Sendable {
         base === other.base && gain === other.gain && coding == other.coding
             && baseOffset == other.baseOffset && alternateOffset == other.alternateOffset
             && p3ToGain == other.p3ToGain && gainToP3 == other.gainToP3 && region == other.region
+            && baseHeadroom == other.baseHeadroom && alternateHeadroom == other.alternateHeadroom
     }
 
     /// The share of the gain a screen with `headroom` (linear) shows.
@@ -67,20 +68,22 @@ nonisolated struct DisplayPair: @unchecked Sendable {
 }
 
 /// ISO 21496-1 weight: where the screen's headroom falls between the base's
-/// and the alternate's, clamped to 0…1.
+/// and the alternate's. ISO gain stores HDR/SDR, so an HDR base uses a
+/// negative application weight while moving toward its SDR alternate.
 nonisolated enum DisplayWeight {
     static let rebuildThreshold: Float = 0.005
     static func value(headroom: Double, base: Double, alternate: Double) -> Float {
         let denominator = alternate - base
-        guard headroom.isFinite, headroom > 1, base.isFinite, alternate.isFinite,
+        guard headroom.isFinite, headroom > 0, base.isFinite, alternate.isFinite,
               abs(denominator) >= 1e-8 else { return 0 }
-        return Float(min(1, max(0, (log2(headroom) - base) / denominator)))
+        let fraction = min(1, max(0, (log2(max(1,headroom)) - base) / denominator))
+        return Float(denominator < 0 ? -fraction : fraction)
     }
     /// Compare with the last *rendered* weight, so small steps accumulate.
     /// Endpoints are exact: never leave a residual HDR contribution on SDR.
     static func needsRebuild(from old: Float?, to new: Float) -> Bool {
         guard let old else { return true }
-        return abs(new - old) > rebuildThreshold || (new != old && (new == 0 || new == 1))
+        return abs(new - old) > rebuildThreshold || (new != old && (new == -1 || new == 0 || new == 1))
     }
 }
 

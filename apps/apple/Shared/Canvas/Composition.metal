@@ -41,10 +41,13 @@ kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0
     const uint2 size = uint2(base.get_width(), base.get_height());
     const uint plane = p.firstPlane + xy.z;
     if (xy.x >= size.x || xy.y >= size.y || plane >= 3) return;
-    const float3 sdr = base.read(xy.xy).rgb;
+    const float4 pixel = base.read(xy.xy);
+    const float3 sdr = pixel.rgb;
     float3 value = sdr;
-    const float weight = plane == 1 ? 1.0 : clamp(p.weight, 0.0, 1.0);
-    if (plane != 0 && p.coding == 1) {
+    const bool reverse = (p.coding & 2) != 0;
+    const float weight = plane == 0 ? (reverse ? -1.0 : 0.0)
+                       : plane == 1 ? (reverse ? 0.0 : 1.0) : clamp(p.weight, -1.0, 1.0);
+    if (plane != 0 && (p.coding & 1)) {
         // The alternate rendition: keep both endpoints exact.
         const float3 hdr = gain.read(xy.xy).rgb;
         if (weight >= 1) value = hdr;
@@ -52,12 +55,16 @@ kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0
             const float3 ratio = max(float3(1e-6), (hdr + p.alternateOffset.rgb) / max(float3(1e-6), sdr + p.baseOffset.rgb));
             value = max(float3(0), (sdr + p.baseOffset.rgb) * pow(ratio, weight) - p.alternateOffset.rgb);
         }
-    } else if (plane != 0) {
+    } else if (plane != 0 || reverse) {
         const float3 scale = exp2(sampleDisplayGain(xy.xy, size, gain, p) * weight);
         value = p.identity != 0 ? (sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb
               : p.gainToP3 * ((p.p3ToGain * sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb);
         value = max(float3(0), value);
     }
+    // Export flattens straight-alpha pixels on linear black after ISO
+    // reconstruction. Apply the same matte to all display/statistics planes;
+    // multiplying the base first would incorrectly scale affine gain offsets.
+    value *= clamp(pixel.a, 0.0, 1.0);
     out.write(float4(value, 1), xy.xy, p.firstSlice + plane);
 }
 

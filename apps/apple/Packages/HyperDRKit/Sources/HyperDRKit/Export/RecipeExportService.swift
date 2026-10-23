@@ -134,7 +134,7 @@ public actor RecipeExportService: RecipeExportServicing {
             }
             if request.source.domain == .rawEDR { emit(.developing) }
             else { emit(.preparing) }
-            let lazySource: HyperDRRender.ExportSource?
+            var lazySource: HyperDRRender.ExportSource?
             var source: RenderSource
             if actualRequest.allowsRowInput {
                 let lazy = try await renderEngine.openExportSource(photo.sourceURL,
@@ -208,6 +208,7 @@ public actor RecipeExportService: RecipeExportServicing {
             if !plan.memory.usesRowInput && lazySource != nil {
                 source = try await renderEngine.load(photo.sourceURL,
                     options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                lazySource = nil
                 resident = retainedCPUBytes + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                     + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
             }
@@ -315,11 +316,13 @@ public actor RecipeExportService: RecipeExportServicing {
                 // old source. SessionStore rehashes on inode/ctime/mtime changes.
                 let refreshed = try await sessions.session(session)
                 try validateRevision(refreshed, snapshot: snapshot)
-                // The collected planes are now independent. Drop graph/analysis/LUT
-                // GPU caches before package allocates its whole-plane copies. The
-                // source stays charged in resident bytes; prediction consumes the
-                // host's measured remaining budget.
+                // The collected planes are independent. End local source ownership
+                // and drop graph/analysis/LUT caches before package and verification
+                // allocate their images. Only retained, estimated allocations receive
+                // resident credit at the next admission check.
+                _ = consume source
                 await renderEngine.clearCaches()
+                resident = retainedCPUBytes
                 try Task.checkCancellation()
                 try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),
                                       request: actualRequest)

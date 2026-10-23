@@ -233,6 +233,9 @@ extension RenderEngine {
     func filmBlur(_ input: any MTLTexture, into output: any MTLTexture, components: [FilmBlurComponent],
                   truncate: Double, context: RenderNodeContext) throws {
         let pass = try context.texture(width: input.width, height: input.height, format: input.pixelFormat)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        context.diagnosticPhase("filmBlur.passAllocated", width: pass.width, height: pass.height)
+#endif
         for (index, component) in components.enumerated() {
             for vertical in [false, true] {
                 let taps = FilmStock.taps(component, truncate: truncate, weighted: !vertical)
@@ -317,6 +320,9 @@ extension RenderEngine {
 
     func graphRegion(_ source: RenderSource, edit: RenderAdjustments, size: PixelSize,
                      region: CGRect, analysis: SpatialAnalysis) throws -> RenderPlanes {
+#if DEBUG || HYPERDR_FILM_PROFILE
+        RenderPipelineDiagnostics.phase("graphRegion.begin", device: device, width: Int(region.width), height: Int(region.height))
+#endif
         let model = try filteredModelGain(source,edit:edit)
         let configuration = try graphConfiguration(source, edit, analysis: analysis, modelPeak:model?.peak ?? 0)
         let halo = edit.film.sourceHalo(size: size)
@@ -328,11 +334,17 @@ extension RenderEngine {
         let film = try filmResources(edit.film)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        context.diagnosticPhase("graphRegion.inputReady", width: input.width, height: input.height)
+#endif
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
         let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
         let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
         let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        context.diagnosticPhase("graphRegion.outputsAllocated", width: base.width, height: base.height)
+#endif
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
         if let target { p.inputRegion = sourceSampling(target.source.texture, target.source.samplingRegion) }
         p.mode.x = configuration.expand ? 1 : 0
@@ -352,13 +364,22 @@ extension RenderEngine {
             // Half floats both clip bright exposures at 65504 and accumulate enough
             // rounding error to move ordinary SDR colours by several 10-bit codes.
             let raw = try context.texture(width: Int(around.width), height: Int(around.height), format: .rgba32Float)
+#if DEBUG || HYPERDR_FILM_PROFILE
+            context.diagnosticPhase("film.exposureAllocated", width: raw.width, height: raw.height)
+#endif
             try context.dispatch("graphFilmExposure", width: raw.width, height: raw.height,
                 textures: [input, raw, resources.texture, film.texture], buffers: [resources.buffer, film.buffer], value: &q)
             let exposure = try context.texture(width: raw.width, height: raw.height, format: .rgba32Float)
+#if DEBUG || HYPERDR_FILM_PROFILE
+            context.diagnosticPhase("film.scatterAllocated", width: exposure.width, height: exposure.height)
+#endif
             try filmBlur(raw, into: exposure, components: try FilmStock.named(stock).scatterComponents(longEdge: max(size.width, size.height)),
                          truncate: FilmStock.scatterTruncate, context: context)
             p.scatter = SIMD4(Int32(region.minX - around.minX), Int32(region.minY - around.minY), 1, 0)
             scattered = exposure
+#if DEBUG || HYPERDR_FILM_PROFILE
+            context.diagnosticPhase("film.scatterEncoded", width: exposure.width, height: exposure.height)
+#endif
         }
         // The grain's sublayer kernels depend only on this render's pixel pitch.
         let grainRows = edit.film.stock.flatMap { try? FilmStock.named($0) }?.packedGrainKernel(longEdge: max(size.width, size.height))
@@ -369,7 +390,13 @@ extension RenderEngine {
             textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
                        analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion, try lookBaseline(target?.source ?? source, edit: edit)],
             buffers: [resources.buffer, film.buffer, grainKernel], value: &p)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        context.diagnosticPhase("graphRegion.outputEncoded", width: base.width, height: base.height)
+#endif
         try finish(command)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        context.diagnosticPhase("graphRegion.completed", width: base.width, height: base.height)
+#endif
         let encoding: GainEncoding = source.domain == .dual
             ? .pairedLog2(offset: editedPairOffset(source), headroom: configuration.range) : .log2
         return RenderPlanes(base: base, gain: gain, gainChannelCount: rgbGain ? 3 : 1, encoding: encoding, baseColorSpace: Self.workingColorSpace,

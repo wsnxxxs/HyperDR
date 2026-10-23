@@ -112,6 +112,10 @@ extension RenderEngine: ExportStripeRendering {
 
     private func prepareExport(_ source: RenderSource, lazy: ExportSource?, recipe: Recipe, lut: ColorLUT?,
                                modelGain: ModelGainPrediction?, request: ExportRenderRequest, rows: Int) throws -> ExportPreparation {
+#if DEBUG || HYPERDR_FILM_PROFILE
+        RenderPipelineDiagnostics.phase("export.prepareBegin", device: device,
+            width: request.photoSize.width, height: request.photoSize.height)
+#endif
         try Task.checkCancellation()
         guard source.domain == recipe.inputDomain, rows > 0 else { throw RenderError.invalidAdjustment }
         try validate(request.photoSize); try validate(request.canvasSize)
@@ -124,6 +128,9 @@ extension RenderEngine: ExportStripeRendering {
             guard let modelGain, modelGain.sourceID == source.modelSourceID else { throw RenderError.aiNotAvailable }
         }
         var automatic = try resolvedAutomatic(source,recipe:recipe,lut:lut,modelGain:modelGain)
+#if DEBUG || HYPERDR_FILM_PROFILE
+        RenderPipelineDiagnostics.phase("export.automaticResolved", device: device)
+#endif
         let naturalRange = edit.hdr.range ?? Float(automatic["hdr.range"] ?? 0)
         if let limit = request.ceilingStops, limit < naturalRange {
             edit.hdr.range = limit
@@ -179,11 +186,17 @@ extension RenderEngine: ExportStripeRendering {
                     try node.dispatch("exportSummary",width:pair.base.width,height:pair.base.height,
                                       textures:[pair.base,pair.gain],buffers:[stats],value:&p)
                     try finish(command)
+#if DEBUG || HYPERDR_FILM_PROFILE
+                    node.diagnosticPhase("export.summaryCompleted", width: pair.base.width, height: pair.base.height)
+#endif
                     let words = stats.contents().bindMemory(to:UInt32.self,capacity:8)
                     for i in 0..<5 { summary[i] = max(summary[i],words[i]) }
                 }
             }
         }
+#if DEBUG || HYPERDR_FILM_PROFILE
+        RenderPipelineDiagnostics.phase("export.summaryPoolsDrained", device: device)
+#endif
         let pair = firstPair!
         guard summary[4] == 0 else { throw RenderError.invalidAdjustment }
         let maxGain = Float(bitPattern:summary[0]), signed = summary[1] != 0, transparent = summary[2] != 0
@@ -301,6 +314,9 @@ extension RenderEngine: ExportStripeRendering {
         try Task.checkCancellation()
         if let lazy { try lazy.revision.validate(lazy.url) }
         if request.frame == nil {
+#if DEBUG || HYPERDR_FILM_PROFILE
+            RenderPipelineDiagnostics.phase("export.readBegin", device: device, width: rect.width, height: rect.height)
+#endif
             // Release the completed command and its render textures before copying
             // the packed buffers. They must not overlap both CPU plane owners.
             var packed = try autoreleasepool {
@@ -315,7 +331,13 @@ extension RenderEngine: ExportStripeRendering {
                     resplit: resplit, flatten: transparent, sdrOnly: !request.includesGain,
                     ceiling: ceiling, shoulder: shoulder, command: command)
             }
+#if DEBUG || HYPERDR_FILM_PROFILE
+            RenderPipelineDiagnostics.phase("export.packedPoolDrained", device: device, width: rect.width, height: rect.height)
+#endif
             let pixels = packed.read()
+#if DEBUG || HYPERDR_FILM_PROFILE
+            RenderPipelineDiagnostics.phase("export.packedCopied", device: device, width: rect.width, height: rect.height)
+#endif
             try Task.checkCancellation()
             return ExportStripe(rect: rect, baseRGB: pixels.base, gain: pixels.gain)
         }

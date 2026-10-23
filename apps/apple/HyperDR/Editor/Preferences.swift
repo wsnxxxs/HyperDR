@@ -4,6 +4,7 @@ import Observation
 nonisolated struct Preferences: Equatable {
     enum SaveMode: String { case ask, folder }
     enum InitialView: String { case edited, original }
+    var rawDecoder: RAWDecoderPreference = .automatic
     var histogramRGB = false
     var highlightZebra = false
     var shadowZebra = false
@@ -14,8 +15,9 @@ nonisolated struct Preferences: Equatable {
     static let key = "HyperDRPreferencesV1"
     static let encodings = ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"]
     static func load(from defaults: UserDefaults) -> Self {
-        guard let d = defaults.dictionary(forKey: key) else { return Self() }
         var result = Self()
+        result.rawDecoder = .load(from: defaults)
+        guard let d = defaults.dictionary(forKey: key) else { return result }
         result.histogramRGB = d["histogramRGB"] as? Bool ?? false
         result.highlightZebra = d["highlightZebra"] as? Bool ?? false
         result.shadowZebra = d["shadowZebra"] as? Bool ?? false
@@ -37,6 +39,7 @@ nonisolated struct Preferences: Equatable {
         }
     }
     func save(to defaults: UserDefaults) {
+        rawDecoder.save(to: defaults)
         defaults.set(["histogramRGB": histogramRGB, "highlightZebra": highlightZebra,
             "shadowZebra": shadowZebra, "rememberOutput": rememberOutput,
             "initialView": initialView.rawValue, "saveMode": saveMode.rawValue,

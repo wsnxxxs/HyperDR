@@ -35,7 +35,10 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// again only when they need more pixels or another development.
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?) async throws -> EditorSource
+    /// `rawDecoderPreference` applies only without a restored recipe; forced
+    /// generations must fail if unavailable, and never retry another generation.
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              rawDecoderPreference: RAWDecoderPreference,
               progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image?
 
@@ -207,6 +210,7 @@ extension EditorRendering {
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              rawDecoderPreference: RAWDecoderPreference,
               progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource {
         await progress(.reading)
         return try await open(url, previewSize: previewSize, restoring: restoring)

@@ -118,6 +118,9 @@ struct ErrorText {
             titleVariants: Dictionary(uniqueKeysWithValues: (Self.heifFeatures + ["unknown"]).map {
                 ("heif_" + $0, LocalizedStringResource("mac.err.unsupported_format.heif.title")) })),
         "decode_failed": Entry(title: "mac.err.decode_failed.title", message: "err.server.decode_failed"),
+        "raw_decoder_unavailable": Entry(title: "mac.err.raw_decoder_unavailable.title",
+            message: "err.server.raw_decoder_unavailable",
+            withDetail: { "err.server.raw_decoder_unavailable.version \($0)" }),
         "input_extension_mismatch": Entry(title: "mac.err.input_extension_mismatch.title",
             message: "err.server.input_extension_mismatch",
             withDetail: { "err.server.input_extension_mismatch.actual \($0)" }),

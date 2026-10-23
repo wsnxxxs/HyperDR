@@ -568,6 +568,62 @@ extension RenderSessionTests {
         await editor.close()
     }
 
+    @MainActor @Test(.enabled(if: Self.fallbackFixtureSupported),
+                     arguments: [RAWDecoderPreference.raw8, .raw9])
+    func aForcedDeveloperIsRecordedInTheRecipeAndExport(choice: RAWDecoderPreference) async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in await attempts.add(options.rawDecoderVersion) }
+        let editor = RecipeEditor(renderer: session)
+        editor.canvasPixelSize = PixelSize(width: 64, height: 64)
+        try await editor.open(url, rawDecoderPreference: choice)
+        await editor.settle()
+        let version = choice == .raw8 ? "8.dng" : "9.dng"
+        #expect(await attempts.versions == [version])
+        #expect(editor.source?.rawDecoderVersion == version)
+        #expect(editor.source?.rawDecoderFallback == nil)
+        #expect(editor.recipe.rawDecoderVersion == version)
+        #expect(try Recipe.decode(editor.recipe.encoded()).rawDecoderVersion == version)
+        #expect(try editor.exportCapture().recipe.rawDecoderVersion == version)
+        #expect(editor.originalFrame?.request.recipe.rawDecoderVersion == version)
+        #expect(editor.frame?.request.recipe.rawDecoderVersion == version)
+        #expect(editor.renderFailure == nil)
+        await editor.close()
+    }
+
+    @Test(.enabled(if: Self.fallbackFixtureSupported),
+          arguments: [RAWDecoderPreference.raw8, .raw9])
+    func aForcedDeveloperNeverRetriesAnotherGeneration(choice: RAWDecoderPreference) async throws {
+        let url = try fallbackFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in
+            await attempts.add(options.rawDecoderVersion)
+            throw RenderError.cannotDecodeSource
+        }
+        await #expect(throws: RenderError.self) {
+            try await session.open(url, previewSize: PixelSize(width: 64, height: 64), restoring: nil,
+                                   rawDecoderPreference: choice)
+        }
+        #expect(await attempts.versions == [choice == .raw8 ? "8.dng" : "9.dng"])
+    }
+
+    @Test(arguments: [RAWDecoderPreference.raw8, .raw9])
+    func aForcedRAWDeveloperDoesNotAffectRasterPhotos(choice: RAWDecoderPreference) async throws {
+        let url = try Self.tinyPhoto(type: .jpeg)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let session = try RenderSession(), attempts = OpenAttempts()
+        await session.setBeforeOpenLoad { options in await attempts.add(options.rawDecoderVersion) }
+        let source = try await session.open(url, previewSize: PixelSize(width: 48, height: 32), restoring: nil,
+                                            rawDecoderPreference: choice)
+        #expect(source.domain == .sdr)
+        #expect(source.rawDecoderVersion == nil)
+        #expect(source.rawDecoderFallback == nil)
+        #expect(await attempts.versions == ["system-default"])
+        await session.close()
+    }
+
     @Test(.enabled(if: Self.fallbackFixtureSupported), arguments: [false, true])
     func savedRecipesNeverDowngradeTheirDecoder(legacy: Bool) async throws {
         let url = try fallbackFixture()
@@ -579,7 +635,8 @@ extension RenderSessionTests {
         }
         let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: legacy ? nil : "9.dng")
         await #expect(throws: (any Error).self) {
-            try await session.open(url, previewSize: PixelSize(width: 64, height: 64), restoring: recipe)
+            try await session.open(url, previewSize: PixelSize(width: 64, height: 64), restoring: recipe,
+                                   rawDecoderPreference: .raw8)
         }
         #expect(await attempts.versions == [legacy ? "system-default" : "9.dng"])
     }

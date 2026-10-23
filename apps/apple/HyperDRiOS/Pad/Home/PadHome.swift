@@ -85,7 +85,7 @@ struct PadHome: View {
         }
         // An export may have been written while the editor was up.
         .task(id: session.isEditing) { if !session.isEditing { await loadHistory() } }
-        .alert(Text("ios.error.load"), isPresented: Binding(get: { session.showsOpenFailure }, set: { session.showsOpenFailure = $0 })) {
+        .alert(Text(session.openFailureMessage), isPresented: Binding(get: { session.showsOpenFailure }, set: { session.showsOpenFailure = $0 })) {
             Button("ios.common.ok", role: .cancel) {}
         }
     }

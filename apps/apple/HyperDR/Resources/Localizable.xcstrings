@@ -1,6 +1,159 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.rawDevelopment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW Development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 开发"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发器"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.automatic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic (Prefer RAW 9)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动（优先 RAW 9）"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.eight" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 8"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 8"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.nine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 9"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 9"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to RAW photos opened next. The current photo and saved edits keep their recorded developer. An unavailable selected version prevents opening; Automatic can fall back to RAW 8."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于之后打开的 RAW 照片。当前照片和已保存的编辑会保留所记录的开发器。所选版本不可用时将无法打开照片；自动模式可回退至 RAW 8。"
+          }
+        }
+      }
+    },
+    "mac.err.raw_decoder_unavailable.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW Developer Unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 开发器不可用"
+          }
+        }
+      }
+    },
+    "err.server.raw_decoder_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected RAW developer is unavailable for this photo on this system. Choose Automatic or another developer in Settings."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统无法为这张照片提供所选的 RAW 开发器。请在设置中选择自动或其他开发器。"
+          }
+        }
+      }
+    },
+    "err.server.raw_decoder_unavailable.version %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW developer %@ is unavailable for this photo on this system. Choose Automatic or another developer in Settings."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统无法为这张照片提供 RAW 开发器 %@。请在设置中选择自动或其他开发器。"
+          }
+        }
+      }
+    },
     "inspector.pane" : {
       "comment" : "Inspector switch between the adjustments and the crop (accessibility label).",
       "extractionState" : "manual",

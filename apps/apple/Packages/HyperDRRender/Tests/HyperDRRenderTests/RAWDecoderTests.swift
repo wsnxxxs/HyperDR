@@ -1,5 +1,6 @@
 import CoreImage
 import Foundation
+import ImageIO
 import XCTest
 import HyperDRRecipe
 @testable import HyperDRRender
@@ -34,6 +35,51 @@ final class RAWDecoderTests: XCTestCase {
             throw XCTSkip("This system/camera does not support RAW decoder 9")
         }
         return version.rawValue
+    }
+
+    func testExplicitGenerationRequiresSupportAndKeepsDNGVariant() async throws {
+        let engine = try RenderEngine()
+        for name in ["sony-ilce-7s.ARW", "canon-eos-5d-iii-lossy.dng"] {
+            let url = try fixture(name)
+            let filter = try XCTUnwrap(CIRAWFilter(imageURL: url))
+            for generation in [8, 9] {
+                let version = String(generation)
+                let expected = filter.supportedDecoderVersions.first {
+                    $0.rawValue == version || $0.rawValue == version + ".dng"
+                }?.rawValue
+                do {
+                    let actual = try await engine.rawDecoder(url, generation: generation)
+                    XCTAssertNotNil(expected, "Unsupported generation succeeded")
+                    XCTAssertEqual(actual, expected)
+                } catch RenderError.unsupportedRAWDecoder(let actual) {
+                    XCTAssertNil(expected)
+                    XCTAssertEqual(actual, version)
+                }
+            }
+            do {
+                _ = try await engine.rawDecoder(url, generation: 999)
+                XCTFail("Unsupported generation succeeded")
+            } catch RenderError.unsupportedRAWDecoder(let version) {
+                XCTAssertEqual(version, "999")
+            }
+        }
+    }
+
+    func testExplicitGenerationReturnsNilForRaster() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let pixel = Data([64, 128, 192, 255])
+        let provider = try XCTUnwrap(CGDataProvider(data: pixel as CFData))
+        let image = try XCTUnwrap(CGImage(width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let writer = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(writer, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(writer))
+        let engine = try RenderEngine()
+        let version = try await engine.rawDecoder(url, generation: 9)
+        XCTAssertNil(version)
     }
 
     func testSelectionLegacyAndUnsupportedVersions() async throws {

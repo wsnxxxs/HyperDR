@@ -221,6 +221,20 @@ extension RenderEngine {
         return preview?.applying(to: opened) ?? opened
     }
 
+    /// Resolve an explicit generation for a newly opened photo. Raster inputs
+    /// have no RAW decoder; an unsupported RAW generation must never fall back.
+    public func rawDecoder(_ url: URL, generation: Int) throws -> String? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let identifier = CGImageSourceGetType(source),
+              UTType(identifier as String)?.conforms(to: .rawImage) == true else { return nil }
+        guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
+        let version = String(generation)
+        guard let supported = filter.supportedDecoderVersions.first(where: {
+            $0.rawValue == version || $0.rawValue == version + ".dng"
+        }) else { throw RenderError.unsupportedRAWDecoder(version) }
+        return supported.rawValue
+    }
+
     /// New photos prefer generation 9, then 8 (including their DNG variants).
     /// Older cameras without either retain their supported system default.
     public func preferredRAWDecoder(_ url: URL) -> String? {

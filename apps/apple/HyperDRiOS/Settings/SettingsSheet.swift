@@ -26,7 +26,7 @@ struct SettingsSheet: View {
     @State private var page: Page? = .luts
 
     /// The iPad's sections.
-    private enum Page: Hashable { case luts, exports, diagnostics, about }
+    private enum Page: Hashable { case rawDevelopment, luts, exports, diagnostics, about }
 
     var body: some View {
         Group {
@@ -44,13 +44,18 @@ struct SettingsSheet: View {
                 .ignoresSafeArea()
         }
         .alert(Text("ios.settings.diagnostics.failed"), isPresented: $diagnosticsFailed) {}
-        .task { history = await session.exports.history() }
+        .task {
+            session.refreshRAWDecoderPreference()
+            history = await session.exports.history()
+        }
     }
 
     private var stack: some View {
         NavigationStack {
             List {
                 Section { identity }
+                RAWDecoderSettings(selection: Binding(get: { session.rawDecoderPreference },
+                                                      set: { session.rawDecoderPreference = $0 }))
                 if let editor = session.editor {
                     Section("ios.settings.editing") {
                         NavigationLink {
@@ -79,6 +84,8 @@ struct SettingsSheet: View {
             List(selection: $page) {
                 Section { identity }
                 Section {
+                    Label("ios.settings.rawDevelopment", systemImage: "camera.aperture")
+                        .tag(Page.rawDevelopment)
                     Label("ios.lut.title", systemImage: "camera.filters")
                         .badge(session.exports.luts.entries.count)
                         .tag(Page.luts)
@@ -100,6 +107,12 @@ struct SettingsSheet: View {
             NavigationStack {
                 Group {
                     switch page ?? .luts {
+                    case .rawDevelopment:
+                        List {
+                            RAWDecoderSettings(selection: Binding(get: { session.rawDecoderPreference },
+                                                                  set: { session.rawDecoderPreference = $0 }))
+                        }
+                        .navigationTitle(Text("ios.settings.rawDevelopment"))
                     case .luts:
                         if let editor = session.editor {
                             LUTLibraryList(library: session.exports.luts, editor: editor)

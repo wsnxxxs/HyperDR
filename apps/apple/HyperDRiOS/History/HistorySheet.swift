@@ -7,16 +7,31 @@ import SwiftUI
 /// `exportHistory`, across photos), newest first and by day. A version
 /// opens to its picture, what was written and the adjustments it was
 /// written with, and can be shared, saved to Files again or deleted.
+///
+/// On the iPad (ipad-studio §6) the sheet is a page with the grid on the
+/// left and the chosen version beside it; it opens at `selected` (a version
+/// from the home screen's recent exports) or at the newest.
 struct HistorySheet: View {
     let model: IOSExportModel
+    var selected: ExportID? = nil
+    /// The iPad Studio's page, grid and version side by side.
+    var isPage = false
     @Environment(\.dismiss) private var dismiss
     @State private var entries: [ExportHistoryEntry]?
+    @State private var path: [ExportID] = []
+    @State private var current: ExportID?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let entries {
-                    if entries.isEmpty { empty } else { grid(entries) }
+                    if entries.isEmpty {
+                        empty
+                    } else if isPage {
+                        split(entries)
+                    } else {
+                        grid(entries)
+                    }
                 } else {
                     ProgressView()
                 }
@@ -37,7 +52,17 @@ struct HistorySheet: View {
                 }
             }
         }
-        .task { entries = await model.history() }
+        .modifier(HistoryPresentation(isPage: isPage))
+        .task {
+            let loaded = await model.history()
+            entries = loaded
+            let start = selected.flatMap { id in loaded.first { $0.id == id }?.id }
+            if isPage {
+                current = start ?? loaded.first?.id
+            } else if let start {
+                path = [start]
+            }
+        }
     }
 
     private var empty: some View {
@@ -48,7 +73,34 @@ struct HistorySheet: View {
         }
     }
 
-    private func grid(_ entries: [ExportHistoryEntry]) -> some View {
+    /// The iPad's page: the grid, and the chosen version beside it.
+    private func split(_ entries: [ExportHistoryEntry]) -> some View {
+        HStack(spacing: 0) {
+            grid(entries, selection: $current)
+                .frame(width: 400)
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 1)
+            Group {
+                if let entry = entries.first(where: { $0.id == current }) {
+                    HistoryDetail(model: model, entry: entry, closesOnRemove: false) { removed in
+                        let index = entries.firstIndex { $0.id == removed }
+                        withAnimation {
+                            self.entries?.removeAll { $0.id == removed }
+                            let left = self.entries ?? []
+                            current = index.flatMap { left.indices.contains($0) ? left[$0].id : left.last?.id }
+                        }
+                    }
+                    .id(entry.id)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The versions by day. With a `selection` a tile chooses (the iPad's
+    /// page); without one it pushes the version.
+    private func grid(_ entries: [ExportHistoryEntry], selection: Binding<ExportID?>? = nil) -> some View {
         let days = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.record.createdAt) }
             .sorted { $0.key > $1.key }
         return ScrollView {
@@ -59,12 +111,29 @@ struct HistorySheet: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, Space.s4)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 2)], spacing: 2) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: selection == nil ? 2 : Space.s2)],
+                                  spacing: selection == nil ? 2 : Space.s2) {
                             ForEach(items) { entry in
-                                NavigationLink(value: entry.id) { HistoryTile(model: model, entry: entry) }
+                                if let selection {
+                                    let isCurrent = selection.wrappedValue == entry.id
+                                    Button { selection.wrappedValue = entry.id } label: {
+                                        HistoryTile(model: model, entry: entry)
+                                            .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                    .strokeBorder(isCurrent ? Color.hdr.accent : .clear, lineWidth: 3)
+                                            }
+                                    }
                                     .buttonStyle(.plain)
+                                    .hoverEffect(.lift)
+                                    .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                                } else {
+                                    NavigationLink(value: entry.id) { HistoryTile(model: model, entry: entry) }
+                                        .buttonStyle(.plain)
+                                }
                             }
                         }
+                        .padding(.horizontal, selection == nil ? 0 : Space.s4)
                     }
                 }
             }
@@ -107,11 +176,22 @@ private struct HistoryTile: View {
     }
 }
 
+/// The iPad's history is a page; the iPhone's the system's sheet.
+private struct HistoryPresentation: ViewModifier {
+    let isPage: Bool
+
+    func body(content: Content) -> some View {
+        if isPage { content.presentationSizing(.page) } else { content }
+    }
+}
+
 /// One version: the picture, what was written, the adjustments, and Save to
 /// Files and Share at the foot.
 private struct HistoryDetail: View {
     let model: IOSExportModel
     let entry: ExportHistoryEntry
+    /// Pushed, deleting the version goes back; beside the grid, it stays.
+    var closesOnRemove = true
     let onRemove: (ExportID) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
@@ -149,7 +229,7 @@ private struct HistoryDetail: View {
                 Task {
                     guard (try? await model.remove(entry)) != nil else { return }
                     onRemove(entry.id)
-                    dismiss()
+                    if closesOnRemove { dismiss() }
                 }
             }
         } message: {

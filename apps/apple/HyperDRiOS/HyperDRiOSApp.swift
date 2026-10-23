@@ -20,26 +20,54 @@ struct HyperDRiOSApp: App {
 
 /// The scene: the library to pick from, and the editor over it while a photo
 /// is open. One session per scene, so two iPad windows edit two photos.
+///
+/// An iPad window of regular width gets the Studio (`PadHome`, `PadEditor`;
+/// docs/design/ipad-studio.md); the iPhone, and an iPad window as narrow as
+/// one, the iPhone's screens. The choice is made inside the cover too, so a
+/// window resized while a photo is open swaps the editor and keeps the edit.
 struct StudioRoot: View {
     @State private var session = EditingSession()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        HomeScreen(session: session)
-            .fullScreenCover(isPresented: $session.isEditing, onDismiss: session.editorDismissed) {
-                if let editor = session.editor { EditorScreen(session: session, editor: editor) }
+        Group {
+            if StudioRoot.usesStudio(sizeClass) { PadHome(session: session) } else { HomeScreen(session: session) }
+        }
+        .fullScreenCover(isPresented: $session.isEditing, onDismiss: session.editorDismissed) {
+            if let editor = session.editor { EditorRoot(session: session, editor: editor) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                DiagnosticLog.notice("App", "Entered background; available to the app \(DeviceFacts.availableMemory)")
+                session.exports.enteredBackground()
+            } else if phase == .active {
+                DiagnosticLog.notice("App", "Active")
             }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background {
-                    DiagnosticLog.notice("App", "Entered background; available to the app \(DeviceFacts.availableMemory)")
-                    session.exports.enteredBackground()
-                } else if phase == .active {
-                    DiagnosticLog.notice("App", "Active")
-                }
-            }
-            #if DEBUG
-            .task { DebugLaunch.open(into: session) }
-            #endif
+        }
+        #if DEBUG
+        .task { DebugLaunch.open(into: session) }
+        #endif
+    }
+
+    /// The iPad Studio is for iPad windows of regular width.
+    static func usesStudio(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular
+    }
+}
+
+/// The editor for the window's width: the Studio or the iPhone's.
+private struct EditorRoot: View {
+    let session: EditingSession
+    let editor: RecipeEditor
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        if StudioRoot.usesStudio(sizeClass) {
+            PadEditor(session: session, editor: editor)
+        } else {
+            EditorScreen(session: session, editor: editor)
+        }
     }
 }
 

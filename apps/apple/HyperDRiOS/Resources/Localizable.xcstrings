@@ -3396,23 +3396,6 @@
         }
       }
     },
-    "ios.toolbar.inspector" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inspector"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "检查器"
-          }
-        }
-      }
-    },
     "ios.toolbar.more" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3516,6 +3499,240 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分屏"
+          }
+        }
+      }
+    },
+    "ipad.hdr.subtitle" : {
+      "comment" : "Studio panel: under the HDR tool's title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only what's brighter than SDR white"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只改变比 SDR 白更亮的部分"
+          }
+        }
+      }
+    },
+    "ipad.headroom.none" : {
+      "comment" : "Canvas bar: the screen has no HDR headroom.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This screen shows SDR only, so HDR highlights are brought down to its white. Exports keep them."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这块屏幕只能显示 SDR，HDR 高光会被压到它的白色以内。导出的文件仍然保留它们。"
+          }
+        }
+      }
+    },
+    "ipad.headroom.note" : {
+      "comment" : "Canvas bar: what the headroom means.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Highlights brighter than this are brought down, not clipped. Low screen brightness or Low Power Mode reduces it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "比这更亮的高光会被压暗，而不是被截断。屏幕亮度调得很低或开启低电量模式时，余量会变小。"
+          }
+        }
+      }
+    },
+    "ipad.headroom.title" : {
+      "comment" : "Canvas bar: the screen's HDR headroom, title of its explanation.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR Headroom"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 余量"
+          }
+        }
+      }
+    },
+    "ipad.histogram" : {
+      "comment" : "Studio panel: the histogram's accessibility name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Histogram"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直方图"
+          }
+        }
+      }
+    },
+    "ipad.home.all" : {
+      "comment" : "iPad home: opens the whole export history.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部"
+          }
+        }
+      }
+    },
+    "ipad.home.drop" : {
+      "comment" : "iPad home: the drop zone's title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drop a photo here"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把照片拖到这里"
+          }
+        }
+      }
+    },
+    "ipad.home.drop.detail" : {
+      "comment" : "iPad home: under the drop zone's title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From Photos or Files, anywhere on the screen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从“照片”或“文件”拖到屏幕任意位置"
+          }
+        }
+      }
+    },
+    "ipad.home.recent" : {
+      "comment" : "iPad home: the latest exported versions.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent Exports"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近导出"
+          }
+        }
+      }
+    },
+    "ipad.settings.diagnostics" : {
+      "comment" : "iPad settings: the diagnostics section.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断"
+          }
+        }
+      }
+    },
+    "ipad.toolbar.panel" : {
+      "comment" : "Top bar: shows or hides the Studio panel.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tools"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具面板"
+          }
+        }
+      }
+    },
+    "ipad.zoom" : {
+      "comment" : "Canvas bar: the zoom button's accessibility name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缩放"
+          }
+        }
+      }
+    },
+    "ipad.zoom.fit" : {
+      "comment" : "Canvas bar: the photo is fitted to the canvas.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适合"
           }
         }
       }

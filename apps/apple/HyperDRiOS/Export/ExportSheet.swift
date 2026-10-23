@@ -11,11 +11,17 @@ import UniformTypeIdentifiers
 /// the destination's settings. Once started the sheet is the progress, then
 /// the result with Save to Files and Share, or the failure. While it runs the
 /// sheet cannot be swiped away, which keeps the editor locked.
+///
+/// On the iPad (ipad-studio §5) the sheet is a large page: what will be
+/// written, live and in HDR, takes the left, and the same column of choices,
+/// progress and result the iPhone shows stands on the right.
 struct ExportSheet: View {
     @Bindable var model: IOSExportModel
     let editor: RecipeEditor
     /// The frame exports carry; turned off here for one export or for good.
     @Binding var frame: FrameSettings
+    /// The iPad's preview beside the column; nil on the iPhone.
+    var preview: AnyView? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var detent = PresentationDetent.large
@@ -26,25 +32,37 @@ struct ExportSheet: View {
     private static let qualities = [100, 95, 90, 85, 80, 70, 60]
     /// The strip's destinations: Photos last.
     private static let destinations: [ExportDestination] = [.web, .social, .photos]
+    /// The column of choices beside the iPad's preview.
+    private static let columnWidth: CGFloat = 420
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(Text("ios.export.title"))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        if model.isRunning {
-                            Button("ios.export.cancel") { model.cancel() }
-                        } else {
-                            Button(role: .close) { dismiss() }
-                        }
+            Group {
+                if let preview {
+                    HStack(spacing: 0) {
+                        preview
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        content
+                            .frame(width: Self.columnWidth)
+                    }
+                } else {
+                    content
+                }
+            }
+            .navigationTitle(Text("ios.export.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if model.isRunning {
+                        Button("ios.export.cancel") { model.cancel() }
+                    } else {
+                        Button(role: .close) { dismiss() }
                     }
                 }
+            }
         }
         .interactiveDismissDisabled(model.isRunning)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationBackground(.regularMaterial)
+        .modifier(ExportSheetPresentation(isPage: preview != nil, detent: $detent))
         .onChange(of: model.isChoosing) { _, choosing in
             withAnimation { detent = choosing ? .large : .medium }
         }
@@ -540,6 +558,33 @@ struct ExportSheet: View {
         }
         .padding(Space.s5)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The iPhone's sheet rises in two heights; the iPad's is a page, which has
+/// room for the preview beside the choices.
+private struct ExportSheetPresentation: ViewModifier {
+    let isPage: Bool
+    @Binding var detent: PresentationDetent
+
+    func body(content: Content) -> some View {
+        if isPage {
+            content
+                .presentationSizing(LightboxSizing())
+                .presentationBackground(.regularMaterial)
+        } else {
+            content
+                .presentationDetents([.medium, .large], selection: $detent)
+                .presentationBackground(.regularMaterial)
+        }
+    }
+}
+
+/// The iPad's export page asks for a lightbox's size, landscape, which the
+/// system fits into the window.
+struct LightboxSizing: PresentationSizing {
+    func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        ProposedViewSize(width: 1180, height: 860)
     }
 }
 

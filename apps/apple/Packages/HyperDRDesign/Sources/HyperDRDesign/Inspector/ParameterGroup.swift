@@ -12,20 +12,26 @@ import SwiftUI
 ///
 /// `accessory` sits at the header's trailing end, outside the toggle button:
 /// the HDR group's switch, a group's reset. It brings its own trailing inset.
+///
+/// A group that is not `collapsible` is a titled section: always open, its
+/// header a heading with no chevron (the iPad sidebar, which shows one tab's
+/// groups at a time, has nothing to fold away).
 public struct ParameterGroup<Content: View, Accessory: View>: View {
     private let title: Text
     private let systemImage: String
     private let summary: Text?
+    private let collapsible: Bool
     @Binding private var isExpanded: Bool
     private let content: Content
     private let accessory: Accessory
 
     public init(_ title: Text, systemImage: String, summary: Text? = nil,
-                isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content,
+                isExpanded: Binding<Bool>, collapsible: Bool = true, @ViewBuilder content: () -> Content,
                 @ViewBuilder accessory: () -> Accessory) {
         self.title = title
         self.systemImage = systemImage
         self.summary = summary
+        self.collapsible = collapsible
         _isExpanded = isExpanded
         self.content = content()
         self.accessory = accessory()
@@ -35,17 +41,21 @@ public struct ParameterGroup<Content: View, Accessory: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(Color.hdr.line).frame(height: 1)
             HStack(spacing: 0) {
-                Button {
-                    withHDRAnimation { isExpanded.toggle() }
-                } label: {
-                    GroupHeader(title: title, systemImage: systemImage, summary: summary, isExpanded: isExpanded)
+                if collapsible {
+                    Button {
+                        withHDRAnimation { isExpanded.toggle() }
+                    } label: {
+                        GroupHeader(title: title, systemImage: systemImage, summary: summary, isExpanded: isExpanded)
+                    }
+                    .buttonStyle(GroupHeaderStyle())
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
+                } else {
+                    SectionHeader(title: title, systemImage: systemImage)
                 }
-                .buttonStyle(GroupHeaderStyle())
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
                 accessory
             }
-            if isExpanded {
+            if isExpanded || !collapsible {
                 content
                     .padding(.horizontal, 20)
                     .padding(.bottom, 18)
@@ -85,6 +95,29 @@ private struct GroupHeader: View {
                 .accessibilityHidden(true)
         }
         .font(.hdr.caption)
+    }
+}
+
+/// A section's heading: the icon and the title in the heading face, at the
+/// header's height, so the accessory lines up as on a collapsible group.
+private struct SectionHeader: View {
+    let title: Text
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: TypeScale.Size.body, weight: .medium))
+                .foregroundStyle(Color.hdr.accent)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            title.font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.hdr.inkStrong).lineLimit(1)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

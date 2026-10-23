@@ -109,7 +109,7 @@ public struct AdjustmentInspector: View {
                                  set: { if $0 { expanded.insert(state.group) } else { expanded.remove(state.group) } })
         return ParameterGroup(AdjustmentText.group(state.group), systemImage: AdjustmentSymbols.group(state.group),
                               summary: isExpanded.wrappedValue ? nil : Text(verbatim: AdjustmentText.summary(state, locale: locale)),
-                              isExpanded: isExpanded) {
+                              isExpanded: isExpanded, collapsible: only == nil) {
             if state.group == .look {
                 LookSection(recipe: $recipe, state: state, panel: panel, style: style,
                             onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)

@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// The touch version of `ParameterSlider` for the iPad sidebar (p7-adjustments
-/// §5.2, §5.4): a 44 pt row, a 22 pt thumb, and no hover.
+/// §5.2, §5.4): a title row over a 22 pt thumb's track, together at least
+/// 44 pt tall, and no hover. A value moved off its default reads in the
+/// accent, so a tab's changes can be found at a glance.
 ///
 /// - Dragging moves the value by the finger's travel; moving the finger 40 pt
 ///   above or below the track halves the speed, 100 pt quarters it, with a
@@ -31,7 +33,8 @@ public struct TouchParameterSlider: View {
     @Environment(\.locale) private var locale
 
     static let thumb: CGFloat = 22
-    static let rowHeight: CGFloat = 44
+    /// The title row; with the track below it the row is well over 44 pt.
+    static let rowHeight: CGFloat = 34
 
     public init(_ title: Text, value: Binding<Double>, spec: ParameterSpec, help: Text? = nil,
                 onEditingChanged: @escaping (Bool) -> Void = { _ in }, onResetGroup: (() -> Void)? = nil) {
@@ -46,7 +49,7 @@ public struct TouchParameterSlider: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                title.font(.hdr.caption).foregroundStyle(isEnabled ? Color.hdr.ink : Color.hdr.inkDisabled)
+                title.font(.hdr.control).foregroundStyle(isEnabled ? Color.hdr.ink : Color.hdr.inkDisabled)
                 if let help { InfoButton(help: help) }
                 Spacer(minLength: 0)
                 readout
@@ -67,13 +70,15 @@ public struct TouchParameterSlider: View {
         }
     }
 
+    private static let readoutFont = Font.system(size: TypeScale.Size.control, weight: .medium).monospacedDigit()
+
     @ViewBuilder private var readout: some View {
         if typing {
             TextField(text: $draft) { title }
                 .focused($fieldFocused)
                 .onAppear { fieldFocused = true }
                 .multilineTextAlignment(.trailing)
-                .font(.hdr.readout)
+                .font(Self.readoutFont)
                 .frame(width: 96)
                 #if os(iOS)
                 .keyboardType(.numbersAndPunctuation)
@@ -96,9 +101,11 @@ public struct TouchParameterSlider: View {
                 typing = true
             } label: {
                 Text(verbatim: spec.formatted(value, locale: locale))
-                    .font(.hdr.readout)
-                    .foregroundStyle(spec.isAutomatic(value) ? Color.hdr.inkMuted : Color.hdr.inkStrong)
-                    .frame(minWidth: 64, minHeight: Self.rowHeight, alignment: .trailing)
+                    .font(Self.readoutFont)
+                    .foregroundStyle(spec.isAutomatic(value) ? Color.hdr.inkMuted
+                                     : value != spec.defaultValue ? Color.hdr.accent : Color.hdr.inkStrong)
+                    .frame(minWidth: 64, minHeight: 44, alignment: .trailing)
+                    .padding(.vertical, -5)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)

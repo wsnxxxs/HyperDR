@@ -118,6 +118,7 @@ struct EditorScreen: View {
                               axis: layout.axis, large: layout.large,
                               onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                               onBypass: bypass, onGeometryEditing: { editor.editingGeometry($0) },
+                              upright: editor.upright,
                               onLUTLibrary: { showingLUTs = true },
                               aiUnavailable: aiUnavailable) {
             FrameDock(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),

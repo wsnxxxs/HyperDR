@@ -33,6 +33,8 @@ struct EditorDock<Frame: View>: View {
     var onBypass: (AdjustmentGroupID, Bool) -> Void = { _, _ in }
     /// The crop pane's drags begin and end.
     var onGeometryEditing: (Bool) -> Void = { _ in }
+    /// The crop pane's Auto; nil hides it.
+    var upright: GeometryUpright?
     var onLUTLibrary: () -> Void = {}
     /// Why AI cannot be chosen, when it cannot (beside the HDR source).
     var aiUnavailable: Text?
@@ -68,7 +70,8 @@ struct EditorDock<Frame: View>: View {
         case .frame:
             frame()
         case .crop:
-            CropControls(recipe: $recipe, photo: photo, axis: axis, large: large, onEditing: onGeometryEditing)
+            CropControls(recipe: $recipe, photo: photo, axis: axis, large: large, upright: upright,
+                         onEditing: onGeometryEditing)
         case .group(let group):
             if let tab = groups.first(where: { $0.contains(group) }) ?? groups.first {
                 AdjustmentControls(recipe: $recipe, panel: panel, group: tab, axis: axis, large: large,

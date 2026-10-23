@@ -104,6 +104,9 @@ import Observation
         }
     }
 
+    /// The crop pane's Auto (`autoUpright(_:)`).
+    var uprightStatus: UprightStatus = .idle
+
     /// The geometry the canvas renders with.
     var renderedGeometry: Geometry { isEditingCrop ? .identity : recipe.geometry }
 

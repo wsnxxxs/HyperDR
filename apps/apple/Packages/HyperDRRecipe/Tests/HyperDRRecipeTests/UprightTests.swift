@@ -72,6 +72,18 @@ import Testing
         #expect(conservative.horizontal == 0, "Auto discards a vanishing point requiring the slider stop")
     }
 
+    @Test func asymmetricConvergenceDoesNotBiasLevelAndExplicitModesRejectStops() throws {
+        let target = Geometry(angle: -0.2, vertical: 46)
+        // Only the facade's right side is visible. Averaging these vertical
+        // slopes mistakes convergence for camera roll.
+        let lines = grid(target, horizontal: false, noise: false).filter { $0.start.x > 0 }
+        let result = try #require(UprightSolver.solve(lines: lines, photo: photo, geometry: .identity, mode: .level))
+        #expect(abs(result.angle - target.angle) < 0.08)
+        #expect(result.vertical == 0 && result.horizontal == 0)
+        let excessive = grid(Geometry(angle: 3, vertical: 28, horizontal: 100))
+        #expect(UprightSolver.solve(lines: excessive, photo: photo, geometry: .identity, mode: .full) == nil)
+    }
+
     @Test func insufficientAndDegenerateLinesFail() {
         #expect(UprightSolver.solve(lines: [], photo: photo, geometry: .identity, mode: .auto) == nil)
         let oneFamily = grid(Geometry(angle: 4), horizontal: false)

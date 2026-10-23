@@ -81,7 +81,8 @@ extension UserFacingError {
         switch error {
         case .sourceChanged: self.init(code: "source_changed")
         case .cannotOpenSource: self.init(code: "source_unreadable")
-        case .cannotDecodeSource, .missingGainMap, .unsupportedGainColorSpace, .unsupportedRAWDecoder:
+        case .unsupportedRAWDecoder(let version): self.init(code: "raw_decoder_unavailable", detail: version)
+        case .cannotDecodeSource, .missingGainMap, .unsupportedGainColorSpace:
             self.init(code: "decode_failed", detail: String(describing: error))
         case .allocationFailed: self.init(code: "out_of_memory")
         case .metalUnavailable: self.init(code: "metal_unavailable")

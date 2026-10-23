@@ -238,7 +238,10 @@ import Observation
     /// `restoring` puts back a photo after a successor failed, or the same
     /// photo found at another place: it starts from that recipe, with no undo
     /// step, and keeps the undo history when the history belongs to `url`.
-    func open(_ url: URL, restoring: Recipe? = nil) async throws {
+    /// `rawDecoderPreference` selects only a new photo's developer; restoring
+    /// a recipe keeps its recorded decoder, including a legacy system default.
+    func open(_ url: URL, restoring: Recipe? = nil,
+              rawDecoderPreference: RAWDecoderPreference = .automatic) async throws {
         // A caller cancelled before it got here must not supersede a newer open.
         try Task.checkCancellation()
         openGeneration += 1
@@ -275,7 +278,8 @@ import Observation
             // next photo's small placeholder before waiting for that decode.
             _ = await previous?.result
             try Task.checkCancellation()
-            return try await renderer.open(url, previewSize: hint, restoring: restoring) { @MainActor [weak self] stage in
+            return try await renderer.open(url, previewSize: hint, restoring: restoring,
+                                           rawDecoderPreference: restoring == nil ? rawDecoderPreference : .automatic) { @MainActor [weak self] stage in
                 guard let self, generation == self.openGeneration, self.isOpening,
                       stage.order >= (self.openingPhase?.order ?? 0) else { return }
                 self.openingPhase = stage

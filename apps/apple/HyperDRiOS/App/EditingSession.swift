@@ -57,6 +57,16 @@ import SwiftUI
     let editor: RecipeEditor?
     let exports = IOSExportModel()
 
+    /// Only newly opened RAWs use this preference. The photo already open and
+    /// its export keep the decoder recorded in the recipe.
+    var rawDecoderPreference: RAWDecoderPreference {
+        didSet {
+            guard rawDecoderPreference != oldValue else { return }
+            rawDecoderPreference.save(to: defaults)
+        }
+    }
+    @ObservationIgnored private let defaults: UserDefaults
+
     /// The frame chosen for exports, kept across launches as on the Mac.
     var frame = FrameSettings.load() {
         didSet {
@@ -86,6 +96,9 @@ import SwiftUI
     /// Say so on the library: set once the editor has gone, since an alert
     /// raised while the editor is still being dismissed is dropped.
     var showsOpenFailure = false
+    /// Most failures use the existing generic message; a forced RAW developer
+    /// names the version the system could not supply for this photo.
+    private(set) var openFailureMessage: LocalizedStringKey = "ios.error.load"
     /// A failure over an open photo, shown for a moment.
     var notice: LocalizedStringKey?
 
@@ -93,7 +106,9 @@ import SwiftUI
     @ObservationIgnored private var factsTask: Task<Void, Never>?
     @ObservationIgnored private var request: UUID?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        rawDecoderPreference = .load(from: defaults)
         editor = (try? RenderSession()).map { RecipeEditor(renderer: $0) }
         editor?.undo.actionName = Self.undoName
         editor?.onLookSpacesChanged = { [weak luts = exports.luts] old, new in
@@ -154,6 +169,9 @@ import SwiftUI
 
     // MARK: - Opening
 
+    /// Other iPad scenes share the default, while keeping their open recipes.
+    func refreshRAWDecoderPreference() { rawDecoderPreference = .load(from: defaults) }
+
     /// Every way of opening a photo comes here. Not while an export runs:
     /// opening the next photo removes this one's copy and session. Export
     /// closes in the same step as the request is accepted, before its load
@@ -165,18 +183,21 @@ import SwiftUI
         request = id
         openFailed = false
         showsOpenFailure = false
+        openFailureMessage = "ios.error.load"
         // A notice belongs to the photo it was about.
         notice = nil
         isEditing = true
         load?.cancel()
-        load = Task { await self.load(source, id: id) }
+        refreshRAWDecoderPreference()
+        let rawDecoderPreference = self.rawDecoderPreference
+        load = Task { await self.load(source, id: id, rawDecoderPreference: rawDecoderPreference) }
     }
 
     /// Copies the original into our own file (library: as a file, `.current`
     /// keeps HEIC, DNG and gain maps; Files: inside its security scope) and
     /// opens it. The previous photo stays on screen until the new one is
     /// ready, and its copy is removed once the new one is open.
-    private func load(_ source: Source, id: UUID) async {
+    private func load(_ source: Source, id: UUID, rawDecoderPreference: RAWDecoderPreference) async {
         // Whatever happens below, this request no longer holds export closed.
         defer { exports.photoRequestEnded(id) }
         // An export that started meanwhile keeps its photo: drop the request.
@@ -207,7 +228,7 @@ import SwiftUI
             fetchFraction = nil
             // The export session hashes the copy while the editor decodes it.
             exports.photoOpening(imported.url)
-            try await editor.open(imported.url)
+            try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference)
             photo?.discard()
             photo = imported
             exports.photoOpened(imported.url)
@@ -217,11 +238,14 @@ import SwiftUI
             imported?.discard()
             guard !Task.isCancelled, !(error is CancellationError) else { return }
             DiagnosticLog.error("Session", "\(imported == nil ? "Import" : "Open") failed: \(EditorLog.describe(error))")
+            if case RenderError.unsupportedRAWDecoder(let version) = error {
+                openFailureMessage = "ios.error.rawDecoderUnavailable \(version)"
+            }
             if editor.source == nil {
                 openFailed = true
                 isEditing = false
             } else {
-                notice = "ios.error.load"
+                notice = openFailureMessage
             }
         }
     }

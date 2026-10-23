@@ -1,8 +1,8 @@
 import SwiftUI
 import HyperDRDesign
 
-/// The Settings window (M3 §11): General, Export and About. Every change
-/// applies at once, through `EditorModel.updatePreferences`.
+/// The Settings window (M3 §11): General, Export and About. Changes persist
+/// through `EditorModel.updatePreferences`; RAW development starts on the next open.
 struct SettingsView: View {
     let model: EditorModel
 
@@ -59,6 +59,8 @@ private struct GeneralSettings: View {
             Section {
                 Text("settings.immediate").font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
             }
+            RAWDecoderSettings(selection: Binding(get: { model.preferences.value.rawDecoder },
+                                                  set: { decoder in change(model) { $0.rawDecoder = decoder } }))
         }
         .formStyle(.grouped)
     }

@@ -38,6 +38,7 @@ actor FakeEditorRendering: EditorRendering {
     var openError: EditorRenderingError?
 
     private(set) var opened: [URL] = []
+    private(set) var rawDecoderPreferences: [RAWDecoderPreference] = []
     /// Every render request in arrival order, finished or not.
     private(set) var requests: [EditorRenderRequest] = []
     private(set) var completed: [EditorRenderRequest] = []
@@ -107,6 +108,14 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     // MARK: - EditorRendering
+
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+              rawDecoderPreference: RAWDecoderPreference,
+              progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource {
+        rawDecoderPreferences.append(rawDecoderPreference)
+        await progress(.reading)
+        return try await open(url, previewSize: previewSize)
+    }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
         opened.append(url)

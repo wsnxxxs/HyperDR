@@ -76,11 +76,16 @@ actor RenderSession: EditorRendering {
     }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
-              progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource {
-        try await mapped { try await openSource(url, previewSize: previewSize, restoring: restoring, progress: progress) }
+              rawDecoderPreference: RAWDecoderPreference,
+              progress: @escaping @Sendable (EditorOpeningStage) async -> Void = { _ in }) async throws -> EditorSource {
+        try await mapped {
+            try await openSource(url, previewSize: previewSize, restoring: restoring,
+                                 rawDecoderPreference: rawDecoderPreference, progress: progress)
+        }
     }
 
     private func openSource(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
+                            rawDecoderPreference: RAWDecoderPreference = .automatic,
                             progress: @escaping @Sendable (EditorOpeningStage) async -> Void = { _ in }) async throws -> EditorSource {
         generation += 1
         let generation = self.generation
@@ -89,7 +94,13 @@ actor RenderSession: EditorRendering {
         let clock = ContinuousClock()
         let began = clock.now
         var options = try SourceOptions(recipe: restoring ?? Recipe(), resolution: resolution)
-        if restoring == nil { options.rawDecoderVersion = await engine.preferredRAWDecoder(url) }
+        if restoring == nil {
+            if let generation = rawDecoderPreference.generation {
+                options.rawDecoderVersion = try await engine.rawDecoder(url, generation: generation)
+            } else {
+                options.rawDecoderVersion = await engine.preferredRAWDecoder(url)
+            }
+        }
         let selected = clock.now
         let revision = try FileRevision(url)
         let loadProgress: @Sendable (SourceLoadPhase) -> Void = { phase in
@@ -113,7 +124,8 @@ actor RenderSession: EditorRendering {
             // Retry only a new photo's preferred 9 after a decode failure, once.
             // Recorded versions, cancellation, memory/GPU errors and changed files
             // retain their original failure semantics.
-            guard restoring == nil, case RenderError.cannotDecodeSource = error,
+            guard restoring == nil, rawDecoderPreference == .automatic,
+                  case RenderError.cannotDecodeSource = error,
                   let requested = options.rawDecoderVersion,
                   requested.split(separator: ".").first == "9",
                   let version = await engine.fallbackRAWDecoder(url), version != requested else { throw error }

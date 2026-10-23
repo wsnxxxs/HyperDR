@@ -430,6 +430,7 @@ import UniformTypeIdentifiers
         generation += 1
         let ticket = generation
         let encoding = preferences.value.rememberOutput ? runEncoding : "adaptive"
+        let rawDecoderPreference = preferences.value.rawDecoder
         var previous = openRollback ?? OpenSnapshot(document: document, photo: photo,
             reference: hasReferenceFrame, edited: hasEditedFrame, viewMode: selectedMode,
             transform: canvas.transform, display: display, editedGainWeight: editedGainWeight,
@@ -459,8 +460,12 @@ import UniformTypeIdentifiers
                 document = opened.openingDocument
                 document?.isPreparingCameraSupport = preparing
                 document?.isOpeningSlowly = slow
-                do { try await editor.open(opened.url) } catch let error as UserFacingError { throw error } catch is CancellationError {
+                do {
+                    try await editor.open(opened.url, rawDecoderPreference: rawDecoderPreference)
+                } catch let error as UserFacingError { throw error } catch is CancellationError {
                     throw CancellationError()
+                } catch let error as RenderError {
+                    throw UserFacingError(error)
                 } catch {
                     // Render's own errors: the file could not be read as a photo.
                     throw UserFacingError(code: "decode_failed", detail: String(describing: error))

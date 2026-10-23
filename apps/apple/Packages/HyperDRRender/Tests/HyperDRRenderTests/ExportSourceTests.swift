@@ -325,7 +325,7 @@ private final class FootprintRecorder: @unchecked Sendable {
 }
 
 @Suite struct TIFFBitmapTests {
-    @Test(arguments:[CIFormat.RGBA8, .RGBAh])
+    @Test(arguments:[CIFormat.RGBA8, .RGBAh, .RGBAf])
     func nativeBitmapPreservesOrientedPixels(format: CIFormat) async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("bitmap-\(UUID()).tiff")
         defer { try? FileManager.default.removeItem(at:url) }
@@ -344,13 +344,37 @@ private final class FootprintRecorder: @unchecked Sendable {
         let lazy = try await engine.openExportSource(url)
         #expect(lazy.domain == whole.domain)
         #expect(lazy.nativeSize == PixelSize(width:13,height:4113))
+        // Every input texel has alpha >= 0.6. Check the entire native image:
+        // the TIFF CGImage provider used to omit the final 17-row tile when
+        // other contexts rendered concurrently, including rows between our ROIs.
+        let wholeNative = RenderEngine.readTexture(whole.texture)
+        #expect(stride(from:3,to:wholeNative.count,by:4).allSatisfy { wholeNative[$0] > 0.59 })
         for y in [0,2047,4105] {
             let region = CGRect(x:0,y:y,width:13,height:8)
             let tile = try await engine.materializeExportRegion(lazy,outputSize:lazy.nativeSize,region:region)
             let recipe = Recipe(inputDomain:whole.domain)
             let a = RenderEngine.readPixels(try await engine.render(whole,recipe:recipe,size:whole.size,region:region))
             let b = RenderEngine.readPixels(try await engine.render(tile,recipe:recipe,size:whole.size,region:region))
-            compareBands(a.baseRGBA,b.baseRGBA,label:"TIFF_bitmap")
+            if let index = a.baseRGBA.indices.max(by: { abs(a.baseRGBA[$0]-b.baseRGBA[$0]) < abs(a.baseRGBA[$1]-b.baseRGBA[$1]) }),
+               abs(a.baseRGBA[index]-b.baseRGBA[index]) > 1.0/1023 {
+                let x = (index/4)%13, localY = (index/4)/13
+                let wholePixels = RenderEngine.readTexture(whole.texture)
+                let tilePixels = RenderEngine.readTexture(tile.texture)
+                let sourceIndex = ((y+localY)*whole.texture.width+x)*4
+                let tileX = x-Int((tile.samplingRegion.minX*Double(whole.size.width)).rounded())
+                let tileY = y+localY-Int((tile.samplingRegion.minY*Double(whole.size.height)).rounded())
+                let tileIndex = (tileY*tile.texture.width+tileX)*4
+                print("TIFF_BITMAP_FAILURE format=\(format.rawValue) region=\(region) xy=\(x),\(y+localY) channel=\(index%4) whole=\(Array(a.baseRGBA[(index/4*4)..<(index/4*4+4)])) tile=\(Array(b.baseRGBA[(index/4*4)..<(index/4*4+4)])) source=\(Array(wholePixels[sourceIndex..<(sourceIndex+4)])) nativeTile=\(Array(tilePixels[tileIndex..<(tileIndex+4)])) sampling=\(tile.samplingRegion) nativeTileSize=\(tile.texture.width)x\(tile.texture.height)")
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-tiff-failure-\(UUID())")
+                try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+                try FileManager.default.copyItem(at:url,to:folder.appendingPathComponent("input.tiff"))
+                try wholePixels.withUnsafeBytes { try Data($0).write(to:folder.appendingPathComponent("whole-source.f32")) }
+                try tilePixels.withUnsafeBytes { try Data($0).write(to:folder.appendingPathComponent("tile-source.f32")) }
+                try a.baseRGBA.withUnsafeBytes { try Data($0).write(to:folder.appendingPathComponent("whole-output.f32")) }
+                try b.baseRGBA.withUnsafeBytes { try Data($0).write(to:folder.appendingPathComponent("tile-output.f32")) }
+                print("TIFF_BITMAP_FAILURE_DATA \(folder.path)")
+            }
+            compareBands(a.baseRGBA,b.baseRGBA,label:"TIFF_bitmap_\(format.rawValue)_y\(y)")
             compareBands(a.gain,b.gain,scale:0.25,label:"TIFF_bitmap_gain")
         }
     }

@@ -6,7 +6,9 @@ import XCTest
         XCTAssertEqual(DisplayWeight.value(headroom: 1, base: 0, alternate: 4), 0)
         XCTAssertEqual(DisplayWeight.value(headroom: 8, base: 2, alternate: 2 + 1e-10), 0)
         XCTAssertEqual(DisplayWeight.value(headroom: 8, base: 2, alternate: 2 - 1e-10), 0)
-        XCTAssertEqual(DisplayWeight.value(headroom: 2, base: 2, alternate: 0), 0.5)
+        XCTAssertEqual(DisplayWeight.value(headroom: 2, base: 2, alternate: 0), -0.5)
+        XCTAssertEqual(DisplayWeight.value(headroom: 1, base: 2, alternate: 0), -1)
+        XCTAssertEqual(DisplayWeight.value(headroom: 4, base: 2, alternate: 0), 0)
         XCTAssertEqual(DisplayWeight.value(headroom: 4, base: 0, alternate: 4), 0.5)
         XCTAssertEqual(DisplayWeight.value(headroom: .nan, base: 0, alternate: 4), 0)
     }
@@ -15,6 +17,7 @@ import XCTest
         XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.5, to: 0.506))
         XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.004, to: 0))
         XCTAssertTrue(DisplayWeight.needsRebuild(from: 0.996, to: 1))
+        XCTAssertTrue(DisplayWeight.needsRebuild(from: -0.996, to: -1))
     }
     func testLatestScreenSampleAndPolicyAreIndependentOfModelPublication() {
         let monitor = HeadroomMonitor()

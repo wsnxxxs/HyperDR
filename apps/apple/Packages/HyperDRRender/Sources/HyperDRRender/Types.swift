@@ -43,6 +43,10 @@ public struct AuthoredGainMap: @unchecked Sendable {
     public let baseColorSpace: CGColorSpace
     public let alternateColorSpace: CGColorSpace?
     public let auxiliaryColorSpace: CGColorSpace?
+    // Reverse ISO sources are normalized to an SDR base at the Render boundary.
+    // Only the effective properties below change. tags, auxiliaryInfo and image
+    // remain the original file metadata and encoded gain, without rewriting them.
+    var hasCanonicalSDRBase = false
     /// ISO gain is applied in linear light in the gamut selected by the metadata.
     /// Legacy Apple maps may not expose that gamut separately; the native dictionary
     /// is authoritative and system HDR reconstruction handles that case.
@@ -51,6 +55,14 @@ public struct AuthoredGainMap: @unchecked Sendable {
         return (alternateColorSpace ?? auxiliaryColorSpace).flatMap(CGColorSpaceCreateExtendedLinearized)
     }
     public var isoChannels: [ISOGainChannel]? {
+        guard let channels = nativeISOChannels else { return nil }
+        guard hasCanonicalSDRBase else { return channels }
+        return channels.map {
+            ISOGainChannel(minimum: $0.minimum, maximum: $0.maximum, gamma: $0.gamma,
+                           baseOffset: $0.alternateOffset, alternateOffset: $0.alternateOffset)
+        }
+    }
+    var nativeISOChannels: [ISOGainChannel]? {
         guard standard == .iso else { return nil }
         var result: [ISOGainChannel] = []
         for index in 0..<3 {
@@ -69,8 +81,17 @@ public struct AuthoredGainMap: @unchecked Sendable {
     public let tags: [String: String]
 
     /// ISO headrooms are in log2 stops. Native tags remain available for exact round trips.
-    public var baseHeadroom: Double? { tags["HDRToneMap:BaseHeadroom"].flatMap(Double.init) }
-    public var alternateHeadroom: Double? { tags["HDRToneMap:AlternateHeadroom"].flatMap(Double.init) }
+    public var baseHeadroom: Double? {
+        tags[hasCanonicalSDRBase ? "HDRToneMap:AlternateHeadroom" : "HDRToneMap:BaseHeadroom"].flatMap(Double.init)
+    }
+    public var alternateHeadroom: Double? {
+        tags[hasCanonicalSDRBase ? "HDRToneMap:BaseHeadroom" : "HDRToneMap:AlternateHeadroom"].flatMap(Double.init)
+    }
+    var needsSDRBaseNormalization: Bool {
+        guard !hasCanonicalSDRBase, standard == .iso,
+              let baseHeadroom, let alternateHeadroom else { return false }
+        return baseHeadroom > alternateHeadroom
+    }
     public var usesBaseColorSpace: Bool? {
         tags["HDRToneMap:BaseColorIsWorkingColor"].map { $0 == "True" }
     }

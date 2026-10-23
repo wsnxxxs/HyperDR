@@ -276,6 +276,8 @@ import HyperDRRender
         XCTAssertEqual(UserFacingError.service(RenderError.sourceChanged).code,"source_changed")
         XCTAssertEqual(UserFacingError.service(RenderError.cannotOpenSource).code,"source_unreadable")
         XCTAssertEqual(UserFacingError.service(RenderError.cannotDecodeSource).code,"decode_failed")
+        XCTAssertEqual(UserFacingError.service(RenderError.invalidSize).code,"internal_error")
+        XCTAssertEqual(UserFacingError.service(RenderError.invalidRegion).code,"internal_error")
         XCTAssertEqual(UserFacingError.service(RenderError.allocationFailed).code,"out_of_memory")
         XCTAssertEqual(UserFacingError.service(RenderError.aiNotAvailable).code,"model_not_ready")
     }

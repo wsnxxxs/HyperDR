@@ -417,7 +417,9 @@ kernel void authoredOutput(texture2d<float,access::sample> baseWorking [[texture
                            constant AuthorUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
-    float3 b=sourceSample(baseWorking,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.inputRegion).rgb,oB=p.baseOffset.xyz,oA=p.alternateOffset.xyz;
+    float3 b=(p.info.y&4) ? baseWorking.read(pos).rgb
+        : sourceSample(baseWorking,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.inputRegion).rgb;
+    float3 oB=p.baseOffset.xyz,oA=p.alternateOffset.xyz;
     float3 g;
     if(p.info.y&1) {
         float3 v=sourceSample(encoded,float2(pos+uint2(p.info.z,p.info.w))+.5f,p.controls.zw,p.gainRegion).rgb;if(p.info.x==1)v=v.rrr;

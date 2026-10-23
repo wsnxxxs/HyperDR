@@ -97,9 +97,9 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["displayHDR", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
-                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportFrame"] {
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -224,11 +224,11 @@ public actor RenderEngine {
                                              baseSpace: Self.workingColorSpace, gain: nil, raw: nil))
     }
 
-    private func materialize(_ opened: OpenedSource, id: UUID = UUID(),
+    func materialize(_ opened: OpenedSource, id: UUID = UUID(),
                              origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
         let texture = try opened.rawPreviewSize.map { try rasterizeRAWPreview(opened.image,size:$0,space:opened.baseSpace) }
             ?? rasterize(opened.image,space:opened.baseSpace,opaque:opened.domain == .rawEDR, raw:opened.domain == .rawEDR)
-        // Retain the native encoded gain. Display decodes gamma before resampling.
+        // Retain native encoded gain: filter it at the output grid before decoding gamma.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
         // A materialized RAW preview must not retain the full decoder graph and
@@ -238,13 +238,14 @@ public actor RenderEngine {
                 .transformed(by:CGAffineTransform(a:1,b:0,c:0,d:-1,tx:0,ty:CGFloat(texture.height)))
                 .settingContentHeadroom(opened.hdr.contentHeadroom)
             : opened.hdr
-        return RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
+        let source = RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
             size: PixelSize(width: texture.width, height: texture.height),
             nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height),
             authoredGainMap: opened.gain,
             hdrImage: hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture,
             geometryUncroppedSize: opened.uncroppedSize)
+        return try canonicalizeAuthoredSource(source)
     }
 
     func lookBaseline(_ source: RenderSource, edit: RenderAdjustments) throws -> any MTLTexture {
@@ -476,13 +477,20 @@ public actor RenderEngine {
         guard !inputRegion.isNull, inputRegion.contains(region) else { throw RenderError.invalidRegion }
         var texture = source.texture
         if source.domain == .dual && edited {
-            if let cached = hdrCache, cached.id == source.renderID { texture = cached.texture } else {
-                texture = try rasterize(source.hdrImage, space: Self.workingColorSpace)
-                hdrCache = (source.renderID, texture)
+            texture = try reconstructedHDR(source).texture
+        } else if authored, source.authoredGainMap?.hasCanonicalSDRBase == true, size != source.size {
+            // Resample the HDR endpoint before reverse normalization. Filtering
+            // native SDR and gain separately would change that endpoint.
+            let hdr = try reconstructedHDR(source)
+            if CFEqual(source.baseSpace, Self.workingColorSpace) { texture = hdr.texture }
+            else {
+                let image = CIImage(mtlTexture: hdr.texture, options: [.colorSpace: Self.workingColorSpace])!
+                    .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(hdr.texture.height)))
+                texture = try rasterize(image, space: source.baseSpace)
             }
         }
-        guard let buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
-        let context = nodeContext(domain: source.domain, buffer: buffer)
+        guard var buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        var context = nodeContext(domain: source.domain, buffer: buffer)
         let wholeSource = size == source.size && inputRegion == bounds
         func sample(_ texture: any MTLTexture, samplingRegion: CGRect, preserveNativeSize: Bool = false) throws -> any MTLTexture {
             if samplingRegion == CGRect(x:0,y:0,width:1,height:1) && wholeSource && ((preserveNativeSize && region == bounds) ||
@@ -494,7 +502,18 @@ public actor RenderEngine {
                                  textures: [texture, target], value: &sampling)
             return target
         }
-        let base = try sample(texture,samplingRegion:source.samplingRegion)
+        let sampledBase = try sample(texture,samplingRegion:source.samplingRegion)
+        let base: any MTLTexture
+        if authored, source.authoredGainMap?.hasCanonicalSDRBase == true, size != source.size {
+            // Complete this sample before the reverse-normalization command.
+            try finish(buffer)
+            base = try canonicalISOBase(sampledBase, source: source, size: size,
+                origin: SIMD2(UInt32(inputRegion.minX), UInt32(inputRegion.minY)))
+            // The remaining source/gain sampling and nodes need an uncommitted buffer.
+            guard let next = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+            buffer = next
+            context = nodeContext(domain: source.domain, buffer: buffer)
+        } else { base = sampledBase }
         let gain: any MTLTexture
         if authored, let nativeGain = source.gainTexture { gain = try sample(nativeGain,samplingRegion:source.gainSamplingRegion,preserveNativeSize:true) } else {
             gain = try context.texture(width: base.width, height: base.height, format: .r32Float)

@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import Metal
+import simd
 import HyperDRRecipe
 
 struct GraphUniform {
@@ -318,7 +319,11 @@ extension RenderEngine {
                      region: CGRect, analysis: SpatialAnalysis) throws -> RenderPlanes {
         let model = try filteredModelGain(source,edit:edit)
         let configuration = try graphConfiguration(source, edit, analysis: analysis, modelPeak:model?.peak ?? 0)
-        let input = try workingInput(source)
+        let halo = edit.film.sourceHalo(size: size)
+        let inputRegion = region.insetBy(dx: CGFloat(-halo), dy: CGFloat(-halo))
+            .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        let target = try authoredSourceAtOutputGrid(source, size: size, region: inputRegion)
+        let input = try target?.hdr ?? workingInput(source)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
         let film = try filmResources(edit.film)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
@@ -329,13 +334,13 @@ extension RenderEngine {
         let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
+        if let target { p.inputRegion = sourceSampling(target.source.texture, target.source.samplingRegion) }
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
         if analysis.filmHalation != nil, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
             p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film)), 1)
         }
         var scattered: (any MTLTexture)?
-        let halo = edit.film.sourceHalo(size: size)
         if halo > 0, let stock = edit.film.stock {
             // In-emulsion scatter at the render's own resolution: film exposure of the
             // region and its halo, blurred, read in place of the render's own.
@@ -359,7 +364,7 @@ extension RenderEngine {
             else { throw RenderError.allocationFailed }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
             textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion, film.texture,
-                       analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion, try lookBaseline(source, edit: edit)],
+                       analysis.filmHalation ?? analysis.expansion, scattered ?? analysis.expansion, try lookBaseline(target?.source ?? source, edit: edit)],
             buffers: [resources.buffer, film.buffer, grainKernel], value: &p)
         try finish(command)
         let encoding: GainEncoding = source.domain == .dual
@@ -404,6 +409,20 @@ extension RenderEngine {
         let analysis = try self.analysis(source)
         let natural = min(Float(Adjustments.declaration("hdr.range")!.range!.upperBound), max(analysis.sourceHeadroom, log2(max(1, analysis.peaks.x))))
         let range = edit.hdr.range ?? natural
+        let localBase = source.authoredGainMap?.hasCanonicalSDRBase == true
+        let workingBase: any MTLTexture
+        if localBase {
+            // renderRegion normalized the reverse source at this output grid.
+            // Re-sampling its native SDR endpoint would undo that guarantee.
+            if CFEqual(original.baseColorSpace, working.metadata.workingColorSpace) { workingBase = original.base }
+            else {
+                workingBase = try context.texture(width: original.base.width, height: original.base.height)
+                var matrix = simd_inverse(try displayMatrixToP3(working.metadata.workingColorSpace))
+                    * (try displayMatrixToP3(original.baseColorSpace))
+                try context.dispatch("displayBase", width: workingBase.width, height: workingBase.height,
+                    textures: [original.base, workingBase], value: &matrix)
+            }
+        } else { workingBase = working.base }
         let channels = working.metadata.source.isoChannels
         func vector(_ key: KeyPath<ISOGainChannel, Double>, fallback: Float) -> SIMD4<Float> {
             guard let channels else { return SIMD4(repeating: fallback) }
@@ -415,10 +434,10 @@ extension RenderEngine {
             inverseGamma: 1 / vector(\.gamma, fallback: 1), baseOffset: SIMD4(working.metadata.baseOffset,0),
             alternateOffset: SIMD4(working.metadata.alternateOffset,0),
             controls: SIMD4(edit.hdr.strength, range, Float(size.width), Float(size.height)),
-            info: SIMD4(UInt32(working.metadata.source.channelCount), (channels == nil ? 0 : 1) | (shoulder ? 2 : 0), UInt32(region.minX), UInt32(region.minY)),
+            info: SIMD4(UInt32(working.metadata.source.channelCount), (channels == nil ? 0 : 1) | (shoulder ? 2 : 0) | (localBase ? 4 : 0), UInt32(region.minX), UInt32(region.minY)),
             inputRegion:sourceSampling(source.texture,source.samplingRegion),gainRegion:sourceSampling(source.gainTexture!,source.gainSamplingRegion))
         try context.dispatch("authoredOutput", width: gain.width, height: gain.height,
-            textures: [working.base, source.gainTexture!, working.hdr, gain], value: &p)
+            textures: [workingBase, source.gainTexture!, working.hdr, gain], value: &p)
         try finish(command)
         return RenderPlanes(base: original.base, gain: gain, gainChannelCount: 3, encoding: .isoLog2(working.metadata),
                             baseColorSpace: original.baseColorSpace, provenance: .editedAuthored, region: region, outputSize:size)

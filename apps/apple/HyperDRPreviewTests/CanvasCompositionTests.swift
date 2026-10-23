@@ -1,12 +1,16 @@
 import Foundation
 import CoreGraphics
+import CoreImage
 import ImageIO
 import QuartzCore
 import HyperDRDesign
 import HyperDRKit
+import HyperDRRecipe
+import HyperDRRender
 import Metal
 import simd
 import XCTest
+import Synchronization
 @testable import HyperDR
 
 @MainActor final class CanvasCompositionTests: XCTestCase {
@@ -101,6 +105,101 @@ import XCTest
                 XCTAssertEqual(image[p*4+2], value*(1-alpha)+CanvasOverlayStyle.mask.z*alpha, accuracy: 0.003)
             }
         }
+    }
+
+    func testTransparentPNGCanvasMatchesExportBlackMatte() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("alpha.png")
+        let rgba = Data([UInt8(255),0,0,128, 0,255,0,64, 0,0,255,0, 255,255,255,255])
+        let image = try XCTUnwrap(CGImage(width:4,height:1,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:16,
+            space:CGColorSpace(name:CGColorSpace.displayP3)!,
+            bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.last.rawValue),
+            provider:CGDataProvider(data:rgba as CFData)!,decode:nil,shouldInterpolate:false,intent:.defaultIntent))
+        let writer = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
+        CGImageDestinationAddImage(writer,image,nil)
+        XCTAssertTrue(CGImageDestinationFinalize(writer))
+        let engine = try RenderEngine()
+        let source = try await engine.load(url)
+        let recipe = Recipe(inputDomain:.sdr,values:["hdr.enabled":.bool(false)])
+        let planes = try await engine.render(source,recipe:recipe)
+        let normalized = try await engine.displayPair(planes,source:source)
+        let pair = DisplayPair(normalized)
+        let renderer = try makePreviewRenderer()
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
+        let exported = Mutex<[Float]>([])
+        _ = try await engine.renderExportStripes(source,recipe:recipe,
+            request:ExportRenderRequest(photoSize:source.size,includesGain:false,
+                capabilities:ExportPairCapabilities(supportsThreeChannelGain:true)),
+            prepare:{ _ in },consume:{ stripe in exported.withLock { $0 += stripe.baseRGB } })
+        let expected = exported.withLock { $0 }
+        for (weight,flags) in [(Float(0),UInt32(0)),(0.5,0),(1,0),(1,1)] {
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let texture = try compositor.makeTestTexture(pair,weight:weight,command:command)
+            let output = try target(renderer.device,width:4,height:1)
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = output
+            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+            var params = CompositionParams(rect:SIMD4(-1,-1,1,1)); params.flags = flags
+            compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
+            let actual = try read(output,after:command)
+            for x in 0..<4 { for c in 0..<3 {
+                XCTAssertEqual(actual[x*4+c],expected[x*3+c],accuracy:0.0005)
+            } }
+            XCTAssertEqual(actual[8],0); XCTAssertEqual(actual[9],0); XCTAssertEqual(actual[10],0)
+        }
+    }
+
+    func testAlphaMatteFollowsAffineGainReconstruction() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
+        let base: [Float] = [0.4,0.2,0.1,0.5]
+        let texture = try PreviewRenderer.texture(device:renderer.device,width:1,height:1,values:base)
+        let gain = try PreviewRenderer.texture(device:renderer.device,width:1,height:1,values:[1],monochrome:true)
+        let pair = DisplayPair(base:texture,gain:gain,baseOffset:SIMD3(repeating:0.02),
+            alternateOffset:SIMD3(repeating:0.08),alternateHeadroom:1)
+        for weight: Float in [0,0.5,1] {
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let layers = try compositor.makeTestTexture(pair,weight:weight,command:command)
+            let output = try target(renderer.device,width:1,height:1)
+            let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = output
+            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+            compositor.draw(encoder,texture:layers,params:CompositionParams(rect:SIMD4(-1,-1,1,1)))
+            encoder.endEncoding()
+            let actual = try read(output,after:command)
+            for c in 0..<3 {
+                let expected = max(0,(base[c]+0.02)*exp2(weight)-0.08)*base[3]
+                XCTAssertEqual(actual[c],expected,accuracy:0.0005)
+            }
+        }
+    }
+
+    func testNativeHDRBaseUsesReverseGainForSDRAndScreenHeadroom() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
+        var pair = try makeDisplayPair(renderer.device,base:[1,1,1],width:1,height:1,gain:[2],
+            baseOffset:0.05,alternateOffset:0.1,alternateHeadroom:0)
+        pair.baseHeadroom = 2
+        for headroom in [1.0,2.0,4.0] {
+            for sdrOnly in [false,true] {
+                let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+                let layers = try compositor.makeTestTexture(pair,weight:pair.weight(headroom:headroom),command:command)
+                let output = try target(renderer.device,width:1,height:1)
+                let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = output
+                pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+                let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+                var params = CompositionParams(rect:SIMD4(-1,-1,1,1)); params.flags = sdrOnly ? 1 : 0
+                compositor.draw(encoder,texture:layers,params:params); encoder.endEncoding()
+                let actual = try read(output,after:command)
+                let factor = sdrOnly ? 0.25 : Float(headroom/4)
+                for c in 0..<3 { XCTAssertEqual(actual[c],1.05*factor-0.1,accuracy:0.0005) }
+            }
+        }
+        var changed = pair; changed.baseHeadroom = 0; changed.alternateHeadroom = 2
+        XCTAssertFalse(pair.hasSameContent(as:changed),"Headroom direction changes invalidate cached layer planes")
     }
 
     /// A synthetic photo for the compositor, standing in for Render's pairs:

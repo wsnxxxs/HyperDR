@@ -183,6 +183,26 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixtur
   return attribution&&pass(ownY)&&pass(ownC)?0:1;
 }
 void require(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
+void hdr_base_roundtrip() {
+  GainMapResult pair;
+  pair.base_linear=FloatImage(16,16,3);
+  pair.gain_map=FloatImage(8,8,1);
+  std::fill(pair.base_linear.pixels.begin(),pair.base_linear.pixels.end(),0.5F);
+  std::fill(pair.gain_map.pixels.begin(),pair.gain_map.pixels.end(),1.0F);
+  pair.metadata.base_headroom={2,1};
+  pair.metadata.alternate_headroom={0,1};
+  pair.metadata.gain_max={2,1};
+  const auto bytes=encode_gain_map_jpeg(pair,{},100);
+  const auto own=codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
+  require(own.authored_sdr.has_value(),"HDR-base input lost the retained native base");
+  // With zero offsets the highest-headroom rendition is the native HDR
+  // base itself. Selecting the alternate instead would darken it by 4x.
+  for(std::size_t i=0;i<own.linear_p3.pixels.size();++i)
+    require(std::abs(own.linear_p3.pixels[i]-own.authored_sdr->pixels[i])<1e-6F,
+            "HDR-base JPEG decoder selected its SDR alternate as full HDR");
+  require(own.gain_map.base_headroom==4.0F && own.gain_map.alternate_headroom==1.0F,
+          "HDR-base JPEG decoder changed native endpoint metadata");
+}
 void regressions() {
   const auto root=std::filesystem::path(HYPERDR_TEST_FIXTURES);
   const auto original=read_binary_file(root/"iso-mono.jpg");
@@ -381,7 +401,7 @@ int main(int argc,char**argv) try {
     }
     if(argc>2)return compare_imageio(read_binary_file(argv[1]),argc>3 && std::string(argv[3])=="constant-fixture");
     if(argc>1)return compare_imageio(read_binary_file(argv[1]));
-    regressions();progressive_regressions();analytic();roundtrip();
+    regressions();progressive_regressions();analytic();roundtrip();hdr_base_roundtrip();
     bool passed=true;
     for(unsigned c:{1U,3U}) for(unsigned pattern:{0U,1U,2U}) {
       GainMapResult pair;

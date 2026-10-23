@@ -57,6 +57,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "旋转" } }
       }
     },
+    "crop.upright.auto" : {
+      "comment" : "Crop button: straightens the photo and corrects its perspective from the lines it finds.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
+      }
+    },
+    "crop.upright.failed" : {
+      "comment" : "Under Auto: the analysis failed; nothing changed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto couldn't straighten this photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动矫正失败" } }
+      }
+    },
+    "crop.upright.full" : {
+      "comment" : "Auto's menu: straightens and corrects both perspectives.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Full" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "完整" } }
+      }
+    },
+    "crop.upright.level" : {
+      "comment" : "Auto's menu: straightens only.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Level" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "水平" } }
+      }
+    },
+    "crop.upright.noLines" : {
+      "comment" : "Under Auto: the photo has too few straight lines; nothing changed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not enough straight lines found" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未找到足够的直线" } }
+      }
+    },
+    "crop.upright.vertical" : {
+      "comment" : "Auto's menu: straightens and corrects converging verticals.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Vertical" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "竖直" } }
+      }
+    },
     "crop.vertical" : {
       "comment" : "Crop slider: vertical perspective correction.",
       "localizations" : {

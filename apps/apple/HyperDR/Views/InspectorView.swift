@@ -203,7 +203,7 @@ private struct Crop: View {
         GeometryInspector(geometry: Binding(get: { editor.recipe.geometry }, set: { model.setGeometry($0) }),
                           photo: editor.source.map { GeometrySize(width: Double($0.pixelSize.width),
                                                                   height: Double($0.pixelSize.height)) },
-                          style: .pointer,
+                          style: .pointer, upright: editor.upright,
                           onEditingChanged: { editor.editingGeometry($0) })
     }
 }

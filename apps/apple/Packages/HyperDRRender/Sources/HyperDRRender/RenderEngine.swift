@@ -99,7 +99,8 @@ public actor RenderEngine {
         var pipelines: [String: any MTLComputePipelineState] = [:]
         for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
-                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame"] {
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame",
+                     "filmMeter", "graphFilmCells", "graphFilmExposure", "filmBlur"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }

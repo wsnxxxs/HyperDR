@@ -88,6 +88,7 @@ public enum UprightSolver {
         let normalized = GeometrySize(width: photo.width / long, height: photo.height / long)
         let worldVerticalIsY = geometry.quarterTurns % 2 == 0
         for iteration in 0..<2 {
+            guard !Task.isCancelled else { return nil }
             let map = Geometry(angle: estimate[0], vertical: estimate[1], horizontal: estimate[2]).transform(for: normalized)
             var families = [[Line](), [Line]()]
             for var line in input {
@@ -104,7 +105,14 @@ public enum UprightSolver {
             let solvesY: Bool
             let solvesX: Bool
             switch mode {
-            case .level: solvesY = false; solvesX = false
+            case .level:
+                // Estimate roll from a vanishing family, rather than averaging
+                // its slopes: an off-centre facade has asymmetric convergence.
+                // Prefer the displayed verticals; horizontal facade edges may
+                // run towards a different, oblique vanishing point. The fitted
+                // perspective is only a nuisance parameter, discarded below.
+                solvesY = worldVerticalIsY ? hasY : (!hasX && hasY)
+                solvesX = worldVerticalIsY ? (!hasY && hasX) : hasX
             case .vertical:
                 guard worldVerticalIsY ? hasY : hasX else { return nil }
                 solvesY = worldVerticalIsY; solvesX = !worldVerticalIsY
@@ -115,13 +123,14 @@ public enum UprightSolver {
             }
             selected = families.flatMap { $0 }
             if mode == .vertical { selected = selected.filter { $0.vertical == worldVerticalIsY } }
+            if mode == .level, solvesY || solvesX { selected = selected.filter { $0.vertical == solvesY } }
             if mode == .auto, solvesY != solvesX { selected = selected.filter { $0.vertical == solvesY } }
             guard selected.count >= 2, selected.reduce(0, { $0 + $1.weight }) >= 0.15 else { return nil }
             estimate = fit(selected, photo: normalized, roll: roll, solvesY: solvesY, solvesX: solvesX,
                            regularize: mode == .auto, coarse: iteration == 0)
-            if mode == .auto, solvesY || solvesX {
+            if solvesY || solvesX {
                 // A vanishing family may belong to an oblique facade rather
-                // than a correctable horizon. Auto must not force it to the
+                // than a correctable horizon. No mode should force it to the
                 // slider stop, or accept a fit that leaves its lines slanted.
                 let map = Geometry(angle: estimate[0], vertical: estimate[1], horizontal: estimate[2]).transform(for: normalized)
                 func reliable(_ family: [Line], parameter: Double) -> Bool {
@@ -131,12 +140,15 @@ public enum UprightSolver {
                         let residual = (line.vertical ? b.x - a.x : b.y - a.y) / max(hypot(b.x - a.x, b.y - a.y), 1e-9)
                         return abs(residual) < 0.035 // two degrees
                     }
-                    return evidence(aligned, strong: true)
+                    return evidence(aligned, strong: mode == .auto)
                         && aligned.reduce(0, { $0 + $1.weight }) >= family.reduce(0, { $0 + $1.weight }) * 0.7
                 }
                 let y = solvesY && reliable(families[1], parameter: estimate[1])
                 let x = solvesX && reliable(families[0], parameter: estimate[2])
                 if y != solvesY || x != solvesX {
+                    // Explicit modes promise every requested axis. Reject an
+                    // unsupported fit rather than silently applying a stop.
+                    guard mode == .auto else { return nil }
                     // Keep the reliable family's roll; unsupported scene lines
                     // cannot pull it towards the discarded vanishing point.
                     selected = (y ? families[1] : []) + (x ? families[0] : [])
@@ -149,8 +161,8 @@ public enum UprightSolver {
         }
         var result = geometry
         result.angle = estimate[0]
-        result.vertical = estimate[1]
-        result.horizontal = estimate[2]
+        result.vertical = mode == .level ? 0 : estimate[1]
+        result.horizontal = mode == .level ? 0 : estimate[2]
         if let crop = geometry.crop {
             let frame = geometry.frameSize(of: photo)
             let rect = crop.rect(in: frame)
@@ -246,6 +258,7 @@ public enum UprightSolver {
                 var p = seed.point; p[dimension] += dimension == 0 ? 3 : 12; return vertex(p)
             }
             for _ in 0..<180 {
+                if Task.isCancelled { return bounded(best.point) }
                 simplex.sort { $0.score < $1.score }
                 let n = dimensions.count
                 if zip(simplex[0].point, simplex[n].point).allSatisfy({ abs($0 - $1) < 0.00001 }) { break }

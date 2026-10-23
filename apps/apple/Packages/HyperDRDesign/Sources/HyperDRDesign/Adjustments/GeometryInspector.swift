@@ -166,7 +166,8 @@ public struct GeometryInspector: View {
                        @ViewBuilder content: () -> some View) -> some View {
         ParameterGroup(title, systemImage: symbol,
                        isExpanded: Binding(get: { expanded.contains(section) },
-                                           set: { if $0 { expanded.insert(section) } else { expanded.remove(section) } })) {
+                                           set: { if $0 { expanded.insert(section) } else { expanded.remove(section) } }),
+                       collapsible: style == .pointer) {
             content()
         } accessory: {
             EmptyView()

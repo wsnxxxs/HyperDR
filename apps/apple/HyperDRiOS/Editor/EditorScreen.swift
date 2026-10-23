@@ -205,9 +205,10 @@ struct EditorScreen: View {
                                         only: tab.map { Set($0.states.map(\.group)) },
                                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                                         onLUTLibrary: { showingLUTs = true })
-                        .id(tab?.id)
                         .padding(.bottom, Space.s5)
                 }
+                // Each tab opens at its top.
+                .id(tab?.id)
             }
         }
         .disabled(locksEditing)
@@ -319,6 +320,7 @@ struct EditorScreen: View {
             }
             .buttonStyle(.glassProminent)
             .tint(Color.hdr.accentFill)
+            .keyboardShortcut("e", modifiers: .command)
             .disabled(!session.exports.isSettled(editor))
         }
         if layout == .inspector {
@@ -326,6 +328,7 @@ struct EditorScreen: View {
                 Button { withAnimation { showsInspector.toggle() } } label: {
                     Label("ios.toolbar.inspector", systemImage: "sidebar.trailing")
                 }
+                .keyboardShortcut("i", modifiers: [.command, .option])
             }
         }
     }

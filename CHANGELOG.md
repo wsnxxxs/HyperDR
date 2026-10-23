@@ -25,7 +25,11 @@ semantic versioning; dates use ISO 8601.
   with the crop box on the canvas. The inspector's look group keeps built-in
   films (with previews) apart from imported LUTs.
 - iPad: the sidebar has the iPhone's tabs (HDR, Adjust, Style, Crop, Frame)
-  and shows one at a time; Reset All stays in the More menu.
+  and shows one at a time; Reset All stays in the More menu. Its groups are
+  titled sections instead of folding rows, sliders are denser with larger
+  type, a value moved off its default reads in the accent, each tab opens at
+  its top, and with a keyboard ⌘1 … pick the tabs, ⌘E exports and ⌥⌘I shows
+  or hides the sidebar.
 - Light and colour edits on imported HDR gain-map photos keep the photo's own
   SDR rendition, and an edit no longer switches it to another reconstruction.
 - New RAW photos fall back to decoder 8 when 9 is unavailable or fails.

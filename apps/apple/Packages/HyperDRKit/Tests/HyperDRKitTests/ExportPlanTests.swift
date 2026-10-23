@@ -507,9 +507,56 @@ struct ExportMemoryPlanTests {
             photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
             writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
             retainedBytes: 0, allowsRowInput: false))
-        // The full RGBAf source is alive beside the decoder and fixed scratch.
+        // The full RGBAf source is alive beside the decoder allowance.
         #expect(estimate.decode == size.pixels * (16 + 24) + (512 + 32) * 1024 * 1024)
         #expect(estimate.decode > 2_847_263_048) // measured Mac RAW 9 whole development
+    }
+
+    @Test func rawRowDevelopmentHasNoRetainedCellSurcharge() {
+        let size = ExportPixelSize(width: 6000, height: 4000)
+        for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
+            func estimate(_ domain: InputDomain) -> ExportMemoryEstimate {
+                ExportMemoryEstimate.estimate(.init(source: source(domain, size: size), photoSize: size,
+                    canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: true,
+                    isFramed: false, baseBitDepth: 10, writeRows: 256, retainedBytes: 0))
+            }
+            // Both domains share the measured decoder/ROI work allowance.
+            // RAW releases each canonical bitmap instead of retaining a cache.
+            #expect(estimate(.rawEDR) == estimate(.hdr))
+        }
+    }
+
+    @Test func wholeRAWDevelopmentRetainsOnlyMeasuredOwners() {
+        let size = ExportPixelSize(width: 6000, height: 4000)
+        let memory = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+            photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
+            writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
+            retainedBytes: 0, allowsRowInput: false))
+        let resident = size.pixels * (16 + 24) + ((512 + 32) << 20)
+        let owner = size.pixels * 24
+        let stripe = size.width * 256 * (32 + 56)
+        #expect(memory.decode == resident)
+        #expect(memory.render == resident + owner + stripe + size.pixels * 64)
+        #expect(memory.encode == resident + owner * 2 + size.pixels * 32 + (48 << 20))
+        #expect(memory.packaging == memory.encode)
+        #expect(memory.verify == resident + owner + size.pixels * 40)
+    }
+
+    @Test func rawRowsRefuseAnExhaustedDecoderAndWriterBudget() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        let input = request(.custom(.init(encoding: .isoGainMapJPEG, quality: 95)),
+            source: source(.rawEDR, size: size))
+        let minimum = ExportMemoryEstimate.estimate(.init(source: input.source, photoSize: size, canvas: size,
+            encoding: .isoGainMapJPEG, writer: .inHouse, writesGainMap: true, isFramed: false,
+            baseBitDepth: 8, writeRows: 64, retainedBytes: 0))
+        let admitted = plan(input, available: minimum.peak)
+        #expect(admitted.isExecutable && admitted.memory.renderRows == 64)
+        for budget in [minimum.peak - 1, minimum.peak - (32 << 20)] {
+            let refused = plan(input, available: budget)
+            #expect(!refused.isExecutable && refused.memory.degradation == .refused)
+            #expect(refused.blockers.map(\.code) == ["export_memory_exceeded"])
+            #expect(refused.memory.estimate.peak == minimum.peak)
+        }
     }
 
     @Test func fullSizeRAWMemoryEstimates() {
@@ -545,6 +592,7 @@ struct ExportMemoryPlanTests {
         plain.edit.needsLookBaseline = true
         let partial = ExportPlanner.plan(plain, budget: FixedExportMemoryBudget(bytes: 8 << 30))
         #expect(partial.memory.estimate.decode - original.memory.estimate.decode == size.pixels * 24)
+        #expect(partial.memory.estimate.decode == size.pixels * 24 * 2 + (512 << 20))
         #expect(partial.memory.estimate.peak > original.memory.estimate.peak)
         let constrained = ExportPlanner.plan(plain, budget: FixedExportMemoryBudget(bytes: original.memory.estimate.peak))
         #expect(!constrained.blockers.isEmpty)
@@ -637,7 +685,15 @@ struct ExportMemoryPlanTests {
             let admitted = plan(input, available: (5 << 30) - (1 << 30))
             #expect(admitted.isExecutable && admitted.photoSize == size)
             #expect(admitted.memory.renderRows == 256)
-            #expect(!plan(input, available: 3 << 30).isExecutable)
+            let threeGiB = plan(input, available: 3 << 30)
+            #expect(!threeGiB.isExecutable)
+            // Removing the retained-cell surcharge allows a smaller JPEG at
+            // 3 GiB; HEIC's codec reserve still leaves no admissible size.
+            if encoding == .isoGainMapJPEG {
+                #expect(threeGiB.memory.maxAdmissibleLongEdge != nil)
+            } else {
+                #expect(threeGiB.memory.maxAdmissibleLongEdge == nil)
+            }
             let refused = plan(input, available: 2800 << 20)
             #expect(!refused.isExecutable)
             // Downscaling cannot remove native Apple decoder residency.
@@ -875,7 +931,10 @@ struct ExportPlanGapTests {
     @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
         for (encoding, sourceSize, budget) in [
             (ExportEncoding.avifPq, photo, 1_800_000_000),
-            (.isoGainMapJPEG, ExportPixelSize(width: 12800, height: 8600), 3 << 30)
+            // Native decoder/ROI work is covered by the fixed allowance;
+            // output rows determine the admissible boundary at this budget.
+            (.isoGainMapJPEG, ExportPixelSize(width: 12800, height: 8600),
+                3 << 30)
         ] {
             let input = request(.custom(.init(encoding: encoding)), source: source(.rawEDR, size: sourceSize))
             let refused = plan(input, available: budget)

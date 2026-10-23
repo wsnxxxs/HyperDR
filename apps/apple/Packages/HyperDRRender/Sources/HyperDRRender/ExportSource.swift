@@ -98,8 +98,9 @@ extension RenderEngine {
         }
         let opened = source.opened
         let baseImage = crop(opened.image,normalized:normalized), hdrImage = crop(opened.hdr,normalized:normalized)
-        let base = try rasterize(baseImage,space:opened.baseSpace,maximumRows:PreparedExportRows.maximumSourceTileSize.height,
-                                 opaque:source.domain == .rawEDR, raw:source.domain == .rawEDR)
+        let base = source.domain == .rawEDR
+            ? try rasterizeNativeRAW(opened.image, region: baseImage.extent, space: opened.baseSpace)
+            : try rasterize(baseImage, space: opened.baseSpace, maximumRows: PreparedExportRows.maximumSourceTileSize.height)
         var gainTexture: (any MTLTexture)?, gainRegion = CGRect(x:0,y:0,width:1,height:1)
         if let gain = opened.gain {
             let size = gain.image.extent.integral.size

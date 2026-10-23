@@ -240,6 +240,8 @@ extension ExportMemoryEstimate {
         // RGBAf gain resource for dual input; it is separate from base decode.
         let auxiliary = input.source.domain == .dual ? input.source.pixelSize.pixels * 16 : 0
         let resident = decoder + 512 * 1024 * 1024 + auxiliary + input.retainedBytes
+        // Single-cell RAW development uses the existing bounded ROI work
+        // allowance; it does not retain completed cells between tile reads.
         let gain = input.writesGainMap || input.encoding.isBT2100
         let channels = gain ? input.gainChannels : 0
         let rows = min(input.writeRows, PreparedExportRows.maximumReadRows, input.canvas.height)

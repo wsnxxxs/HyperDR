@@ -97,7 +97,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
@@ -110,7 +110,8 @@ public actor RenderEngine {
         if let rawContext { return rawContext }
         let created = CIContext(mtlDevice: device, options: [
             .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
-            .workingFormat: CIFormat.RGBAf.rawValue, .cacheIntermediates: false, .memoryTarget: 256
+            .workingFormat: CIFormat.RGBAf.rawValue, .outputPremultiplied: false,
+            .cacheIntermediates: false, .memoryTarget: 256
         ])
         rawContext = created
         return created
@@ -226,8 +227,12 @@ public actor RenderEngine {
 
     func materialize(_ opened: OpenedSource, id: UUID = UUID(),
                              origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
-        let texture = try opened.rawPreviewSize.map { try rasterizeRAWPreview(opened.image,size:$0,space:opened.baseSpace) }
-            ?? rasterize(opened.image,space:opened.baseSpace,opaque:opened.domain == .rawEDR, raw:opened.domain == .rawEDR)
+        let texture: any MTLTexture
+        if let preview = opened.rawPreviewSize {
+            texture = try rasterizeRAWPreview(opened.image, size: preview, space: opened.baseSpace)
+        } else if opened.domain == .rawEDR {
+            texture = try rasterizeNativeRAW(opened.image, space: opened.baseSpace)
+        } else { texture = try rasterize(opened.image, space: opened.baseSpace) }
         // Retain native encoded gain: filter it at the output grid before decoding gamma.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
@@ -279,8 +284,7 @@ public actor RenderEngine {
             let n = source.samplingRegion, e = opened.image.extent.integral
             let rect = CGRect(x: e.minX + (n.minX * e.width).rounded(), y: e.minY + ((1-n.maxY) * e.height).rounded(),
                               width: (n.width * e.width).rounded(), height: (n.height * e.height).rounded())
-            texture = try rasterize(opened.image.cropped(to: rect), space: Self.workingColorSpace,
-                                    maximumRows: PreparedExportRows.maximumSourceTileSize.height, opaque: true, raw: true)
+            texture = try rasterizeNativeRAW(opened.image, region: rect, space: Self.workingColorSpace)
         }
         guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
         try origin.revision.validate(origin.url)
@@ -293,7 +297,10 @@ public actor RenderEngine {
                           workingSpace: Self.workingColorSpace, library: library, pipelines: pipelines)
     }
 
-    /// `opaque` is for RAW developments, which cover their whole extent. Core Image's
+    /// Generic opaque rasterization, also used for direct decoder diagnostics.
+    /// Native RAW inputs use rasterizeNativeRAW instead: they must retry the same
+    /// canonical cell and never enter this adaptive splitting path.
+    /// Core Image's
     /// RAW decoder returns parts of some cropped regions transparent: on the lossy DNG
     /// fixture, the last internal tile column (from x 4800) when a crop enters it from
     /// the column before, always at some crops and now and then at others. Such a region
@@ -303,8 +310,11 @@ public actor RenderEngine {
                    maximumRows: Int = .max, opaque: Bool = false, raw: Bool = false) throws -> any MTLTexture {
         guard opaque else { return try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: false, raw: raw) }
         for _ in 0..<Self.decodeAttempts {
-            let texture = try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: true, raw: raw)
-            if try transparentTexels(texture) == 0 { return texture }
+            let complete = try autoreleasepool { () throws -> (any MTLTexture)? in
+                let texture = try rasterizeOnce(image, space: space, format: format, maximumRows: maximumRows, opaque: true, raw: raw)
+                return try transparentTexels(texture) == 0 ? texture : nil
+            }
+            if let complete { return complete }
         }
         let extent = image.extent.integral
         guard max(extent.width, extent.height) >= 64 else { throw RenderError.cannotDecodeSource }
@@ -349,16 +359,65 @@ public actor RenderEngine {
     /// Renders of one region before it is split.
     static let decodeAttempts = 3
 
-    /// Texels whose alpha is zero: never written by a render that covers the texture.
-    func transparentTexels(_ texture: any MTLTexture) throws -> Int {
-        guard let command = queue.makeCommandBuffer(),
-              let count = device.makeBuffer(length: 4, options: .storageModeShared) else { throw RenderError.allocationFailed }
-        count.contents().storeBytes(of: UInt32(0), as: UInt32.self)
-        var unused: UInt32 = 0
-        try nodeContext(domain: .sdr, buffer: command).dispatch("countTransparent", width: texture.width, height: texture.height,
-                                                               textures: [texture], buffers: [count], value: &unused)
+    /// A bounded native RAW bitmap, shared with Metal without a second pixel
+    /// allocation. The bitmap destination avoids incomplete cropped RAW writes
+    /// observed with Metal-backed CIRenderDestination, including decoder 8 DNGs.
+    func rasterizeRAWBitmap(_ image: CIImage, region: CGRect, space: CGColorSpace) throws -> any MTLTexture {
+        try Task.checkCancellation()
+        let limit = PreparedExportRows.maximumSourceTileSize
+        guard region.minX.isFinite, region.minY.isFinite, region.width.isFinite, region.height.isFinite,
+              region.width > 0, region.height > 0, region == region.integral,
+              region.width <= Double(limit.width), region.height <= Double(limit.height),
+              image.extent.contains(region) else { throw RenderError.invalidRegion }
+        let width = Int(region.width), height = Int(region.height)
+        try device.validateTexture(width: width, height: height)
+        let alignment = device.minimumLinearTextureAlignment(for: .rgba32Float)
+        let rowBytes = (width * 16 + alignment - 1) / alignment * alignment
+        guard rowBytes <= limit.width * 16 else { throw RenderError.allocationFailed }
+        guard let bitmap = device.makeBuffer(length: rowBytes * height, options: .storageModeShared) else {
+            throw RenderError.allocationFailed
+        }
+        bitmap.contents().initializeMemory(as: UInt8.self, repeating: 0, count: bitmap.length)
+        let destination = CIRenderDestination(bitmapData: bitmap.contents(), width: width, height: height,
+            bytesPerRow: rowBytes, format: .RGBAf)
+        destination.colorSpace = space
+        destination.alphaMode = .unpremultiplied
+        destination.isFlipped = true
+        // Keep the original RAW graph and global coordinates intact. A bitmap
+        // task also propagates errors reported by CI; only a completed task's
+        // missing pixels are classified separately by the opacity check.
+        let task = try rawRenderingContext().startTask(toRender: image, from: region, to: destination, at: .zero)
+        _ = try task.waitUntilCompleted()
+        try Task.checkCancellation()
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float,
+            width: width, height: height, mipmapped: false)
+        descriptor.storageMode = .shared
+        descriptor.usage = .shaderRead
+        guard let texture = bitmap.makeTexture(descriptor: descriptor, offset: 0, bytesPerRow: rowBytes) else {
+            throw RenderError.allocationFailed
+        }
+        return texture
+    }
+
+    /// Texels whose alpha is zero, optionally in a fixed top-down ownership region.
+    func transparentTexels(_ texture: any MTLTexture, region: CGRect? = nil) throws -> Int {
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let count = try encodeTransparentCount(texture, region: region, buffer: command)
         try finish(command)
         return Int(count.contents().load(as: UInt32.self))
+    }
+
+    func encodeTransparentCount(_ texture: any MTLTexture, region requested: CGRect? = nil,
+                                buffer: any MTLCommandBuffer) throws -> any MTLBuffer {
+        let bounds = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
+        let region = (requested ?? bounds).integral
+        guard !region.isEmpty, bounds.contains(region) else { throw RenderError.invalidRegion }
+        guard let count = device.makeBuffer(length: 4, options: .storageModeShared) else { throw RenderError.allocationFailed }
+        count.contents().storeBytes(of: UInt32(0), as: UInt32.self)
+        var rect = SIMD4(UInt32(region.minX), UInt32(region.minY), UInt32(region.width), UInt32(region.height))
+        try nodeContext(domain: .sdr, buffer: buffer).dispatch("countTransparent", width: Int(region.width), height: Int(region.height),
+            textures: [texture], buffers: [count], value: &rect)
+        return count
     }
 
     private func rasterizeOnce(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat,
@@ -403,6 +462,13 @@ public actor RenderEngine {
         destination.colorSpace = space
         destination.isFlipped = false
         destination.alphaMode = .unpremultiplied
+        if opaque {
+            // Metal allocations are uninitialized. A decoder that leaves a tile
+            // unwritten must leave a reliable zero-alpha sentinel, not old data.
+            var unused: UInt32 = 0
+            try nodeContext(domain: .sdr, buffer: buffer).dispatch("zeroGain", width: texture.width, height: texture.height,
+                textures: [texture], value: &unused)
+        }
         let task = try (raw ? rawRenderingContext() : context).startTask(toRender:topDown,to:destination)
         try finish(buffer)
         _ = try task.waitUntilCompleted()

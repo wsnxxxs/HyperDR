@@ -19,6 +19,9 @@ public struct RecipeExportReport: Sendable, Codable {
     public let writerReason: ExportWriterReason?
     public let imageIO: ImageIOGainWriteReport?
     public let usesRowInput: Bool?
+    /// Reader height selected for the executed row path; absent for whole output
+    /// and reports written before this diagnostic field was added.
+    public let renderRows: Int?
 }
 
 /// One operation at a time. Dedicated RenderEngine caches can be discarded
@@ -228,11 +231,13 @@ public actor RecipeExportService: RecipeExportServicing {
             var packageJSON: Data?
             var firstReaderJSON: Data?
             var imageIOReport: ImageIOGainWriteReport?
+            let actualRenderRows: Int?
             if plan.memory.usesRowInput {
                 guard let rowRenderer, let lazySource,
                       Engine.supportsPackageRows(format: plan.encoding.rawValue) else {
                     throw HyperDRError(code: "unsupported_format", message: "Incremental export is unavailable")
                 }
+                actualRenderRows = plan.memory.renderRows
                 emit(.rendering)
                 let rows = try await rowRenderer.prepareRows(lazySource, recipe: snapshot.recipe, lut: frozenLUT,
                     modelGain: model, request: renderRequest, rows: plan.memory.renderRows)
@@ -277,6 +282,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 thumbnail = try bridge.thumbnail()
                 emit(.verifying)
             } else {
+                actualRenderRows = nil
                 let owner = PackagePlaneCollector(width: plan.size.width, height: plan.size.height)
                 emit(.rendering)
                 let finalReport = try await renderer.renderExportStripes(source, recipe: snapshot.recipe, lut: frozenLUT,
@@ -382,7 +388,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 firstReaderJSON: firstReaderJSON, system: system, stageSeconds: timings,
                 resplitReasons: resolved.resplitReasons, transparentBackground: "black-sdr",
                 writer: plan.writer, writerReason: plan.writerReason, imageIO: imageIOReport,
-                usesRowInput: plan.memory.usesRowInput)
+                usesRowInput: plan.memory.usesRowInput, renderRows: actualRenderRows)
             emit(.publishing)
             var record = try await sessions.publishRecipeExport(session, export: prepared.id, name: file.lastPathComponent,
                 resolved: resolved, reportJSON: JSONEncoder().encode(evidence), thumbnail: thumbnail)

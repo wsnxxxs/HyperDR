@@ -241,6 +241,18 @@ extension RenderEngine: ExportStripeRendering {
     func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest, halo: Int = 0) -> PixelSize {
         let limit = PreparedExportRows.maximumSourceTileSize
         guard let source else { return PixelSize(width:limit.width,height:PreparedExportRows.maximumReadRows) }
+        let extent = source.opened.image.extent
+        if source.domain == .rawEDR, source.nativeSize == request.photoSize,
+           extent == extent.integral,
+           extent.width == Double(source.nativeSize.width), extent.height == Double(source.nativeSize.height),
+           source.opened.gain == nil {
+            // These are the geometry-applied image's pixels, not sensor pixels.
+            // A one-to-one integer projection needs the four sampling texels
+            // but no outward rounding allowance. Keep a 512-row writer read in
+            // one band instead of developing an additional two-row remainder.
+            return PixelSize(width:max(1,limit.width-4-2*halo),
+                height:max(1,min(PreparedExportRows.maximumReadRows,limit.height-4-2*halo)))
+        }
         let gain = source.opened.gain?.image.extent.size ?? .zero
         let width = max(Double(source.nativeSize.width),gain.width)
         let height = max(Double(source.nativeSize.height),gain.height)

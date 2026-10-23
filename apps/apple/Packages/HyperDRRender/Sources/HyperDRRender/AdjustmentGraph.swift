@@ -348,10 +348,13 @@ extension RenderEngine {
                 .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
             var q = p
             q.region = SIMD4(UInt32(size.width), UInt32(size.height), UInt32(around.minX), UInt32(around.minY))
-            let raw = try context.texture(width: Int(around.width), height: Int(around.height), format: .rgba16Float)
+            // Scatter integrates linear exposure before the film's nonlinear curves.
+            // Half floats both clip bright exposures at 65504 and accumulate enough
+            // rounding error to move ordinary SDR colours by several 10-bit codes.
+            let raw = try context.texture(width: Int(around.width), height: Int(around.height), format: .rgba32Float)
             try context.dispatch("graphFilmExposure", width: raw.width, height: raw.height,
                 textures: [input, raw, resources.texture, film.texture], buffers: [resources.buffer, film.buffer], value: &q)
-            let exposure = try context.texture(width: raw.width, height: raw.height, format: .rgba16Float)
+            let exposure = try context.texture(width: raw.width, height: raw.height, format: .rgba32Float)
             try filmBlur(raw, into: exposure, components: try FilmStock.named(stock).scatterComponents(longEdge: max(size.width, size.height)),
                          truncate: FilmStock.scatterTruncate, context: context)
             p.scatter = SIMD4(Int32(region.minX - around.minX), Int32(region.minY - around.minY), 1, 0)

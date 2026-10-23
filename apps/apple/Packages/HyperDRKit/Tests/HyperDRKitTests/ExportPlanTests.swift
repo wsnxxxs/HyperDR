@@ -1,5 +1,6 @@
 import Foundation
 import HyperDRRecipe
+import class HyperDRRender.PreparedExportRows
 import Testing
 @testable import HyperDRKit
 
@@ -549,6 +550,53 @@ struct ExportMemoryPlanTests {
         #expect(!constrained.blockers.isEmpty)
     }
 
+    @Test func recipeFactsReserveOnlyAnActiveFilm() {
+        var recipe = Recipe(inputDomain: .rawEDR)
+        #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)
+        recipe.setValue(.string("portra400"), for: Recipe.filmID)
+        let full = ExportEditFacts(recipe: recipe, peakStops: 3)
+        #expect(full.usesFilm && !full.needsLookBaseline)
+        recipe.setValue(.number(40), for: "look.filmStrength")
+        let partial = ExportEditFacts(recipe: recipe, peakStops: 3)
+        #expect(partial.usesFilm && partial.needsLookBaseline)
+        recipe.setValue(.number(0), for: "look.filmStrength")
+        #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)
+        recipe.setValue(nil, for: Recipe.filmID)
+        #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)
+    }
+
+    @Test func filmFloatWorkspaceIsBoundedAndCountedDuringRendering() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        let workspace = 4096 * 516 * 3 * 4 * MemoryLayout<Float>.stride
+        for encoding in [ExportEncoding.isoGainMapJPEG, .pq] {
+            func estimate(film: Bool) -> ExportMemoryEstimate {
+                ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size), photoSize: size,
+                    canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: encoding.writesGainMap,
+                    isFramed: false, baseBitDepth: encoding.isBT2100 ? 10 : 8, writeRows: 256,
+                    retainedBytes: 0, usesFilm: film))
+            }
+            let plain = estimate(film: false), film = estimate(film: true)
+            #expect(film.render - plain.render == workspace)
+            #expect(film.encode - plain.encode == workspace)
+            #expect(film.decode == plain.decode && film.verify == plain.verify)
+            #expect(plain.decode == size.pixels * 24 + (512 << 20))
+            #expect(film.fits(in: 4 << 30))
+        }
+    }
+
+    @Test func filmWorkspaceCanRefuseAnOtherwiseAdmittedExport() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        var input = request(.custom(.init(encoding: .isoGainMapJPEG, quality: 95)), source: source(.rawEDR, size: size))
+        let minimum = ExportMemoryEstimate.estimate(.init(source: input.source, photoSize: size, canvas: size,
+            encoding: .isoGainMapJPEG, writer: .inHouse, writesGainMap: true, isFramed: false,
+            baseBitDepth: 8, writeRows: 64, retainedBytes: 0))
+        #expect(plan(input, available: minimum.peak).isExecutable)
+        input.edit.usesFilm = true
+        let constrained = plan(input, available: minimum.peak)
+        #expect(!constrained.isExecutable && constrained.memory.degradation == .refused)
+        #expect(constrained.blockers.map(\.code) == ["export_memory_exceeded"])
+    }
+
     @Test func rowOwnersFollowRenderReadLimitAndGainChannels() {
         let size = ExportPixelSize(width: 20017, height: 8600)
         func estimate(rows: Int, channels: Int) -> ExportMemoryEstimate {
@@ -564,6 +612,20 @@ struct ExportMemoryPlanTests {
         #expect(ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 8192)
             == ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 16384))
         #expect(ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 16384) < 512 << 20)
+    }
+
+    @Test func rowGPUPricesOnlyAnActiveFilm() {
+        let limit = 16384
+        let plain = ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit, usesFilm: false)
+        let film = ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit, usesFilm: true)
+        let source = PreparedExportRows.maximumSourceTileSize
+        let expectedPlain = source.width * source.height * 64
+            + source.width * PreparedExportRows.maximumReadRows * 64 + (48 << 20)
+        #expect(plain == expectedPlain)
+        #expect(ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit) == plain)
+        #expect(film - plain == source.width * source.height * PreparedExportRows.filmWorkspaceBytesPerPixel)
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: plain, recommended: plain) == nil)
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: film, recommended: plain) != nil)
     }
 
     @Test func fullSizeRAWAdmissionUsesRemainingBudgetAndRefusesDecoderShortfall() {

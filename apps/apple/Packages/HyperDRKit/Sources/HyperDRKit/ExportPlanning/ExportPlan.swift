@@ -88,11 +88,23 @@ public struct ExportEditFacts: Sendable, Hashable {
     public var peakStops: Double
     /// A partial Log/film look also develops the Apple display endpoint.
     public var needsLookBaseline: Bool
+    /// An active film also retains three float32 exposure/scatter textures per tile.
+    public var usesFilm: Bool
 
-    public init(hdrEnabled: Bool = true, peakStops: Double, needsLookBaseline: Bool = false) {
+    public init(hdrEnabled: Bool = true, peakStops: Double, needsLookBaseline: Bool = false, usesFilm: Bool = false) {
         self.hdrEnabled = hdrEnabled
         self.peakStops = peakStops
         self.needsLookBaseline = needsLookBaseline
+        self.usesFilm = usesFilm
+    }
+
+    /// The same recipe facts drive the editor's estimate and the frozen export.
+    public init(recipe: Recipe, peakStops: Double) {
+        let film = recipe.conditionValue(Recipe.filmID)?.stringValue
+        let strength = recipe.conditionValue("look.filmStrength")?.numberValue ?? 0
+        self.init(hdrEnabled: recipe.conditionValue("hdr.enabled")?.boolValue ?? true,
+                  peakStops: peakStops, needsLookBaseline: recipe.needsLookBaseline,
+                  usesFilm: film != nil && film != "none" && strength > 0)
     }
 }
 
@@ -484,7 +496,7 @@ public enum ExportPlanner {
             isFramed: request.frame.isFramed, baseBitDepth: baseBitDepth, writeRows: rows,
             retainedBytes: request.resources.bytes, allowsRowInput: request.allowsRowInput,
             quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality,
-            needsLookBaseline: request.edit.needsLookBaseline))
+            needsLookBaseline: request.edit.needsLookBaseline, usesFilm: request.edit.usesFilm))
     }
 
     /// Search estimates only, freezing the measured budget and writer choices.

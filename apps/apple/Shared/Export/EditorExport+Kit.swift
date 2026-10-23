@@ -24,7 +24,7 @@ extension EditorExportCapture {
                                                    ? ExportPixelSize(width: source.pixelSize.width, height: source.pixelSize.height) : nil,
                                                hasAlpha: source.hasAlpha),
                           frame: frame,
-                          edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops, needsLookBaseline: recipe.needsLookBaseline),
+                          edit: ExportEditFacts(recipe: recipe, peakStops: peakStops),
                           capabilities: capabilities)
     }
 }

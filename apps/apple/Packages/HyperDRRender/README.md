@@ -72,10 +72,18 @@ reconstruction handles legacy Apple data without a luminance-ratio approximation
 ISO reconstruction uses the same decoded min/max/gamma, offsets and working gamut as
 the original canvas, so editing does not switch to a different system rendition.
 
-New RAW imports prefer decoder 9, then 8, including `9.dng` / `8.dng`. If 9 is
-listed but fails to decode, RenderSession retries 8 once and records that version.
-Only cameras without 8 use an older supported system default. Saved recipes retain
-their recorded decoder; cancellation, allocation and GPU errors do not trigger a retry.
+Settings on Mac, iPhone and iPad offer Automatic / RAW 8 / RAW 9 for newly opened
+photos; changing the preference does not reopen the current photo or rewrite
+saved edits. Automatic prefers decoder 9, then 8, including `9.dng` / `8.dng`.
+Cameras without either use their supported older system default. If a new photo's
+selected 9 cannot decode, RenderSession retries once with 8, or a supported older
+system default when 8 is unavailable, and records the successful version.
+Forced 8/9 requires that exact generation and reports an error if unavailable,
+without fallback. Saved recipes retain their recorded version; legacy recipes
+without one keep the system default. Cancellation,
+allocation failures and reported GPU/CI errors do not trigger a decoder retry.
+A completed CI task with missing output is a decode failure; the system does not
+always supply an error that distinguishes its cause from an internal resource failure.
 
 RAW uses G2: boost 1, file boostShadow/baseline, exposure 0, LTM 0, EDR 1, contrast 0,
 as-shot temperature/tint, and selectable lens correction. **Apple's original detail, sharpness
@@ -85,22 +93,40 @@ nil means Apple's/file defaults. `rawSettings` records actual values and support
 Changing these options invalidates the development cache. Export defaults to
 `RAWResolution.full` (scale 1). Preview uses
 `SourceOptions(recipe: recipe, rawResolution: .preview(maximumSize: canvasPixelSize))`;
-CIRAWFilter scales development to fit that oriented canvas without upscaling. Both paths keep
-Apple detail defaults and disable draft mode. Resolution is part of the source cache key, so
-preview and full development cannot alias. Both variants are retained together.
-`rawSettings.nativeSize` preserves the oriented original size and `scaleFactor` records the
-actual request. The shared `resolution` option also applies to ImageIO. Previews are
+CIRAWFilter stays at native scale; preview pixels integrate the developed native cells
+over their full area without upscaling. Both paths keep Apple detail defaults and disable
+draft mode. Resolution is part of the source cache key, so preview and full textures
+cannot alias. `rawSettings.nativeSize` preserves the oriented size and `scaleFactor`
+records the preview ratio. The shared `resolution` option also applies to ImageIO. Previews are
 lower-resolution source approximations; preview/export share a fixed 1024-edge source
 and 768-edge analysis, independent of the last loaded variant. Export must load `.full`
 before rendering at export size rather than enlarging a preview texture.
 
-Every RAW raster (native preview tiles, full development, export regions) must come back
-opaque. Core Image's RAW decoder returns parts of some cropped regions transparent: on the lossy
-DNG fixture, its last internal tile column (from x 4800) when a crop enters it from the column
-before, always at some crops and now and then at others. `rasterize(opaque:)` counts transparent
-texels on the GPU, renders a region again (three times), then splits it in two along its longer
-side, recursively; a piece under 32 pixels that stays incomplete fails with `cannotDecodeSource`
-rather than reading as black.
+Native RAW pixels are developed on fixed 2044×256 cells with a two-pixel halo,
+anchored to the complete geometry-applied extent. The maximum cell destination is
+2048×260, independent of the preview/export ROI or writer's read height. RAW develops
+in an RGBA32Float extended-linear sRGB CIContext and converts to extended-linear P3
+at output. Each bitmap-backed CIRenderDestination shares its aligned MTLBuffer with
+a Metal texture, with no separate Render pixel copy. CI task errors propagate.
+
+The destination starts at zero. GPU opacity validation covers the complete cell's
+owned inner rectangle, including pixels outside the caller's window; its discarded
+decode halo has no ownership. An incomplete cell makes up to three attempts at the
+same rectangle, then fails with `cannotDecodeSource`. Native RAW never uses adaptive halves:
+changing the requested shape changes CIRAWFilter floats, as reproduced with the
+61MP Sony RAW and decoder 8. The generic `rasterize(opaque:)` diagnostic path retains
+its adaptive splitting for incomplete crops. Preview, full load, analysis/AI input,
+export ROIs and partial RAW look baselines share the fixed grid and recorded decoder.
+
+Canonical cells are transient: each bitmap is validated, copied into the requested
+output and released before the next cell is developed. Export-row reads keep no
+completed-cell storage or cache. The existing decoder/ROI working-set allowance
+covers this single-cell workspace; there is no separate retained-cell surcharge.
+
+The final configuration without retained-cell caching produced identical decoded
+pixels and compressed tiles in both Mac RAW scenarios, but speed and memory showed
+no stable general improvement. It remains unverified on a physical device or with
+a real 110MP RAW; see `docs/reviews/raw-repeatability-film-2026-10-23/FINAL-NO-CACHE-2026-10-24.md`.
 
 Processing is RGBA32Float extended-linear Display P3, SDR white 1. Generated pairs have
 RGBA32Float SDR base and R32Float log2 gain, zero offsets: `HDR = base * exp2(gain)`.
@@ -109,20 +135,21 @@ shoulder, so changing range/strength never changes which SDR base was selected.
 
 Dual sources have three paths:
 
-* Default whole-image and HDR parameters reuse the author's original base and encoded gain
-  unchanged (`authored`). Full-size renders reuse original textures, including native gain size;
-  resize/stripes resample the requested grid. `PlanePixels.gainSize` may differ from base size.
-* HDR-only edits retain the native author base (`editedAuthored`). ISO gains are decoded and
+* Default whole-image and HDR parameters preserve the authored pair (`authored`). Reverse
+  HDR-base sources use the equivalent lower-headroom endpoint for editing, with the original
+  auxiliary data retained. Native gain keeps its encoded grid; resize/stripes sample it before
+  gamma decoding. `PlanePixels.gainSize` may differ from base size.
+* HDR-only edits retain the authored SDR endpoint (`editedAuthored`). ISO gains are decoded and
   transformed directly. Offsets are retained, working gamut is retained, and the output is
   three-channel float **log2 gain**, tagged `GainEncoding.isoLog2`. Reconstruct in that gamut:
   `HDR = (base + baseOffset) * exp2(gain) - alternateOffset`. Equal offsets give `g *= strength`;
   unequal offsets interpolate from the exact neutral gain, so strength zero equals the base.
   Legacy Apple edits use system HDR then exact per-channel inversion. Range uses the same
   exponential shoulder and inverse ISO formula. HDR disabled returns base plus zero gain.
-* Any tone/color/active-LUT edit reconstructs linear-P3 HDR, processes it, and outputs a scalar
-  zero-offset split (`resplit`). This follows the Lead's resolved H1 exception, replacing the
-  design draft's older dual-base editing language. Export fallback for writers lacking RGB gain
-  support belongs to P7-3.
+* Tone/color/active-LUT edits process the authored SDR and reconstructed HDR endpoints in
+  linear P3. An RGB `pairedLog2` gain with equal offsets and global headroom preserves both;
+  provenance remains `resplit`. Partial looks blend completed endpoints in linear light.
+  Writers lacking RGB/signed gain support use the explicit export fallback and report its reason.
 
 ## Processing order and formulas
 
@@ -235,11 +262,16 @@ energy-preserving mixture of a Gaussian core (about 2 µm) and an exponential ta
 spektrafilm's three-Gaussian fit), per channel. It softens edges and makes very bright points bloom.
 It is computed at the render's own resolution: `graphFilmExposure` evaluates the film exposure of
 the region plus `FilmAdjustments.sourceHalo` pixels (three of the widest sigma), `filmBlur` runs
-the separable passes (half floats, scipy's reflected edges), and `graphOutput` reads the result in
+the separable passes (float32, scipy's reflected edges), and `graphOutput` reads the result in
 place of its own exposure. Sources cropped for a region (export tiles, the editor's detail regions)
 are materialized with that halo, so tiles and regions match the whole render exactly; export tiles
 shrink by the halo to stay within the source tile limit. Below about 220 pixels on the long edge
 its taps round to the centre alone and the pass is skipped.
+
+Film exposure, the horizontal pass and the accumulated scatter remain float32. Half-float
+rounding in this chain moved ordinary SDR shadow channels by up to four 10-bit codes;
+bright HDR developments could also exceed its 65504 ceiling before scatter. Export admission
+prices the three overlapping RGBAf textures as bounded film workspace.
 
 Halation (`look.filmHalation`, 100 % = the stock's own; `look.filmAntihalation` off uses
 spektrafilm's strengths for a film without its antihalation layer, as CineStill does to Vision3)
@@ -294,7 +326,8 @@ space (≤1 code) or tighter float checks for gain/metadata. Synthetic images an
 RAW fixture are used; no tests reference user photos. Preview checks cover ROI/full-frame
 agreement, SDR thumbnail orientation, tiered ImageIO/RAW resolution, and PQ/dual preservation.
 Display checks cover native-gamut three-channel ISO gamma/offsets at endpoint and intermediate
-weights, decode-before-resample, legacy system reconstruction, and unchanged export planes.
+weights, encoded-domain resampling before gamma decoding, reverse HDR bases,
+legacy system reconstruction, and unchanged export planes.
 
 iOS device and simulator package targets build with signing disabled. Metal resources compile
 at renderer creation; macOS tests exercise every new entry point. No App/Kit/engine is changed.
@@ -363,9 +396,17 @@ For any ISO weight `w`, the compositor computes:
 gainToP3 * ((p3ToGain * base + baseOffset) * exp2(w * gain) - alternateOffset)
 ```
 
-Render decodes ISO min/max/gamma **before** gain interpolation, retains ISO offsets
-and both headrooms, and obtains ICC matrices through Core Image/ColorSync in linear
-light. Legacy Apple files use the system's full HDR reconstruction and exact
+Render interpolates the native encoded gain at the requested base grid **before**
+decoding ISO min/max/gamma, retains ISO offsets and both headrooms, and obtains ICC
+matrices through Core Image/ColorSync in linear light. Reverse ISO sources are
+normalized to their lower-headroom base before editing. With native base `B`,
+offsets `oB`/`oA` and log gain `g`, the normalized base is
+`S=(B+oB)*exp2(-g)-oA`; both effective offsets are `oA`, and the headrooms are
+exchanged. This preserves the native negative-weight curve at every headroom,
+including unequal offsets. Original auxiliary dictionaries, tags and encoded gain
+remain unchanged. Resizing normalizes after sampling the HDR endpoint, rather
+than separately filtering normalized SDR and gain. Legacy Apple files use the
+system's full HDR reconstruction and exact
 per-channel inversion into a display-only ISO pair, with equal 1/64 offsets to
 represent black safely; their native encoded gain remains untouched for export.
 Generated zero-offset P3 pairs reuse both textures and identity matrices
@@ -568,17 +609,23 @@ a replaced source throws `sourceChanged`.
 has the same report and callbacks as the materialized overload. Each scan/output
 band materializes its native-pixel source ROI with two sampling-support texels;
 Core Image requests upstream filter halos. Auxiliary gain is cropped on its own
-native grid, decoded before display resampling. Global pixel-space bilinear
+native grid, sampled in its encoded domain and then decoded at the output grid.
+Global pixel-space bilinear
 weights avoid the dimension-dependent rounding of hardware normalized samplers.
-Analysis remains fixed-scale, shared across bands. Export still scans once before
-emission to determine global metadata. No writer or package behavior changes.
+Analysis remains fixed-scale, shared across bands. HDR export scans once before
+emission to determine global metadata; SDR-only export checks finite values and
+flattens alpha while reading instead of scanning the photo for an unused gain
+header. Unframed reads normalize and pack directly into shared RGB32 buffers in
+the consumer command. Independent CPU arrays are copied after intermediate
+textures leave their rendering pool; framed reads retain texture composition.
 
 Opening clears engine-owned pixel caches, keeping the last four AI predictions.
 Use a separate export engine to keep editor preview caches warm. Render owns
 only analysis, band textures and bounded readback. This does **not** promise
 region-only codec I/O or bounded Apple internal caches: ImageIO may decode a full
 compressed image; CIRAWFilter/Core Image/Metal can retain full-frame workspaces.
-Kit's whole-plane accumulation also remains until incremental writing lands.
+Kit's writers that require whole planes still accumulate them; native pull
+writers consume the bounded replayable row reader.
 
 Measured on the licensed 2768×1848 Sony RAW, separate fresh macOS test processes,
 full-size export, 256-row bands, discard-on-consume (no writer accumulation):

@@ -35,3 +35,14 @@ binds to the editor models, while the shared RecipeEditor and HyperDRRender own
 editing and rendering. The Mac EDR canvas supports original/split comparison,
 actual-pixel detail and pan. The editor includes film and LUT looks, presentation
 frames, and JPEG/HEIC/AVIF/TIFF exports. See the root README for pipeline details.
+
+Settings → General → RAW Development offers **Automatic / RAW 8 / RAW 9** for
+newly opened photos. It does not reopen the current photo or rewrite saved edits.
+Automatic prefers a supported RAW 9, then RAW 8 (including `9.dng` / `8.dng`);
+cameras without either use their supported older system default. If a new photo's
+selected RAW 9 cannot decode, it retries once with RAW 8, or the supported older
+system default when 8 is unavailable. Cancellation, allocation failures and
+reported GPU/CI errors do not trigger that retry. Forced RAW 8/9 reports an error
+if that generation is unavailable and never falls back. Saved edits keep their
+exact recorded decoder; legacy edits without a recorded version keep the system
+default. The iPhone and iPad use the same rules.

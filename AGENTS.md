@@ -138,12 +138,15 @@ photo-dependent HDR content into the mat.
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
 CIRAWFilter decode; Core ML supplies AI gain. The apps require iOS/iPadOS 27 and macOS 27; RAW decoder 9 still depends on the camera and file.
-New RAW photos select decoder 9
-when the system and file support it (including `9.dng`), otherwise decoder 8
-(`8.dng` for DNG); cameras without either keep their supported older system default.
-The exact version is stored in `Recipe.rawDecoderVersion`. A new photo whose decoder 9
-cannot decode retries 8 once (or the older default if 8 is unavailable), even if
+Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
+photos. Automatic selects decoder 9 when the system and file support it
+(including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without
+either keep their supported older system default. Explicit RAW 8/9 requires
+that exact generation and reports an unavailable version without fallback.
+The exact version is stored in `Recipe.rawDecoderVersion`. In Automatic, a new
+photo whose decoder 9 cannot decode retries 8 once (or the older default if 8 is unavailable), even if
 the system default is itself 9, and records the successful version.
+The preference does not reopen the current photo or rewrite saved recipes.
 Saved recipes never downgrade. Old recipes without this field keep the system
 default. An unavailable recorded version blocks decoding/export.
 All RAW developments use an extended-linear sRGB CIContext, converting to extended
@@ -191,16 +194,31 @@ export tiles, native-tile RAW preview, the Kit export estimate on
 `Packages/HyperDRRender/EXPORT_MEMORY.md` and the HEIF streaming sink are in.
 The target is at least 110MP at full size on iPhone 17 Pro, for editing and
 export; a smaller long edge is only a fallback. The estimate admits 110MP with
-about 4 GiB of free process memory and not with 3 GiB.
+4 GiB of remaining usable export budget, after the process reserve, and not
+with 3 GiB.
 61MP RAW opening, 1:1/pan and full-size Adaptive export, and the 60MP Sony HIF's
 full-size HLG export have now succeeded on the physical iPhone 17 Pro. Use the
 optimized `HyperDRiOS-Release` scheme for timing. Current measurements and remaining
 110MP work are in `apps/apple/Packages/HyperDRRender/EXPORT_MEMORY.md`; real 110MP RAW
-support is still unverified. Optimization was stopped at the user's request;
-CPU remains default, the opt-in Metal experiment showed no HIF net benefit,
-and a later identical-recipe RAW comparison differed by up to 9 decoded codes.
-Its cause remains unresolved; do not claim universal pixel repeatability.
-No further optimization is scheduled. The iOS/iPadOS UI was redesigned on
+support is still unverified. The user resumed correctness-first optimization
+on 2026-10-23. CPU remains the default HEVC transfer path; the opt-in Metal
+experiment showed no HIF net benefit. The historical identical-recipe RAW
+comparison differed by up to 9 decoded codes. This historical case is closed:
+controlled request-shape reproduction and exact comparisons with the original
+device artifacts established that CIRAWFilter's requested rectangle changes
+its float development, and HEVC can amplify small input differences. Native
+RAW reads use fixed global cells with a shared, zeroed RGBAf bitmap and validate the entire cell's
+owned pixels before publication. Do not restore adaptive cell splitting or
+generalize this case to universal pixel repeatability. Formal cap0/cap3
+measurements are complete; retained-cell caching was deleted because it had
+no consistent benefit. The final configuration without that cache produced
+identical decoded pixels and compressed tiles in both Mac RAW scenarios, but
+speed and memory showed no stable general improvement. It remains unverified
+on a physical device or with a real 110MP RAW; see
+`docs/reviews/raw-repeatability-film-2026-10-23/FINAL-NO-CACHE-2026-10-24.md`.
+This optimization was developed in an isolated worktree. The iPad Studio UI
+from main (9e927164) is now integrated, retaining the shared processing pipeline.
+The iOS/iPadOS UI was redesigned on
 2026-10-21 (library, editor, frame, export, LUT library; see the `HyperDRiOS` row). Then: P7-3e (saving to the photo library, after the user's Photos
 Lab run using `prototypes/photos-lab/PhotosLab.xcodeproj`, merged into this
 branch), the iOS background host and the hands-on checks

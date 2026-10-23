@@ -1,14 +1,111 @@
 # ROI editing and export memory contract
 
-## Status: optimization stopped at user request — 2026-10-21
+## Status: historical RAW repeatability case closed; final Mac checks complete — 2026-10-24
 
-Keep the CPU route as the default. The Metal experiment is opt-in only and is
-not approved as a faster or fully validated replacement. No further optimization
-or device experiments are scheduled. Existing full-size exports succeeded, but
-**a later RAW repeatability comparison failed**; see the unresolved issue below.
-Do not treat earlier zero-difference comparisons as a universal quality guarantee.
+The historical nine-code device discrepancy is closed: controlled request-shape
+reproduction and exact comparisons with the original device artifacts established
+the cause. The RAW repair uses a fixed native decode grid and a bounded
+bitmap-backed cell. This closes the recorded case, not universal repeatability
+across cameras, operating systems or hardware.
 
-## Current device status — 2026-10-21
+Film retains full-resolution float32 processing, the four precompiled film
+pipeline states and the earlier release of whole-export source ownership. The
+isolated PSO/ownership evidence below remains separate from the final RAW comparison.
+
+Formal cap0/cap3 measurements on iPhone and Mac are complete. Retained-cell caching
+was deleted because the comparisons did not establish a consistent benefit.
+The final configuration without the cache produced identical decoded pixels and
+compressed tiles in both Mac RAW scenarios, but speed and memory showed no stable
+general improvement. It remains unverified on a physical device or with a real
+110MP RAW; see `docs/reviews/raw-repeatability-film-2026-10-23/FINAL-NO-CACHE-2026-10-24.md`.
+
+## Film pipeline reuse and whole-source ownership — 2026-10-23
+
+Local host: Apple M6, 24 GiB, macOS 27.0.1 (26A434), Xcode 27.1 (27A9275).
+The film already uses Metal. Its float32 formats, arithmetic and full-resolution
+scatter/grain/halation remain unchanged. The missing engine-level states were
+`filmMeter`, `graphFilmCells`, `graphFilmExposure` and `filmBlur`: a context's
+fallback cache did not escape that command. A diagnostic matrix of five stocks,
+SDR/HDR and four exposure/grain/halation/partial-strength variants, each with
+whole and ROI output, recorded 222 actual fallback creations before precompiling
+and zero afterward. All 25,388,740 Float bit patterns matched.
+
+The ownership experiment uses a **24MP synthetic TIFF**, read as a file through
+the complete `RecipeExportService` and ImageIO HEIC path. Both variants already
+precompile the four states; their sole difference is Service ownership. The
+late whole fallback releases its initial lazy source. Once the collector owns
+independent planes and the source revision is rechecked, it consumes the full
+source and clears caches. Runtime admission then credits only the retained CPU
+resources and collected planes.
+
+Five pairs ran in alternating AB/BA order, each export in a fresh normal Release
+process. No concurrent builds, GPU jobs or large-memory jobs ran in the window.
+All ten 863,302-byte HEIC files have the same SHA-256. Values below retain every
+sample, including the first slow runs; each cell is **min / median / max**.
+
+| Metric | Before | After |
+|---|---:|---:|
+| Lifetime peak footprint, MiB | 2203.94 / 2205.99 / 2206.33 | 1674.16 / 1676.11 / 1677.24 |
+| Process entry through export completion, s | 3.359 / 3.554 / 5.155 | 3.256 / 3.358 / 4.399 |
+| Engine initialization plus export, s | 3.293 / 3.494 / 5.035 | 3.195 / 3.299 / 4.325 |
+| Service export, s | 3.230 / 3.443 / 4.943 | 3.141 / 3.247 / 4.254 |
+
+Every pair reduces the process peak by **528.81–532.17 MiB** (median 529.52 MiB).
+Four pairs finish sooner; one is 0.0166 s slower. The timing ranges overlap, so
+this establishes a memory improvement rather than elimination of timing
+variance. Process-entry timing includes engine initialization and Kit setup;
+the separately saved child wall clock also includes output copying and SHA-256.
+The fixed 16 GiB benchmark admission is not physical-device admission evidence.
+
+Weak references prove the complete source texture/image survives encoding and
+verification before the change, and is gone before encoding afterward. Its
+texture allocation is 387,121,152 bytes. Encoding-stage Metal allocation changes
+from 399,441,920 to 720,896 bytes in every pair; sampled stage maxima remain
+798,359,552 bytes on both sides. Metal allocation and process footprint describe
+different resources and release times. The larger process-peak reduction also
+includes native image/analysis ownership; it is not a reduction of film scratch.
+A separate diagnostic locates the original process peak during verification,
+after the small film tiles, so no extra per-tile command completion was added.
+
+Ten additional pairs control for ordinary photos with film disabled: each fresh
+process creates and renders with one engine, then creates a second engine. The
+complete initialization distributions in milliseconds are:
+
+| Engine initialization | Before | Four precompiled film states |
+|---|---:|---:|
+| First in fresh process | 55.70 / 60.03 / 2103.85 | 55.87 / 61.56 / 1628.27 |
+| Second in same process | 14.36 / 16.07 / 32.67 | 12.58 / 14.62 / 19.80 |
+
+The ordinary first source/render including initialization has medians 76.82 and
+77.38 ms; the second has medians 31.34 and 28.79 ms. These samples do not show a
+consistent initialization regression. OS/compiler/file cache state is uncontrolled;
+fresh process does not imply a cold system cache. No broader persistent pipeline
+cache was introduced.
+
+`RecipeExportReport.renderRows` now records the final reader height when the
+executed path uses row input. Whole/ImageIO output leaves it absent, and older
+JSON reports without it still decode. A fake-render regression selects 256 and
+128 through two actual budgets, observes the prepareRows arguments and matching
+report values, and confirms both exports keep the same identity. The field is
+diagnostic only; it does not enter `ResolvedExportSnapshot` or `exportKey`.
+Historical reports did not record this value, so the recipe alone cannot establish
+their actual row setting.
+
+Evidence lives under ignored `build/film-variance/`: `pso-evidence.json`,
+`pso-control-{samples,summary,paired-deltas}.json`,
+`whole-source-ownership-diagnostic.json`, `scope-formal-v0-paired-{samples,summary}.json`
+and their frozen package/source/binary manifests. Symbol checks find no diagnostic
+code in the normal Release binaries. These isolated PSO/ownership measurements
+are distinct from the completed cap0/cap3 comparison and final Mac RAW comparison
+summarized above.
+
+## Historical stop and device status — 2026-10-21
+
+The user stopped optimization on 2026-10-21. At that point no further experiments
+were scheduled; the CPU writer-conversion route remained the default and the
+opt-in Metal writer experiment had no validated net HIF benefit. That experiment
+and its measurements predate the current canonical RAW backend. The later RAW
+repeatability failure remains recorded below.
 
 Physical iPhone 17 Pro `Hydrogen`, Personal Team, optimized
 `HyperDRiOS-Release`, q90, original dimensions, resident editor, unchanged
@@ -71,10 +168,11 @@ explain the memory allowance, rejected precision/cache changes and earlier timin
 
 ## System RAW 9 backend measurement — 2026-10-22 (Mac only)
 
-New photos choose CIRAWFilter decoder 9 when supported, retaining the exact
-`9` / `9.dng` identity in the recipe. Existing recipes with no decoder field
-keep the system default. Every RAW read uses an extended-linear sRGB working
-CIContext and converts to extended-linear P3 at output; decoder 9 loses red
+In Automatic, new photos prefer CIRAWFilter decoder 9, then 8, retaining the exact
+`9` / `9.dng` or `8` / `8.dng` identity in the recipe. Cameras without either use
+their supported older system default. Forced RAW 8/9 requires that generation.
+Existing recipes with no decoder field keep the system default. Every RAW read
+uses an extended-linear sRGB working CIContext and converts to extended-linear P3 at output; decoder 9 loses red
 with a P3 working context. Other rendering stays in P3.
 
 Mac, macOS 27.0.1, Apple M6, `DSC01468.ARW`, 9504 × 6336 (60,217,344
@@ -105,8 +203,9 @@ fallback now uses that same decoder allowance beside its 16 B/pixel source
 texture and 32 MiB fixed reserve (2841 MiB at this size), replacing its old
 16 B/native-pixel decoder reserve. The measured RAW 9 full footprint (2715 MiB)
 exceeded the old allowance. Admission tests cover the revised fallback.
-**iPhone/iPad RAW 9 memory and performance have not been measured.** These Mac
-numbers do not establish 110MP RAW 9 admission or repeatability on a device.
+Later formal cap0/cap3 and final Mac RAW comparisons are separate application
+benchmarks, summarized above. This table is the earlier Mac backend measurement,
+not the final application's performance result.
 
 ## Editing and render bounds
 
@@ -155,12 +254,31 @@ made for this path.
   bytes of owned floats. At 12800 wide and 256 rows that is 50 MiB (mono) or
   75 MiB (RGB gain); 512 rows doubles those values. Wider canvases therefore
   cost wider **CPU row buffers**, not a wider GPU texture.
-- RGB packing uses vImage and releases the base RGBA scratch before reading
-  gain. The packing scratch/output high-water is 28 bytes per tile pixel for
-  mono gain and 40 for RGB gain, in addition to the canvas-row arrays when
-  horizontal stitching is needed. The maximum output tile has 2,097,152 pixels.
-- Summary preparation visits every photo tile once, keeps five summary words
-  and metadata, and retains no tile outputs. `read` never repeats this scan.
+- Unframed output normalizes and packs RGB32 into shared Metal buffers in the
+  consumer's command. Its completed command and intermediate textures leave the
+  rendering pool before independent Swift arrays are copied; the base buffer is
+  released before copying gain. Framed output retains texture composition and
+  vImage packing. Admission conservatively retains the previous packing bound:
+  28 bytes per tile pixel for mono gain and 40 for RGB gain, beside canvas-row
+  arrays when horizontal stitching is needed. The maximum output tile has
+  2,097,152 pixels; this optimization does not reduce the decoder reservation.
+- An active film reserves three overlapping RGBA float32 textures for linear
+  exposure, its horizontal pass and accumulated scatter: **48 B/tile-pixel**,
+  at most **96.75 MiB** against the 4096 x 516 source bound. Half-float storage
+  both lost ordinary SDR shadow codes and clipped bright film exposure before
+  scattering. The film's source halo still shrinks lazy output tiles to retain
+  that bound. Editor preflight and the frozen export use the same recipe facts;
+  disabled/zero-strength film does not add this reservation. It overlaps row
+  rendering/encoding, and is released before assembly and verification. The
+  whole-plane fallback's existing 64 B/photo-pixel allowance covers these
+  three textures. No new physical-device memory measurement is claimed.
+- HDR summary preparation visits every photo tile once, keeps five summary
+  words and metadata, and retains no tile outputs. SDR-only output renders one
+  tile for provenance and checks finite inputs and alpha while reading every
+  stripe, avoiding the unused full-photo gain summary. `read` never repeats
+  summary preparation. Export pair conversion joins the consuming command and
+  omits local display-peak reductions; the first authored HDR band retains the
+  legacy headroom fallback, and the global HDR summary remains authoritative.
   It uses its private renderer's persistent CIContext, queue, compiled kernels,
   lazy source graph and frozen analysis. The original RenderEngine remains free.
 - Frames/shadows are composed per output tile; captions are cropped before
@@ -171,6 +289,29 @@ before calling `makeTexture`: Simulator **8192**, Apple family 3+/Mac family 2
 **16384**, older families 8192. Shared display allocations use the same check.
 Oversized logical canvases use tiled export/ROI rendering; an explicitly requested
 single texture beyond the limit throws `invalidSize` rather than Metal aborting.
+
+## Canonical RAW decode scratch — 2026-10-23
+
+RAW materialization decodes a fixed grid on the complete geometry-applied image:
+each inner cell is at most **2044 x 256**, with a fixed two-pixel halo clipped only
+at the image boundary. A completed cell supplies its inner pixels to the requested
+ROI. There is no full-image pixel cache. Preview, fixed analysis/model input,
+full loads, lazy export/detail ROIs and partial-look baselines use this path.
+
+One bitmap-backed cell is at most
+**2048 x 260 x 16 = 8,519,680 bytes (8.125 MiB)**, beside the requested output.
+Each cell is validated and copied, then its command completes and its autorelease
+pool drains before the next development. No completed cell is retained for a
+later tile or row read. Partial looks develop their endpoints serially. Opaque
+retries keep the same rectangle and fail after three incomplete developments;
+canonical cells do not use adaptive splitting.
+
+Single-cell workspace uses the existing bounded ROI working-set allowance;
+there is no additional completed-cell reservation. The **24 B/native-pixel +
+512 MiB** decoder/work reservation, the second native allowance for partial RAW
+looks, film workspace and the 20% available-memory reserve remain in place.
+These are conservative allocation estimates, not device-memory measurements.
+Performance and validation status are summarized at the start of this document.
 
 ## Apple decoder memory is not a constant
 
@@ -190,6 +331,11 @@ bit depth, color space, alpha, decode values and headroom. This is native decode
 storage, not a full-size RGBAf Render texture. It remains resident with the export
 source and is charged to the native-area allowance. Other large rasters keep CI's
 file provider; bounded <=4096 rasters keep the cheaper ImageIO CGImage provider.
+Full loads also detach large TIFF bitmaps: concurrent Core Image rendering of
+the original ImageIO provider omitted complete tiles despite intact native data.
+Ordinary RAW exports reuse their open full development for fixed analysis;
+scene-linear Log/film exports keep independent analysis after sharing that graph
+increased measured opening memory. Both paths retain the same decoder allowance.
 
 **Do not replace Apple's native-area item with a fixed constant.** Remove the
 retired full RGBAf *Render source/output/composite* items; retain one decoder
@@ -268,22 +414,23 @@ both references by up to **9 decoded codes** (37,918,881 changed samples across
 194,248,704, mean squared code difference 0.4131698094). Source digest, recipe,
 resolved snapshot and options matched. Both files passed native structural and
 independent system readback. Those checks do not establish pixel repeatability.
-The cause is **undetermined**; neither RAW rendering variability nor the Metal
-conversion has been isolated. Do not use the 14.67 s run as a quality-qualified
-speedup, or infer that the GPU path alone caused the discrepancy.
+At that point the cause was undetermined. The later controlled request-shape
+reproduction and exact original-artifact comparisons closed this historical
+case, as described at the start of this document. Do not use the 14.67 s run as
+a quality-qualified speedup, or infer that the GPU path alone caused the discrepancy.
 
 A fresh RAW launch with the pre-encode audit enabled was prepared, but the user
-stopped optimization before another export ran. No further audit result exists.
-The phone was returned to the CPU route and audit disabled. Recorded lifetime
+stopped optimization before another export ran in that 2026-10-21 session.
+The phone was returned to the CPU route and audit disabled. Later RAW 8/9 audit
+and controlled repeatability comparisons are covered by the final report. Recorded lifetime
 VT-boundary peaks: RAW Metal 1121.1 MiB / CPU 1111.7 MiB; these include earlier
 editor/decode work and do not establish a universal memory bound.
 
 Evidence: `build/device-qa/2026-10-21/metal/`, including both RAW comparisons,
 all four outputs/reports, timing/memory traces and the unresolved-status summary.
 
-If optimization is explicitly resumed later, first isolate RAW repeatability
-with an on-device pre-encode audit and repeated identical-source controls. A
-possible later performance experiment is a frozen Render graph ROI feeding
+The subsequent on-device audit and repeated controls addressed that diagnostic
+step. A possible future performance experiment is a frozen Render graph ROI feeding
 float32 Metal textures and encoder surfaces without intermediate CPU float
 arrays. It would need a GPU handoff across Render/Kit/engine, preserving
 cancellation, revisions, codebook/CLLI statistics, frame zero gain and both
@@ -292,18 +439,22 @@ verification paths. This work is deferred, not scheduled or in progress.
 ## Deferred checks and handoff
 
 - Measure a **real 110MP RAW on the iPhone** before claiming support. The current
-  estimate admits roughly 4 GiB available process memory, not 3 GiB; retain
+  estimate admits 4 GiB remaining usable export budget after the process reserve,
+  not 3 GiB; retain
   24 B/native pixel + 512 MiB plus rows, resources and resident editor.
-- Current RAW measurements use a zero-gain automatic recipe. Measure nonzero
-  HDR edits separately before generalizing its speedup to all RAW exports.
+- The completed formal phone comparison has zero gain for RAW 8 and about
+  0.13008 stops for RAW 9. It does not establish performance under strong HDR
+  highlights. The final configuration after cache deletion still needs device
+  validation; Mac pixel equality does not establish phone speed or footprint.
 - Keep 256-row admission as the default. The old Mac 512-row experiment saved
   little and doubled row storage; a device experiment must justify changing it.
 - Render APIs retain revision checks and the public 512-row read limit. No C ABI
   change. Oversized logical canvases use bounded tiles, never full-canvas GPU textures.
-- Latest follow-up validation: eight native targeted tests (including zero,
+- Historical 2026-10-21 follow-up validation: eight native targeted tests (including zero,
   tiny nonzero and framed gain replay/equality checks), eight absolute quality
   cases plus E5, unsigned iOS device/simulator builds, and both full-size device
-  initial exports with zero changed decoded codes. The later RAW repeatability
-  failure above remains unresolved. The final full Apple suite passed (481 Mac
-  app tests, two skipped); these test passes do not waive the RAW failure. Do not infer jetsam from signal 9
+  initial exports with zero changed decoded codes. That historical Apple suite
+  passed (481 Mac app tests, two skipped); those passes alone did not resolve
+  the later RAW failure, which was subsequently closed by the artifact comparisons
+  described above. Do not infer jetsam from signal 9
   without a termination report.

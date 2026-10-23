@@ -30,6 +30,10 @@ struct EditorCanvas: View {
 
     /// The canvas is held to show the original.
     @Binding var holdingOriginal: Bool
+    /// A fit or actual-pixels request (the iPad's canvas bar).
+    var zoomRequest: CanvasZoomRequest? = nil
+    /// The screen's headroom as it changes (the iPad's canvas bar).
+    var onHeadroom: (HeadroomSnapshot) -> Void = { _ in }
     @State private var headroom = HeadroomSnapshot()
     /// The crop pane's placement while its box is dragged.
     @State private var cropFreeze: CropLayout?
@@ -133,7 +137,8 @@ struct EditorCanvas: View {
         let crop = cropLayout(viewport)
         return EDRCanvas(content: content(crop),
                   fitRequest: framed,
-                  onHeadroom: { headroom = $0 },
+                  zoomRequest: zoomRequest,
+                  onHeadroom: { headroom = $0; onHeadroom($0) },
                   onDrawableSize: { editor.canvasPixelSize = $0 },
                   onHoldOriginal: { holdingOriginal = $0 },
                   onError: { _ in session.notice = "ios.error.load" },

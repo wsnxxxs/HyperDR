@@ -4,11 +4,13 @@ import HyperDRRender
 import PhotosUI
 import SwiftUI
 
-/// The editor, over the library while a photo is open: the EDR canvas, the
-/// controls laid out by `EditorLayout`, and a toolbar of Liquid Glass
-/// buttons laid out as in Photos: close, undo and redo lead; More (with the
-/// comparison) and Export, the one prominent button, trail. Undo steps go to
-/// the scene's undo manager, so the three-finger swipe and ⌘Z work too.
+/// The editor on the iPhone, and in an iPad window as narrow as one (a
+/// regular-width iPad window has the Studio, `PadEditor`), over the library
+/// while a photo is open: the EDR canvas, the dock laid out by
+/// `EditorLayout`, and a toolbar of Liquid Glass buttons laid out as in
+/// Photos: close, undo and redo lead; More (with the comparison) and Export,
+/// the one prominent button, trail. Undo steps go to the scene's undo
+/// manager, so the three-finger swipe and ⌘Z work too.
 ///
 /// Comparison follows §5.4: holding the canvas shows the original, and More
 /// switches between Adjusted, Original and Split. Zoomed in, the
@@ -25,7 +27,6 @@ struct EditorScreen: View {
     @State private var holdingOriginal = false
     @State private var transform: CanvasTransform?
     @State private var windowSize = CGSize.zero
-    @State private var showsInspector = true
     @State private var showingExport = false
     @State private var showingLUTs = false
     @State private var importingLUTs = false
@@ -58,11 +59,6 @@ struct EditorScreen: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationTitle(isPad ? Text(verbatim: session.photoName ?? "") : Text(verbatim: ""))
                 .navigationSubtitle(isPad ? subtitle : Text(verbatim: ""))
-                .inspector(isPresented: Binding(get: { layout == .inspector && showsInspector },
-                                                set: { if layout == .inspector { showsInspector = $0 } })) {
-                    inspector
-                        .inspectorColumnWidth(min: 320, ideal: 340, max: 420)
-                }
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             windowSize = size
@@ -117,31 +113,26 @@ struct EditorScreen: View {
     // MARK: - Layout
 
     @ViewBuilder private var workspace: some View {
-        switch layout {
-        case .inspector:
-            canvas
-        case .dock(let axis, let large):
-            let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
-                                  photo: photo,
-                                  axis: axis, large: large,
-                                  onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
-                                  onBypass: bypass, onGeometryEditing: { editor.editingGeometry($0) },
-                                  onLUTLibrary: { showingLUTs = true },
-                                  aiUnavailable: aiUnavailable) {
-                FrameDock(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
-                          photoSize: photoSize, misfits: session.frameMisfits, axis: axis, large: large)
+        let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
+                              photo: photo,
+                              axis: layout.axis, large: layout.large,
+                              onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
+                              onBypass: bypass, onGeometryEditing: { editor.editingGeometry($0) },
+                              onLUTLibrary: { showingLUTs = true },
+                              aiUnavailable: aiUnavailable) {
+            FrameDock(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
+                      photoSize: photoSize, misfits: session.frameMisfits, axis: layout.axis, large: layout.large)
+        }
+        .disabled(locksEditing)
+        if layout.axis == .horizontal {
+            VStack(spacing: 0) {
+                canvas
+                dock
             }
-            .disabled(locksEditing)
-            if axis == .horizontal {
-                VStack(spacing: 0) {
-                    canvas
-                    dock
-                }
-            } else {
-                HStack(spacing: 0) {
-                    canvas
-                    dock
-                }
+        } else {
+            HStack(spacing: 0) {
+                canvas
+                dock
             }
         }
     }
@@ -170,62 +161,9 @@ struct EditorScreen: View {
         }
     }
 
-    private var inspector: some View {
-        let groups = DockGroup.tabs(panel.groups(for: editor.recipe))
-        return VStack(spacing: 0) {
-            SidebarTabs(groups: groups, pane: $pane, cropOn: !editor.recipe.geometry.isIdentity,
-                        frameOn: session.frame.isEnabled, onBypass: bypass)
-                .padding(.horizontal, Space.s4)
-                .padding(.top, Space.s2)
-                .padding(.bottom, Space.s3)
-            switch pane {
-            case .frame:
-                FramePanel(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),
-                           photoSize: photoSize, misfits: session.frameMisfits,
-                           output: session.frameLayout.map { ($0.width, $0.height) })
-            case .crop:
-                ScrollView {
-                    GeometryInspector(geometry: geometry, photo: photo, style: .touch,
-                                      onEditingChanged: { editor.editingGeometry($0) })
-                        .padding(.bottom, Space.s5)
-                }
-            case .group(let group):
-                let tab = groups.first { $0.contains(group) } ?? groups.first
-                ScrollView {
-                    if let aiUnavailable, tab?.id == .hdr {
-                        Label { aiUnavailable } icon: { Image(systemName: "info.circle") }
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, Space.s2)
-                    }
-                    AdjustmentInspector(recipe: recipe, panel: panel, style: .touch,
-                                        only: tab.map { Set($0.states.map(\.group)) },
-                                        onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
-                                        onLUTLibrary: { showingLUTs = true })
-                        .padding(.bottom, Space.s5)
-                }
-                // Each tab opens at its top.
-                .id(tab?.id)
-            }
-        }
-        .disabled(locksEditing)
-    }
-
     /// The photo's own size, for the crop pane.
     private var photo: GeometrySize? {
         editor.source.map { GeometrySize(width: Double($0.pixelSize.width), height: Double($0.pixelSize.height)) }
-    }
-
-    /// The crop pane's writes, through the recipe so they are undo steps.
-    private var geometry: Binding<Geometry> {
-        Binding(get: { editor.recipe.geometry }, set: { geometry in
-            var recipe = editor.recipe
-            recipe.geometry = geometry
-            editor.setRecipe(recipe)
-        })
     }
 
     // MARK: - Editing
@@ -322,14 +260,6 @@ struct EditorScreen: View {
             .tint(Color.hdr.accentFill)
             .keyboardShortcut("e", modifiers: .command)
             .disabled(!session.exports.isSettled(editor))
-        }
-        if layout == .inspector {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { withAnimation { showsInspector.toggle() } } label: {
-                    Label("ios.toolbar.inspector", systemImage: "sidebar.trailing")
-                }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-            }
         }
     }
 

@@ -222,6 +222,14 @@ final class EDRCanvasUIView: UIView {
         apply(next)
     }
 
+    /// One photo pixel to one screen pixel, about the middle of the view; a
+    /// photo smaller than the view stays fitted.
+    func zoomToActualPixels() {
+        guard !cropping else { return }
+        let target = min(geometry.maxZoom, max(CanvasTransform.minZoom, geometry.actualPixelsZoom))
+        apply(geometry.zoomed(to: target, anchorInView: CGPoint(x: bounds.midX, y: bounds.midY)))
+    }
+
     private func apply(_ next: CanvasTransform) {
         guard next != geometry else { return }
         geometry = next
@@ -237,11 +245,22 @@ extension EDRCanvasUIView: UIGestureRecognizerDelegate {
     }
 }
 
+/// A request to fit the photo or show it at actual pixels (the iPad's canvas
+/// bar and ⌘0). Each request is new, so asking twice for the same kind
+/// works twice.
+struct CanvasZoomRequest: Equatable {
+    enum Kind { case fit, actualPixels }
+    let kind: Kind
+    let id = UUID()
+}
+
 /// SwiftUI wrapper of `EDRCanvasUIView`.
 struct EDRCanvas: UIViewRepresentable {
     var content: EDRCanvasUIView.Content?
     /// A change fits the whole photo again (entering or leaving the frame view).
     var fitRequest = false
+    /// A new request zooms; the one current when the canvas is made is not run.
+    var zoomRequest: CanvasZoomRequest? = nil
     var onHeadroom: (HeadroomSnapshot) -> Void
     var onDrawableSize: (HyperDRRender.PixelSize) -> Void
     var onHoldOriginal: (Bool) -> Void
@@ -250,6 +269,8 @@ struct EDRCanvas: UIViewRepresentable {
 
     final class Coordinator {
         var fitRequest: Bool?
+        var zoomRequest: CanvasZoomRequest?
+        var hasSeenZoomRequest = false
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -269,6 +290,14 @@ struct EDRCanvas: UIViewRepresentable {
         if !Self.same(view.content, content) { view.content = content }
         if let last = context.coordinator.fitRequest, last != fitRequest { view.fit() }
         context.coordinator.fitRequest = fitRequest
+        if context.coordinator.hasSeenZoomRequest, let request = zoomRequest, request != context.coordinator.zoomRequest {
+            switch request.kind {
+            case .fit: view.fit()
+            case .actualPixels: view.zoomToActualPixels()
+            }
+        }
+        context.coordinator.zoomRequest = zoomRequest
+        context.coordinator.hasSeenZoomRequest = true
     }
 
     private static func same(_ a: EDRCanvasUIView.Content?, _ b: EDRCanvasUIView.Content?) -> Bool {

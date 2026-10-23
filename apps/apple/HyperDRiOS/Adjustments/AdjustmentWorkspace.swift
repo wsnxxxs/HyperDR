@@ -2,24 +2,17 @@ import HyperDRDesign
 import HyperDRRecipe
 import SwiftUI
 
-/// Where the controls go, by window size (p7-adjustments §5.2, §5.3), not by
-/// device orientation or size class, so Split View and Stage Manager pick the
-/// right form as the window changes:
-///
-/// - iPad, window ≥ 1000 pt wide: the system inspector on the right, with the
-///   generated inspector controls in touch sizes.
-/// - iPad, narrower: the canvas on top and the large dock under it.
-/// - iPhone: the dock under the canvas, or standing on the right when the
-///   window is wider than tall.
-enum EditorLayout: Equatable {
-    case inspector
-    case dock(axis: Axis, large: Bool)
-
-    static var inspectorMinimumWindowWidth: CGFloat { 1000 }
+/// Where the dock goes (p7-adjustments §5.3): under the canvas, or on the
+/// iPhone standing on the right when the window is wider than tall. In an
+/// iPad window as narrow as an iPhone the dock is the large one, under the
+/// canvas; a wider iPad window has the Studio (`PadLayout`).
+struct EditorLayout: Equatable {
+    let axis: Axis
+    let large: Bool
 
     static func layout(for size: CGSize, isPad: Bool) -> EditorLayout {
-        if isPad { return size.width >= inspectorMinimumWindowWidth ? .inspector : .dock(axis: .horizontal, large: true) }
-        return size.width > size.height ? .dock(axis: .vertical, large: false) : .dock(axis: .horizontal, large: false)
+        if isPad { return EditorLayout(axis: .horizontal, large: true) }
+        return EditorLayout(axis: size.width > size.height ? .vertical : .horizontal, large: false)
     }
 }
 

@@ -7,8 +7,9 @@ import SwiftUI
 /// the photo on the canvas and every export carries it.
 ///
 /// - `FrameDock` sits in the iPhone's bottom bar (or its standing bar in
-///   landscape) and the narrow iPad's bottom panel.
-/// - `FramePanel` is the iPad inspector's Frame tab, everything in one column.
+///   landscape) and the bottom panel of an iPad window as narrow as an iPhone.
+/// - The iPad Studio's Frame tool (`PadFrameTool`) lays the same pieces out
+///   in its panel.
 struct FrameDock: View {
     @Binding var settings: FrameSettings
     /// The photo's oriented size, which shapes the miniatures.
@@ -71,64 +72,6 @@ struct FrameDock: View {
             }
             .presentationDetents([.medium, .large])
         }
-    }
-
-    private func choose(_ style: FrameStyle?) {
-        withAnimation(.smooth(duration: 0.3)) {
-            if let style {
-                settings.style = style
-                settings.isEnabled = true
-            } else {
-                settings.isEnabled = false
-            }
-        }
-    }
-}
-
-/// The iPad inspector's Frame tab.
-struct FramePanel: View {
-    @Binding var settings: FrameSettings
-    let photoSize: (width: Int, height: Int)?
-    let misfits: Bool
-    /// The framed export's size at full size, when the frame is on.
-    let output: (width: Int, height: Int)?
-
-    var body: some View {
-        Form {
-            Section {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: Space.s3)], spacing: Space.s3) {
-                    FrameStyleTile(style: nil, settings: settings, photoSize: photoSize) { choose(nil) }
-                    ForEach(FrameStyle.allCases) { style in
-                        FrameStyleTile(style: style, settings: settings, photoSize: photoSize) { choose(style) }
-                    }
-                }
-                .padding(.vertical, Space.s2)
-            } header: {
-                Text("ios.frame.style")
-            } footer: {
-                if settings.isEnabled && misfits { FrameMisfitNote(alignment: .leading) }
-            }
-            Section {
-                FrameTones(settings: $settings)
-            } header: {
-                Text("ios.frame.tone")
-            }
-            .disabled(!settings.isEnabled)
-            FrameCaptionSections(settings: $settings)
-                .disabled(!settings.isEnabled)
-            Section {
-                Text("ios.frame.sdrNote").font(.footnote).foregroundStyle(.secondary)
-                if let output {
-                    LabeledContent {
-                        Text(verbatim: "\(output.width) × \(output.height)").monospacedDigit()
-                    } label: {
-                        Text("ios.frame.output")
-                    }
-                }
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .tint(Color.hdr.accent)
     }
 
     private func choose(_ style: FrameStyle?) {

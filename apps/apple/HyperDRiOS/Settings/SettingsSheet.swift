@@ -8,8 +8,14 @@ import SwiftUI
 /// much room it takes, diagnostics to send when something goes wrong, and
 /// About (version, privacy, acknowledgements).
 /// Only what the app really has; nothing here is a placeholder.
+///
+/// On the iPad Studio (ipad-studio §7) the same sections are a page of two
+/// columns, as the system's Settings: who we are and the sections on the
+/// left, the chosen section on the right.
 struct SettingsSheet: View {
     let session: EditingSession
+    /// The iPad Studio's two columns.
+    var isPage = false
     @Environment(\.dismiss) private var dismiss
     @State private var history: [ExportHistoryEntry] = []
     @State private var confirmingClear = false
@@ -17,8 +23,31 @@ struct SettingsSheet: View {
     @State private var diagnostics: DiagnosticsFile?
     @State private var preparingDiagnostics = false
     @State private var diagnosticsFailed = false
+    @State private var page: Page? = .luts
+
+    /// The iPad's sections.
+    private enum Page: Hashable { case luts, exports, diagnostics, about }
 
     var body: some View {
+        Group {
+            if isPage { split } else { stack }
+        }
+        .confirmationDialog(Text("ios.settings.history.clear.confirm"), isPresented: $confirmingClear,
+                            titleVisibility: .visible) {
+            Button("ios.settings.history.clear", role: .destructive) { clear() }
+        } message: {
+            Text("ios.settings.history.footer")
+        }
+        .sheet(item: $diagnostics) { file in
+            ActivitySheet(items: [file.url])
+                .presentationDetents([.medium, .large])
+                .ignoresSafeArea()
+        }
+        .alert(Text("ios.settings.diagnostics.failed"), isPresented: $diagnosticsFailed) {}
+        .task { history = await session.exports.history() }
+    }
+
+    private var stack: some View {
         NavigationStack {
             List {
                 Section { identity }
@@ -35,72 +64,124 @@ struct SettingsSheet: View {
                         }
                     }
                 }
+                historySection
+                diagnosticsSection
+                aboutSection
+            }
+            .navigationTitle(Text("ios.settings.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { closeButton }
+        }
+    }
+
+    private var split: some View {
+        NavigationSplitView {
+            List(selection: $page) {
+                Section { identity }
                 Section {
-                    LabeledContent {
-                        if history.isEmpty {
-                            Text("ios.settings.history.none")
-                        } else {
-                            Text("ios.settings.history.kept \(String(history.count)) \(ExportPlanText.bytes(keptBytes))")
-                                .monospacedDigit()
-                        }
-                    } label: {
-                        Label("ios.history.title", systemImage: "clock.arrow.circlepath")
-                    }
-                    Button("ios.settings.history.clear", role: .destructive) { confirmingClear = true }
-                        .disabled(history.isEmpty || clearing)
-                } footer: {
-                    Text("ios.settings.history.footer")
-                }
-                Section {
-                    Button(action: exportDiagnostics) {
-                        LabeledContent {
-                            if preparingDiagnostics { ProgressView() }
-                        } label: {
-                            Label("ios.settings.diagnostics.export", systemImage: "stethoscope")
-                        }
-                    }
-                    .disabled(preparingDiagnostics)
-                } footer: {
-                    Text("ios.settings.diagnostics.footer")
-                }
-                Section {
-                    LabeledContent { Text(verbatim: Self.version).monospacedDigit() } label: {
-                        Text("ios.settings.version")
-                    }
-                    NavigationLink("ios.settings.acknowledgements") { AcknowledgementsView() }
-                } header: {
-                    Text("ios.settings.about")
-                } footer: {
-                    Text("ios.settings.privacy")
+                    Label("ios.lut.title", systemImage: "camera.filters")
+                        .badge(session.exports.luts.entries.count)
+                        .tag(Page.luts)
+                    Label("ios.history.title", systemImage: "clock.arrow.circlepath")
+                        .badge(history.count)
+                        .tag(Page.exports)
+                    Label("ipad.settings.diagnostics", systemImage: "stethoscope")
+                        .tag(Page.diagnostics)
+                    Label("ios.settings.about", systemImage: "info.circle")
+                        .tag(Page.about)
                 }
             }
             .navigationTitle(Text("ios.settings.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
+            .toolbar { closeButton }
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(300)
+        } detail: {
+            NavigationStack {
+                Group {
+                    switch page ?? .luts {
+                    case .luts:
+                        if let editor = session.editor {
+                            LUTLibraryList(library: session.exports.luts, editor: editor)
+                        }
+                    case .exports:
+                        List { historySection }
+                            .navigationTitle(Text("ios.history.title"))
+                    case .diagnostics:
+                        List { diagnosticsSection }
+                            .navigationTitle(Text("ipad.settings.diagnostics"))
+                    case .about:
+                        List { aboutSection }
+                            .navigationTitle(Text("ios.settings.about"))
+                    }
+                }
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .presentationSizing(.page)
+    }
+
+    private var closeButton: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button(role: .close) { dismiss() }
+        }
+    }
+
+    private var historySection: some View {
+        Section {
+            LabeledContent {
+                if history.isEmpty {
+                    Text("ios.settings.history.none")
+                } else {
+                    Text("ios.settings.history.kept \(String(history.count)) \(ExportPlanText.bytes(keptBytes))")
+                        .monospacedDigit()
+                }
+            } label: {
+                Label("ios.history.title", systemImage: "clock.arrow.circlepath")
+            }
+            Button("ios.settings.history.clear", role: .destructive) { confirmingClear = true }
+                .disabled(history.isEmpty || clearing)
+        } footer: {
+            Text("ios.settings.history.footer")
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        Section {
+            Button(action: exportDiagnostics) {
+                LabeledContent {
+                    if preparingDiagnostics { ProgressView() }
+                } label: {
+                    Label("ios.settings.diagnostics.export", systemImage: "stethoscope")
                 }
             }
-            .confirmationDialog(Text("ios.settings.history.clear.confirm"), isPresented: $confirmingClear,
-                                titleVisibility: .visible) {
-                Button("ios.settings.history.clear", role: .destructive) { clear() }
-            } message: {
-                Text("ios.settings.history.footer")
-            }
-            .sheet(item: $diagnostics) { file in
-                ActivitySheet(items: [file.url])
-                    .presentationDetents([.medium, .large])
-                    .ignoresSafeArea()
-            }
-            .alert(Text("ios.settings.diagnostics.failed"), isPresented: $diagnosticsFailed) {}
+            .disabled(preparingDiagnostics)
+        } footer: {
+            Text("ios.settings.diagnostics.footer")
         }
-        .task { history = await session.exports.history() }
+    }
+
+    private var aboutSection: some View {
+        Section {
+            LabeledContent { Text(verbatim: Self.version).monospacedDigit() } label: {
+                Text("ios.settings.version")
+            }
+            NavigationLink("ios.settings.acknowledgements") { AcknowledgementsView() }
+        } header: {
+            Text("ios.settings.about")
+        } footer: {
+            Text("ios.settings.privacy")
+        }
     }
 
     private var identity: some View {
         VStack(spacing: Space.s1) {
-            Text(verbatim: "HyperDR")
-                .font(.title2.weight(.semibold))
+            HStack(spacing: 0) {
+                Text(verbatim: "Hyper")
+                Text(verbatim: "DR").foregroundStyle(isPage ? Color.hdr.amber : Color.primary)
+            }
+            .font(.title2.weight(.semibold))
             Text("ios.settings.tagline")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

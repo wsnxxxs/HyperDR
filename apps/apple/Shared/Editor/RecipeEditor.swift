@@ -100,12 +100,16 @@ import Observation
     var isEditingCrop = false {
         didSet {
             guard isEditingCrop != oldValue else { return }
+            if !isEditingCrop { cancelUpright() }
             updatePreviewSize(force: true)
         }
     }
 
     /// The crop pane's Auto (`autoUpright(_:)`).
     var uprightStatus: UprightStatus = .idle
+    @ObservationIgnored var uprightTask: Task<Void, Never>?
+    @ObservationIgnored var uprightGeneration = 0
+    @ObservationIgnored var uprightLines: (source: UUID, lines: [UprightLine])?
 
     /// The geometry the canvas renders with.
     var renderedGeometry: Geometry { isEditingCrop ? .identity : recipe.geometry }
@@ -247,6 +251,7 @@ import Observation
               rawDecoderPreference: RAWDecoderPreference = .automatic) async throws {
         // A caller cancelled before it got here must not supersede a newer open.
         try Task.checkCancellation()
+        cancelUpright(clearCache: true)
         openGeneration += 1
         let generation = openGeneration
         isOpening = true
@@ -343,6 +348,7 @@ import Observation
 
     /// No photo: the empty state.
     func close() async {
+        cancelUpright(clearCache: true)
         openGeneration += 1
         isOpening = false
         openingPhase = nil
@@ -543,6 +549,7 @@ import Observation
     private func register(_ step: RecipeStep) { undo.register(step) }
 
     private func recipeDidChange(from old: Recipe) {
+        if old.geometry != recipe.geometry { cancelUpright() }
         // A new crop or turn is a new picture size: the preview follows.
         if old.geometry != recipe.geometry, !isEditingCrop { updatePreviewSize() }
         scheduleRender()
@@ -1050,6 +1057,7 @@ import Observation
     /// Waits until nothing is pending, pacing, rendering or predicting.
     func settle() async {
         while true {
+            if let uprightTask { await uprightTask.value; await Task.yield(); continue }
             if let pacing { await pacing.value; continue }
             if let flight = inFlight { await flight.task.value; await Task.yield(); continue }
             if let flight = originalFlight { await flight.task.value; await Task.yield(); continue }

@@ -36,6 +36,14 @@ struct CropLayout: Equatable {
         self.margin = margin
     }
 
+    /// The canvas draws the frame shown through the recipe's geometry: in the
+    /// crop pane, and once it is left until the cropped frame arrives (the
+    /// frame shown is still the whole photo). The canvas then draws the edit
+    /// alone, so a comparison or a held original waits until this ends.
+    static func drawsThroughGeometry(shown: Geometry, recipe: Geometry, cropping: Bool) -> Bool {
+        cropping || (shown == .identity && !recipe.isIdentity)
+    }
+
     /// The same placement for another geometry: a drag keeps the photo still.
     func with(_ geometry: Geometry) -> CropLayout {
         CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale, centre: centre, margin: margin)

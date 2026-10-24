@@ -113,4 +113,28 @@ import simd
         }
     }
 
+    /// Entering the pane, the cropped frame still shown lands on its crop:
+    /// the crop's corners on the canvas are the corners of that frame.
+    func testACroppedFrameIsDrawnOnItsCropInThePane() {
+        let photo = GeometrySize(width: 6000, height: 4000)
+        let geometry = Geometry(angle: 7, quarterTurns: 1, aspect: .free,
+                                crop: CropRect(centreX: 0.04, centreY: -0.03, width: 0.5, height: 0.4))
+        let layout = CropLayout(photo: photo, geometry: geometry, viewport: CGSize(width: 800, height: 600), margin: 28)
+        let display = layout.display(clipsToCrop: false, dimsOutsideCrop: true, rendered: geometry)
+        let box = layout.cropRect
+        func output(_ point: CGPoint) -> CGPoint {
+            let q = display.photoFromCanvas * SIMD3<Float>(Float(point.x / 800), Float(point.y / 600), 1)
+            return CGPoint(x: Double(q.x / q.z), y: Double(q.y / q.z))
+        }
+        for (point, expected) in [(CGPoint(x: box.minX, y: box.minY), CGPoint(x: 0, y: 0)),
+                                  (CGPoint(x: box.maxX, y: box.maxY), CGPoint(x: 1, y: 1)),
+                                  (CGPoint(x: box.midX, y: box.midY), CGPoint(x: 0.5, y: 0.5))] {
+            let at = output(point)
+            XCTAssertEqual(at.x, expected.x, accuracy: 1e-4)
+            XCTAssertEqual(at.y, expected.y, accuracy: 1e-4)
+        }
+        // With the whole photo rendered, the default is unchanged.
+        XCTAssertEqual(layout.display(clipsToCrop: false, dimsOutsideCrop: true),
+                       layout.display(clipsToCrop: false, dimsOutsideCrop: true, rendered: .identity))
+    }
 }

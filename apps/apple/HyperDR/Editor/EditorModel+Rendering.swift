@@ -33,19 +33,22 @@ extension EditorModel {
             overlays: CanvasOverlays(highlights: showsHighlightZebra, shadows: showsShadowZebra,
                                      hdrRange: Float(outputCeilingStops)),
             previewsAsSDR: previewsAsSDR || editor.previewsAsSDR,
-            geometry: crop?.display(clipsToCrop: !isCropping, dimsOutsideCrop: isCropping))
+            geometry: crop?.display(clipsToCrop: !isCropping, dimsOutsideCrop: isCropping,
+                                    rendered: editedFrame?.request.recipe.geometry ?? .identity))
     }
 
     /// Room around the crop in the crop pane, for its corners.
     static let cropMargin: CGFloat = 40
 
-    /// The crop pane's placement of the photo; also, once it is left, until
-    /// the cropped frame arrives (the whole photo drawn through the crop, so
-    /// it never shows uncropped). Nil when the frame shown is not the whole photo.
+    /// The crop pane's placement of the photo, drawn from whatever frame is
+    /// shown (on entering, the cropped one lands on its crop until the whole
+    /// photo arrives); also, once the pane is left, until the cropped frame
+    /// arrives (the whole photo drawn through the crop, so it never shows
+    /// uncropped). Nil outside the pane when the frame shown is not the whole photo.
     var cropLayout: CropLayout? {
         let viewport = canvas.transform.viewport
         guard let frame = editedFrame, let source = editor.source, frame.request.sourceID == source.id,
-              frame.request.recipe.geometry == .identity, isCropping || !editor.recipe.geometry.isIdentity,
+              isCropping || (frame.request.recipe.geometry == .identity && !editor.recipe.geometry.isIdentity),
               viewport.width > 0, viewport.height > 0 else { return nil }
         if isCropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
         let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))

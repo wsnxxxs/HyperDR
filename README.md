@@ -20,51 +20,81 @@
 <br>
 
 <p align="center">
-  <img src=".github/readme/ipad-en.png" width="100%" alt="HyperDR editing a RAW night photo on iPad, with the HDR controls in the inspector">
+  <img src=".github/readme/mac-en.png" width="100%" alt="HyperDR on the Mac: an HDR photo on the EDR canvas, with the histogram, HDR and light controls in the inspector">
 </p>
 
 <br>
 
-Most editors flatten an HDR photo into SDR the moment you touch it. HyperDR
-keeps the light above white — from the camera file to the exported photo — and
-shows it at your display’s real brightness while you edit.
+Photos from today’s iPhones and cameras hold highlights brighter than white, and
+the screens of Macs, iPhones and iPads can really light them up. Most editors
+flatten the photo into SDR the moment you touch a slider, and that light is
+gone. HyperDR keeps it — from the camera file to the exported photo — and shows
+it at your display’s real brightness while you edit.
 
 <br>
 
-## Why HyperDR
+## HDR is the subject, not an afterthought
 
-### HDR is the subject, not an afterthought
-
-The canvas is an EDR Metal layer, so highlights glow on screen exactly as far as
-your display allows. HDR has its own source and its own controls:
+The canvas is a Metal EDR layer, so highlights glow on screen as far as your
+display allows. Hold the canvas to see the original, or split the view to
+compare. HDR has its own source and its own controls:
 
 - **Captured** — the highlights your camera actually recorded, from RAW, HIF, HEIC or gain-map files.
 - **+ Expand** — stretch what is there into more headroom.
-- **+ AI** — an on-device Core ML model predicts highlights the file never stored.
+- **+ AI** — an on-device neural network infers highlights the file never stored.
 
 Controls marked *Affects HDR only* shape the highlights without touching the SDR
 picture underneath, so both versions stay right.
 
-### What you approve is what is written
+### A network that brings HDR back to ordinary photos
+
+Many photos carry no HDR information at all: an ordinary JPEG, an image saved
+from the web, an old photo from years ago. HyperDR ships a small convolutional
+network we trained for one job — look at an SDR photo and infer how bright its
+highlights should have been. It learned from HDR photos rendered by Apple’s own
+devices and their gain maps, so it lifts highlights the restrained, natural way
+Apple does instead of brightening the whole picture.
+
+The model has about 635,000 parameters and runs on the device through Core ML.
+Its prediction is a starting point: shape it with strength,
+range and where the expansion starts, or let it add only what a photo with
+captured highlights is missing. It always infers from the same development, so
+a look or LUT chosen later never pulls it off course.
+
+<br>
 
 <p align="center">
-  <img src=".github/readme/pipeline-en.svg" width="100%" alt="Pipeline: inputs are decoded, the recipe drives one GPU render graph, which feeds both preview and export">
+  <img src=".github/readme/ipad-en.png" width="100%" alt="The HyperDR Studio on iPad: the photo on the EDR canvas, and the glass panel with the tool rail, histogram and the selected tool">
 </p>
 
-Preview and export run through the same GPU render graph — Core Image plus our
-own Metal kernels, in linear Display P3 with extended range. There is no
-separate export engine that reinterprets your edit. Each file is read back and
-checked before it is handed to Files, Photos or the share sheet.
+<p align="center"><sub>The Studio on iPad</sub></p>
 
-### Exports that look right on every screen
+<br>
+
+## Looks from film, LUTs that know their colour space
+
+- **Film** — Kodak Portra 400, Gold 200, Kodachrome 64, Vision3 500T and Fujifilm Velvia 100. Turn off a stock’s antihalation layer for the red highlight bloom of motion-picture film with its backing removed, as CineStill does to Vision3 500T.
+- **Grain and halation** — computed from the emulsion’s physical scatter, not overlaid, and available on every photo, with or without a look.
+- **LUTs** — import `.cube` files into HyperDR’s own library. Every LUT remembers its input and output space, and a LUT whose input the photo cannot supply is disabled rather than forced on as if it were sRGB.
+- **Camera Log** — LUTs for S-Log3, V-Log, F-Log2, LogC3, LogC4 or Canon Log 3 are fed from a scene-linear RAW development, with the file’s baseline exposure kept and gamut compression off, so middle grey lands where the curve expects it.
+
+While you choose, every look is rendered on your own photo. Strength mixes in
+linear light, and a look changes colour and the SDR picture while the HDR
+highlights are kept.
+
+<br>
+
+## Exports that look right on every screen
 
 <p align="center">
   <img src=".github/readme/gainmap-en.svg" width="100%" alt="An SDR base plus a gain map makes an adaptive HDR photo">
 </p>
 
-Adaptive HDR stores a finished SDR picture plus a gain map (ISO 21496-1). An
-ordinary screen shows the SDR picture you graded; an HDR screen lifts the
-highlights as far as it can. No guessing, no washed-out fallback.
+Adaptive HDR stores the SDR picture you graded plus an ISO 21496-1 gain map. An
+ordinary screen shows the SDR picture; an HDR screen lifts the highlights as far
+as it can. Pick what the photo is for — Web, Social or Photos — and HyperDR
+chooses the format, size and quality; change any setting to make a format of
+your own.
 
 | Output | Encoding |
 |---|---|
@@ -73,38 +103,46 @@ highlights as far as it can. No guessing, no washed-out fallback.
 | **HDR HEIC · AVIF** | PQ or HLG, 10-bit |
 | **SDR** | JPEG · HEIC · TIFF |
 
-Pick a destination — Web, Social or Photos — and HyperDR chooses the format,
-size and quality; change any setting to make a format of your own.
-
-### Looks from measured film, LUTs that know their colour space
-
-- **Film** — Kodak Portra 400, Gold 200, Kodachrome 64, Vision3 500T and Fujifilm Velvia 100, emulated from measured data: exposure, development and, for negatives, the print. Grain, halation and the antihalation layer are modelled, not overlaid.
-- **LUTs** — every LUT remembers its input and output space. Camera Log curves (S-Log3, V-Log, F-Log2, LogC3, LogC4, Canon Log 3) are fed from a scene-linear RAW development, so middle grey lands where the LUT expects it.
-- **Strength** mixes in linear light, and a look changes the SDR base while the HDR highlights are kept.
-
 ### Frames for showing the work
 
 <p align="center">
-  <img src=".github/readme/iphone-en.png" width="100%" alt="HyperDR on iPhone: the HDR controls, a Gallery frame with an EXIF caption, and the export sheet">
+  <img src=".github/readme/iphone-en.png" width="100%" alt="HyperDR on iPhone: the HDR controls in the dock, Kodachrome 64 chosen from previews of the photo, and a Gallery frame with an EXIF caption">
 </p>
 
-Gallery, Label, Story, Hairline and Instant mats, in five paper tones, with an
-optional caption from the photo’s own EXIF. The paper is written with exactly
-zero gain, so the mat never glows on an HDR display — only the photograph does.
+Gallery, Label, Story, Hairline and Instant mats in five paper tones, with an
+optional shadow and a caption read from the photo’s own EXIF — camera, lens,
+aperture, shutter speed. The paper is written with exactly zero gain, so on an
+HDR display only the photograph lights up and the mat stays a calm paper white.
+The Mac’s Frame panel and the iPad’s export lightbox preview the framed photo
+on a live EDR canvas, exactly as it will be written.
 
-### Edits that don’t drift
+<br>
 
-RAW files are developed by Apple’s `CIRAWFilter`, and the exact decoder version
-is saved with your edit. Opening the photo again — on another device, after an
-OS update — develops it with that same decoder, never a newer or older one. If it is ever unavailable,
-HyperDR says so instead of quietly showing you something different.
+## What you approve is what is written
 
-### Private, native, self-contained
+<p align="center">
+  <img src=".github/readme/pipeline-en.svg" width="100%" alt="Pipeline: inputs are decoded, the recipe drives one GPU render graph, which feeds both preview and export">
+</p>
 
-- Photos are processed on the device. HyperDR reads only the photos you pick in the system picker and has no library of its own.
-- SwiftUI on every platform, Liquid Glass on iOS and iPadOS, no Catalyst.
-- HEIF is read and written by HyperDR’s own container code, with HEVC through VideoToolbox. The app embeds no dynamic libraries and no (L)GPL code.
-- Built for large files: 61 MP RAW and 60 MP HIF photos open, pan at 1:1 and export at full size on iPhone 17 Pro.
+Preview and export run through the same GPU render graph — Core Image plus our
+own Metal kernels, in linear Display P3 with extended range. There is no
+separate export engine that reinterprets your edit. Crop, rotation, perspective
+and one-tap automatic upright are part of the same recipe. Each file is read
+back and checked after it is written, before it is handed to Files, Photos or
+the share sheet.
+
+**Edits that don’t drift.** RAW files are developed by Apple’s `CIRAWFilter`, and
+the decoder version is saved with your edit. Opening the photo again — on
+another device, after an OS update — develops it the same way; if that decoder
+is ever unavailable, HyperDR says so instead of quietly showing something else.
+
+**Private and self-contained.** HyperDR has no photo library of its own: it reads
+only the photos you pick in the system picker, and all processing happens on
+the device. HEIF is read and written by our own container code with HEVC through
+VideoToolbox; the app embeds no dynamic libraries and no (L)GPL code.
+
+**Built for large files.** 61 MP RAW and 60 MP HIF photos open, pan at 1:1 and
+export at full size on iPhone 17 Pro.
 
 <br>
 
@@ -124,11 +162,13 @@ HyperDR says so instead of quietly showing you something different.
 macOS blocks the first launch, choose *Open Anyway* in System Settings → Privacy
 & Security.
 
-**iPhone and iPad** — build from source with Xcode; see the
+**iPhone and iPad** — build from source with Xcode and a free Apple ID (Personal
+Team); no paid developer account is needed. See the
 [installation notes](apps/apple/README-iOS.md).
 
 Requires iOS / iPadOS 27, or macOS 27 on Apple silicon.
 
+> [!NOTE]
 > HyperDR 0.5.1 is a pre-release. Full-size 110 MP RAW on iPhone is still being
 > verified, and iOS does not yet continue an export in the background.
 
@@ -142,11 +182,12 @@ Requires iOS / iPadOS 27, or macOS 27 on Apple silicon.
 
 | Layer | Where | What it does |
 |---|---|---|
-| App | `apps/apple/HyperDR`, `apps/apple/HyperDRiOS` | SwiftUI for Mac, and iPhone / iPad |
-| Shared editor | `apps/apple/Shared` | `RecipeEditor`, EDR canvas, export capture, frames |
+| App | `apps/apple/HyperDR`, `apps/apple/HyperDRiOS` | SwiftUI for the Mac, and for iPhone and iPad |
+| Shared editor | `apps/apple/Shared` | `RecipeEditor`, EDR canvas, crop, scopes, export capture, frames |
 | Recipe & render | `Packages/HyperDRRecipe`, `Packages/HyperDRRender` | The edit as data; the GPU render graph (Core Image + Metal, Core ML) |
 | Services | `Packages/HyperDRKit` | Input formats, sessions, export planning and `RecipeExportService` |
-| Engine | `modules/` | C++ writers, HEIF / image readers, VideoToolbox codecs, bounded verification — reached only through the C ABI in `modules/capi/include/hyperdr/hyperdr.h` |
+| Engine | `modules/` | C++ writers, HEIF and image readers, VideoToolbox codecs, bounded verification — reached only through the C ABI in `modules/capi/include/hyperdr/hyperdr.h` |
+| Model | `HyperDR_Model` | Training code for the AI highlight model |
 
 Core packages do not depend on AppKit or UIKit. Swift calls the C ABI directly,
 without C++ interoperability.
@@ -163,12 +204,10 @@ directory its own vcpkg install root.
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-export TMPDIR="$(mktemp -d /tmp/hyperdr-build.XXXXXX)"
 python3.12 scripts/fetch_test_fixtures.py
-cmake --preset macos-arm64-codecs -B build -DPython3_EXECUTABLE="$(command -v python3.12)"
-python3.12 scripts/test.py native --build-dir build   # engine
+python3.12 scripts/test.py native --build-dir build   # C++ engine
 python3.12 scripts/test.py apple                      # xcframework, Swift packages, Mac app, localisation
-python3.12 scripts/test.py ios                        # unsigned iPhone / iPad device and simulator builds
+python3.12 scripts/test.py ios                        # unsigned iPhone and iPad device and simulator builds
 ```
 
 `bash scripts/build_xcframework.sh --platforms all` builds all three arm64
@@ -186,9 +225,3 @@ HyperDR is dual-licensed under the [GNU AGPL v3.0](LICENSE) or a commercial
 license — see [LICENSING.md](LICENSING.md). The HyperDR name and app icon are not
 covered by either license. Third-party components keep their own licenses:
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-<br>
-
-<p align="center">
-  <sub>Copyright © 2026 Renhe Wang</sub>
-</p>

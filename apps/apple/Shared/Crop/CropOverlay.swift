@@ -26,6 +26,10 @@ struct CropOverlay: View {
     @Binding var freeze: CropLayout?
     let write: (Geometry) -> Void
     let onEditing: (Bool) -> Void
+    /// Ends the crop gesture that never reported its end (cancelled, or the
+    /// overlay gone): the editor's `endCropInteraction()`, which commits it
+    /// as one undo step.
+    let onCancel: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: (kind: CropDrag, start: GeometryRect, geometry: Geometry)?
@@ -59,7 +63,7 @@ struct CropOverlay: View {
         .contentShape(.rect)
         .gesture(gesture(box))
         // A cancelled drag (a system gesture, the view rebuilt) ends as a finished one.
-        .onChange(of: pressing) { _, now in if !now { endDrag(with: nil) } }
+        .onChange(of: pressing) { _, now in if !now { endDrag(with: nil, cancelled: true) } }
         .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
             if box.contains(tap.location) { resetCrop() }
         })
@@ -86,7 +90,7 @@ struct CropOverlay: View {
             if drag != nil {
                 drag = nil
                 stopped = false
-                finishEditing()
+                finishEditing(cancelled: true)
             }
             freeze = nil
         }
@@ -183,24 +187,26 @@ struct CropOverlay: View {
                 #if os(macOS)
                 Self.cursor(CropDrag.at(value.location, box: (freeze ?? layout).with(geometry).cropRect)).set()
                 #endif
-                endDrag(with: geometry)
+                endDrag(with: geometry, cancelled: false)
             }
     }
 
     /// Ends a drag once, however it ends: with the finger's last geometry, or
     /// (cancelled) with what was last written. Then the canvas fits the crop.
-    private func endDrag(with geometry: Geometry?) {
+    private func endDrag(with geometry: Geometry?, cancelled: Bool) {
         guard drag != nil else { return }
         if let geometry { write(geometry) }
         drag = nil
         stopped = false
-        finishEditing()
+        finishEditing(cancelled: cancelled)
         settle(from: freeze ?? layout, to: geometry ?? layout.geometry)
     }
 
-    /// The one place a crop drag is closed (the host's `editingGeometry(false)`,
-    /// or the editor's close-out call for interactions once it has one).
-    private func finishEditing() {
+    /// Closes the crop drag in the editor. A cancelled one is committed by
+    /// `onCancel`; the end notice after it then clears the editor's guard
+    /// against the gesture's late writes, so the next edit is not dropped.
+    private func finishEditing(cancelled: Bool) {
+        if cancelled { onCancel() }
         onEditing(false)
     }
 
@@ -217,8 +223,8 @@ struct CropOverlay: View {
             : drag.geometry.aspect.ratio(frame: frame) ?? drag.start.width / drag.start.height
         let result = drag.kind.resolve(delta, to: drag.start, ratio: ratio, quad: drag.geometry.quad(for: layout.photo),
                                        minimum: max(frame.width, frame.height) * 0.06)
-        var geometry = drag.geometry
-        geometry.crop = CropRect(centre: result.rect.centre, size: result.rect.size, frame: frame)
+        let geometry = drag.geometry.settingCrop(CropRect(centre: result.rect.centre, size: result.rect.size, frame: frame),
+                                                 photo: layout.photo)
         return (geometry, result.stopped)
     }
 

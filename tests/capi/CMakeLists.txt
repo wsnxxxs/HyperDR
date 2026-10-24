@@ -13,8 +13,9 @@ endforeach()
 if(HYPERDR_WITH_CODECS)
   # The packaging entry point writes real files, so it needs the encoder paths.
   # Synthetic planes keep it independent of the RAW and HEIC fixtures.
+  find_package(libavif CONFIG REQUIRED)
   add_executable(capi_package_rows_test package_rows_test.cpp)
-  target_link_libraries(capi_package_rows_test PRIVATE HyperDR::capi_static HyperDR::app)
+  target_link_libraries(capi_package_rows_test PRIVATE HyperDR::capi_static HyperDR::app avif)
   set_target_properties(capi_package_rows_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
   add_test(NAME capi_package_rows_test COMMAND capi_package_rows_test)
   add_executable(capi_package_test package_test.c)

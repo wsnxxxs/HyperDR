@@ -387,6 +387,31 @@ private func code(_ value: Double) -> Int {
         for x in 0..<8 { for c in 0..<3 { #expect(narrower.baseRGBA[x * 4 + c] == pixels.baseRGBA[(32 + x) * 4 + c]) } }
     }
 
+    /// A tall preview or detail region renders its film in bands, with the same
+    /// values as one region: base and RGB gain of a partial film, bit for bit.
+    @Test func filmBandsRenderTheWholeRegion() async throws {
+        let engine = try RenderEngine()
+        let width = 120, height = 700
+        var values = [SIMD4<Float>](repeating: SIMD4(0.05, 0.06, 0.04, 1), count: width * height)
+        for y in 0..<height { for x in 0..<width where (x / 5 + y / 7) % 3 == 0 { values[y * width + x] = SIMD4(0.5, 0.35, 0.2, 1) } }
+        for y in 340..<352 { for x in 50..<64 { values[y * width + x] = SIMD4(24, 20, 14, 1) } }
+        let image = CIImage(bitmapData: values.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
+        let source = try await engine.source(image: image, domain: .hdr)
+        var edit = RenderAdjustments()
+        edit.film.stock = .portra400; edit.film.strength = 0.6
+        let size = PixelSize(width: 2 * width, height: 2 * height)
+        #expect(edit.film.sourceHalo(size: size) > 0 && size.height > 4 * RenderEngine.filmBandRows)
+        let banded = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size))
+        let analysis = try await engine.analysis(source, adjustments: edit)
+        let whole = RenderEngine.readPixels(try await engine.graphRegion(source, edit: edit, size: size,
+            region: CGRect(x: 0, y: 0, width: size.width, height: size.height), analysis: analysis))
+        #expect(banded.gainChannelCount == 3 && whole.gainChannelCount == 3)
+        #expect(banded.baseRGBA.count == size.width * size.height * 4)
+        #expect(zip(banded.baseRGBA, whole.baseRGBA).allSatisfy { $0.bitPattern == $1.bitPattern })
+        #expect(zip(banded.gain, whole.gain).allSatisfy { $0.bitPattern == $1.bitPattern })
+    }
+
     /// An SDR-to-SDR look: the gain of an HDR source is kept.
     @Test func filmKeepsTheGain() async throws {
         let engine = try RenderEngine()

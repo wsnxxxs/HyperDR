@@ -192,7 +192,10 @@ import Testing
 @Test func packageRowsUsesBorrowedBandsAndPropagatesFailure() async throws {
     let engine = try await Engine()
     #expect(Engine.supportsPackageRows(format: "iso-gainmap-jpeg"))
-    #expect(!Engine.supportsPackageRows(format: "avif-pq"))
+    // AVIF stages quantized rows on disk and encodes one cell at a time.
+    #expect(Engine.supportsPackageRows(format: "avif-pq"))
+    #expect(Engine.supportsPackageRows(format: "avif-hlg"))
+    #expect(!Engine.supportsPackageRows(format: "not-a-format"))
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }

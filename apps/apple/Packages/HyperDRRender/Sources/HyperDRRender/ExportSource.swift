@@ -30,16 +30,27 @@ public struct ExportSource: @unchecked Sendable {
     let opened: OpenedSource
     let url: URL
     let revision: SourceRevision
+    var stagedLookBaseline: StagedLookBaseline? = nil
+    /// Whether a partial scene look's Apple endpoint was developed once into
+    /// a staged file, so no band opens a second RAW decoder.
+    public var stagesLookBaseline: Bool { stagedLookBaseline != nil }
 }
 
 extension RenderEngine {
     /// Opens full-quality system graphs/native decoder storage and materializes
     /// only the fixed analysis texture. Drops pixel caches, retaining four AI grids.
     /// Use an export engine if the editor must keep its preview caches warm.
-    public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions()) throws -> ExportSource {
+    /// `stagingLookBaseline` (a partial RAW film or Log look) first develops
+    /// Apple's endpoint into a staged file (`StagedLookBaseline`), before the
+    /// scene-linear graph opens; it needs that endpoint's float32 size on disk.
+    public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions(),
+                                 stagingLookBaseline: Bool = false) throws -> ExportSource {
         try Task.checkCancellation()
         let revision = try SourceRevision(url:url)
         var fullOptions = options; fullOptions.resolution = .full
+        clearImageCaches()
+        let staged = stagingLookBaseline && fullOptions.sceneLinear
+            ? try stageLookBaseline(url, options: fullOptions, revision: revision) : nil
         let opened = try Self.open(url,options:fullOptions,deferred:true)
         let size = opened.nativeSize ?? opened.raw!.nativeSize
         try validate(size)
@@ -65,7 +76,8 @@ extension RenderEngine {
         analysisSource = analysis
         try revision.validate(url)
         return ExportSource(id:analysis.id,domain:opened.domain,nativeSize:size,rawSettings:opened.raw,
-                            analysisSource:analysis,opened:opened,url:url,revision:revision)
+                            analysisSource:analysis,opened:opened,url:url,revision:revision,
+                            stagedLookBaseline:staged)
     }
 
     /// Materialize a native-pixel ROI plus two texels of sampling support. Decoder
@@ -120,6 +132,7 @@ extension RenderEngine {
             texture:base,baseSpace:opened.baseSpace,gainTexture:gainTexture)
         result.samplingRegion = normalized; result.gainSamplingRegion = gainRegion
         result.geometryUncroppedSize = opened.uncroppedSize
+        result.stagedLookBaseline = source.stagedLookBaseline
         try source.revision.validate(source.url)
         return try canonicalizeAuthoredSource(result)
     }

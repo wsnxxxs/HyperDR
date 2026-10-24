@@ -139,6 +139,13 @@ void verify_gain_map_jpeg(const std::filesystem::path&) {
 void verify_avif_decodable(std::span<const std::uint8_t>) {
   fail_without_codecs("AVIF decode verification");
 }
+VerificationResult verify_avif_pixels(std::span<const std::uint8_t>) {
+  fail_without_codecs("AVIF decode verification");
+}
+void write_avif_rows(const EncodingRows&, const EncodingRows&, const GainMapMetadata&,
+    float, const PhotoMetadata&, HdrEncoding, int, const std::filesystem::path&) {
+  fail_without_codecs("AVIF row encoding");
+}
 
 void reconstruct_heic_to_tiff(const std::filesystem::path&,
                               const std::filesystem::path&) {

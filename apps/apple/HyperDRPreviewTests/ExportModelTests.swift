@@ -241,7 +241,10 @@ import HyperDRRender
 
         var request = ExportPlanRequest(choice: .custom(.init(encoding: .avifPq)),
             source: .init(domain: .sdr, pixelSize: .init(width: 6000, height: 4000)), edit: .init(hdrEnabled: true, peakStops: 2))
-        let budget = FixedExportMemoryBudget(bytes: 900_000_000)
+        // AVIF rows hold no whole planes: refuse one byte below what the photo needs.
+        guard case .memory(let needed, _, _, _)? = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1))
+            .blockers.first(where: { $0.code == "export_memory_exceeded" }) else { return XCTFail("AVIF admission") }
+        let budget = FixedExportMemoryBudget(bytes: needed - 1)
         let refused = ExportPlanner.plan(request, budget: budget)
         XCTAssertNotNil(ExportLongEdge.memoryBlocker(refused))
         let edge = try XCTUnwrap(ExportLongEdge.admissible(refused))

@@ -14,6 +14,7 @@ if(HYPERDR_WITH_CODECS)
   list(APPEND HYPERDR_CODEC_SOURCES
     src/avif_decoder.cpp
     src/avif_encoder.cpp
+    src/avif_rows.cpp
     src/heif_encoder.cpp
     src/raster_decoder.cpp
     src/heif_decoder.cpp
@@ -44,10 +45,13 @@ if(HYPERDR_WITH_CODECS)
   find_package(TIFF REQUIRED)
   find_package(ZLIB REQUIRED)
   find_package(libavif CONFIG REQUIRED)
+  # Already libavif's codec; raw AV1 verification must see dimensions/CICP
+  # before libavif's ispe scaling and colr overrides can hide a mismatch.
+  find_package(AOM CONFIG REQUIRED)
   # PRIVATE: nothing above this module includes a codec header, which is the
   # point of the module existing.
   target_link_libraries(hyperdr_codec PRIVATE
-    lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif)
+    lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif AOM::aom)
   # HEVC is VideoToolbox's (src/hevc); the frameworks are C APIs.
   target_link_libraries(hyperdr_codec PRIVATE
     "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo"

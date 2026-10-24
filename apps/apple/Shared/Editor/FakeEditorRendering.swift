@@ -48,6 +48,8 @@ actor FakeEditorRendering: EditorRendering {
     private var made: Set<String> = []
     private var loadedDevelopment: String?
     private(set) var installedLUTs: Set<String> = []
+    /// How many times an export asked for the memory (`yieldMemory`).
+    private(set) var yields = 0
 
     private var current: EditorSource?
     private var holdingRenders = false
@@ -201,6 +203,8 @@ actor FakeEditorRendering: EditorRendering {
         case .unavailable(let reason): throw EditorRenderingError.modelUnavailable(reason)
         }
     }
+
+    func yieldMemory() async { yields += 1 }
 
     func installLUT(_ lut: ColorLUT) async {
         installedLUTs.insert(lut.contentHash)

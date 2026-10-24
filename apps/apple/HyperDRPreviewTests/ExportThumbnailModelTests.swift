@@ -66,11 +66,15 @@ import XCTest
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(a) }
         await start(model, services)
         XCTAssertEqual(model.export.thumbnail, .ready(a))
+        // The editor renders nothing while the export develops the photo;
+        // the summary follows the edit once it ends.
         model.adjustRecipe("tone.exposure", to: 0.8)
-        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(b) }
+        try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(model.export.thumbnail, .ready(a))
         services.sendExport(.finished(result: result("v1"), failure: nil))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(b) }
+        XCTAssertEqual(model.export.thumbnail, .ready(a))
         XCTAssertEqual(model.versionThumbnail("v1"), .ready(a))
         XCTAssertTrue(services.versionThumbnailCalls.isEmpty)
         model.closeDocument()

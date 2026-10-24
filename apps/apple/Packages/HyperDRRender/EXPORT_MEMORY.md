@@ -19,6 +19,74 @@ compressed tiles in both Mac RAW scenarios, but speed and memory showed no stabl
 general improvement. It remains unverified on a physical device or with a real
 110MP RAW; see `docs/reviews/raw-repeatability-film-2026-10-23/FINAL-NO-CACHE-2026-10-24.md`.
 
+## Film/LUT and AVIF memory, editor included — 2026-10-24 (Mac only)
+
+Target: a 61MP photo with film or a LUT stays within 2,000,000,000 B of
+`phys_footprint` for the whole process, the open editor included, at full size,
+float32, with the film unchanged. Measured on the Mac with a Release probe that
+links `Shared/Editor` and Kit as the apps do (not in the repository): the real
+`RecipeEditor` opens `DSC01468.ARW` (9504 × 6336) on a 2940 × 1912 canvas
+(3840 × 2560 preview), applies Portra 400, goes 1:1 and pans twice, then Kit's
+`RecipeExportService` exports from its own `RenderEngine`. Footprint is sampled
+every 2 ms and checked against the kernel's lifetime peak.
+
+Before (main 8db4c890): AVIF used the whole-plane path (5977 MiB with the editor,
+5264 without); RAW 9 film 100 % HEIC 1838 MiB with the editor; RAW 9 film 50 %
+2250 MiB, its export 272 s because every band reopened the RAW for the Apple
+endpoint. Four changes:
+
+1. **PQ/HLG AVIF write from rows** (libavif writer). Rows stage 10-bit RGB
+   (6 B/canvas pixel) and the compressed samples in files beside the output; one
+   ≤1024² cell and one two-thread encoder are resident. Kit charges 96 B/cell
+   pixel + 64 MiB, and system verification 24 B/canvas pixel (ImageIO decodes
+   every grid cell for its thumbnail). Cells are predicted independently, so
+   bytes and seam codes may differ from a whole-plane AVIF. Encoding this RAW
+   takes about 27 s against 10–16 s for HEIC.
+2. **A partial RAW scene look's Apple endpoint is staged once per export**
+   (`StagedLookBaseline`). Before the scene graph opens, the export develops the
+   endpoint in the canonical cells into an anonymous float32 file (16 B/native
+   pixel plus 256 MiB of free space, reserved first; otherwise
+   `insufficientStorage`, shown as a storage error), releases that decoder, and
+   bands read their window back. Bit-identical to reopening per band
+   (`StagedLookBaselineTests`, RAW 8/9, cropped and not). Film 50 % export:
+   272 s → 78 s (HEIC HLG), 96 s (AVIF). The Kit estimate still charges the
+   second decoder allowance.
+3. **The editor yields while an export runs** (`RecipeEditor.yieldToExport` /
+   `resumeAfterExport`, Mac and iOS hosts). The captured edit lands first; the
+   shown frame and the original (still compared) stay; details, AI and original
+   renders stop; `RenderSession` drops its development, detail graph and engine
+   caches. Afterwards it develops the same variant once (bit-identical). Editor
+   resident 1120 → 618 MiB during a film 50 % export.
+4. **Film renders taller than 1024 rows run in 256-row bands**
+   (`graphRegionInBands`). Scatter allocated three float32 textures over the
+   whole region: ≈450 MiB for the 3840 × 2560 preview, ≈290 MiB for a 1:1 detail.
+   A region renders exactly the whole render's pixels (`FilmTests`), so the
+   output is bit-identical; no measurable time change. Export bands (≤516 rows)
+   are unaffected.
+
+| Fresh process, MiB | Open | Look | 1:1 | Pan | Export max | Resume | Lifetime peak | Export s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RAW 9, film 50 %, HEIC HLG (two runs) | 1187 | 1891 / 1931 | 1748 / 1727 | 1862 / 1864 | 1683 / 1700 | 1868 / 1867 | **1894 / 1940** | 78 |
+| RAW 9, film 50 %, AVIF PQ | 1188 | 1931 | 1735 | 1864 | 1699 | 1850 | **1931** | 96 |
+| RAW 9, film 100 %, AVIF PQ | 1190 | 1664 | 1570 | 1551 | 1486 | 1476 | **1664** | 62 |
+| RAW 8, film 50 %, AVIF HLG | 1066 | 1626 | 1436 | 1485 | 1514 | 1530 | **1626** | 89 |
+| RAW 9, film 50 %, HEIC HLG, no editor | — | — | — | — | 1206 | — | **1206** | 78 |
+
+2,000,000,000 B is 1907.3 MiB. Every export now stays under it with the editor
+open. A partial RAW 9 look is **at the limit** (1.99–2.03 GB): the peak is the
+editor applying the look at a 3840 preview, not the export. Then the editor holds
+the scene preview (157 MiB), the 4096-edge analysis development (179), the Apple
+endpoint (157), the new frame's base and RGB gain (314), the original frame and
+the previous frame until it is replaced. Further cuts trade interaction: drop the
+original frame while it is not shown (≈200 MiB, peeking renders it again), or
+develop the analysis source on demand (every tone edit develops again).
+
+Rejected, measured: releasing only the editor's detail graph (30–130 MiB);
+releasing it on reload (no change); clearing the RAW context before the editor's
+Apple endpoint (2342–2367 MiB, worse: the editor peak was render workspace and
+resident frames, not two decoders); keeping detail and original renders apart on
+resume (no change). Not measured on iPhone or iPad, nor with a 110MP RAW.
+
 ## Film pipeline reuse and whole-source ownership — 2026-10-23
 
 Local host: Apple M6, 24 GiB, macOS 27.0.1 (26A434), Xcode 27.1 (27A9275).
@@ -221,7 +289,8 @@ Log LUTs and built-in film are alternative looks. Strength between zero and one
 requires the scene development and the neutral Apple display development to
 preserve both endpoints. `lookBaseline` materializes one matching preview/ROI;
 only its latest texture is cached, never a collection of visited tiles. Export
-uses the existing 4096 × 516 source bound. Partial looks can produce RGB gain;
+uses the existing 4096 × 516 source bound; its Apple endpoint is staged once
+(see the 2026-10-24 section above) rather than developed again for each band. Partial looks can produce RGB gain;
 writers that require mono use the existing explicit reconstruction/resplit path.
 
 `Recipe.needsLookBaseline` travels through editor preflight and is recomputed

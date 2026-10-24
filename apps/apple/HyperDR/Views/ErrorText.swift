@@ -168,6 +168,9 @@ struct ErrorText {
             variants: ["dng": "err.server.raw_unsupported.dng"],
             titleVariants: ["dng": "mac.err.raw_unsupported.dng.title"], showsDetail: false),
         "export_failed": Entry(title: "mac.err.export_failed.title", message: "err.server.export_failed"),
+        // The byte counts are diagnostics; the sentence says what to do.
+        "export_storage_full": Entry(title: "mac.err.export_storage_full.title", message: "err.server.export_storage_full",
+            showsDetail: false),
         "convert_timeout": Entry(title: "mac.err.convert_timeout.title", message: "err.server.convert_timeout"),
     ]
 }

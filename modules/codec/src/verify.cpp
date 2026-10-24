@@ -65,8 +65,8 @@ VerificationResult verify_encoded_file(const std::filesystem::path& path,HdrEnco
   if(encoding==HdrEncoding::SdrJpeg||encoding==HdrEncoding::IsoGainMapJpeg)
     return codec::verify_jpeg_pixels(bytes,encoding==HdrEncoding::IsoGainMapJpeg,frame);
   if(is_avif_encoding(encoding)) {
-    verify_avif_decodable(bytes);
-    VerificationResult result;result.boundedMemory=false;return result;
+    if(frame)throw std::invalid_argument("AVIF has no gain-map frame");
+    return verify_avif_pixels(bytes);
   }
   return codec::verify_heif_pixels(bytes,encoding,frame);
 }

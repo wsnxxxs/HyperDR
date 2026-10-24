@@ -1,6 +1,24 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "ios.export.error.storage" : {
+      "comment" : "Export failure: the export's temporary files need more free storage than the device has.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enough free storage to export this photo. Free up some space and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用存储空间不足，无法导出这张照片。请腾出一些空间后重试。"
+          }
+        }
+      }
+    },
     "ios.settings.rawDevelopment" : {
       "extractionState" : "manual",
       "localizations" : {

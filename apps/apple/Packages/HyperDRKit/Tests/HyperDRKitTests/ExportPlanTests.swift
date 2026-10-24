@@ -451,7 +451,9 @@ struct ExportMemoryPlanTests {
         #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
         #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
         #expect(!ExportWriter.imageIO.supportsRowInput(encoding: .adaptive))
-        #expect(!ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
+        #expect(ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
+        #expect(ExportWriter.libavif.supportsRowInput(encoding: .avifHlg))
+        #expect(!ExportWriter.libavif.supportsRowInput(encoding: .adaptive))
     }
 
     @Test func nativeRowVerificationWorkspaceDoesNotGrowWithHeight() {
@@ -473,7 +475,8 @@ struct ExportMemoryPlanTests {
             let writer: ExportWriter = encoding.isAVIF ? .libavif : .imageIO
             let result = ExportMemoryEstimate.estimate(.init(source: source(), photoSize: photo, canvas: photo,
                 encoding: encoding, writer: writer, writesGainMap: encoding.writesGainMap,
-                isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0))
+                isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0,
+                allowsRowInput: false))
             #expect(result.nativeVerify == result.systemVerify)
             #expect(result.verify > photo.pixels * 16)
         }
@@ -929,8 +932,13 @@ struct ExportPlanGapTests {
     }
 
     @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
+        // AVIF rows no longer hold whole planes, so a fixed budget would only
+        // restate today's estimate; refuse one byte below what the photo needs.
+        let avif = request(.custom(.init(encoding: .avifPq)), source: source(.rawEDR, size: photo))
+        guard case .memory(let needed, _, _, _)? = plan(avif, available: 1).blockers.first(where: {
+            $0.code == "export_memory_exceeded" }) else { Issue.record("AVIF admission"); return }
         for (encoding, sourceSize, budget) in [
-            (ExportEncoding.avifPq, photo, 1_800_000_000),
+            (ExportEncoding.avifPq, photo, needed - 1),
             // Native decoder/ROI work is covered by the fixed allowance;
             // output rows determine the admissible boundary at this budget.
             (.isoGainMapJPEG, ExportPixelSize(width: 12800, height: 8600),

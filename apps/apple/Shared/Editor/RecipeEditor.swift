@@ -211,6 +211,10 @@ import Observation
     @ObservationIgnored private var viewport: CanvasViewport?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
     @ObservationIgnored private var detailGeneration = 0
+    /// Exports developing the photo with the memory the editor gave up
+    /// (`yieldToExport`); renders wait until the last `resumeAfterExport`.
+    private var exportYields = 0
+    var isYieldingToExport: Bool { exportYields > 0 }
 
     init(renderer: any EditorRendering, frameClock: any EditorFrameClock = ContinuousFrameClock(),
          detailIdle: Duration = .milliseconds(250)) {
@@ -619,7 +623,7 @@ import Observation
     }
 
     private func submitPending() {
-        guard let request = pending else { return }
+        guard !isYieldingToExport, let request = pending else { return }
         if let flight = inFlight {
             if flight.request == request {
                 pending = nil
@@ -667,7 +671,7 @@ import Observation
     }
 
     private func scheduleOriginalIfNeeded(size: HyperDRRender.PixelSize) {
-        guard let original = request(for: recipe.original, size: size, interactive: false) else { return }
+        guard !isYieldingToExport, let original = request(for: recipe.original, size: size, interactive: false) else { return }
         var wanted = original
         wanted.bypassedGroups = []
         wanted.usesModelGain = false
@@ -701,6 +705,7 @@ import Observation
                     self.failedOriginalRequest = wanted
                 }
                 self.noteFailure(error)
+                self.scheduleDetails()
             }
         }
         originalFlight = Flight(generation: generation, request: wanted, task: task)
@@ -802,6 +807,57 @@ import Observation
                                    lut: lut, automaticValues: automatic ?? [:])
     }
 
+    // MARK: - Exports
+
+    /// Before an export develops the photo: keeps the frames the canvas shows
+    /// (the edit and the original, which the viewer can still compare) and
+    /// gives up the rest, the full-size details and the renderer's preview
+    /// development and caches,
+    /// so the export's own RAW development has that memory
+    /// (`Packages/HyperDRRender/EXPORT_MEMORY.md`). The recipe, undo and the
+    /// shown frames stay; renders asked for meanwhile wait. Take the export's
+    /// capture first. Every call is followed by `resumeAfterExport`.
+    func yieldToExport() async {
+        guard exportYields == 0 else {
+            exportYields += 1
+            return
+        }
+        // The canvas shows the exported recipe: its frame lands first.
+        while pending != nil || inFlight != nil || pacing != nil {
+            if let pacing {
+                pacing.cancel()
+                self.pacing = nil
+            }
+            if inFlight == nil { submitPending() }
+            if let flight = inFlight { await flight.task.value }
+            await Task.yield()
+        }
+        exportYields += 1
+        originalFlight?.task.cancel()
+        originalFlight = nil
+        detailTask?.cancel()
+        detailTask = nil
+        detailGeneration += 1
+        detailFrame = nil
+        originalDetailFrame = nil
+        modelTask?.cancel()
+        modelTask = nil
+        modelKey = nil
+        await renderer.yieldMemory()
+    }
+
+    /// The export ended (finished, failed or cancelled): renders resume, and
+    /// the details the canvas needs develop again.
+    func resumeAfterExport() {
+        guard exportYields > 0 else { return }
+        exportYields -= 1
+        guard exportYields == 0 else { return }
+        if pending != nil, pacing == nil { submitPending() }
+        if let size = previewSize, !isDragging { scheduleOriginalIfNeeded(size: size) }
+        updateModelGain()
+        scheduleDetails()
+    }
+
     // MARK: - Canvas layers
 
     /// What the canvas shows, from the host on every pan, zoom, resize and
@@ -842,8 +898,10 @@ import Observation
     private func scheduleDetails() {
         detailTask?.cancel()
         detailTask = nil
-        guard let source, let viewport, !isDragging, pending == nil, pacing == nil, inFlight == nil,
-              !viewport.visible.isEmpty else { return }
+        // A detail develops the full-size source: never beside another
+        // development (the original's comes back from its flight to here).
+        guard !isYieldingToExport, let source, let viewport, !isDragging, pending == nil, pacing == nil,
+              inFlight == nil, originalFlight == nil, !viewport.visible.isEmpty else { return }
         // No detail while the crop is edited: the canvas draws the photo turned and tilted.
         guard !isEditingCrop else { return }
         let photo = renderedGeometry.outputSize(of: source.pixelSize)
@@ -858,7 +916,7 @@ import Observation
             request.isInteractive = false
             return request
         }
-        let original = originalFlight == nil ? wanted(originalFrame, originalDetailFrame, shown: viewport.showsOriginal) : nil
+        let original = wanted(originalFrame, originalDetailFrame, shown: viewport.showsOriginal)
         let edited = wanted(frame, detailFrame, shown: viewport.showsEdited)
         guard original != nil || edited != nil else { return }
         detailGeneration += 1
@@ -993,7 +1051,7 @@ import Observation
     }
 
     private func startPrediction(_ key: ModelKey) {
-        guard let size = previewSize ?? canvasPhotoSize,
+        guard !isYieldingToExport, let size = previewSize ?? canvasPhotoSize,
               let request = request(for: recipe, size: size, interactive: false) else { return }
         modelTask?.cancel()
         modelKey = key
@@ -1052,7 +1110,8 @@ import Observation
             if let flight = originalFlight { await flight.task.value; await Task.yield(); continue }
             if let modelTask { await modelTask.value; await Task.yield(); continue }
             if let detailTask { await detailTask.value; await Task.yield(); continue }
-            if pending != nil { submitPending(); await Task.yield(); continue }
+            // A render held for an export is not pending work to wait for.
+            if pending != nil, !isYieldingToExport { submitPending(); await Task.yield(); continue }
             return
         }
     }

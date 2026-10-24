@@ -257,12 +257,18 @@ extension ExportMemoryEstimate {
             ? min(input.photoSize.width, PreparedExportRows.maximumSourceTileSize.width)
                 * min(input.photoSize.height, PreparedExportRows.maximumSourceTileSize.height)
                 * PreparedExportRows.filmWorkspaceBytesPerPixel : 0
-        let heic = input.encoding == .adaptive || input.encoding.isBT2100
+        let avif = input.encoding.isAVIF
+        let heic = input.encoding == .adaptive || (input.encoding.isBT2100 && !avif)
         // encode_heic_rows materializes one RGB Float slab (12 B/px), not
         // full-width YUV/float canvases. VT has at most four 512px pictures in
         // flight; reserve their buffers/framework workspace separately (32 MiB).
         // Completed tiles are spooled to an anonymous file, not retained by VT.
-        let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
+        // AVIF's RGB16 staging and compressed samples are file-backed. Only
+        // one <=1024-square cell / two-thread libaom context is resident. Keep
+        // a conservative 96 B/cell-pixel plus 64 MiB for codec/container buffers.
+        let avifWorkspace = avifRowCell(canvas: input.canvas).pixels * 96 + (64 << 20)
+        let codec = avif ? avifWorkspace
+            : heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
             : input.canvas.width * 32
         let compressedCache = heic ? streamedHEICSampleBytes : 0
         // Both package routes stream the container into the staged file.
@@ -280,12 +286,17 @@ extension ExportMemoryEstimate {
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
         // reader's last ROI/graph priced while it remains alive in the caller.
         let verifierResident = resident
-        let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
+        let nativeWorkspace = avif ? avifWorkspace
+            : (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
         let nativeVerify = verifierResident + nativeWorkspace
         // No full auxiliary dictionary on native row output. JPEG/HEIC CI
         // readback requests decoder subsampling by 8 and a <=256px thumbnail.
         // Keep decoder row/tile workspace beside fixed base/gain/float buffers.
-        let systemVerify = verifierResident + nativeWorkspace + 256 * 256 * (gain ? 40 : 16)
+        // ImageIO can decode every AVIF grid cell to make its thumbnail. Unlike
+        // JPEG/HEVC subsampling, a 256px result does not bound that workspace.
+        // Reserve a native-area decoder here, after the native cell reader ends.
+        let systemVerify = verifierResident + (avif ? input.canvas.pixels * 24 : nativeWorkspace)
+            + 256 * 256 * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
                      packaging: assembly, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)
@@ -309,32 +320,17 @@ extension ExportMemoryEstimate {
     /// It no longer scales with canvas area, quality, or the encoded file size.
     static let streamedHEICSampleBytes = 16 * 1024 * 1024
 
-    /// libaom refuses a source frame above its cap, so a large canvas is coded
-    /// as a grid of cells (`modules/codec/include/hyperdr/codec/avif_grid.hpp`).
-    /// nil means one item, which is what every destination size uses.
-    static func avifCell(canvas: ExportPixelSize) -> ExportPixelSize? {
-        let border = 160
-        let alignedWidth = (canvas.width + 7) & ~7
-        let alignedHeight = (canvas.height + 7) & ~7
-        let stride = (alignedWidth + 2 * border + 31) & ~31
-        let plane = (alignedHeight + 2 * border) * stride
-        let pyramid = canvas.pixels / 3 * 4 + (1 << 20)
-        let singleFrame = 2 * 3 * plane + pyramid
-        guard singleFrame > avifSingleFrameBudget else { return nil }
-        let maxCell = 4096, alignment = 64
-        let columns = min(max((canvas.width + maxCell - 1) / maxCell, 1), 256)
-        let rows = min(max((canvas.height + maxCell - 1) / maxCell, 1), 256)
-        func cellSide(_ size: Int, _ count: Int) -> Int {
-            guard count > 1 else { return size }
+    /// Mirrors avif_row_grid_layout in codec/avif_grid.hpp. The row writer
+    /// always bounds cells, rather than waiting for libaom's 1 GiB frame cap.
+    static func avifRowCell(canvas: ExportPixelSize) -> ExportPixelSize {
+        let maxCell = 1024, alignment = 64
+        func cellSide(_ size: Int) -> Int {
+            let count = max(1, (size + maxCell - 1) / maxCell)
             let balanced = (size + count - 1) / count
             return (balanced + alignment - 1) / alignment * alignment
         }
-        return ExportPixelSize(width: cellSide(canvas.width, columns),
-                               height: cellSide(canvas.height, rows))
+        return ExportPixelSize(width: cellSide(canvas.width), height: cellSide(canvas.height))
     }
-
-    /// libaom's 1 GiB cap, less a tenth for allocator and build differences.
-    static let avifSingleFrameBudget = (1 << 30) / 10 * 9
 }
 
 extension ExportEncoding {

@@ -671,8 +671,8 @@ std::string package_image(const PackageRequest& request) {
 }
 
 bool package_rows_supported(OutputEncoding encoding) {
-  // libavif's current grid API keeps every YUV cell alive through AddImageGrid.
-  return kCodecsAvailable && !is_avif_encoding(encoding);
+  (void)encoding;
+  return kCodecsAvailable;
 }
 
 std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,const PackageRows& read) {
@@ -694,6 +694,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     validate_offsets(*request.gain,channels,request.presentation_frame);
   }
   if((request.encoding==OutputEncoding::SdrJpeg||request.encoding==OutputEncoding::IsoGainMapJpeg)&&(width>65500||height>65500))throw ExportDimensionLimit(width,height);
+  if(is_avif_encoding(request.encoding)&&!avif_canvas_decodable(width,height))throw ExportDimensionLimit::avif(width,height);
   if(request.frame_photo) {
     const auto& f=*request.frame_photo;
     if(!request.presentation_frame||!is_gain_map_encoding(request.encoding)||!request.gain ||
@@ -750,7 +751,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
       const auto normalized=range>kEpsilon?clamp_finite((v-gain->gain_min)/range,0.f,1.f):0.f;
       const auto encoded=encode_gain_code(normalized,gain->gamma);
       const auto code=request.presentation_frame&&std::abs(v)<=kFrameZeroTolerance?gain->zero_code:
-          !is_gain_map_encoding(request.encoding)?encoded:
+          // AVIF, like whole-plane packaging, reconstructs from stored 8-bit
+          // gain codes. Only PQ/HLG HEIC keeps continuous float codes.
+          !(is_gain_map_encoding(request.encoding)||is_avif_encoding(request.encoding))?encoded:
           !request.presentation_frame?quantize_gain_code_dithered(encoded,x,y):std::round(encoded*255)/255;
       if(request.frame_photo) {
         const auto& f=*request.frame_photo;
@@ -768,6 +771,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     case OutputEncoding::SdrJpeg:write_sdr_jpeg_rows(base_rows,photo,request.quality,resolved_gamut(request),staged.path);break;
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
+    case OutputEncoding::AvifPq:
+    case OutputEncoding::AvifHlg:
+      write_avif_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,staged.path);break;
     default: {
       write_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame,staged.path);break;
     }

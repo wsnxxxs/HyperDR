@@ -95,7 +95,8 @@ void verify_avif_decodable(std::span<const std::uint8_t> bytes);
 
 // Native-pixel file verification. Compressed files are borrowed through a
 // read-only mapping; JPEG/TIFF rows and HEIC tiles never form a whole raster.
-// AVIF currently retains its complete decoded YUV image (boundedMemory=false).
+// AVIF grids are verified one coded cell at a time; legacy single-item AVIF
+// may still require a complete decoded YUV image.
 struct VerificationFrame {
   std::uint32_t width{},height{},x{},y{},photoWidth{},photoHeight{};
 };
@@ -162,6 +163,13 @@ void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& code
 void write_heic_rows(const EncodingRows& base,
     const EncodingRows& codes, const GainMapMetadata&, float headroom,
     const PhotoMetadata&, OutputEncoding, int quality, int depth, bool frame, const std::filesystem::path&);
+
+// Disk-staged 10-bit 4:4:4 AVIF grid: one small coded cell/context resident.
+// Rows are replayable, as for HEIC. No full-canvas pixel allocation.
+void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
+    const GainMapMetadata&, float headroom, const PhotoMetadata&, HdrEncoding,
+    int quality, const std::filesystem::path&);
+[[nodiscard]] VerificationResult verify_avif_pixels(std::span<const std::uint8_t>);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

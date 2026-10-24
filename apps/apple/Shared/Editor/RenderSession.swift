@@ -28,7 +28,9 @@ actor RenderSession: EditorRendering {
         /// one, so a reload checks this first (R23-001).
         let revision: FileRevision
         /// The latest loaded variant; all share `id` (source and model identity).
-        var source: RenderSource
+        /// Nil while an export holds the memory (`yieldMemory`): the next
+        /// request loads `options` again.
+        var source: RenderSource?
         var options: SourceOptions
         var detail: ExportSource?
         var detailOptions: SourceOptions?
@@ -218,34 +220,43 @@ actor RenderSession: EditorRendering {
                             modelGain: request.usesModelGain ? prediction(for: recipe, source: tile) : nil,
                             options: options, generation: generation)
         }
+        var reload: SourceOptions?
         if request.keepsSource {
             var kept = sourceOptions
             kept.resolution = opened.options.resolution
             // Only RAW is developed: a film's scene-linear development changes nothing else.
-            guard kept == opened.options || opened.source.domain != .rawEDR else {
+            guard kept == opened.options || opened.editor.domain != .rawEDR else {
                 throw EditorRenderingError.needsDevelopment
             }
-        } else if sourceOptions != opened.options && opened.source.reusesRAWPreview(options: sourceOptions) {
+        } else if sourceOptions != opened.options, opened.source?.reusesRAWPreview(options: sourceOptions) == true {
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
             opened.options = sourceOptions
             self.opened = opened
         } else if sourceOptions != opened.options {
+            reload = sourceOptions
+        }
+        // An export had the memory: develop the same variant again.
+        if reload == nil, opened.source == nil { reload = opened.options }
+        if let reload {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
-            let source = try await engine.load(opened.editor.url, options: sourceOptions, preparingAnalysis: true)
+            let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true)
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
             try Task.checkCancellation()
             try checkCurrent(generation)
-            opened.source = source
-            opened.options = sourceOptions
-            self.opened = opened
+            guard var current = self.opened else { throw EditorRenderingError.noSource }
+            current.source = source
+            current.options = reload
+            self.opened = current
+            opened = current
         }
         try Task.checkCancellation()
+        guard let source = opened.source else { throw EditorRenderingError.noSource }
         // Looked up on the source the request renders from: another
         // development has no prediction yet, and the frame says it is pending.
-        let modelGain = request.usesModelGain ? prediction(for: recipe, source: opened.source) : nil
-        return Prepared(source: opened.source, lut: lut, modelGain: modelGain, options: options, generation: generation)
+        let modelGain = request.usesModelGain ? prediction(for: recipe, source: source) : nil
+        return Prepared(source: source, lut: lut, modelGain: modelGain, options: options, generation: generation)
     }
 
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
@@ -327,6 +338,17 @@ actor RenderSession: EditorRendering {
 
     func installLUT(_ lut: ColorLUT) async {
         luts[lut.contentHash] = lut
+    }
+
+    func yieldMemory() async {
+        if var opened {
+            // The previous development's native graph and textures go with it.
+            opened.source = nil
+            opened.detail = nil
+            opened.detailOptions = nil
+            self.opened = opened
+        }
+        await engine.clearCaches()
     }
 
     func close() async {

@@ -72,6 +72,8 @@ extension UserFacingError {
             else { self.init(code: "export_failed", detail: detail) }
         case .verificationFailed(let detail): self.init(code: "export_failed", detail: "verification failed: " + detail)
         case .invalidStripes: self.init(code: "export_failed", detail: "invalid stripes")
+        case .insufficientStorage(let required, let available):
+            self.init(code: "export_storage_full", detail: "required \(required) bytes, available \(available)")
         }
     }
 
@@ -89,6 +91,8 @@ extension UserFacingError {
         case .gpu(let detail): self.init(code: "metal_unavailable", detail: detail)
         case .aiNotAvailable: self.init(code: "model_not_ready")
         case .invalidLUT(let detail): self.init(code: "lut_invalid", detail: detail)
+        case .insufficientStorage(let required, let available):
+            self.init(code: "export_storage_full", detail: "required \(required) bytes, available \(available)")
         case .invalidSize, .invalidRegion, .invalidAdjustment, .duplicateHDRSplit:
             self.init(code: "internal_error", detail: String(describing: error))
         }

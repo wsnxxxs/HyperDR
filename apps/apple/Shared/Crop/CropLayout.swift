@@ -82,15 +82,22 @@ struct CropLayout: Equatable {
     /// The photo's outline on the canvas.
     var photoOutline: [CGPoint] { geometry.quad(for: photo).map(point) }
 
-    /// What the canvas draws: each canvas point looked up in the photo.
-    func display(clipsToCrop: Bool, dimsOutsideCrop: Bool) -> GeometryDisplay {
+    /// What the canvas draws: each canvas point looked up in the frame shown,
+    /// which was rendered with `rendered` (the whole photo, or until it arrives
+    /// on entering the pane, the crop it had). A cropped frame lands on its
+    /// crop and the canvas stays clear around it, so the pane opens in place.
+    func display(clipsToCrop: Bool, dimsOutsideCrop: Bool, rendered: Geometry = .identity) -> GeometryDisplay {
         let w = Double(viewport.width), h = Double(viewport.height)
         // Canvas fractions to frame pixels, back through the geometry to the
-        // photo's pixels about its centre, then to photo fractions.
+        // photo's pixels about its centre, then forward through the rendered
+        // geometry to the fractions of its output.
         let canvasToFrame = Homography(m: [w / scale, 0, centre.x - w / (2 * scale),
                                            0, h / scale, centre.y - h / (2 * scale), 0, 0, 1])
-        let photoToFractions = Homography(m: [1 / photo.width, 0, 0.5, 0, 1 / photo.height, 0.5, 0, 0, 1])
-        let m = (photoToFractions * geometry.transform(for: photo).inverse * canvasToFrame).m.map(Float.init)
+        let output = rendered.rasterCropRect(for: photo)
+        let outputToFractions = Homography.scale(x: 1 / output.width, y: 1 / output.height)
+        let fromCentre = Homography.translation(x: photo.width / 2, y: photo.height / 2)
+        let m = (outputToFractions * rendered.photoToOutput(for: photo) * fromCentre
+                 * geometry.transform(for: photo).inverse * canvasToFrame).m.map(Float.init)
         let crop = cropRect
         return GeometryDisplay(
             photoFromCanvas: simd_float3x3(columns: (SIMD3(m[0], m[3], m[6]), SIMD3(m[1], m[4], m[7]), SIMD3(m[2], m[5], m[8]))),

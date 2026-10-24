@@ -156,19 +156,23 @@ struct EditorCanvas: View {
                                     var recipe = editor.recipe
                                     recipe.geometry = geometry
                                     editor.setRecipe(recipe)
-                                }, onEditing: { editor.editingGeometry($0) })
+                                }, onEditing: { editor.editingGeometry($0) },
+                                onCancel: { editor.endCropInteraction() })
                 } else if !cropping {
                     adornments
                 }
             }
     }
 
-    /// The crop pane's placement of the photo; also, once it is left, until
-    /// the cropped frame arrives (the whole photo drawn through the crop, so
-    /// it never shows uncropped). Nil when the frame shown is not the whole photo.
+    /// The crop pane's placement of the photo, drawn from whatever frame is
+    /// shown (on entering, the cropped one lands on its crop until the whole
+    /// photo arrives); also, once the pane is left, until the cropped frame
+    /// arrives (the whole photo drawn through the crop, so it never shows
+    /// uncropped). Nil outside the pane when the frame shown is not the whole photo.
     private func cropLayout(_ viewport: CGSize) -> CropLayout? {
-        guard let frame = editor.frame, let source = editor.frameSource, frame.request.recipe.geometry == .identity,
-              cropping || !editor.recipe.geometry.isIdentity, viewport.width > 0, viewport.height > 0 else { return nil }
+        guard let frame = editor.frame, let source = editor.frameSource,
+              cropping || (frame.request.recipe.geometry == .identity && !editor.recipe.geometry.isIdentity),
+              viewport.width > 0, viewport.height > 0 else { return nil }
         if cropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
         let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
         return CropLayout(photo: photo, geometry: editor.recipe.geometry, viewport: viewport,
@@ -213,7 +217,8 @@ struct EditorCanvas: View {
                                        mode: mode, splitRatio: splitRatio,
                                        previewsAsSDR: editor.previewsAsSDR,
                                        imageSize: CGSize(width: size.width, height: size.height),
-                                       geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping))
+                                       geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping,
+                                                               rendered: frame.request.recipe.geometry))
     }
 
     /// The split divider and the badge, in the canvas's coordinates.

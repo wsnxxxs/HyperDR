@@ -121,4 +121,76 @@ import Testing
         let decoded = try Recipe.decode(Data(newer.utf8))
         #expect(decoded.geometry.aspect == .free && decoded.geometry.quarterTurns == 1)
     }
+    @Test func directInscribedRectIsMaximalForAllTurnsAndTilts() {
+        for size in [photo, GeometrySize(width: 1, height: 2), GeometrySize(width: 11000, height: 10000)] {
+            for turn in 0..<4 {
+                for angle in [-45.0, -13, 0, 17, 45] {
+                    for tilt in [-100.0, 0, 100] {
+                        let geometry = Geometry(angle: angle, vertical: tilt, horizontal: -tilt,
+                                                quarterTurns: turn, flipped: turn % 2 == 0, aspect: .portrait4x5)
+                        let rect = geometry.cropRect(for: size)
+                        let quad = geometry.quad(for: size)
+                        #expect(rect.width > 0 && rect.height > 0)
+                        #expect(abs(rect.width / rect.height - 0.8) < 1e-9)
+                        #expect(rect.corners.allSatisfy { Geometry.contains(quad, $0) })
+                        let larger = GeometryRect(centre: rect.centre, size: GeometrySize(width: rect.width * 1.001, height: rect.height * 1.001))
+                        #expect(!larger.corners.allSatisfy { Geometry.contains(quad, $0) })
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func malformedControlValuesCannotProduceNonfiniteTransforms() {
+        let geometry = Geometry(angle: .nan, vertical: .infinity, horizontal: -.infinity,
+                                quarterTurns: Int.max, crop: CropRect(centreX: .nan, centreY: 0, width: -1, height: 0))
+        #expect(geometry.transform(for: photo).m.allSatisfy { $0.isFinite })
+        #expect(geometry.outputSize(of: photo) == (3000, 4000))
+        #expect(geometry.turnedLeft().quarterTurns == 0)
+    }
+
+    @Test func settingCropEnforcesLockWithoutEnlargingAndKeepsPosition() {
+        let geometry = Geometry(angle: 25, vertical: 80, aspect: .portrait4x5)
+        let proposal = CropRect(centreX: 0.05, centreY: -0.04, width: 0.8, height: 0.6)
+        let result = geometry.settingCrop(proposal, photo: photo)
+        let rect = result.cropRect(for: photo)
+        #expect(abs(rect.width / rect.height - 0.8) < 1e-9)
+        #expect(abs(rect.centre.x - 200) < 1e-9 && abs(rect.centre.y + 120) < 1e-9)
+        #expect(rect.width <= 3200 && rect.height <= 1800)
+        #expect(rect.corners.allSatisfy { Geometry.contains(geometry.quad(for: photo), $0) })
+        #expect(result.turnedLeft().aspect == .landscape5x4)
+        #expect(abs(result.turnedLeft().cropRect(for: photo).width / result.turnedLeft().cropRect(for: photo).height - 1.25) < 1e-9)
+        #expect(abs(result.mirrored().cropRect(for: photo).width / rect.height - 0.8) < 1e-9)
+    }
+
+    @Test func aCropCentredOnTheBoundaryRemainsPositiveAndStable() {
+        let result = Geometry(aspect: .square).settingCrop(
+            CropRect(centreX: 0.5, centreY: 0, width: 0.4, height: 0.4), photo: photo)
+        #expect(result.crop!.width > 0 && result.crop!.height > 0)
+        #expect(result.resolvedCrop(for: photo) == result.crop)
+        #expect(result.crop!.centreX == 0)
+        let overflow = Geometry(crop: CropRect(centreX: 1e308, centreY: 0, width: 1e308, height: 1))
+        #expect(overflow.outputSize(of: photo) == (4000, 3000))
+    }
+
+    @Test func rasterWindowKeepsOddPixelGridsAndOffsetsAcrossTurnsAndMirrors() {
+        let odd = GeometrySize(width: 95, height: 63)
+        for turns in 0..<4 {
+            for flipped in [false, true] {
+                let geometry = Geometry(quarterTurns: turns, flipped: flipped,
+                                        crop: CropRect(centreX: 0.071, centreY: -0.043, width: 0.53, height: 0.61))
+                let map = geometry.photoToOutput(for: odd)
+                #expect(abs(map.m[2] - map.m[2].rounded()) < 1e-10)
+                #expect(abs(map.m[5] - map.m[5].rounded()) < 1e-10)
+                let crop = geometry.rasterCropRect(for: odd)
+                let output = geometry.outputSize(of: odd)
+                #expect(crop.width == Double(output.width) && crop.height == Double(output.height))
+                let topLeft = geometry.transform(for: odd).inverse.apply(
+                    GeometryPoint(x: crop.minX, y: crop.minY))
+                let mapped = map.apply(GeometryPoint(x: topLeft.x + odd.width / 2, y: topLeft.y + odd.height / 2))
+                #expect(abs(mapped.x) < 1e-10 && abs(mapped.y) < 1e-10)
+            }
+        }
+    }
+
 }

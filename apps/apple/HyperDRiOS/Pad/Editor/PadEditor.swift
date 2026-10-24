@@ -97,7 +97,9 @@ struct PadEditor: View {
         .onChange(of: undoManager.map(ObjectIdentifier.init), initial: true) { editor.attach(undoManager: undoManager) }
         .onChange(of: tool, initial: true) { _, tool in
             // The frame is drawn from the whole photo: leave zoom and split behind.
-            if tool == .frame || tool == .crop, comparison != .edited { comparison = .edited }
+            // The crop pane shows the edit alone (`EditorCanvas.mode`) and keeps
+            // the comparison chosen for when it is left.
+            if tool == .frame, comparison != .edited { comparison = .edited }
             // The crop is edited on the whole photo, rendered once; leaving renders it cropped.
             editor.isEditingCrop = tool == .crop && !showingExport
         }
@@ -177,7 +179,7 @@ struct PadEditor: View {
         guard let transform, let photo = editor.canvasPhotoSize,
               transform.imageSize == CGSize(width: photo.width, height: photo.height),
               let visible = transform.visibleSourceRect else { return nil }
-        let mode = EditorCanvas.mode(editor, comparison: comparison, holding: holdingOriginal)
+        let mode = EditorCanvas.mode(editor, comparison: comparison, holding: holdingOriginal, cropping: tool == .crop)
         return CanvasViewport(visible: visible,
                               displayedWidth: Double(transform.displayedSize.width * transform.backingScale),
                               showsEdited: mode != .original, showsOriginal: mode != .edited)

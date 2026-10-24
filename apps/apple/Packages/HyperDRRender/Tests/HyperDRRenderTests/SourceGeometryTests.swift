@@ -124,4 +124,117 @@ import HyperDRRecipe
         let export = try await engine.openExportSource(heic, options: options)
         #expect(export.id == source.id && export.nativeSize == source.nativeSize)
     }
+    @Test func projectivePixelsAndRegionReadsUseTheModelsInverseCoordinates() throws {
+        let width = 160, height = 120
+        var pixels = [Float]()
+        for y in 0..<height {
+            for x in 0..<width {
+                pixels += [Float(x + 1) / Float(width), Float(y + 1) / Float(height), 1, 1]
+            }
+        }
+        let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+        let data = pixels.withUnsafeBytes { Data($0) }
+        let image = CIImage(bitmapData: data, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: space)
+        let context = CIContext(options: [.workingColorSpace: space])
+        let photo = GeometrySize(width: Double(width), height: Double(height))
+        for geometry in [Geometry(angle: 31, vertical: 100, horizontal: -100, quarterTurns: 1),
+                         Geometry(angle: -45, horizontal: 90, quarterTurns: 3, flipped: true)] {
+            let result = try OpenedSource.transform(image, geometry)
+            let crop = geometry.cropRect(for: photo)
+            let output = geometry.outputSize(of: photo)
+            let inverse = geometry.transform(for: photo).inverse
+            var full = [Float](repeating: 0, count: output.width * output.height * 4)
+            context.render(result, toBitmap: &full, rowBytes: output.width * 16,
+                           bounds: result.extent, format: .RGBAf, colorSpace: space)
+            for (x, y) in [(output.width / 3, output.height / 3), (output.width * 2 / 3, output.height * 2 / 3)] {
+                let source = inverse.apply(GeometryPoint(x: Double(x) + 0.5 - Double(output.width) / 2 + crop.centre.x,
+                                                        y: Double(output.height) / 2 - Double(y) - 0.5 + crop.centre.y))
+                // Core Image bitmap rows run from the top; bounds use y up.
+                let index = ((output.height - 1 - y) * output.width + x) * 4
+                #expect(abs(Double(full[index]) - (source.x + photo.width / 2 + 0.5) / photo.width) < 0.015)
+                #expect(abs(Double(full[index + 1]) - (photo.height / 2 + source.y + 0.5) / photo.height) < 0.015)
+                var region = [Float](repeating: 0, count: 4)
+                context.render(result, toBitmap: &region, rowBytes: 16,
+                               bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: space)
+                #expect(zip(region, full[index..<(index + 4)]).allSatisfy { abs($0 - $1) < 1e-5 })
+            }
+        }
+    }
+
+    @Test func oddCheckerboardHasTheSamePixelPhaseInPreviewRegionAndExport() async throws {
+        let width = 95, height = 63
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 4
+                bytes[index] = (x + y) % 2 == 0 ? 255 : 0
+                bytes[index + 1] = bytes[index]
+                bytes[index + 2] = bytes[index]
+            }
+        }
+        let context = CIContext()
+        let image = CIImage(bitmapData: Data(bytes), bytesPerRow: width * 4,
+                            size: CGSize(width: width, height: height), format: .RGBA8,
+                            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("checker.png")
+        try context.writePNGRepresentation(of: image, to: file, format: .RGBA8,
+                                           colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        let engine = try RenderEngine()
+        for turns in 0..<4 {
+            let geometry = Geometry(quarterTurns: turns, flipped: turns % 2 == 0,
+                                    crop: CropRect(centreX: 0.071, centreY: -0.043, width: 0.53, height: 0.61))
+            // A scaled/translated decoded preview must retain the native
+            // crop phase, rather than snap its translation a second time.
+            let transformed = try OpenedSource.transform(image, geometry)
+            let decodedPreview = image.transformed(by: CGAffineTransform(translationX: 3, y: 7).scaledBy(x: 0.37, y: 0.41))
+            let scaled = try OpenedSource.transform(decodedPreview, geometry,
+                nativePhoto: GeometrySize(width: Double(width), height: Double(height)))
+            let expected = transformed.transformed(by: CGAffineTransform(
+                scaleX: scaled.extent.width / transformed.extent.width,
+                y: scaled.extent.height / transformed.extent.height))
+            let count = Int(scaled.extent.width * scaled.extent.height) * 4
+            var expectedPixels = [Float](repeating: 0, count: count)
+            var scaledPixels = expectedPixels
+            context.render(expected, toBitmap: &expectedPixels, rowBytes: Int(scaled.extent.width) * 16,
+                           bounds: scaled.extent, format: .RGBAf, colorSpace: nil)
+            context.render(scaled, toBitmap: &scaledPixels, rowBytes: Int(scaled.extent.width) * 16,
+                           bounds: scaled.extent, format: .RGBAf, colorSpace: nil)
+            #expect(zip(expectedPixels, scaledPixels).allSatisfy { abs($0 - $1) < 1e-5 })
+            var options = SourceOptions()
+            options.geometry = geometry
+            let full = try await engine.load(file, options: options)
+            options.resolution = .preview(maximumSize: full.nativeSize)
+            let preview = try await engine.load(file, options: options)
+            let pixels = RenderEngine.readTexture(full.texture)
+            let previewPixels = RenderEngine.readTexture(preview.texture)
+            #expect(full.size == preview.size)
+            #expect(zip(pixels, previewPixels).allSatisfy { abs($0 - $1) < 1e-5 })
+            #expect(abs(pixels[0] - pixels[4]) > 0.99)
+            #expect(abs(pixels[0] - pixels[full.size.width * 4]) > 0.99)
+            // Whole-pixel crop/turn/mirror must not blur the one-pixel checks.
+            #expect(stride(from: 0, to: pixels.count, by: 4).allSatisfy { pixels[$0] < 0.001 || pixels[$0] > 0.999 })
+            let export = try await engine.openExportSource(file, options: optionsWithFullResolution(options))
+            let region = CGRect(x: 3, y: 5, width: 11, height: 9)
+            let tile = try await engine.materializeExportRegion(export, outputSize: full.nativeSize, region: region, halo: 0)
+            let tilePixels = RenderEngine.readTexture(tile.texture)
+            for y in 0..<9 {
+                for x in 0..<11 {
+                    let sourceIndex = ((y + 5) * full.size.width + x + 3) * 4
+                    let tileIndex = (y * 11 + x) * 4
+                    #expect(abs(pixels[sourceIndex] - tilePixels[tileIndex]) < 1e-5)
+                }
+            }
+        }
+    }
+
+    private func optionsWithFullResolution(_ options: SourceOptions) -> SourceOptions {
+        var full = options
+        full.resolution = .full
+        return full
+    }
+
 }

@@ -98,6 +98,11 @@ import Observation
     /// the crop or the straightening never renders again. Leaving renders the
     /// photo as cropped.
     var isEditingCrop = false {
+        willSet {
+            // Finish while requests still describe the uncropped photo. Once
+            // the mode changes, compute the new size before scheduling anything.
+            if isEditingCrop, !newValue { endCropInteraction() }
+        }
         didSet {
             guard isEditingCrop != oldValue else { return }
             if !isEditingCrop { cancelUpright() }
@@ -472,8 +477,39 @@ import Observation
     }
 
     /// The crop pane's drags (the crop box, straightening, perspective): one step each.
+    /// Begin before the first recipe write; end after the last (including inertia).
+    /// Duplicate begin notifications are harmless. While `isEditingCrop` is true,
+    /// geometry-only writes, undo/redo and gesture completion update display state
+    /// without submitting render work. Closing the pane commits an open gesture
+    /// and submits the final cropped preview and its comparison original.
     func editingGeometry(_ isEditing: Bool) {
-        editing(Self.geometryDragID, isEditing)
+        if isEditing || drag?.id == Self.geometryDragID || abandoned?.id == Self.geometryDragID {
+            editing(Self.geometryDragID, isEditing)
+        }
+    }
+
+    /// Host teardown/cancellation: commits only the active crop gesture and
+    /// suppresses its late writes until its end notification. Safe to repeat
+    /// from pane exit, overlay disappearance or gesture cancellation; never
+    /// ends an unrelated adjustment gesture. Does not leave the crop pane.
+    @discardableResult
+    func endCropInteraction() -> Bool {
+        guard drag?.id == Self.geometryDragID else { return false }
+        return commitDrag()
+    }
+
+    /// Cancel the pane back to its entry geometry before the host leaves it.
+    /// First commits an active crop gesture as its own undo step, then clears
+    /// its abandoned-write window and restores the entry as a separate edit.
+    /// This discrete restoration bypasses control binding writes, so it also
+    /// works after Undo committed a still-coasting gesture. An unchanged entry
+    /// adds no step. The host sets `isEditingCrop = false` afterwards.
+    func cancelCrop(restoring entry: Geometry) {
+        let committed = endCropInteraction()
+        abandoned = nil
+        guard recipe.geometry != entry else { return }
+        if committed { undo.separateNextStep() }
+        apply(.geometry) { $0.geometry = entry }
     }
 
     /// The drag id of the crop pane's gestures.
@@ -484,6 +520,7 @@ import Observation
             abandoned = nil
             return
         }
+        if isEditing, drag?.id == id { return }
         finishDrag()
         abandoned = nil
         if isEditing {
@@ -533,8 +570,12 @@ import Observation
         }
         // The final, non-interactive frame, and the original if development
         // moved; a new development's prediction starts now.
-        scheduleRender()
-        updateModelGain()
+        var previous = drag.start
+        previous.geometry = recipe.geometry
+        if drag.id != Self.geometryDragID || !isEditingCrop || previous != recipe {
+            scheduleRender()
+            updateModelGain()
+        }
         return registered
     }
 
@@ -554,6 +595,14 @@ import Observation
 
     private func recipeDidChange(from old: Recipe) {
         if old.geometry != recipe.geometry { cancelUpright() }
+        // Geometry-only edits in the crop pane are display transforms. Do not
+        // queue even an identical graph request: it still executes the graph
+        // and cancels detail work. Mixed edits must continue to render.
+        if isEditingCrop {
+            var previous = old
+            previous.geometry = recipe.geometry
+            if previous == recipe { return }
+        }
         // A new crop or turn is a new picture size: the preview follows.
         if old.geometry != recipe.geometry, !isEditingCrop { updatePreviewSize() }
         scheduleRender()

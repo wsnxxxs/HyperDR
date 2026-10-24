@@ -72,7 +72,8 @@ struct CanvasStage: View {
                 if model.isCropping, let crop = model.cropLayout {
                     CropOverlay(layout: crop, adjusting: model.editor.editingParameter == RecipeEditor.geometryDragID,
                                 freeze: Bindable(model).cropFreeze, write: { model.setGeometry($0) },
-                                onEditing: { model.editor.editingGeometry($0) })
+                                onEditing: { model.editor.editingGeometry($0) },
+                                onCancel: { model.editor.endCropInteraction() })
                 }
             }
             .overlay {

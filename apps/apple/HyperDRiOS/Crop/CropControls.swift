@@ -20,6 +20,8 @@ struct CropControls: View {
     let onEditing: (Bool) -> Void
 
     @State private var dial = CropDial.straighten
+    /// Counts the buttons' and resets' taps, for the haptics.
+    @State private var taps = 0
 
     private var geometry: Geometry { recipe.geometry }
 
@@ -34,6 +36,9 @@ struct CropControls: View {
                 .frame(height: large ? 52 : 40)
         }
         .disabled(photo == nil)
+        .sensoryFeedback(.selection, trigger: dial)
+        .sensoryFeedback(.selection, trigger: geometry.aspect)
+        .sensoryFeedback(.impact(weight: .light), trigger: taps)
     }
 
     private func set(_ dial: CropDial, _ value: Double) {
@@ -46,14 +51,15 @@ struct CropControls: View {
 
     private var buttons: some View {
         HStack(spacing: Space.s2) {
-            button("rotate.left", Text("ios.crop.rotate")) { recipe.geometry = geometry.turnedLeft() }
+            button("rotate.left", Text("ios.crop.rotate")) { recipe.geometry = geometry.turnedLeft(); taps += 1 }
             button("arrow.left.and.right.righttriangle.left.righttriangle.right", Text("ios.crop.flip")) {
                 recipe.geometry = geometry.mirrored()
+                taps += 1
             }
             Spacer(minLength: Space.s1)
             if let upright { autoMenu(upright) }
             aspectMenu
-            button("arrow.counterclockwise", Text("ios.crop.reset")) { recipe.geometry = .identity }
+            button("arrow.counterclockwise", Text("ios.crop.reset")) { recipe.geometry = .identity; taps += 1 }
                 .disabled(geometry.isIdentity)
         }
         .frame(maxWidth: 420)
@@ -182,9 +188,13 @@ struct CropControls: View {
     private var rings: some View {
         HStack(spacing: Space.s2) {
             ForEach(CropDial.allCases, id: \.self) { item in
-                CropRing(dial: item, value: item.value(geometry), isCurrent: item == dial)
+                CropRing(dial: item, value: item.value(geometry), readout: item.readout(geometry), isCurrent: item == dial)
                     .onTapGesture { withAnimation(.smooth(duration: 0.2)) { dial = item } }
-                    .simultaneousGesture(TapGesture(count: 2).onEnded { set(item, 0) })
+                    .simultaneousGesture(TapGesture(count: 2).onEnded {
+                        guard item.value(geometry) != 0 else { return }
+                        set(item, 0)
+                        taps += 1
+                    })
             }
         }
         .frame(maxWidth: .infinity)
@@ -260,6 +270,7 @@ enum CropDial: CaseIterable, Hashable {
 private struct CropRing: View {
     let dial: CropDial
     let value: Double
+    let readout: String
     let isCurrent: Bool
 
     var body: some View {
@@ -288,7 +299,7 @@ private struct CropRing: View {
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(dial.label)
-        .accessibilityValue(Text(verbatim: "\(value)"))
+        .accessibilityValue(Text(verbatim: readout))
         .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
     }
 }

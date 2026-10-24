@@ -124,4 +124,42 @@ import HyperDRRecipe
         let export = try await engine.openExportSource(heic, options: options)
         #expect(export.id == source.id && export.nativeSize == source.nativeSize)
     }
+    @Test func projectivePixelsAndRegionReadsUseTheModelsInverseCoordinates() throws {
+        let width = 160, height = 120
+        var pixels = [Float]()
+        for y in 0..<height {
+            for x in 0..<width {
+                pixels += [Float(x + 1) / Float(width), Float(y + 1) / Float(height), 1, 1]
+            }
+        }
+        let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+        let data = pixels.withUnsafeBytes { Data($0) }
+        let image = CIImage(bitmapData: data, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: space)
+        let context = CIContext(options: [.workingColorSpace: space])
+        let photo = GeometrySize(width: Double(width), height: Double(height))
+        for geometry in [Geometry(angle: 31, vertical: 100, horizontal: -100, quarterTurns: 1),
+                         Geometry(angle: -45, horizontal: 90, quarterTurns: 3, flipped: true)] {
+            let result = try OpenedSource.transform(image, geometry)
+            let crop = geometry.cropRect(for: photo)
+            let output = geometry.outputSize(of: photo)
+            let inverse = geometry.transform(for: photo).inverse
+            var full = [Float](repeating: 0, count: output.width * output.height * 4)
+            context.render(result, toBitmap: &full, rowBytes: output.width * 16,
+                           bounds: result.extent, format: .RGBAf, colorSpace: space)
+            for (x, y) in [(output.width / 3, output.height / 3), (output.width * 2 / 3, output.height * 2 / 3)] {
+                let source = inverse.apply(GeometryPoint(x: Double(x) + 0.5 - Double(output.width) / 2 + crop.centre.x,
+                                                        y: Double(output.height) / 2 - Double(y) - 0.5 + crop.centre.y))
+                // Core Image bitmap rows run from the top; bounds use y up.
+                let index = ((output.height - 1 - y) * output.width + x) * 4
+                #expect(abs(Double(full[index]) - (source.x + photo.width / 2 + 0.5) / photo.width) < 0.015)
+                #expect(abs(Double(full[index + 1]) - (photo.height / 2 + source.y + 0.5) / photo.height) < 0.015)
+                var region = [Float](repeating: 0, count: 4)
+                context.render(result, toBitmap: &region, rowBytes: 16,
+                               bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: space)
+                #expect(zip(region, full[index..<(index + 4)]).allSatisfy { abs($0 - $1) < 1e-5 })
+            }
+        }
+    }
+
 }

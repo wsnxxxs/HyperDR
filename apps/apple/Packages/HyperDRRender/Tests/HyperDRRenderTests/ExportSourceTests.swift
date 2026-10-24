@@ -23,6 +23,37 @@ private func compareBands(_ a: [Float], _ b: [Float], scale: Float = 1, label: S
     if !label.isEmpty { print("STREAM_DIFF \(label) max=\(error)") }
     #expect(error <= 1.0/1023)
 }
+private func verifyFlattenedHDR(_ engine: RenderEngine, source: RenderSource, recipe: Recipe,
+                                size: PixelSize, rows: Int, base: [Float], gain: [Float]) async throws {
+    try #require(base.count == size.width*size.height*3 && gain.count == size.width*size.height)
+    let edit = try RenderAdjustments(recipe: recipe)
+    var expected: [Float] = [], alpha: [Float] = []
+    for y in stride(from: 0, to: size.height, by: rows) {
+        let count = min(rows, size.height-y)
+        let planes = try await engine.render(source, adjustments: edit, size: size,
+            region: CGRect(x: 0, y: y, width: size.width, height: count))
+        guard case .pairedLog2(let offset, _) = planes.encoding else {
+            Issue.record("Edited authored source lost its offset-aware RGB pair")
+            return
+        }
+        let pixels = RenderEngine.readPixels(planes)
+        try #require(pixels.gainChannelCount == 3)
+        for pixel in 0..<(size.width*count) {
+            let a = pixels.baseRGBA[pixel*4+3]
+            alpha.append(a)
+            for channel in 0..<3 {
+                let b = Double(pixels.baseRGBA[pixel*4+channel]), g = Double(pixels.gain[pixel*3+channel])
+                // Independent ISO reconstruction, followed by a black matte.
+                let hdr = (b+Double(offset))*exp2(g)-Double(offset)
+                expected.append(Float(hdr*Double(min(max(a, 0), 1))))
+            }
+        }
+    }
+    #expect(alpha.allSatisfy(\.isFinite) && alpha.contains { $0 < 1 } && alpha.contains { $0 > 0 })
+    let reconstructed = base.indices.map { base[$0]*exp2(gain[$0/3]) }
+    compareBands(reconstructed, expected, label: "authored_alpha_HDR_oracle")
+    print("AUTHORED_ALPHA minimum=\(alpha.min()!) maximum=\(alpha.max()!)")
+}
 private func licensedRAW() -> URL {
     var root = URL(fileURLWithPath:#filePath)
     for _ in 0..<7 { root.deleteLastPathComponent() }
@@ -210,19 +241,16 @@ private func licensedRAW() -> URL {
                 rows: 9, prepare: { _ in }, consume: { tiled.consume($0) })
             #expect(wholeReport.gain == tileReport.gain)
             #expect(wholeReport.resplitReasons == tileReport.resplitReasons)
-            // Filtering an opaque system-written HEIF can leave alpha one
-            // float32 ULP below one on virtual Metal. The conservative export
-            // path then flattens it, legitimately yielding scalar gain. Keep
-            // RGB gain required whenever that specific fallback is absent.
+            // System-written HEIF and its filtered edges can carry fractional
+            // alpha. Verify its actual HDR endpoint when that requires a black
+            // matte; retain RGB gain whenever that fallback is absent.
             #expect(wholeReport.resplitReasons.isSubset(of: [.flattenTransparency]),
                     "Unexpected resplit: \(wholeReport.resplitReasons)")
             let flattened = wholeReport.resplitReasons.contains(.flattenTransparency)
             #expect(wholeReport.gain?.channelCount == (flattened ? 1 : 3))
             if flattened {
-                let planes = try await engine.render(author, recipe: recipe, size: authorRequest.photoSize)
-                let pixels = RenderEngine.readPixels(planes)
-                #expect(stride(from: 3, to: pixels.baseRGBA.count, by: 4)
-                    .allSatisfy { abs(pixels.baseRGBA[$0]-1) < 1e-6 })
+                try await verifyFlattenedHDR(engine, source: author, recipe: recipe,
+                    size: authorRequest.photoSize, rows: 9, base: whole.rgb, gain: whole.gain)
             }
             compareBands(whole.rgb, tiled.rgb, label: "ISO_edited_base")
             compareBands(whole.gain, tiled.gain, scale: 0.25, label: "ISO_edited_gain")
@@ -234,6 +262,30 @@ private func licensedRAW() -> URL {
                 region:CGRect(x:0,y:0,width:height,height:11))
             Issue.record("Lazy source accepted a different file revision")
         } catch RenderError.sourceChanged {}
+    }
+
+    @Test func translucentAuthoredPairFlattensToItsActualHDREndpoint() async throws {
+        let engine = try RenderEngine(), size = PixelSize(width: 31, height: 19)
+        let bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        let space = RenderEngine.workingColorSpace
+        let base = CIImage(color: CIColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 0.5, colorSpace: space)!)
+            .cropped(to: bounds)
+        let hdr = base.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 4, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 4, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 4, w: 0)])
+            .settingContentHeadroom(4)
+        let gainImage = CIImage(color: .black).cropped(to: bounds)
+        let gain = AuthoredGainMap(standard: .apple, auxiliaryInfo: [:], image: gainImage, channelCount: 1,
+            baseColorSpace: space, alternateColorSpace: nil, auxiliaryColorSpace: nil, tags: [:])
+        let source = try await engine.materialize(OpenedSource(domain: .dual, image: base, hdr: hdr,
+            baseSpace: space, gain: gain, raw: nil, nativeSize: size))
+        let recipe = Recipe(inputDomain: .dual, values: ["tone.exposure": .number(0.7), "color.saturation": .number(-20)])
+        let request = ExportRenderRequest(photoSize: PixelSize(width: 17, height: 11), capabilities: streamCaps)
+        let output = StreamPixels()
+        let report = try await engine.renderExportStripes(source, recipe: recipe, request: request, rows: 9,
+            prepare: { _ in }, consume: { output.consume($0) })
+        #expect(report.resplitReasons == [.flattenTransparency] && report.gain?.channelCount == 1)
+        try await verifyFlattenedHDR(engine, source: source, recipe: recipe, size: request.photoSize,
+            rows: 9, base: output.rgb, gain: output.gain)
     }
 
     @Test(arguments:[false,true])

@@ -78,7 +78,8 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 @Test func groupsAndControlsFollowTheInputDomain() {
     let sdr = Recipe(inputDomain: .sdr)
     #expect(panel.groups(for: sdr).map(\.group) == [.hdr, .light, .color, .look], "no detail group outside RAW")
-    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation"])
+    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation", "effect.grain", "effect.halation"],
+            "grain and halation on every photo, without a look")
     #expect(ids(sdr, .hdr).contains("hdr.coverage"))
     #expect(!ids(sdr, .hdr).contains("hdr.sdrRolloff"))
 
@@ -138,7 +139,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 @Test func filmStrengthAppearsOnceAFilmIsChosen() throws {
     var recipe = Recipe(inputDomain: .sdr)
     panel.set(Recipe.filmID, option: "velvia100", in: &recipe)
-    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmGrain", "look.filmHalation", "look.filmAntihalation"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmStrength", "look.filmExposure", "look.filmAntihalation"])
     let film = try #require(panel.control(Recipe.filmID, in: recipe))
     let sections = AdjustmentText.optionSections(film)
     #expect(sections.allSatisfy { $0.family == nil }, "film stocks are not LUT spaces")
@@ -147,6 +148,44 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(sections.flatMap { $0.options.map(\.id) } == Adjustments.filmStocks)
     panel.set(Recipe.filmID, option: "none", in: &recipe)
     #expect(ids(recipe, .look) == ["look.lut", "look.film"])
+}
+
+@Test func grainAndHalationWorkWithALUTAndWithoutALook() {
+    var recipe = Recipe(inputDomain: .hdr)
+    panel.set("effect.grain", number: 40, in: &recipe)
+    panel.set("effect.halation", number: 25, in: &recipe)
+    #expect(recipe.value(for: "effect.grain") == .number(40))
+    panel.set("look.lut", reference: "sha256:01", in: &recipe)
+    #expect(ids(recipe, .color).suffix(2) == ["effect.grain", "effect.halation"], "a LUT leaves them alone")
+    #expect(recipe.value(for: "effect.halation") == .number(25))
+    panel.set("look.lut", reference: nil, in: &recipe)
+    #expect(recipe.value(for: "effect.grain") == .number(40), "removing the look keeps them")
+}
+
+@Test func aStockOnAnUntouchedPhotoBringsItsOwnGrainAndHalation() {
+    var recipe = Recipe(inputDomain: .sdr)
+    panel.set("look.lut", reference: "sha256:01", in: &recipe)
+    panel.set(Recipe.filmExposureID, number: 1, in: &recipe)
+    panel.chooseFilm("portra400", in: &recipe)
+    #expect(recipe.look == nil, "a film replaces the LUT")
+    #expect(recipe.isDefault(Recipe.filmExposureID), "its exposure is back on the meter")
+    #expect(recipe.value(for: "effect.grain") == .number(100))
+    #expect(recipe.value(for: "effect.halation") == .number(100))
+
+    // Another stock keeps what the photo has, even no grain at all.
+    panel.set("effect.grain", number: 0, in: &recipe)
+    panel.chooseFilm("velvia100", in: &recipe)
+    #expect(recipe.isDefault("effect.grain") && recipe.value(for: "effect.halation") == .number(100))
+
+    // Effects already set are never overwritten by a stock.
+    var set = Recipe(inputDomain: .sdr)
+    panel.set("effect.grain", number: 30, in: &set)
+    panel.chooseFilm("gold200", in: &set)
+    #expect(set.value(for: "effect.grain") == .number(30) && set.isDefault("effect.halation"))
+
+    panel.chooseFilm("none", in: &recipe)
+    #expect(recipe.conditionValue(Recipe.filmID) == .string("none"))
+    #expect(recipe.value(for: "effect.halation") == .number(100), "no look still has its effects")
 }
 
 @Test func choosingALUTStartsItsSpacesFromTheLibrary() {
@@ -307,6 +346,15 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 }
 
 // MARK: Words
+
+@Test func theAdjustGroupsResetNamesWhatItResets() {
+    let chinese = Locale(identifier: "zh-Hans")
+    #expect(DesignStrings.string("group.color", locale: chinese) == "调整")
+    #expect(AdjustmentText.undoName(.group(.color), locale: english) == "Reset Color, Grain and Halation")
+    #expect(AdjustmentText.undoName(.group(.color), locale: chinese) == "重置颜色、颗粒与光晕")
+    #expect(AdjustmentText.undoName(.group(.light), locale: chinese) == "重置光线")
+    #expect(AdjustmentText.undoName(.all, locale: english) == "Reset All")
+}
 
 @Test func everyDeclaredKeyIsInTheCatalogueInBothLanguages() {
     let keys = AdjustmentText.declaredKeys

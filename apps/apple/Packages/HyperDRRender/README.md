@@ -242,7 +242,7 @@ edge, put at 18.4 %, clamped to the declared ±3 EV. It meters the original phot
 analysis source, before any edit, so preview and export agree and the light edits still move the
 exposure; `resolvedAutomatic` reports it.
 
-Grain (`look.filmGrain`, 100 % = the stock's own) follows spektrafilm's sublayer particle model,
+Grain (`effect.grain`, 100 % = the stock's own) follows spektrafilm's sublayer particle model,
 with a 35 mm frame spanning the render's long edge. Per channel, each of the three sublayers
 develops Poisson particle counts: its density variance and third cumulant against density, per
 pixel area, are tabulated. Each sublayer's dye clouds (0.5–1.7 µm, a size on the film) and then
@@ -273,7 +273,7 @@ rounding in this chain moved ordinary SDR shadow channels by up to four 10-bit c
 bright HDR developments could also exceed its 65504 ceiling before scatter. Export admission
 prices the three overlapping RGBAf textures as bounded film workspace.
 
-Halation (`look.filmHalation`, 100 % = the stock's own; `look.filmAntihalation` off uses
+Halation (`effect.halation`, 100 % = the stock's own; `look.filmAntihalation` off uses
 spektrafilm's strengths for a film without its antihalation layer, as CineStill does to Vision3)
 is back-reflected light: the scattered film exposure plus strength × a sum of three Gaussians
 (sigma 65 µm for still film, 50 µm for motion picture, × √k, weights halving), divided by 1 +
@@ -653,3 +653,37 @@ Export reports distinguish the rendered `sourceProvenance` from final
 adjustment does not require a resplit and is reported even when `resplitReasons`
 is empty. A later output-boundary conversion still records `.outputCeiling`
 among its actual resplit reasons.
+
+Independent effects (`effect.grain`, `effect.halation`) default to zero and apply
+without a look or with an imported LUT. A selected film uses its existing stock
+particle/halation model and its existing exposure → halation → development →
+grain → print order; 100 % retains the former stock amount. Without a selected stock,
+grain uses the Portra 400 particle tables at neutral half-density, with their
+35 mm pixel pitch, projected to monochrome luminance so it does not impose a
+stock colour cast. A smooth 4y(1−y) envelope protects black and white. Noise hashes
+full output coordinates, so ROI, detail and export bands agree.
+
+Generic halation integrates scene highlights above 0.7 linear luminance into the
+fixed global analysis cells, including captured HDR. The Portra 35 mm halation
+blur supplies the spatial profile. Red/orange glow is composited after the look's
+completed linear-light crossfade, followed by grain. Neither effect enters the
+LUT or is attenuated by look strength. This output-stage glow preserves the LUT
+colour transform while its driver remains scene-referred. Both completed SDR
+and HDR endpoints receive effects; their RGB ratio retains authored SDR bases
+and equal-offset gain (a 1/64 floor also carries newly lit black channels without
+an authored gain map). Effects alone never require a second RAW development.
+
+Stock selection, independently of colour strength, selects the physical model.
+For a partial or zero stock colour strength, evaluate the stock without physical
+effects (S0) and with its complete grain/halation (S1). The two endpoint results
+are `mix(displayReference, S0, strength) + (S1 − S0)`, clamped to their valid
+ranges; at 100 % the existing S1 path is used directly. This costs one additional
+`filmFromRaw` per pixel at partial/zero colour strength when effects are enabled,
+without another full-resolution intermediate. RAW keeps its scene development
+and Apple baseline even at zero stock colour strength if effects are active.
+
+Analytic/model stops are converted from their zero-offset HDR target into the
+current equal-offset RGB gain before combining. The artificial encoding floor
+does not change their brightness or gain-strength semantics. Generic effects
+do not force a shoulder on legal highlights: if the original graph did not need
+a shoulder, only actual new overflow is capped at the requested HDR capacity.

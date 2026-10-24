@@ -9,37 +9,34 @@ enum EditorPane: Hashable {
     case frame
 }
 
-/// One tab of the dock: an adjustment group, or light and colour together
-/// as Adjust. The two are used side by side, so one tab with both rows of
-/// rings keeps the tab bar short; the recipe's groups stay as they are.
+/// One tab of the dock: an adjustment group, or light and Adjust (the
+/// colour group, which also holds grain and halation) together as Adjust.
+/// They are used side by side, so one tab with all their rings keeps the tab
+/// bar short; the recipe's groups stay as they are.
 ///
-/// Style holds only the choice of look and its strength. The film's grain and
-/// halation shape the photo like the light and colour controls, so Adjust
-/// shows them, after colour, while a film is on; its exposure follows its
+/// Style holds only the choice of look and its strength: a look changes
+/// colour. Grain and halation work on every photo with or without a look,
+/// so they sit in the colour group, after saturation. A film's exposure follows its
 /// meter (Adjust's exposure moves it) and its antihalation layer stays on.
 struct DockGroup: Identifiable {
     /// The groups that share a tab, in display order.
     static let merged: [AdjustmentGroupID] = [.light, .color]
-    /// The look's controls Adjust shows.
-    static let borrowed = ["look.filmGrain", "look.filmHalation"]
     /// What Style keeps of the look group.
     static let lookControls: Set<String> = [Recipe.filmID, Recipe.lookID, "look.strength", "look.filmStrength"]
 
     let states: [AdjustmentGroupState]
-    /// Another group's controls shown on this tab, after its own.
-    var borrowed: [AdjustmentControl] = []
     var id: AdjustmentGroupID { states[0].group }
     var isMerged: Bool { states.count > 1 }
 
     /// The controls the tab shows.
     var controls: [AdjustmentControl] {
         let own = states.flatMap(\.controls)
-        return (id == .look ? own.filter { Self.lookControls.contains($0.id) } : own) + borrowed
+        return id == .look ? own.filter { Self.lookControls.contains($0.id) } : own
     }
 
     var isModified: Bool {
         if id == .look { return controls.contains { !$0.isDefault } }
-        return states.contains { $0.isModified } || borrowed.contains { !$0.isDefault }
+        return states.contains { $0.isModified }
     }
 
     func contains(_ group: AdjustmentGroupID) -> Bool { states.contains { $0.group == group } }
@@ -56,10 +53,6 @@ struct DockGroup: Identifiable {
             } else {
                 tabs.append(DockGroup(states: [state]))
             }
-        }
-        if let look = groups.first(where: { $0.group == .look }),
-           let index = tabs.firstIndex(where: { merged.contains($0.id) }) {
-            tabs[index].borrowed = borrowed.compactMap { id in look.controls.first { $0.id == id } }
         }
         return tabs
     }
@@ -353,12 +346,11 @@ struct AdjustmentControls: View {
             if let film = layout.film {
                 FilmSwatches(control: film, lookIsImported: recipe.look != nil, previews: panel.context.lutPreviews,
                              removeLook: removeLook) { stock in
-                    // One write, one undo step: the stock, its exposure back on the meter
-                    // and its antihalation layer back on, neither having a control here.
+                    // One write, one undo step (`AdjustmentPanel.chooseFilm`): the
+                    // stock, its exposure back on the meter and its antihalation
+                    // layer back on, neither having a control here.
                     var edited = recipe
-                    panel.set(film.id, option: stock, in: &edited)
-                    panel.setAutomatic(Recipe.filmExposureID, in: &edited)
-                    panel.reset(Recipe.filmAntihalationID, in: &edited)
+                    panel.chooseFilm(stock, in: &edited)
                     recipe = edited
                 }
             }
@@ -426,7 +418,7 @@ struct AdjustmentControls: View {
                     // The control's own group: on the shared tab, light or colour.
                     if let onReset { onReset(.group(control.group)) } else { panel.reset(group: control.group, in: &recipe) }
                 } label: {
-                    Label { AdjustmentText.command(.resetGroup) } icon: { Image(systemName: "arrow.counterclockwise") }
+                    Label { AdjustmentText.resetGroup(control.group, shared: group.isMerged) } icon: { Image(systemName: "arrow.counterclockwise") }
                 }
                 .disabled(!group.isModified(control.group))
             }

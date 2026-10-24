@@ -65,6 +65,7 @@ struct GraphUniform {
     float4 halation; // per-channel strength, w: the render samples a halation map
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
     float4 pair; // x: equal offset for independently edited SDR/HDR endpoints
+    float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -205,7 +206,7 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
     bool logLook=p.flags.z && p.lutInfo.z>=5;
-    if(!logLook && p.film.x==0) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
+    if(!logLook && p.effects.w==0) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
     return rgb;
 }
 // `exposed`, when w is set, is the film exposure after the in-emulsion scatter.
@@ -221,10 +222,18 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     rgb=fit(rgb,max(1.f,maximum(rgb)));
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
-    if(p.film.x>0) {
+    float3 stockDelta=0;
+    bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
+    if(p.effects.w>0) {
         float3 raw=exposed.w>0 ? exposed.xyz : filmRaw(filmScene*p.film.w,film,filmLUT);
-        if(p.halation.w>0) raw=(raw+p.halation.xyz*glow)/(1+p.halation.xyz);
-        base=fit(filmFromRaw(raw,film,p.film.yz,site,grainKernel),1.f);
+        float3 rawWithGlow=p.halation.w>0 ? (raw+p.halation.xyz*glow)/(1+p.halation.xyz) : raw;
+        float3 completed=fit(filmFromRaw(rawWithGlow,film,p.film.yz,site,grainKernel),1.f);
+        if(independentStock) {
+            // The colour rendition has no grain/halation. The complete physical
+            // stock delta is added after its colour crossfade, independently of t.
+            base=fit(filmFromRaw(raw,film,float2(0,p.film.z),site,grainKernel),1.f);
+            stockDelta=completed-base;
+        } else base=completed; // t=1 preserves the legacy stock path exactly.
     }
     if(p.flags.y) {
         base=applyLUT(base,p,cube,table);
@@ -251,15 +260,21 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         }
         float3 hdr=weight>0 ? mix(neutralHDR,styledHDR,weight) : neutralHDR;
         base=weight>0 ? mix(neutralBase,base,weight) : neutralBase;
+        if(independentStock) {
+            base=fit(base+stockDelta,1.f);
+            hdr=max(hdr+stockDelta*exp2(g),0.f);
+        }
         gain=log2((max(hdr,0.f)+offset)/(base+offset));
         return {base,gain,pixel.a};
     }
-    if(weight>0 && weight<1) {
+    float3 renderedHDR=base*exp2(g);
+    if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
         float3 original=graphScene(baseline,p,cube,table);
         original=fit(original,max(1.f,maximum(original)));
         float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : 0;
         float3 oldBase=fit(original*exp2(-oldGain),1.f);
         float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
+        renderedHDR=hdr;
         base=mix(oldBase,base,weight);
         // The two endpoints can have different HDR ratios and colours. Retain
         // both the SDR and HDR crossfade exactly with per-channel gain. A single
@@ -267,12 +282,49 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         gain=g==oldGain ? float3(g) : select(log2(max(hdr/max(base,1e-30f),1e-30f)),float3(0),base==0);
 
     }
+    if(independentStock) {
+        base=fit(base+stockDelta,1.f);
+        renderedHDR=max(renderedHDR+stockDelta*exp2(g),0.f);
+        gain=log2((renderedHDR+p.pair.x)/(base+p.pair.x));
+        return {base,gain,pixel.a};
+    }
+    if(p.pair.x>0) {
+        // Independent effects edit both endpoints and can light a black channel.
+        // Encode their common offset before the output-stage effect is applied.
+        gain=log2((max(base*exp2(gain),0.f)+p.pair.x)/(base+p.pair.x));
+    }
     return {base,gain,pixel.a};
 }
 float softPeak(float peak,float limit,bool gate) {
     if(!gate || peak<=1 || limit<=1) return peak;
     float knee=1+.75f*(limit-1), width=limit-knee;
     return peak<=knee ? peak : knee+width*(1-exp(-(peak-knee)/width));
+}
+// Neutral 35 mm grain uses Portra particle statistics without its colour transform.
+// The same monochrome noise perturbs both endpoints; a smooth envelope protects black/white.
+float3 effectEndpoint(float3 rgb,float3 glow,float noise,constant GraphUniform& p) {
+    rgb=max(float3(0),rgb+p.effects.y*float3(.08f,.025f,.004f)*glow);
+    if(p.effects.x>0) {
+        float scale=max(1.f,maximum(rgb)), y=clamp(lum(rgb)/scale,0.f,1.f);
+        rgb=max(float3(0),rgb+noise*(4*y*(1-y))*scale);
+    }
+    return rgb;
+}
+WorkingPair applyEffects(WorkingPair pair,float3 glow,int2 site,constant GraphUniform& p,
+                         const device FilmData& film,constant float4* grainKernel) {
+    if(p.effects.x==0 && p.effects.y==0) return pair;
+    float noise=0;
+    if(p.effects.x>0 && grainKernel!=nullptr) {
+        float3 density=.5f*film.densityMaximum.xyz;
+        float3 delta=filmGrain(density,film,float2(p.effects.x,p.effects.z),site,grainKernel)-density;
+        noise=rawY(delta)*.5f;
+    }
+    float offset=p.pair.x;
+    float3 hdr=(pair.base+offset)*exp2(pair.gain)-offset;
+    pair.base=fit(effectEndpoint(pair.base,glow,noise,p),1.f);
+    hdr=effectEndpoint(hdr,glow,noise,p);
+    pair.gain=select(log2(max((hdr+offset)/max(pair.base+offset,1e-30f),1e-30f)),float3(0),pair.base+offset==0);
+    return pair;
 }
 // Fixed-scale per-cell integrals. Every source pixel contributes; bright single
 // pixels survive in the peak plane even when the analysis resolution is small.
@@ -359,6 +411,23 @@ kernel void graphFilmCells(texture2d<float,access::read> src [[texture(0)]],text
     }
     dst.write(float4(sum/(scale.x*scale.y),0),pos);
 }
+// Scene highlights (including captured HDR) drive the generic orange/red glow.
+// Integrate exact cell footprints, with the same global grid as film halation.
+kernel void graphEffectCells(texture2d<float,access::read> src [[texture(0)]],texture2d<float,access::write> dst [[texture(1)]],
+                             texture3d<float,access::read> cube [[texture(2)]],constant GraphUniform& p [[buffer(0)]],
+                             device const float4* table [[buffer(1)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=dst.get_width() || pos.y>=dst.get_height())return;
+    float2 scale=float2(src.get_width(),src.get_height())/float2(dst.get_width(),dst.get_height());
+    float2 lo=float2(pos)*scale,hi=float2(pos+1)*scale;
+    int2 a=int2(floor(lo)),b=min(int2(ceil(hi)),int2(src.get_width(),src.get_height()));
+    float value=0;
+    for(int y=a.y;y<b.y;y++)for(int x=a.x;x<b.x;x++) {
+        float weight=(min(hi.y,float(y+1))-max(lo.y,float(y)))*(min(hi.x,float(x+1))-max(lo.x,float(x)));
+        float highlight=max(0.f,lum(graphScene(src.read(uint2(x,y)),p,cube,table))-.7f);
+        value+=weight*highlight;
+    }
+    dst.write(float4(float3(value/(scale.x*scale.y)),0),pos);
+}
 // Film exposure of a render's pixels from p.region.zw on (a region and its halo), for
 // the in-emulsion scatter.
 kernel void graphFilmExposure(texture2d<float,access::sample> src [[texture(0)]],texture2d<float,access::write> dst [[texture(1)]],
@@ -368,6 +437,22 @@ kernel void graphFilmExposure(texture2d<float,access::sample> src [[texture(0)]]
     if(pos.x>=dst.get_width() || pos.y>=dst.get_height())return;
     float3 rgb=graphScene(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table);
     dst.write(float4(filmRaw(rgb*p.film.w,film,filmLUT),0),pos);
+}
+// Expansion/model values describe zero-offset HDR = base * 2^stops, rather
+// than the encoded paired curve. Convert that target before combining gains.
+float3 expansionGain(float3 base,float stops,float offset) {
+    if(offset==0) return float3(stops);
+    return log2((base*exp2(stops)+offset)/(base+offset));
+}
+float3 scaleEndpointGain(float3 base,float3 gain,float strength,float offset,uint domain) {
+    if(offset==0 || domain==3 || strength==1) return gain*strength;
+    float3 hdr=max((base+offset)*exp2(gain)-offset,0.f);
+    float3 paired=max((base+offset)*exp2(gain*strength)-offset,0.f);
+    float3 plain=base*exp2(log2(max(hdr/max(base,1e-30f),1e-30f))*strength);
+    // Newly lit black channels need the paired curve; positive channels retain
+    // the original zero-offset strength semantics as an effect tends to zero.
+    hdr=select(paired,plain,base>0);
+    return log2((hdr+offset)/(base+offset));
 }
 kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],texture2d<float,access::write> base [[texture(1)]],
                         texture2d<float,access::write> gain [[texture(2)]],texture3d<float,access::read> cube [[texture(3)]],
@@ -386,22 +471,32 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
                          sourceSample(baseline,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table,film,filmLUT,int2(pos+p.region.zw),
                          p.halation.w>0 ? filmSmooth(halation,uv) : float3(0),
                          p.scatter.z ? float4(scattered.read(uint2(int2(pos)+p.scatter.xy)).rgb,1) : float4(0),grainKernel);
+    pair=applyEffects(pair,p.effects.y>0 ? filmSmooth(halation,uv) : float3(0),int2(pos+p.region.zw),p,film,grainKernel);
     float3 g=pair.gain;
-    if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
-    if(p.mode.y)g=max(g,model.sample(s,uv).x);
-    g*=p.color.w;
     float offset=p.pair.x;
+    if(p.mode.x)g=max(g,expansionGain(pair.base,expansion.sample(s,uv).x*p.color.z/3,offset));
+    if(p.mode.y)g=max(g,expansionGain(pair.base,model.sample(s,uv).x,offset));
+    g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
     float3 hdr=(pair.base+offset)*exp2(g)-offset;
-    float peak=maximum(hdr), mapped=softPeak(peak,exp2(p.color.z),p.hdr.w!=0);
+    float limit=exp2(p.color.z);
+    float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0);
+    bool physical=p.effects.x>0 || p.effects.y>0;
+    // A newly enabled generic effect must not trigger the shoulder below its
+    // legal ceiling. Cap only its actual overflow, continuously at that ceiling.
+    if(!p.hdr.w && physical && peak>limit) mapped=limit;
     if(peak>0 && mapped!=peak) {
-        if(p.flags.x==3)g=log2((max(hdr*(mapped/peak),0.f)+offset)/(pair.base+offset));
+        if(offset>0)g=log2((max(hdr*(mapped/peak),0.f)+offset)/(pair.base+offset));
         else g+=log2(max(mapped/peak,1e-30f));
     }
     if(p.hdr.z>0 && p.flags.x!=0 && p.flags.x!=3) {
         float m=maximum(pair.base);
         if(m>.7f) {
             float target=mix(m,.7f+.3f*(1-exp(-(m-.7f)/.3f)),p.hdr.z);
-            pair.base*=target/m;g+=log2(m/target);
+            if(offset>0) {
+                float3 rendition=(pair.base+offset)*exp2(g)-offset;
+                pair.base*=target/m;
+                g=log2((max(rendition,0.f)+offset)/(pair.base+offset));
+            } else { pair.base*=target/m;g+=log2(m/target); }
         }
     }
     if(!p.flags.w)g=0;

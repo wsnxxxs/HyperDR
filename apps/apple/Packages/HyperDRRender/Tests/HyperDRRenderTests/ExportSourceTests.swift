@@ -112,7 +112,7 @@ private func licensedRAW() -> URL {
         let lazy = ExportSource(id:analysis.id,domain:.sdr,nativeSize:size,rawSettings:nil,
             analysisSource:analysis,opened:opened,url:url,revision:try SourceRevision(url:url))
         var edit = RenderAdjustments()
-        edit.film.stock = .portra400; edit.film.grain = 0; edit.film.exposure = 0; edit.film.halation = 0
+        edit.film.stock = .portra400; edit.effects.grain = 0; edit.film.exposure = 0; edit.effects.halation = 0
         let halo = edit.film.sourceHalo(size:size)
         #expect(halo >= 6)
         let bounds = CGRect(x:0,y:0,width:size.width,height:size.height)
@@ -135,6 +135,38 @@ private func licensedRAW() -> URL {
         // Export tiles leave room for the halo within the source tile limit.
         let tile = await engine.exportTileSize(lazy,request:ExportRenderRequest(photoSize:size,capabilities:streamCaps),halo:halo)
         #expect(tile.width + 2*halo + 6 <= PreparedExportRows.maximumSourceTileSize.width)
+    }
+
+    @Test func independentEffectsAgreeForWholeExportAndLazyRows() async throws {
+        let engine = try RenderEngine()
+        let size = PixelSize(width: 128, height: 1152)
+        let image = CIFilter(name: "CICheckerboardGenerator", parameters: [
+            "inputColor0": CIColor(red: 3, green: 2, blue: 1),
+            "inputColor1": CIColor(red: 0.18, green: 0.2, blue: 0.15),
+            "inputWidth": 13, "inputSharpness": 1])!.outputImage!
+            .cropped(to: CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        let source = try await engine.source(image: image, domain: .hdr)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("effects-export-\(UUID())")
+        try Data([0]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let opened = OpenedSource(domain: .hdr, image: image, hdr: image,
+            baseSpace: RenderEngine.workingColorSpace, gain: nil, raw: nil, nativeSize: size)
+        let lazy = ExportSource(id: source.id, domain: .hdr, nativeSize: size, rawSettings: nil,
+            analysisSource: source, opened: opened, url: url, revision: try SourceRevision(url: url))
+        let recipe = Recipe(inputDomain: .hdr, values: [
+            "effect.grain": .number(100), "effect.halation": .number(100), "hdr.range": .number(3)])
+        let request = ExportRenderRequest(photoSize: size, capabilities: streamCaps)
+        let whole = StreamPixels()
+        _ = try await engine.renderExportStripes(source, recipe: recipe, request: request,
+            rows: 79, prepare: { _ in }, consume: { whole.consume($0) })
+        let reader = try await engine.prepareExportRows(lazy, recipe: recipe, request: request)
+        let bands = StreamPixels()
+        for y in stride(from: 0, to: size.height, by: 73) {
+            bands.consume(try reader.read(y: y, count: min(73, size.height-y)))
+        }
+        compareBands(whole.rgb, bands.rgb, label: "independent effects base")
+        compareBands(whole.gain, bands.gain, label: "independent effects RGB gain")
+        #expect(whole.gain.count == size.width * size.height * 3)
     }
 
     @Test func oversizedPanoramaRowsAndTextureLimit() async throws {

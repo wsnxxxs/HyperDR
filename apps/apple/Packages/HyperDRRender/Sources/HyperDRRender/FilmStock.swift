@@ -16,23 +16,18 @@ public struct FilmAdjustments: Hashable, Sendable {
     /// The film's exposure compensation in stops; nil meters the original photo
     /// (`RenderEngine.filmMeter`). It adds to the light edits, which act on the scene.
     public var exposure: Float? = nil
-    /// Scales the grain's standard deviation; 1 is the stock's own grain on a 35 mm frame.
-    public var grain: Float = RenderParameter.defaultNumber("look.filmGrain")
-    /// Scales the back-reflection halation; 1 is the stock's own.
-    public var halation: Float = RenderParameter.defaultNumber("look.filmHalation")
     /// Off removes the antihalation layer (as CineStill does to Vision3), spektrafilm's
     /// 'no' strengths for the film's use.
     public var antihalation: Bool = RenderParameter.defaultBool("look.filmAntihalation")
     public init() {}
     public var isIdentity: Bool { stock == nil || strength == 0 }
-    /// Analysis integrates cells, where grain averages out: it never invalidates them.
-    var withoutGrain: FilmAdjustments { var value = self; value.grain = 0; return value }
-
     /// Output pixels a region of a render of `size` reads beyond its edges: the reach of
     /// the in-emulsion scatter. Sources cropped for a region (export tiles, detail
-    /// regions) must cover this halo too.
+    /// regions) must cover this halo too. This is the conservative reach of the
+    /// selected stock, independent of its colour strength. RenderAdjustments filters
+    /// it to zero when neither stock colour nor stock effects are being rendered.
     public func sourceHalo(size: PixelSize) -> Int {
-        guard !isIdentity, let stock, let data = try? FilmStock.named(stock) else { return 0 }
+        guard let stock, let data = try? FilmStock.named(stock) else { return 0 }
         return data.scatterComponents(longEdge: max(size.width, size.height)).map { FilmStock.taps($0, truncate: FilmStock.scatterTruncate).radius }.max() ?? 0
     }
 }
@@ -161,10 +156,10 @@ public struct FilmStock: Sendable {
         return sampleSpectralLUT(tx, ty) * sum * resource.filming.exposureScale
     }
 
-    /// Per-channel halation strength for these settings; zero without halation.
-    public func halationStrength(_ settings: FilmAdjustments) -> RGB {
+    /// Per-channel stock halation strength, scaled by the independent effect amount.
+    public func halationStrength(_ settings: FilmAdjustments, amount: Float = 1) -> RGB {
         let halation = resource.filming.halation
-        return Self.vector(settings.antihalation ? halation.strength : halation.strengthRemoved) * Double(settings.halation)
+        return Self.vector(settings.antihalation ? halation.strength : halation.strengthRemoved) * Double(amount)
     }
 
     /// Micrometres per pixel of a render whose long edge spans the 35 mm frame.

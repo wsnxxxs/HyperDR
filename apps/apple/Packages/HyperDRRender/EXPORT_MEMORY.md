@@ -527,3 +527,23 @@ verification paths. This work is deferred, not scheduled or in progress.
   the later RAW failure, which was subsequently closed by the artifact comparisons
   described above. Do not infer jetsam from signal 9
   without a termination report.
+
+## Independent grain and halation
+
+Generic effects use no full-resolution scatter textures. Halation uses the same
+bounded analysis-cell budget as film (≤768 long edge): two RGBAf cell textures
+and one temporary separable-blur texture, ≤27 MiB for a square grid. The fixed
+512 MiB ROI/analysis allowance in Kit already covers this budget regardless of
+`usesFilm`; the extra per-tile film allowance remains exclusive to stock scatter.
+Grain uses the bundled Portra particle table and small kernel buffer, without a
+full-image noise texture. Both effects run in 256-row bands when the region is
+taller than 1024 rows. Zero amounts allocate no generic effect workspace.
+Generic effects require no extra decoder or staged Apple endpoint. A selected
+stock with nonzero grain/halation continues to require scene-linear RAW and
+scatter even at zero stock colour strength. Below 100 % colour strength it also
+requires the Apple display baseline, including exactly 0 %, so `needsLookBaseline`
+and Kit's `usesFilm` charge both developments and the existing scatter workspace.
+The independent stock effect is the difference of its complete and effect-free
+outputs: one extra `filmFromRaw` per pixel at partial/zero colour strength, held
+in shader registers without another full-resolution texture. At 100 % colour
+strength the old complete-stock path is evaluated once.

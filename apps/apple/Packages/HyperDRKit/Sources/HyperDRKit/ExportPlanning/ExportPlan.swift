@@ -102,9 +102,10 @@ public struct ExportEditFacts: Sendable, Hashable {
     public init(recipe: Recipe, peakStops: Double) {
         let film = recipe.conditionValue(Recipe.filmID)?.stringValue
         let strength = recipe.conditionValue("look.filmStrength")?.numberValue ?? 0
+        let effects = Adjustments.effectIDs.contains { (recipe.conditionValue($0)?.numberValue ?? 0) > 0 }
         self.init(hdrEnabled: recipe.conditionValue("hdr.enabled")?.boolValue ?? true,
                   peakStops: peakStops, needsLookBaseline: recipe.needsLookBaseline,
-                  usesFilm: film != nil && film != "none" && strength > 0)
+                  usesFilm: film != nil && film != "none" && (strength > 0 || effects))
     }
 }
 

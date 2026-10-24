@@ -63,7 +63,7 @@ import Testing
         let source = try await engine.source(image: image(values, width: width, height: height), domain: .sdr)
         var edit = RenderAdjustments()
         edit.hdr.enabled = false
-        edit.film.stock = stock; edit.film.exposure = 0; edit.film.grain = 0; edit.film.halation = 0
+        edit.film.stock = stock; edit.film.exposure = 0; edit.effects.grain = 0; edit.effects.halation = 0
         let region = CGRect(x: site.x - 1, y: max(0, site.y - 1), width: 3, height: 3)
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, region: region))
         let film = try FilmStock.named(stock)
@@ -92,7 +92,7 @@ import Testing
         let source = try await engine.source(image: image(values, width: width, height: height), domain: .hdr)
         var edit = RenderAdjustments()
         edit.hdr.enabled = false; edit.tone.exposure = 4; edit.tone.highlights = 1
-        edit.film.stock = .portra400; edit.film.exposure = 3; edit.film.grain = 0; edit.film.halation = 0
+        edit.film.stock = .portra400; edit.film.exposure = 3; edit.effects.grain = 0; edit.effects.halation = 0
         let region = CGRect(x: 1490, y: 0, width: 21, height: height)
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, region: region))
         let film = try FilmStock.named(.portra400)

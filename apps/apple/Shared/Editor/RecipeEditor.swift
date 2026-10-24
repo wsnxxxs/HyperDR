@@ -98,13 +98,14 @@ import Observation
     /// the crop or the straightening never renders again. Leaving renders the
     /// photo as cropped.
     var isEditingCrop = false {
+        willSet {
+            // Finish while requests still describe the uncropped photo. Once
+            // the mode changes, compute the new size before scheduling anything.
+            if isEditingCrop, !newValue { endCropInteraction() }
+        }
         didSet {
             guard isEditingCrop != oldValue else { return }
-            if !isEditingCrop {
-                // Commit the outgoing gesture before scheduling the cropped preview.
-                endCropInteraction()
-                cancelUpright()
-            }
+            if !isEditingCrop { cancelUpright() }
             updatePreviewSize(force: true)
         }
     }

@@ -20,6 +20,7 @@ class GainMapStripTest(unittest.TestCase):
         pointer = ctypes.c_void_p
         library.hyperdr_engine_create.argtypes = [ctypes.c_char_p, ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
         library.hyperdr_probe.argtypes = [pointer, ctypes.c_char_p, ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
+        library.hyperdr_capabilities.argtypes = [pointer, ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
         library.hyperdr_engine_destroy.argtypes = [pointer]
         library.hyperdr_string_free.argtypes = [pointer]
         fixture = ROOT / "tests/fixtures/gain-map-jpeg/xmp-and-iso.jpg"
@@ -37,6 +38,12 @@ class GainMapStripTest(unittest.TestCase):
             engine, output, error = pointer(), pointer(), pointer()
             self.assertEqual(library.hyperdr_engine_create(b'{"hevc_override":"unavailable"}', ctypes.byref(engine), ctypes.byref(error)), 0)
             try:
+                self.assertEqual(library.hyperdr_capabilities(engine, ctypes.byref(output), ctypes.byref(error)), 0)
+                capabilities = json.loads(ctypes.string_at(output))
+                library.hyperdr_string_free(output)
+                output = pointer()
+                if not capabilities["codecs"]:
+                    self.skipTest("strip invariants passed; XMP decoding requires a codec-enabled build")
                 self.assertEqual(library.hyperdr_probe(engine, os.fsencode(derived), ctypes.byref(output), ctypes.byref(error)), 0)
                 probe = json.loads(ctypes.string_at(output))
             finally:

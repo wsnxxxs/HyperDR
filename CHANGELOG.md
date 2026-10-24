@@ -3,8 +3,16 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
-## Unreleased
+## 0.5.1 - 2026-10-24 (Apple pre-release)
 
+- Add automatic upright correction to the crop editor on Mac, iPhone and iPad.
+- Bound AVIF export memory with streamed grid cells and stage partial RAW looks
+  once per export; release editor decoding resources while exporting.
+- Use fixed native RAW decode cells for consistent development across export
+  row requests; retain full-resolution float32 film processing.
+- Add Automatic, RAW 8 and RAW 9 preferences for new photos.
+- Redesign regular-width iPad windows as a Studio with a tool rail, histogram,
+  adaptive panel layout and a live export lightbox.
 - Require iOS/iPadOS 27 and macOS 27.
 - iPhone and iPad: Settings can export diagnostics — the app's log from the
   last few launches, the system's crash and hang reports (MetricKit) and the

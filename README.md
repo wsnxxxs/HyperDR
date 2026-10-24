@@ -129,7 +129,7 @@ macOS blocks the first launch, choose *Open Anyway* in System Settings → Priva
 
 Requires iOS / iPadOS 27, or macOS 27 on Apple silicon.
 
-> HyperDR 0.5.0 is a pre-release. Full-size 110 MP RAW on iPhone is still being
+> HyperDR 0.5.1 is a pre-release. Full-size 110 MP RAW on iPhone is still being
 > verified, and iOS does not yet continue an export in the background.
 
 <br>

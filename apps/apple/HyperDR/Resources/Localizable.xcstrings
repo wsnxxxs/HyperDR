@@ -3561,6 +3561,23 @@
         }
       }
     },
+    "canvas.hint.crop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag the box or its edges · Double-click to reset the crop · Return to finish, Esc to cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拖动裁切框或其边缘 · 双击复位裁切 · 回车完成，Esc 取消"
+          }
+        }
+      }
+    },
     "canvas.hint.pan" : {
       "extractionState" : "manual",
       "localizations" : {

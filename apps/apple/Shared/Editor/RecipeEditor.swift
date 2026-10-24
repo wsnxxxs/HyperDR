@@ -100,7 +100,11 @@ import Observation
     var isEditingCrop = false {
         didSet {
             guard isEditingCrop != oldValue else { return }
-            if !isEditingCrop { cancelUpright() }
+            if !isEditingCrop {
+                // Commit the outgoing gesture before scheduling the cropped preview.
+                commitDrag()
+                cancelUpright()
+            }
             updatePreviewSize(force: true)
         }
     }
@@ -472,6 +476,11 @@ import Observation
     }
 
     /// The crop pane's drags (the crop box, straightening, perspective): one step each.
+    /// Begin before the first recipe write; end after the last (including inertia).
+    /// Duplicate begin notifications are harmless. While `isEditingCrop` is true,
+    /// geometry-only writes, undo/redo and gesture completion update display state
+    /// without submitting render work. Closing the pane commits an open gesture
+    /// and submits the final cropped preview and its comparison original.
     func editingGeometry(_ isEditing: Bool) {
         editing(Self.geometryDragID, isEditing)
     }
@@ -484,6 +493,7 @@ import Observation
             abandoned = nil
             return
         }
+        if isEditing, drag?.id == id { return }
         finishDrag()
         abandoned = nil
         if isEditing {
@@ -533,8 +543,12 @@ import Observation
         }
         // The final, non-interactive frame, and the original if development
         // moved; a new development's prediction starts now.
-        scheduleRender()
-        updateModelGain()
+        var previous = drag.start
+        previous.geometry = recipe.geometry
+        if drag.id != Self.geometryDragID || !isEditingCrop || previous != recipe {
+            scheduleRender()
+            updateModelGain()
+        }
         return registered
     }
 
@@ -554,6 +568,14 @@ import Observation
 
     private func recipeDidChange(from old: Recipe) {
         if old.geometry != recipe.geometry { cancelUpright() }
+        // Geometry-only edits in the crop pane are display transforms. Do not
+        // queue even an identical graph request: it still executes the graph
+        // and cancels detail work. Mixed edits must continue to render.
+        if isEditingCrop {
+            var previous = old
+            previous.geometry = recipe.geometry
+            if previous == recipe { return }
+        }
         // A new crop or turn is a new picture size: the preview follows.
         if old.geometry != recipe.geometry, !isEditingCrop { updatePreviewSize() }
         scheduleRender()

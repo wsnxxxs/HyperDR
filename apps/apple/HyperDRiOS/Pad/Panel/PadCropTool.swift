@@ -60,6 +60,7 @@ struct PadCropTool: View {
             }
         }
         .disabled(photo == nil)
+        .sensoryFeedback(.selection, trigger: geometry.aspect)
     }
 
     /// Fixed ratios are shown the way up the crop is (or the photo, before one).

@@ -14,7 +14,7 @@ concurrency:
 jobs:
   macos-core:
     name: Core (macOS arm64, ${{ matrix.build_type }})
-    runs-on: macos-26
+    runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +31,7 @@ jobs:
 
   macos-codecs:
     name: Codecs (macOS arm64)
-    runs-on: macos-26
+    runs-on: xcode-27
     env:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
     steps:
@@ -72,7 +72,7 @@ jobs:
 
   macos-sanitizers:
     name: C ABI (ASan + UBSan)
-    runs-on: macos-26
+    runs-on: xcode-27
     env:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
     steps:
@@ -118,8 +118,8 @@ jobs:
         run: ctest --test-dir build-asan -R '^capi_(shared|static|package|package_rows)_test$' --output-on-failure
 
   apple-app:
-    name: Apple app (macOS 26 arm64)
-    runs-on: macos-26
+    name: Apple app (macOS 27 arm64)
+    runs-on: xcode-27
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       VCPKG_ROOT: ${{ github.workspace }}/build-vcpkg

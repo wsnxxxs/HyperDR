@@ -120,7 +120,7 @@ RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑
 
 需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 27。
 
-> HyperDR 0.5.0 为测试版。iPhone 上 1.1 亿像素 RAW 的全尺寸处理仍在验证中，
+> HyperDR 0.5.1 为测试版。iPhone 上 1.1 亿像素 RAW 的全尺寸处理仍在验证中，
 > iOS 暂不支持在后台继续导出。
 
 <br>

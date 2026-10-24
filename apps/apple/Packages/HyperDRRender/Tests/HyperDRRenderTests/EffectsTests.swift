@@ -42,8 +42,13 @@ import Testing
                 edit.effects.grain = amount
                 let actual = effectHDR(try await engine.render(source, adjustments: edit))
                 let worst = zip(original, actual).reduce(Float(0)) { max($0, abs($1.0-$1.1)) }
-                // Includes float32 log/exp roundoff around 12x HDR white.
-                #expect(worst < 1e-5, "model \(model) strength \(strength) grain \(amount): \(original[0]) -> \(actual[0]), max \(worst)")
+                // Enabling the offset-aware pair adds log/exp roundtrips.
+                // Around 12x HDR white, even 11 float32 ULPs exceed 1e-5.
+                // Retain the absolute floor and bound HDR roundoff per value.
+                let continuous = zip(original, actual).allSatisfy { a, b in
+                    abs(a-b) <= max(1e-5, 16*max(a.ulp, b.ulp))
+                }
+                #expect(continuous, "model \(model) strength \(strength) grain \(amount): \(original[0]) -> \(actual[0]), max \(worst)")
             }
         }
     }

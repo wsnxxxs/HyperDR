@@ -209,7 +209,21 @@ private func licensedRAW() -> URL {
             let tileReport = try await engine.renderExportStripes(lazyAuthor, recipe: recipe, request: authorRequest,
                 rows: 9, prepare: { _ in }, consume: { tiled.consume($0) })
             #expect(wholeReport.gain == tileReport.gain)
-            #expect(wholeReport.gain?.channelCount == 3)
+            #expect(wholeReport.resplitReasons == tileReport.resplitReasons)
+            // Filtering an opaque system-written HEIF can leave alpha one
+            // float32 ULP below one on virtual Metal. The conservative export
+            // path then flattens it, legitimately yielding scalar gain. Keep
+            // RGB gain required whenever that specific fallback is absent.
+            #expect(wholeReport.resplitReasons.isSubset(of: [.flattenTransparency]),
+                    "Unexpected resplit: \(wholeReport.resplitReasons)")
+            let flattened = wholeReport.resplitReasons.contains(.flattenTransparency)
+            #expect(wholeReport.gain?.channelCount == (flattened ? 1 : 3))
+            if flattened {
+                let planes = try await engine.render(author, recipe: recipe, size: authorRequest.photoSize)
+                let pixels = RenderEngine.readPixels(planes)
+                #expect(stride(from: 3, to: pixels.baseRGBA.count, by: 4)
+                    .allSatisfy { abs(pixels.baseRGBA[$0]-1) < 1e-6 })
+            }
             compareBands(whole.rgb, tiled.rgb, label: "ISO_edited_base")
             compareBands(whole.gain, tiled.gain, scale: 0.25, label: "ISO_edited_gain")
         }

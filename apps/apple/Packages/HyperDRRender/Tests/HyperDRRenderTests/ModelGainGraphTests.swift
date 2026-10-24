@@ -42,7 +42,11 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         edit.hdr.strength = 2; edit.hdr.range = 1; edit.hdr.expansionStart = nil
         let limited = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         #expect(limited.baseRGBA == result.baseRGBA)
-        #expect(limited.baseRGBA[8]*exp2(limited.gain[2]) < 2)
+        // The asymptotic shoulder can round to the ceiling (or one float32
+        // ULP above it) on another GPU. Check its independent numeric result.
+        let expectedPeak = DoubleReference.softShoulder(
+            Double(result.baseRGBA[8])*exp2(Double(result.gain[2])*2), range: 1, active: true)
+        #expect(abs(Double(limited.baseRGBA[8]*exp2(limited.gain[2]))-expectedPeak) < 1e-6)
         edit.hdr.enabled = false
         let off = try await engine.render(source,adjustments:edit)
         #expect(!off.aiPending && RenderEngine.readPixels(off).gain == [0,0,0])
@@ -55,7 +59,7 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         let base = try await engine.sdrBase(source)
         let baseSource = try await engine.source(image:base,domain:.sdr)
         let pixels = RenderEngine.readPixels(try await engine.render(baseSource))
-        #expect(pixels.baseRGBA == [1,0.5,0.25,1])
+        #expect(zip(pixels.baseRGBA, [Float(1),0.5,0.25,1]).allSatisfy { abs($0-$1) < 1e-6 })
         var edit = RenderAdjustments(); edit.hdr.source = .capturedAI; edit.hdr.range = 4
         edit.hdr.modelGain = try aiPrediction(source,[1],device:device)
         let low = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))

@@ -119,4 +119,96 @@ import Testing
         await editor.close()
     }
 
+    @Test(arguments: [0.0, 5.0])
+    func cancellingCropCommitsTheActiveGestureBeforeRestoringEntry(previousAngle: Double) async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        editor.attach(undoManager: undo)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-cancel-active.jpg"))
+        await editor.settle()
+        editor.isEditingCrop = true
+        await editor.settle()
+        let before = await fake.requests.count
+        let entry = editor.recipe.geometry
+        var recipe = editor.recipe
+        recipe.geometry.angle = previousAngle
+        editor.setRecipe(recipe)
+        editor.editingGeometry(true)
+        recipe.geometry.angle = 10
+        editor.setRecipe(recipe)
+        // Gesture completion and Esc can register in the same AppKit event.
+        undo.beginUndoGrouping()
+        editor.cancelCrop(restoring: entry)
+        undo.endUndoGrouping()
+        #expect(!editor.isDragging && editor.recipe.geometry == entry)
+        await editor.settle()
+        #expect(await fake.requests.count == before)
+        undo.undo()
+        #expect(editor.recipe.geometry.angle == 10, "Undo Esc restores the state immediately before Esc")
+        undo.undo()
+        #expect(editor.recipe.geometry.angle == previousAngle, "the drag is a separate step")
+        if previousAngle != 0 { undo.undo() }
+        #expect(editor.recipe.geometry == entry && !undo.canUndo)
+        await editor.close()
+    }
+
+    @Test func cancellingCropRestoresEntryInsideAnAbandonedWriteWindow() async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        editor.attach(undoManager: undo)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-cancel-abandoned.jpg"))
+        await editor.settle()
+        editor.isEditingCrop = true
+        await editor.settle()
+        let entry = editor.recipe.geometry
+        var recipe = editor.recipe
+        recipe.geometry.angle = 5
+        editor.setRecipe(recipe)
+        editor.editingGeometry(true)
+        recipe.geometry.angle = 10
+        editor.setRecipe(recipe)
+        editor.commitDrag()
+        undo.undo()
+        #expect(editor.recipe.geometry.angle == 5)
+        // The gesture has not sent its end notification; binding restoration
+        // would be discarded by the abandoned-write protection here.
+        editor.cancelCrop(restoring: entry)
+        #expect(editor.recipe.geometry == entry && !editor.isDragging)
+        editor.editingGeometry(false)
+        undo.undo()
+        #expect(editor.recipe.geometry.angle == 5)
+        undo.redo()
+        #expect(editor.recipe.geometry == entry)
+        await editor.close()
+    }
+
+    @Test func cancellingAnUnchangedCropAddsNoUndoStep() async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        editor.attach(undoManager: undo)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-cancel-unchanged.jpg"))
+        await editor.settle()
+        editor.isEditingCrop = true
+        let entry = editor.recipe.geometry
+        editor.editingGeometry(true)
+        editor.cancelCrop(restoring: entry)
+        editor.cancelCrop(restoring: entry)
+        #expect(!editor.isDragging && !undo.canUndo)
+        #expect(editor.recipe.geometry == entry)
+        // No stale suppression remains to swallow the next discrete edit.
+        var recipe = editor.recipe
+        recipe.geometry.angle = 5
+        editor.setRecipe(recipe)
+        #expect(editor.recipe.geometry.angle == 5)
+        undo.undo()
+        #expect(editor.recipe.geometry == entry && !undo.canUndo)
+        await editor.close()
+    }
+
 }

@@ -15,7 +15,7 @@ locations, and the large 4:2:2 tile used by cancellation/progress tests. The sam
 512-pixel sample also drives the 61MP decode-memory test. Pixel comparisons,
 the 40 dB PSNR threshold, malformed-sample checks and 512 KB stacks are unchanged.
 
-Each `.bin` holds the six bytes `HDRVT` followed by version byte 1, a four-byte
+Each `.bin` holds the five-byte magic `HDRVT`, version byte 1, a four-byte
 big-endian hvcC length, the hvcC record, and one length-prefixed HEVC picture.
 The input pixels are reconstructed independently of decoding from the helper's
 fixed pattern; uncompressed pictures are not stored. `SHA256SUMS` records the

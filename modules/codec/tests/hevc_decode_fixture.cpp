@@ -2,12 +2,44 @@
 
 #include <VideoToolbox/VideoToolbox.h>
 
+#include <algorithm>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
+
+#include "hyperdr/foundation/file_io.hpp"
 #include <exception>
 
 #include "hevc/vt_common.hpp"
 namespace hyperdr::codec::hevc::testing {
 namespace {
+DecodedPicture reference_picture(FixtureGeometry g) {
+  // VT encodes monochrome full range; limited mono changes only its SPS below.
+  if (g.chroma == 0) g.full_range = true;
+  DecodedPicture input{g.width, g.height, g.depth, g.chroma, {}, {}};
+  input.luma.resize(input.luma_row_bytes() * g.height);
+  input.chroma.resize(input.chroma_row_bytes() * input.chroma_height());
+  const auto put = [&](std::uint8_t* p, unsigned value) {
+    if (g.depth == 8) *p = value;
+    else {
+      auto word = static_cast<std::uint16_t>(value << 6);
+      std::memcpy(p, &word, 2);
+    }
+  };
+  const unsigned scale = 1U << (g.depth - 8), low = (g.full_range ? 8 : 24) * scale,
+                 range = (g.full_range ? 236 : 200) * scale, center = 1U << (g.depth - 1);
+  for (unsigned row = 0; row < g.height; ++row)
+    for (unsigned x = 0; x < g.width; ++x) {
+      const unsigned code = low + (std::uint64_t(x) * (range - 16 * scale)) / (g.width - 1) +
+                            (((x / 7) ^ (row / 5)) & 1) * 8 * scale + (row % 7) * scale;
+      put(input.luma.data() + row * input.luma_row_bytes() + x * input.sample_bytes(), code);
+    }
+  for (std::size_t at = 0; at < input.chroma.size(); at += input.sample_bytes())
+    put(input.chroma.data() + at, center);
+  return input;
+}
+
 struct State {
   std::vector<std::uint8_t> configuration, sample;
   std::exception_ptr error;
@@ -44,7 +76,7 @@ class Session {
   }
 };
 }  // namespace
-DecodeFixture encode(const FixtureGeometry& geometry) {
+static DecodeFixture encode(const FixtureGeometry& geometry) {
   auto g = geometry;
   const bool limited_mono = g.chroma == 0 && !g.full_range;
   if (limited_mono) g.full_range = true;
@@ -113,44 +145,20 @@ DecodeFixture encode(const FixtureGeometry& geometry) {
     CVBufferSetAttachment(pixel.get(), kCVImageBufferChromaLocationBottomFieldKey, location,
                           kCVAttachmentMode_ShouldPropagate);
   }
-  DecodedPicture input{g.width, g.height, g.depth, g.chroma, {}, {}};
-  input.luma.resize(input.luma_row_bytes() * g.height);
-  input.chroma.resize(input.chroma_row_bytes() * input.chroma_height());
-  const auto put = [&](std::uint8_t* p, unsigned value) {
-    if (g.depth == 8)
-      *p = value;
-    else {
-      auto word = static_cast<std::uint16_t>(value << 6);
-      std::memcpy(p, &word, 2);
-    }
-  };
+  auto input = reference_picture(g);
   check_status(CVPixelBufferLockBaseAddress(pixel.get(), 0), "lock fixture source");
-  const unsigned scale = 1U << (g.depth - 8), low = (g.full_range ? 8 : 24) * scale,
-                 range = (g.full_range ? 236 : 200) * scale, center = 1U << (g.depth - 1);
   const bool planar = CVPixelBufferIsPlanar(pixel.get());
   auto* y = static_cast<std::uint8_t*>(planar ? CVPixelBufferGetBaseAddressOfPlane(pixel.get(), 0)
-                                              : CVPixelBufferGetBaseAddress(pixel.get()));
+                                            : CVPixelBufferGetBaseAddress(pixel.get()));
   const auto stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(pixel.get(), 0)
                              : CVPixelBufferGetBytesPerRow(pixel.get());
   for (unsigned row = 0; row < g.height; ++row)
-    for (unsigned x = 0; x < g.width; ++x) {
-      unsigned code = low + (std::uint64_t(x) * (range - 16 * scale)) / (g.width - 1) +
-                      (((x / 7) ^ (row / 5)) & 1) * 8 * scale + (row % 7) * scale;
-      put(y + row * stride + x * input.sample_bytes(), code);
-      put(input.luma.data() + row * input.luma_row_bytes() + x * input.sample_bytes(), code);
-    }
+    std::memcpy(y + row * stride, input.luma.data() + row * input.luma_row_bytes(), input.luma_row_bytes());
   if (planar) {
     auto* uv = static_cast<std::uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(pixel.get(), 1));
-    auto stride_uv = CVPixelBufferGetBytesPerRowOfPlane(pixel.get(), 1);
-    auto w = CVPixelBufferGetWidthOfPlane(pixel.get(), 1),
-         h = CVPixelBufferGetHeightOfPlane(pixel.get(), 1);
-    for (unsigned row = 0; row < h; ++row)
-      for (unsigned x = 0; x < w * 2; ++x)
-        put(uv + row * stride_uv + x * input.sample_bytes(), center);
-    if (g.chroma)
-      for (unsigned row = 0; row < input.chroma_height(); ++row)
-        std::memcpy(input.chroma.data() + row * input.chroma_row_bytes(), uv + row * stride_uv,
-                    input.chroma_row_bytes());
+    const auto stride_uv = CVPixelBufferGetBytesPerRowOfPlane(pixel.get(), 1);
+    for (unsigned row = 0; row < input.chroma_height(); ++row)
+      std::memcpy(uv + row * stride_uv, input.chroma.data() + row * input.chroma_row_bytes(), input.chroma_row_bytes());
   }
   CVPixelBufferUnlockBaseAddress(pixel.get(), 0);
   check_status(VTCompressionSessionEncodeFrame(session.value, pixel.get(), CMTimeMake(0, 1),
@@ -188,5 +196,37 @@ DecodeFixture encode(const FixtureGeometry& geometry) {
     if (!changed) throw std::runtime_error("cannot construct video-range mono SPS");
   }
   return {std::move(config), std::move(state.sample), std::move(input)};
+}
+DecodeFixture fixture(const FixtureGeometry& g) {
+  const auto name = std::to_string(g.width) + "x" + std::to_string(g.height) + "-" +
+      std::to_string(g.depth) + "-" + std::to_string(g.chroma) + "-" +
+      (g.full_range ? "full" : "video") + "-" +
+      (g.chroma_location ? std::to_string(*g.chroma_location) : "default") + ".bin";
+  const auto path = std::filesystem::path(HYPERDR_HEVC_DECODE_FIXTURES) / name;
+  constexpr std::uint8_t magic[] = {'H', 'D', 'R', 'V', 'T', 1};
+  if (const auto record = std::getenv("HYPERDR_RECORD_HEVC_FIXTURES"); record && std::string(record) == "1") {
+    auto result = encode(g);
+    // Store only hvcC and the compressed picture. The source is the fixed
+    // analytic pattern above, so no uncompressed image needs to enter Git.
+    std::vector<std::uint8_t> bytes(std::begin(magic), std::end(magic));
+    const auto length = result.config.record.size();
+    for (int shift : {24, 16, 8, 0}) bytes.push_back((length >> shift) & 255);
+    bytes.insert(bytes.end(), result.config.record.begin(), result.config.record.end());
+    bytes.insert(bytes.end(), result.sample.begin(), result.sample.end());
+    std::filesystem::create_directories(path.parent_path());
+    write_binary_file_atomic(path, bytes, true);
+    return result;
+  }
+  if (std::filesystem::file_size(path) > 16 * 1024 * 1024)
+    throw std::runtime_error("oversized HEVC decoder fixture: " + name);
+  const auto bytes = read_binary_file(path);
+  if (bytes.size() < 11 || !std::equal(std::begin(magic), std::end(magic), bytes.begin()))
+    throw std::runtime_error("invalid HEVC decoder fixture: " + name);
+  std::size_t length = 0;
+  for (unsigned at = 6; at < 10; ++at) length = (length << 8) | bytes[at];
+  if (!length || length > 1024 * 1024 || length >= bytes.size() - 10)
+    throw std::runtime_error("invalid HEVC fixture configuration length: " + name);
+  return {parse_hevc_configuration(std::span(bytes).subspan(10, length)),
+          {bytes.begin() + 10 + length, bytes.end()}, reference_picture(g)};
 }
 }  // namespace hyperdr::codec::hevc::testing

@@ -22,6 +22,8 @@ if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(hevc_vt_decode_test LINK HyperDR::codec)
   if(TARGET hevc_vt_decode_test)
     target_sources(hevc_vt_decode_test PRIVATE hevc_decode_fixture.cpp)
+    target_compile_definitions(hevc_vt_decode_test PRIVATE
+      HYPERDR_HEVC_DECODE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/hevc_decode")
     target_include_directories(hevc_vt_decode_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
     add_test(NAME hevc_vt_decode_memory_test COMMAND hevc_vt_decode_test memory)
     set_tests_properties(hevc_vt_decode_test hevc_vt_decode_memory_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)

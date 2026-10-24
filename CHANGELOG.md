@@ -3,6 +3,27 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## 0.5.2 - 2026-10-24 (Apple pre-release)
+
+- Grain and halation work on every photo: they sit at the end of the colour
+  group, titled Adjust on the Mac, iPad and iPhone, with no look, with an
+  imported LUT or with a built-in film. With a film they use that stock's
+  model; otherwise a generic grain and a highlight-driven halation. A stock
+  chosen on a photo whose effects are untouched brings its own 100 %, and a
+  look's strength only mixes its colour.
+- Crop: edge handles, a wider touch reach, thirds that fade, a double tap that
+  restores the largest crop of the ratio, and a glide to the fitted crop after
+  a drag; haptics on iPhone and iPad; thin boxes can shrink below the long-edge
+  minimum; readouts follow the reader's number format.
+- Crop: the pane opens in place on the cropped frame, the iOS pane shows only
+  the edit and restores the chosen comparison afterwards, and a press that does
+  not move no longer writes a crop. On the Mac, Return finishes the crop and Esc
+  cancels it; entering and cancelling are discrete undo steps.
+- Export verification compares alpha-flattened exports with the actual HDR
+  endpoint, scales HDR tolerances with float32 precision and rejects
+  non-finite values.
+- Refresh the README with current Mac, iPad and iPhone screenshots.
+
 ## 0.5.1 - 2026-10-24 (Apple pre-release)
 
 - Add automatic upright correction to the crop editor on Mac, iPhone and iPad.

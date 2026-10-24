@@ -498,6 +498,20 @@ import Observation
         return commitDrag()
     }
 
+    /// Cancel the pane back to its entry geometry before the host leaves it.
+    /// First commits an active crop gesture as its own undo step, then clears
+    /// its abandoned-write window and restores the entry as a separate edit.
+    /// This discrete restoration bypasses control binding writes, so it also
+    /// works after Undo committed a still-coasting gesture. An unchanged entry
+    /// adds no step. The host sets `isEditingCrop = false` afterwards.
+    func cancelCrop(restoring entry: Geometry) {
+        let committed = endCropInteraction()
+        abandoned = nil
+        guard recipe.geometry != entry else { return }
+        if committed { undo.separateNextStep() }
+        apply(.geometry) { $0.geometry = entry }
+    }
+
     /// The drag id of the crop pane's gestures.
     nonisolated static let geometryDragID = "geometry"
 

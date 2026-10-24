@@ -213,6 +213,8 @@ import HyperDRRecipe
             let previewPixels = RenderEngine.readTexture(preview.texture)
             #expect(full.size == preview.size)
             #expect(zip(pixels, previewPixels).allSatisfy { abs($0 - $1) < 1e-5 })
+            #expect(abs(pixels[0] - pixels[4]) > 0.99)
+            #expect(abs(pixels[0] - pixels[full.size.width * 4]) > 0.99)
             // Whole-pixel crop/turn/mirror must not blur the one-pixel checks.
             #expect(stride(from: 0, to: pixels.count, by: 4).allSatisfy { pixels[$0] < 0.001 || pixels[$0] > 0.999 })
             let export = try await engine.openExportSource(file, options: optionsWithFullResolution(options))

@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import HyperDRRecipe
 import simd
 
@@ -14,26 +15,51 @@ struct CropLayout: Equatable {
     let viewport: CGSize
     let scale: Double
     let centre: GeometryPoint
+    /// The room kept around the crop when it is fitted.
+    let margin: CGFloat
 
     init(photo: GeometrySize, geometry: Geometry, viewport: CGSize, margin: CGFloat) {
         let crop = geometry.cropRect(for: photo)
         let room = CGSize(width: max(1, viewport.width - 2 * margin), height: max(1, viewport.height - 2 * margin))
         self.init(photo: photo, geometry: geometry, viewport: viewport,
                   scale: min(Double(room.width) / max(crop.width, 1), Double(room.height) / max(crop.height, 1)),
-                  centre: crop.centre)
+                  centre: crop.centre, margin: margin)
     }
 
-    private init(photo: GeometrySize, geometry: Geometry, viewport: CGSize, scale: Double, centre: GeometryPoint) {
+    private init(photo: GeometrySize, geometry: Geometry, viewport: CGSize, scale: Double, centre: GeometryPoint,
+                 margin: CGFloat) {
         self.photo = photo
         self.geometry = geometry
         self.viewport = viewport
         self.scale = scale
         self.centre = centre
+        self.margin = margin
     }
 
     /// The same placement for another geometry: a drag keeps the photo still.
     func with(_ geometry: Geometry) -> CropLayout {
-        CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale, centre: centre)
+        CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale, centre: centre, margin: margin)
+    }
+
+    /// Where the pane settles for this geometry: its crop fitted and centred again.
+    var fitted: CropLayout { CropLayout(photo: photo, geometry: geometry, viewport: viewport, margin: margin) }
+
+    /// Part of the way (`t`, 0...1) from this placement to `other`'s, with
+    /// this geometry. The scale moves by equal ratios, so a zoom reads evenly.
+    func moving(towards other: CropLayout, _ t: Double) -> CropLayout {
+        let t = min(max(t, 0), 1)
+        let scale = scale > 0 && other.scale > 0 ? scale * pow(other.scale / scale, t) : other.scale
+        let centre = GeometryPoint(x: centre.x + (other.centre.x - centre.x) * t,
+                                   y: centre.y + (other.centre.y - centre.y) * t)
+        return CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale, centre: centre, margin: margin)
+    }
+
+    /// The placement differs from `other`'s by less than a point anywhere on
+    /// the crop: nothing left worth animating.
+    func settles(at other: CropLayout) -> Bool {
+        let a = cropRect, b = other.with(geometry).cropRect
+        return abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5
+            && abs(a.maxX - b.maxX) < 0.5 && abs(a.maxY - b.maxY) < 0.5
     }
 
     var frame: GeometrySize { geometry.frameSize(of: photo) }
@@ -81,11 +107,29 @@ enum CropDrag: Equatable {
     /// The edges that follow the finger: −1 is the left (top), +1 the right (bottom), 0 neither.
     case resize(x: Int, y: Int)
 
+    /// How far from an edge a finger still takes hold of it: a band of
+    /// 2 × 24 pt, wider than the 44 pt touch target. A pointer is precise.
+    #if os(macOS)
+    static let reach: CGFloat = 10
+    #else
+    static let reach: CGFloat = 24
+    #endif
+
     /// What a touch at `location` takes hold of on a crop box `box`: a corner
-    /// or an edge within reach, else the box when inside it.
-    static func at(_ location: CGPoint, box: CGRect, reach: CGFloat = 28) -> CropDrag? {
+    /// or an edge within reach, else the box when inside it. Inside, the
+    /// edges reach at most a quarter of the way in, so a small box still has
+    /// a middle to move it by; a corner takes precedence over its edges.
+    static func at(_ location: CGPoint, box: CGRect, reach: CGFloat = Self.reach) -> CropDrag? {
         func side(_ value: CGFloat, _ low: CGFloat, _ high: CGFloat) -> Int {
-            abs(value - low) <= reach && abs(value - low) <= abs(value - high) ? -1 : abs(value - high) <= reach ? 1 : 0
+            let inner = min(reach, (high - low) / 4)
+            func near(_ edge: CGFloat, inward: CGFloat) -> Bool {
+                let offset = (value - edge) * inward
+                return offset <= 0 ? -offset <= reach : offset <= inner
+            }
+            let toLow = abs(value - low), toHigh = abs(value - high)
+            if near(low, inward: 1), toLow <= toHigh { return -1 }
+            if near(high, inward: -1) { return 1 }
+            return 0
         }
         let within = box.insetBy(dx: -reach, dy: -reach).contains(location)
         guard within else { return nil }
@@ -100,16 +144,22 @@ enum CropDrag: Equatable {
     /// `quad` and no smaller than `minimum` pixels across.
     func apply(_ delta: GeometryPoint, to start: GeometryRect, ratio: Double?, quad: [GeometryPoint],
                minimum: Double) -> GeometryRect {
+        resolve(delta, to: start, ratio: ratio, quad: quad, minimum: minimum).rect
+    }
+
+    /// As `apply`, and whether the photo's edge stopped the drag short of the finger.
+    func resolve(_ delta: GeometryPoint, to start: GeometryRect, ratio: Double?, quad: [GeometryPoint],
+                 minimum: Double) -> (rect: GeometryRect, stopped: Bool) {
         let target = proposed(delta, start, ratio: ratio, minimum: minimum)
         func valid(_ r: GeometryRect) -> Bool { r.corners.allSatisfy { Geometry.contains(quad, $0) } }
-        if valid(target) { return target }
+        if valid(target) { return (target, false) }
         // The farthest point along the way that still fits.
         var low = 0.0, high = 1.0
         for _ in 0..<30 {
             let t = (low + high) / 2
             if valid(Self.mix(start, target, t)) { low = t } else { high = t }
         }
-        return Self.mix(start, target, low)
+        return (Self.mix(start, target, low), true)
     }
 
     private func proposed(_ d: GeometryPoint, _ s: GeometryRect, ratio: Double?, minimum: Double) -> GeometryRect {

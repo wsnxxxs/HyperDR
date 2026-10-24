@@ -64,6 +64,8 @@ struct EditorCanvas: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.smooth(duration: 0.35), value: placement)
         }
+        // A placement held from one visit to the crop pane never reaches the next.
+        .onChange(of: cropping) { cropFreeze = nil }
         // The new photo's embedded thumbnail until its first frame; over a
         // previous photo it covers that one entirely.
         .overlay { OpeningPlaceholder(placeholder, backdrop: editor.frame != nil) }

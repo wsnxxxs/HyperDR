@@ -25,7 +25,10 @@ conda create -y -p .venv python=3.12 pip
 ```
 
 The local dataset defaults to `~/datasets/hyperdr-apple`. It is not
-distributed or committed.
+distributed or committed. Neither are the trained models: `models/` is ignored,
+so the ONNX, Core ML and EXIF-level files the commands below read or write stay
+local, and the app bundles `research-cnn-v1.mlpackage` only when a copy is put
+in HyperDRRender's `Resources/Models/`.
 
 When this directory is refreshed from a sibling `HyperDR_Model` checkout, run
 `sync_from_source.ps1`. It copies only source and contract files; datasets,

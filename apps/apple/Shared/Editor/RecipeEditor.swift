@@ -36,7 +36,8 @@ import Observation
         case ready
         /// The prediction failed; the source stays selected. Developer-facing detail.
         case failed(String)
-        /// The model cannot run on this device; AI options are disabled.
+        /// The model cannot run on this device, or this build does not include
+        /// it (`modelIncluded`); AI options are disabled.
         case unavailable(String)
     }
 
@@ -70,6 +71,10 @@ import Observation
     private(set) var placeholderURL: URL?
     private(set) var placeholderID: UUID?
     private(set) var aiStatus: AIStatus = .idle
+    /// Whether this build includes the AI model. An open-source build does not:
+    /// AI is unavailable from the start, and the views say why.
+    let modelIncluded: Bool
+    nonisolated static let modelNotIncluded = "This build does not include the AI model"
     /// The last render failure (not a cancellation), developer-facing; nil once a render succeeds.
     private(set) var renderFailure: String?
     /// The file changed on disk since it was opened: tell the user to open it again.
@@ -231,12 +236,14 @@ import Observation
     init(renderer: any EditorRendering, frameClock: any EditorFrameClock = ContinuousFrameClock(),
          detailIdle: Duration = .milliseconds(250)) {
         self.renderer = renderer
+        self.modelIncluded = renderer.includesModel
         self.frameClock = frameClock
         self.detailIdle = detailIdle
         self.recipe = Recipe()
         var restore: (@MainActor (Recipe) -> Void)?
         self.undo = RecipeUndo(restore: { restore?($0) })
         restore = { [weak self] in self?.restore($0) }
+        if !modelIncluded { aiStatus = .unavailable(Self.modelNotIncluded) }
     }
 
     /// Steps go to this manager from now on.

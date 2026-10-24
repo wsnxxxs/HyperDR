@@ -49,16 +49,13 @@ public final class ModelGainModel: @unchecked Sendable {
         guard !MLModel.availableComputeDevices.isEmpty else {
             throw ModelGainError.deviceUnavailable("Core ML has no available compute device")
         }
-        let bundle = bundle ?? Bundle.module
         let configuration = MLModelConfiguration()
         configuration.computeUnits = computeUnits
         let compiled: URL
-        if let url = bundle.url(forResource: ModelGain.modelName, withExtension: "mlmodelc") {
-            compiled = url
-        } else if let package = bundle.url(forResource: ModelGain.modelName, withExtension: "mlpackage") {
-            compiled = try Self.compileOnce(package)
-        } else {
-            throw ModelGainError.modelUnavailable("\(ModelGain.modelName).mlmodelc is not in the bundle")
+        switch ModelGain.bundledModel(in: bundle) {
+        case .compiled(let url): compiled = url
+        case .package(let url): compiled = try Self.compileOnce(url)
+        case nil: throw ModelGainError.notIncluded
         }
         do {
             model = try MLModel(contentsOf: compiled, configuration: configuration)

@@ -18,7 +18,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
 }
 
 @Suite(.serialized) struct RenderTests {
-    @Test func oldSourceCannotAnalyzeReplacementFile() async throws {
+    @Test(.needsModel) func oldSourceCannotAnalyzeReplacementFile() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tiff")
         defer { try? FileManager.default.removeItem(at:url) }
         func write(_ gray: UInt8, modified: Date) throws {
@@ -381,7 +381,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         #expect(medianLift > 1.9 && medianLift < 2.4)
     }
 
-    @Test func logLookKeepsAIOnTheAppleBoostPhotograph() async throws {
+    @Test(.needsModel) func logLookKeepsAIOnTheAppleBoostPhotograph() async throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 { root.deleteLastPathComponent() }
         let fixture = root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")

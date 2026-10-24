@@ -61,7 +61,9 @@ actor FakeEditorRendering: EditorRendering {
     private var nextHold = 0
     private var textures: (base: any MTLTexture, gain: any MTLTexture)?
 
-    init() {}
+    /// `includesModel`: false stands for an open-source build without the model.
+    nonisolated let includesModel: Bool
+    init(includesModel: Bool = true) { self.includesModel = includesModel }
 
     func configure(_ change: @Sendable (isolated FakeEditorRendering) -> Void) { change(self) }
 

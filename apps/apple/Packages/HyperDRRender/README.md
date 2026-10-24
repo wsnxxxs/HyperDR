@@ -514,7 +514,10 @@ actual edited auto output range as `hdr.range`.
 AI predictions use a four-entry LRU keyed by `(sourceID, modelID)`. Switching
 development families preserves these small grids; `clearCaches()` removes them.
 `ModelGainError.deviceUnavailable(String)` identifies absent Metal/Core ML compute
-devices. Missing/broken model resources remain `modelUnavailable`; inference failures
+devices. The weights are not in the repository: `Resources/Models/` carries the
+model only in builds given a private copy, `ModelGain.isIncluded` says whether this
+one was, and loading without it throws `notIncluded`. Broken model resources remain
+`modelUnavailable`; inference failures
 remain `predictionFailed`. These are not labelled as hardware incompatibility.
 
 RAW preview `SourceOptions(recipe:resolution:)` sets CIRAWFilter.scaleFactor

@@ -170,7 +170,12 @@ public actor RecipeExportService: RecipeExportServicing {
                     let provider: CoreMLModelGainProvider
                     if let cached = defaultModelProvider { provider = cached }
                     else {
-                        provider = try CoreMLModelGainProvider(device: await renderEngine.device)
+                        do {
+                            provider = try CoreMLModelGainProvider(device: await renderEngine.device)
+                        } catch ModelGainError.notIncluded {
+                            // A build without the model cannot export an AI recipe.
+                            throw RecipeExportError.missingModel
+                        }
                         defaultModelProvider = provider
                     }
                     identity = provider.modelID

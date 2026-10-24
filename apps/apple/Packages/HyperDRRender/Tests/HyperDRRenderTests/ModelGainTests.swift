@@ -175,7 +175,7 @@ private struct Difference: CustomStringConvertible {
     ///
     /// Both runs see identical input bytes; the only difference between them is
     /// where Core ML schedules the program.
-    @Test(arguments: [MLComputeUnits.all, .cpuOnly])
+    @Test(.needsModel, arguments: [MLComputeUnits.all, .cpuOnly])
     func ncnnParity(units: MLComputeUnits) throws {
         let model = try model(units)
         var covered = 0
@@ -260,7 +260,7 @@ private struct Difference: CustomStringConvertible {
     /// picture, exactly like an ImageIO-decoded photograph. A swapped row order
     /// would put the bright half in the wrong end of the feature planes and, from
     /// there, in the wrong end of the gain grid.
-    @Test func imageInputKeepsOrientation() throws {
+    @Test(.needsModel) func imageInputKeepsOrientation() throws {
         let width = 256, height = 192
         let top = [UInt8](repeating: 128, count: width * height / 2 * 3)  // mid grey
         var bottom = [UInt8](repeating: 0, count: width * height / 2 * 3)
@@ -506,7 +506,7 @@ private struct Difference: CustomStringConvertible {
 
     /// Core ML requires one thread at a time per `MLModel`; the model serializes
     /// predictions, so concurrent callers must all see the same answer.
-    @Test func concurrentPredictionsAgree() async throws {
+    @Test(.needsModel) func concurrentPredictionsAgree() async throws {
         let model = try ModelGainModel(computeUnits: .all)
         let size = PixelSize(width: 256, height: 192)
         let pixels = size.width * size.height
@@ -556,7 +556,7 @@ private struct Difference: CustomStringConvertible {
     }
 
     /// The cached gain must not outlive the model identity it was computed with.
-    @Test func cacheKeyCoversModelAndGrid() throws {
+    @Test(.needsModel) func cacheKeyCoversModelAndGrid() throws {
         let all = try model(.all)
         let cpu = try model(.cpuOnly)
         let size = PixelSize(width: 256, height: 192)
@@ -574,7 +574,7 @@ private struct Difference: CustomStringConvertible {
     /// No tight bound: this exists to record the number and to fail loudly if the
     /// model ever starts spilling to something pathological (a flexible-shape
     /// recompile per call, for instance). AI gain runs once per photograph.
-    @Test func analysisScaleInferenceCost() throws {
+    @Test(.needsModel) func analysisScaleInferenceCost() throws {
         let reference = try #require(try Fixture.cases().first { $0.upsampledBy != nil })
         let (rgb, size) = try Fixture.linearBase(reference.sourceURL)
         let factor = try #require(reference.upsampledBy)
@@ -597,7 +597,7 @@ private struct Difference: CustomStringConvertible {
     /// The provider render-dev's graph calls: one prediction per source, a
     /// single-channel stop grid as a texture, and the model identity it should
     /// cache under.
-    @Test func coreMLProviderCarriesTheModelGrid() async throws {
+    @Test(.needsModel) func coreMLProviderCarriesTheModelGrid() async throws {
         let engine = try RenderEngine()
         let width = 384, height = 256
         var bytes = [UInt8](repeating: 0, count: width * height * 3)
@@ -641,7 +641,7 @@ private struct Difference: CustomStringConvertible {
 
     /// The analysis scale changes the grid, so it belongs in the prediction's
     /// identity: two providers configured differently must not share a cache entry.
-    @Test func providerIdentityIncludesTheAnalysisScale() async throws {
+    @Test(.needsModel) func providerIdentityIncludesTheAnalysisScale() async throws {
         let engine = try RenderEngine()
         let width = 64, height = 64
         var bytes = [UInt8](repeating: 0, count: width * height * 3)
@@ -669,7 +669,7 @@ private struct Difference: CustomStringConvertible {
     /// Only SDR and RAW sources choose an AI HDR source, and a RAW source has to
     /// bring its SDR base: its extended-range development is not what the model
     /// was trained on.
-    @Test func coreMLProviderRefusesUnsuitableSources() async throws {
+    @Test(.needsModel) func coreMLProviderRefusesUnsuitableSources() async throws {
         let engine = try RenderEngine()
         let cgImage = try #require(Self.cgImage(rgb8: [UInt8](repeating: 120, count: 64 * 64 * 3),
                                                 width: 64, height: 64))
@@ -688,7 +688,7 @@ private struct Difference: CustomStringConvertible {
     /// An explicit SDR base — what a RAW source's split hands over — predicts the
     /// same gain as the source path when the base is the same picture, and the
     /// cache stays on the source identity it was given.
-    @Test func coreMLProviderAcceptsAnExplicitSDRBase() async throws {
+    @Test(.needsModel) func coreMLProviderAcceptsAnExplicitSDRBase() async throws {
         let engine = try RenderEngine()
         let width = 320, height = 240
         var bytes = [UInt8](repeating: 0, count: width * height * 3)

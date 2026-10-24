@@ -61,6 +61,9 @@ range and where the expansion starts, or let it add only what a photo with
 captured highlights is missing. It always infers from the same development, so
 a look or LUT chosen later never pulls it off course.
 
+The trained weights are not published. A build from this repository offers
+Captured and Expand, and shows the AI sources as unavailable.
+
 <br>
 
 <p align="center">

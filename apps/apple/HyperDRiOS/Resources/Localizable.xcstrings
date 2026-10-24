@@ -696,6 +696,23 @@
         }
       }
     },
+    "ios.ai.notIncluded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This build doesn’t include the AI model. Use Expand for HDR highlights."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本未附带 AI 模型，可使用“扩展”生成 HDR 高光。"
+          }
+        }
+      }
+    },
     "ios.canvas.original" : {
       "comment" : "Shown while the canvas is held to see the original.",
       "extractionState" : "manual",

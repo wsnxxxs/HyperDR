@@ -674,7 +674,7 @@ struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).count == 1)
     }
 
-    @Test func defaultProviderResolvesSelectionAndChecksHistoricalIdentity() async throws {
+    @Test(.needsModel) func defaultProviderResolvesSelectionAndChecksHistoricalIdentity() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         var recipe = Recipe(); recipe.setHDRSource(.ai)
         let snapshot = try env.snapshot(recipe: recipe)

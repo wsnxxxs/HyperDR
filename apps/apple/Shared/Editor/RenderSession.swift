@@ -18,7 +18,8 @@ import HyperDRRender
 ///   (preview and full size share it): renders look it up after loading
 ///   their source, and without one they come back `aiPending`. The latest
 ///   `predictionLimit` are kept, by source id and model. A provider or prediction that reports
-///   `ModelGainError.deviceUnavailable` makes AI unavailable; any other
+///   `ModelGainError.deviceUnavailable` or `.notIncluded` (a build without the
+///   model, `includesModel`) makes AI unavailable; any other
 ///   failure is a failed prediction the user can retry.
 actor RenderSession: EditorRendering {
     private let engine: RenderEngine
@@ -284,6 +285,8 @@ actor RenderSession: EditorRendering {
         try await engine.sdrThumbnail(frame.planes, maximumSize: maximumSize)
     }
 
+    nonisolated var includesModel: Bool { ModelGain.isIncluded }
+
     func predictModelGain(_ request: EditorRenderRequest) async throws {
         try await mapped { try await predict(request) }
     }
@@ -326,11 +329,13 @@ actor RenderSession: EditorRendering {
         return prediction
     }
 
-    /// The device cannot run the model at all: AI becomes unavailable. Anything
-    /// else (a missing model, a failed prediction) can be retried.
+    /// The device cannot run the model at all, or this build has none: AI
+    /// becomes unavailable. Anything else (a model that fails to load, a failed
+    /// prediction) can be retried.
     private static func modelError(_ error: any Error) -> any Error {
         switch error {
         case ModelGainError.deviceUnavailable(let reason): return EditorRenderingError.modelUnavailable(reason)
+        case ModelGainError.notIncluded: return EditorRenderingError.modelUnavailable(RecipeEditor.modelNotIncluded)
         case RenderError.metalUnavailable: return EditorRenderingError.modelUnavailable("No Metal device")
         default: return error
         }

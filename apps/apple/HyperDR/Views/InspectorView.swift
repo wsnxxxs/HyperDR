@@ -238,7 +238,11 @@ private struct AIStatusLine: View {
         switch editor.aiStatus {
         case .computing: return usesAI ? "ai.status.predicting" : nil
         case .failed: return usesAI ? "ai.status.predictFailed" : nil
-        case .unavailable: return "ai.status.modelUnavailable"
+        case .unavailable:
+            if editor.modelIncluded { return "ai.status.modelUnavailable" }
+            // Without the model, say so only where AI would have been offered.
+            return HDRSource.options(in: editor.recipe.inputDomain).contains(where: \.usesModel)
+                ? "ai.status.modelNotIncluded" : nil
         case .ready: return usesAI && editor.isModelGainPending ? "ai.status.notApplied" : nil
         case .idle: return nil
         }
@@ -246,7 +250,9 @@ private struct AIStatusLine: View {
 
     private var isProblem: Bool {
         switch editor.aiStatus {
-        case .failed, .unavailable: true
+        case .failed: true
+        // A build without the model is a fact, not a problem to fix.
+        case .unavailable: editor.modelIncluded
         default: false
         }
     }

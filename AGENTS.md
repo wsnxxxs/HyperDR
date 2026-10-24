@@ -38,6 +38,14 @@ this checkout. This file summarizes what they decide.
   2026-10-20 (last visible at `5cd997fd`). P7-4 removes the CLI, schema,
   panel-v1 adapter, C++ processing and ncnn; AI runs through Core ML in Render.
 - New code is Apple/POSIX only, with no `_WIN32` branches.
+- The AI model weights are private (user decision, 2026-10-25): no ONNX,
+  Core ML package, EXIF trees or checkpoint is committed, and history was
+  rewritten to remove them. `HyperDR_Model/models/` and HyperDRRender's
+  `Resources/Models/*` (except its README) are ignored; a private copy of
+  `research-cnn-v1.mlpackage` placed there is bundled. Without it
+  (`ModelGain.isIncluded`, `EditorRendering.includesModel`) Mac, iPhone and iPad
+  offer Captured and Expand, show AI as not included, and tests marked
+  `.needsModel` skip. Published releases are built without the model.
 
 ## Layout
 
@@ -137,7 +145,7 @@ photo-dependent HDR content into the mat.
 ## Current pipeline
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
-CIRAWFilter decode; Core ML supplies AI gain. The apps require iOS/iPadOS 27 and macOS 27; RAW decoder 9 still depends on the camera and file.
+CIRAWFilter decode; Core ML supplies AI gain when the build includes the model. The apps require iOS/iPadOS 27 and macOS 27; RAW decoder 9 still depends on the camera and file.
 Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
 photos. Automatic selects decoder 9 when the system and file support it
 (including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without

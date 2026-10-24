@@ -185,7 +185,7 @@ import UniformTypeIdentifiers
         await session.close()
     }
 
-    @Test func opensRendersARegionAndRefusesStaleRequests() async throws {
+    @Test(.needsModel) func opensRendersARegionAndRefusesStaleRequests() async throws {
         let session = try RenderSession()
         let url = try Self.tinyPhoto()
         let source = try await session.open(url, previewSize: PixelSize(width: 48, height: 48))
@@ -233,7 +233,7 @@ import UniformTypeIdentifiers
 
     /// R22-006: a prediction belongs to the source id it was made on; a new
     /// development renders pending (not an error) until predicted.
-    @Test func aNewDevelopmentNeedsItsOwnPrediction() async throws {
+    @Test(.needsModel) func aNewDevelopmentNeedsItsOwnPrediction() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         // Tests/HyperDREditorCoreTests → the checkout; `fetch_test_fixtures.py` puts it there.
         let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
@@ -267,7 +267,7 @@ import UniformTypeIdentifiers
     }
 
     /// Log look redevelops scene-linear, but AI stays on the Apple-boost photograph.
-    @Test func logLookReusesThePrediction() async throws {
+    @Test(.needsModel) func logLookReusesThePrediction() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
             .appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")

@@ -57,6 +57,11 @@ __pycache__/
 # Bundled local ML runtime and private trained weights are machine-local.
 /HyperDR_Model/.venv/
 /HyperDR_Model/checkpoints/*.pt
+# The AI models are private: no weights in the repository. Official builds
+# put research-cnn-v1.mlpackage into HyperDRRender's Resources/Models/.
+/HyperDR_Model/models/
+/apps/apple/Packages/HyperDRRender/Sources/HyperDRRender/Resources/Models/*
+!/apps/apple/Packages/HyperDRRender/Sources/HyperDRRender/Resources/Models/README.md
 /HyperDR_Model/reports/
 
 # Keep documentation local.

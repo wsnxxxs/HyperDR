@@ -314,8 +314,10 @@ struct PadEditor: View {
             lutPreviews: session.exports.luts.previews.images))
     }
 
-    /// Why AI cannot be chosen on this device, as on the Mac's AI status line.
+    /// Why AI cannot be chosen: this build has no model, or this device cannot
+    /// run it; as on the Mac's AI status line.
     private var aiUnavailable: Text? {
+        if !editor.modelIncluded { return Text("ios.ai.notIncluded") }
         if case .unavailable = editor.aiStatus { return Text("ios.ai.unavailable") }
         return nil
     }

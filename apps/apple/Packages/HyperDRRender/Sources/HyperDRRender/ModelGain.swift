@@ -17,6 +17,9 @@ import Foundation
 public enum ModelGainError: Error, Sendable, Equatable {
     /// No compatible runtime device; distinct from a missing/corrupt model or prediction failure.
     case deviceUnavailable(String)
+    /// This build carries no model: the weights are not in the repository, so
+    /// an open-source build offers only the analytic expansion.
+    case notIncluded
     case modelUnavailable(String)
     case invalidTensorSize(PixelSize)
     case invalidInputCount(expected: Int, actual: Int)
@@ -38,6 +41,33 @@ public enum ModelGain {
     /// Model version recorded by the conversion script; also embedded in the
     /// compiled model's metadata, which is what `ModelGainModel.version` reads.
     public static let modelVersion = "research-demo-fold0-seed908/v1"
+    /// Where the model is looked up in the package resources.
+    public static let resourceDirectory = "Models"
+
+    /// The model file in `bundle`, compiled or as the package it was converted
+    /// to, or nil when this build does not include it. Only looks: loading and
+    /// compiling are `ModelGainModel`'s.
+    public enum BundledModel: Sendable, Equatable {
+        case compiled(URL)
+        case package(URL)
+    }
+
+    public static func bundledModel(in bundle: Bundle? = nil) -> BundledModel? {
+        let bundle = bundle ?? .module
+        for directory in [resourceDirectory, nil] {
+            if let url = bundle.url(forResource: modelName, withExtension: "mlmodelc", subdirectory: directory) {
+                return .compiled(url)
+            }
+            if let url = bundle.url(forResource: modelName, withExtension: "mlpackage", subdirectory: directory) {
+                return .package(url)
+            }
+        }
+        return nil
+    }
+
+    /// Whether this build includes the model. Cheap: nothing is loaded.
+    public static var isIncluded: Bool { bundledModel() != nil }
+
     /// Bump when the feature formula or the input snapping changes: cached gains
     /// computed under the old contract must not be reused.
     public static let preprocessingRevision = "features-v1"

@@ -10,7 +10,8 @@ Construct the service with `Engine`, a dedicated `RenderEngine`, an
 `ExportStripeRendering` (the real Render implementation or a Fake), `SessionStore`
 and `ExportTarget`. An optional prediction closure receives the Recipe model
 selection and returns a prediction carrying its full provider identity. The
-default resolves `research-cnn-v1` through its CoreML provider and uses Render's
+default resolves `research-cnn-v1` through its CoreML provider (an AI recipe in a
+build without the model fails with `missingModel`) and uses Render's
 RAW/SDR prediction entry. The service never converts a Recipe to EditOptions or
 calls convert.
 

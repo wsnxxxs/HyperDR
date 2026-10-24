@@ -60,6 +60,11 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// run on this device at all; any other error is a failed prediction.
     func predictModelGain(_ request: EditorRenderRequest) async throws
 
+    /// Whether this build includes the AI model. Without it (an open-source
+    /// build) AI is unavailable from the start and only the analytic
+    /// expansion is offered; nothing is loaded to find out.
+    var includesModel: Bool { get }
+
     /// Installs a LUT the recipe can then reference by its `contentHash`.
     func installLUT(_ lut: ColorLUT) async
 
@@ -213,6 +218,8 @@ extension Recipe {
 
 // Test renderers without decoder graphs may keep their existing open implementation.
 extension EditorRendering {
+    nonisolated var includesModel: Bool { true }
+
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
 
     func yieldMemory() async {}

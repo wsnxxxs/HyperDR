@@ -52,7 +52,7 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         #expect(!off.aiPending && RenderEngine.readPixels(off).gain == [0,0,0])
     }
 
-    @Test func rawUsesUneditedBaseAndCapturedMaximum() async throws {
+    @Test(.needsModel) func rawUsesUneditedBaseAndCapturedMaximum() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let engine = try RenderEngine(device:device)
         let source = try await engine.source(image:aiImage([SIMD3(4,2,1)]),domain:.rawEDR)

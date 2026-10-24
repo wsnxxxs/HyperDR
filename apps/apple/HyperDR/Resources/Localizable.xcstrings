@@ -8749,6 +8749,23 @@
         }
       }
     },
+    "settings.diag.model.notIncluded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not included · this build has no AI model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未附带 · 此版本没有 AI 模型"
+          }
+        }
+      }
+    },
     "settings.diag.preview" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9663,6 +9680,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台 Mac 无法运行 AI 模型。"
+          }
+        }
+      }
+    },
+    "ai.status.modelNotIncluded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This build doesn’t include the AI model. Use Expand for HDR highlights."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本未附带 AI 模型，可使用“扩展”生成 HDR 高光。"
           }
         }
       }

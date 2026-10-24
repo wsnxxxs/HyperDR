@@ -12,13 +12,14 @@ import Testing
 }
 
 @MainActor private struct Harness {
-    let fake = FakeEditorRendering()
+    let fake: FakeEditorRendering
     let undoManager = UndoManager()
     let editor: RecipeEditor
 
     /// Undo steps go to `undoManager` only with `undo`; without it, writes
-    /// need no undo grouping.
-    init(undo: Bool = false) {
+    /// need no undo grouping. `includesModel: false` is a build without the model.
+    init(undo: Bool = false, includesModel: Bool = true) {
+        fake = FakeEditorRendering(includesModel: includesModel)
         editor = RecipeEditor(renderer: fake, frameClock: ImmediateFrameClock(), detailIdle: .zero)
         undoManager.groupsByEvent = false
         if undo { editor.attach(undoManager: undoManager) }
@@ -494,6 +495,21 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.unavailableOptions == ["hdr.source": ["ai", "capturedAI"]])
         try await h.open(.rawEDR, name: "d.dng")
         #expect(h.editor.unavailableOptions["hdr.source"] != nil)
+    }
+
+    /// An open-source build has no model: AI is unavailable before anything is
+    /// tried, for every photo, and the expansion stays the SDR default.
+    @Test func aBuildWithoutTheModelOffersOnlyTheExpansion() async throws {
+        let h = Harness(includesModel: false)
+        #expect(!h.editor.modelIncluded)
+        #expect(h.editor.aiStatus == .unavailable(RecipeEditor.modelNotIncluded))
+        try await h.open()
+        #expect(h.editor.recipe.hdrSource == .expand)
+        #expect(h.editor.unavailableOptions == ["hdr.source": ["ai", "capturedAI"]])
+        try await h.open(.rawEDR, name: "d.dng")
+        #expect(h.editor.aiStatus == .unavailable(RecipeEditor.modelNotIncluded))
+        #expect(h.editor.unavailableOptions["hdr.source"] == ["ai", "capturedAI"])
+        #expect(await h.fake.predictions.isEmpty)
     }
 
     /// R22-006: a prediction belongs to one RAW development. A new one

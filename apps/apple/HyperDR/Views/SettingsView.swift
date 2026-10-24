@@ -198,10 +198,13 @@ enum SettingsDiagnostics {
     }
 
     /// The AI model: Core ML, built in; "Starting…" until the engine is up;
-    /// why not when it cannot run on this Mac.
+    /// not included in a build without it; why not when it cannot run on this Mac.
     static func models(_ model: EditorModel, locale: Locale) -> String {
         // The runtime is not reported before the engine is up: not "missing" yet.
         if case .starting = model.engine { return AppStrings.string("settings.diag.engine.starting", locale: locale) }
+        if !model.editor.modelIncluded {
+            return AppStrings.string("settings.diag.model.notIncluded", locale: locale)
+        }
         // Core ML: built in; it says it cannot run here only once it was tried.
         if case .unavailable = model.editor.aiStatus {
             return AppStrings.string("settings.diag.model.noRuntime", locale: locale)

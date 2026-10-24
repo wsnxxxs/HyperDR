@@ -268,7 +268,7 @@ struct PadEditor: View {
                              onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                              aiUnavailable: group == .hdr ? aiUnavailable : nil)
         case .crop:
-            PadCropTool(geometry: geometry, photo: photo, columns: columns,
+            PadCropTool(geometry: geometry, photo: photo, columns: columns, upright: editor.upright,
                         onEditingChanged: { editor.editingGeometry($0) })
         case .frame:
             PadFrameTool(settings: Binding(get: { session.frame }, set: { session.frame = $0 }),

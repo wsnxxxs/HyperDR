@@ -3,8 +3,9 @@ import HyperDRRecipe
 import SwiftUI
 
 /// The crop pane's controls on the dock, laid out as the other panes: the
-/// pane's buttons above (a quarter turn left, mirror, the ratio with its
-/// orientation, reset), the dial's readout, a ring for each dial (rotation,
+/// pane's buttons above (a quarter turn left, mirror, Auto with its modes in
+/// a menu, the ratio with its orientation, reset), the dial's readout (or why
+/// Auto changed nothing), a ring for each dial (rotation,
 /// vertical, horizontal) and the ruler under them.
 /// The crop box itself is on the canvas (`CropOverlay`).
 ///
@@ -15,6 +16,7 @@ struct CropControls: View {
     let photo: GeometrySize?
     var axis: Axis = .horizontal
     var large = false
+    var upright: GeometryUpright?
     let onEditing: (Bool) -> Void
 
     @State private var dial = CropDial.straighten
@@ -49,6 +51,7 @@ struct CropControls: View {
                 recipe.geometry = geometry.mirrored()
             }
             Spacer(minLength: Space.s1)
+            if let upright { autoMenu(upright) }
             aspectMenu
             button("arrow.counterclockwise", Text("ios.crop.reset")) { recipe.geometry = .identity }
                 .disabled(geometry.isIdentity)
@@ -66,6 +69,32 @@ struct CropControls: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
         .accessibilityLabel(label)
+    }
+
+    /// Auto, with the other modes on a long press; a spinner while it runs.
+    private func autoMenu(_ upright: GeometryUpright) -> some View {
+        Menu {
+            upright.menuItems
+        } label: {
+            HStack(spacing: Space.s1) {
+                if upright.analyzing != nil {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: GeometryUpright.symbol)
+                }
+                GeometryUpright.name(.auto)
+            }
+            .font(.footnote.weight(.medium))
+            .padding(.horizontal, Space.s3)
+            .frame(minHeight: 36)
+            .contentShape(.capsule)
+        } primaryAction: {
+            upright.run(.auto)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .disabled(upright.analyzing != nil)
+        .accessibilityLabel(GeometryUpright.name(.auto))
     }
 
     /// The ratios, in the photo's orientation: 4:5 on a landscape photo is 5:4.
@@ -127,7 +156,20 @@ struct CropControls: View {
 
     // MARK: Dials
 
-    private var readout: some View {
+    @ViewBuilder private var readout: some View {
+        if let notice = upright?.notice {
+            Label { GeometryUpright.text(notice) } icon: { Image(systemName: "exclamationmark.triangle") }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(minHeight: 28)
+        } else {
+            dialReadout
+        }
+    }
+
+    private var dialReadout: some View {
         HStack(spacing: Space.s2) {
             dial.label.font(.footnote.weight(.medium)).foregroundStyle(.secondary)
             Text(verbatim: dial.readout(geometry))

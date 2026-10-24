@@ -244,10 +244,7 @@ enum CropDial: CaseIterable, Hashable {
 
     /// "+2.5°" for the straightening, "−12" for the perspective, "0" at rest.
     func readout(_ geometry: Geometry) -> String {
-        let value = value(geometry)
-        if value == 0 { return self == .straighten ? "0°" : "0" }
-        let text = self == .straighten ? String(format: "%+.1f°", value) : String(format: "%+.0f", value)
-        return text.replacingOccurrences(of: "-", with: "−")
+        CropReadout.text(value(geometry), degrees: self == .straighten)
     }
 
     /// The ruler: a tick a degree for the straightening (major every 5°), and
@@ -262,6 +259,18 @@ enum CropDial: CaseIterable, Hashable {
             return RulerScale(range: range, step: straighten ? 0.1 : 1, defaultValue: 0,
                               majorTick: straighten ? 5 : 10, pointsPerUnit: straighten ? 8 : reach / 100)
         }
+    }
+}
+
+/// "+2.5°" for the straightening, "−12" for the perspective, "0" at rest, in
+/// the reader's number format (the iPhone's dials and the iPad's sliders).
+nonisolated enum CropReadout {
+    static func text(_ value: Double, degrees: Bool, locale: Locale = .autoupdatingCurrent) -> String {
+        if abs(value) < (degrees ? 0.05 : 0.5) { return degrees ? "0°" : "0" }
+        let number = value.formatted(.number.locale(locale).precision(.fractionLength(degrees ? 1 : 0))
+            .sign(strategy: .always()).grouping(.never))
+        // A true minus, which lines up with the plus.
+        return number.replacingOccurrences(of: "-", with: "\u{2212}") + (degrees ? "°" : "")
     }
 }
 

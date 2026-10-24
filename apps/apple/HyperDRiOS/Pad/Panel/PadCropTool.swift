@@ -99,17 +99,7 @@ struct PadCropTool: View {
     /// for the perspective, both filled from zero.
     static func spec(_ dial: CropDial) -> ParameterSpec {
         let degrees = dial == .straighten
-        return .signed(dial.range, step: degrees ? 0.1 : 1, format: ParameterFormat { PadCropReadout.text($0, degrees: degrees) })
-    }
-}
-
-/// "+2.5°" for the straightening, "−12" for the perspective, "0" at rest, as
-/// the iPhone's crop dials read.
-nonisolated enum PadCropReadout {
-    static func text(_ value: Double, degrees: Bool) -> String {
-        if abs(value) < (degrees ? 0.05 : 0.5) { return degrees ? "0°" : "0" }
-        let text = degrees ? String(format: "%+.1f°", value) : String(format: "%+.0f", value)
-        return text.replacingOccurrences(of: "-", with: "\u{2212}")
+        return .signed(dial.range, step: degrees ? 0.1 : 1, format: ParameterFormat { CropReadout.text($0, degrees: degrees) })
     }
 }
 

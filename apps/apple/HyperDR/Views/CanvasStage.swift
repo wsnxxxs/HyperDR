@@ -169,9 +169,8 @@ struct CanvasStage: View {
 
     /// Esc in the crop pane: the geometry it opened with, and back to Adjust.
     private func cancelCrop() {
-        if let cropEntry, !model.isEditingLocked, model.editor.recipe.geometry != cropEntry {
-            model.setGeometry(cropEntry)
-        }
+        // Commits a drag still under way, then restores the entry as its own undo step.
+        if let cropEntry, !model.isEditingLocked { model.editor.cancelCrop(restoring: cropEntry) }
         model.isCropping = false
     }
 

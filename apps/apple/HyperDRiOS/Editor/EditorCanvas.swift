@@ -171,7 +171,8 @@ struct EditorCanvas: View {
     /// uncropped). Nil outside the pane when the frame shown is not the whole photo.
     private func cropLayout(_ viewport: CGSize) -> CropLayout? {
         guard let frame = editor.frame, let source = editor.frameSource,
-              cropping || (frame.request.recipe.geometry == .identity && !editor.recipe.geometry.isIdentity),
+              CropLayout.drawsThroughGeometry(shown: frame.request.recipe.geometry, recipe: editor.recipe.geometry,
+                                              cropping: cropping),
               viewport.width > 0, viewport.height > 0 else { return nil }
         if cropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
         let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
@@ -188,10 +189,16 @@ struct EditorCanvas: View {
         Self.mode(editor, comparison: comparison, holding: holdingOriginal, cropping: cropping)
     }
 
-    /// What the canvas composes. The crop pane draws the edit alone, through
-    /// its geometry (as the Mac's does); the comparison chosen comes back after.
+    /// What the canvas composes. While it draws through the geometry (the crop
+    /// pane, and leaving it until the cropped frame arrives) it draws the edit
+    /// alone, as the Mac's does; the comparison chosen comes back after.
     static func mode(_ editor: RecipeEditor, comparison: Comparison, holding: Bool,
                      cropping: Bool = false) -> DisplayComposition.Mode {
+        if let frame = editor.frame,
+           CropLayout.drawsThroughGeometry(shown: frame.request.recipe.geometry, recipe: editor.recipe.geometry,
+                                           cropping: cropping) {
+            return .edited
+        }
         guard !cropping else { return .edited }
         let original = editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
         guard original != nil else { return .edited }
@@ -277,7 +284,7 @@ struct EditorCanvas: View {
 
     private var status: some View {
         VStack(spacing: Space.s2) {
-            if holdingOriginal, !cropping, original != nil { capsule(Text("ios.canvas.original")) }
+            if holdingOriginal, mode == .original, original != nil { capsule(Text("ios.canvas.original")) }
             // The original is asked for but not there: the canvas shows the
             // edit (unlabelled) until it is, or says it failed.
             if wantsOriginal, original == nil, editor.frame != nil, session.openingStage == nil {

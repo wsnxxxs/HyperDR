@@ -48,7 +48,8 @@ extension EditorModel {
     var cropLayout: CropLayout? {
         let viewport = canvas.transform.viewport
         guard let frame = editedFrame, let source = editor.source, frame.request.sourceID == source.id,
-              isCropping || (frame.request.recipe.geometry == .identity && !editor.recipe.geometry.isIdentity),
+              CropLayout.drawsThroughGeometry(shown: frame.request.recipe.geometry, recipe: editor.recipe.geometry,
+                                              cropping: isCropping),
               viewport.width > 0, viewport.height > 0 else { return nil }
         if isCropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
         let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))

@@ -137,4 +137,17 @@ import simd
         XCTAssertEqual(layout.display(clipsToCrop: false, dimsOutsideCrop: true),
                        layout.display(clipsToCrop: false, dimsOutsideCrop: true, rendered: .identity))
     }
+
+    /// The canvas draws the edit alone while it draws through the geometry:
+    /// in the pane, and after it until the cropped frame replaces the whole photo.
+    func testTheGeometryTransitionCoversLeavingThePane() {
+        let cropped = Geometry(crop: CropRect(centreX: 0, centreY: 0, width: 0.5, height: 0.5))
+        XCTAssertTrue(CropLayout.drawsThroughGeometry(shown: .identity, recipe: .identity, cropping: true))
+        XCTAssertTrue(CropLayout.drawsThroughGeometry(shown: cropped, recipe: cropped, cropping: true))
+        // Left, the whole photo still shown: drawn through the crop.
+        XCTAssertTrue(CropLayout.drawsThroughGeometry(shown: .identity, recipe: cropped, cropping: false))
+        // The cropped frame has arrived, or there is no crop: the comparison applies.
+        XCTAssertFalse(CropLayout.drawsThroughGeometry(shown: cropped, recipe: cropped, cropping: false))
+        XCTAssertFalse(CropLayout.drawsThroughGeometry(shown: .identity, recipe: .identity, cropping: false))
+    }
 }

@@ -101,7 +101,7 @@ struct CropLayout: Equatable {
 }
 
 /// Dragging the crop box (`CropOverlay`): what a touch takes hold of, and
-/// the crop it leaves, always inside the photo and at least `minimum`.
+/// the crop it leaves, always inside the photo with a minimum long edge.
 enum CropDrag: Equatable {
     case move
     /// The edges that follow the finger: −1 is the left (top), +1 the right (bottom), 0 neither.
@@ -141,7 +141,8 @@ enum CropDrag: Equatable {
     /// The crop after the finger moved `delta` frame pixels from where the
     /// drag started on `start`. A locked `ratio` (width over height) holds;
     /// the result is the farthest point towards the finger that stays inside
-    /// `quad` and no smaller than `minimum` pixels across.
+    /// `quad` and with a long edge of at least `minimum` pixels (unless the
+    /// starting box is already smaller).
     func apply(_ delta: GeometryPoint, to start: GeometryRect, ratio: Double?, quad: [GeometryPoint],
                minimum: Double) -> GeometryRect {
         resolve(delta, to: start, ratio: ratio, quad: quad, minimum: minimum).rect
@@ -167,11 +168,17 @@ enum CropDrag: Equatable {
         case .move:
             return GeometryRect(centre: GeometryPoint(x: s.centre.x + d.x, y: s.centre.y + d.y), size: s.size)
         case .resize(let x, let y):
+            // `minimum` bounds the long edge. Scale the starting dimensions
+            // together, so a panorama's short edge may remain below it. Never
+            // enlarge an already smaller starting box merely to meet a floor.
+            let minimumScale = min(1, max(0, minimum) / max(s.width, s.height))
+            let minimumWidth = s.width * minimumScale
+            let minimumHeight = s.height * minimumScale
             var minX = s.minX, maxX = s.maxX, minY = s.minY, maxY = s.maxY
-            if x < 0 { minX = min(s.minX + d.x, s.maxX - minimum) }
-            if x > 0 { maxX = max(s.maxX + d.x, s.minX + minimum) }
-            if y < 0 { minY = min(s.minY + d.y, s.maxY - minimum) }
-            if y > 0 { maxY = max(s.maxY + d.y, s.minY + minimum) }
+            if x < 0 { minX = min(s.minX + d.x, s.maxX - minimumWidth) }
+            if x > 0 { maxX = max(s.maxX + d.x, s.minX + minimumWidth) }
+            if y < 0 { minY = min(s.minY + d.y, s.maxY - minimumHeight) }
+            if y > 0 { maxY = max(s.maxY + d.y, s.minY + minimumHeight) }
             guard let ratio else {
                 return GeometryRect(centre: GeometryPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2),
                                     size: GeometrySize(width: maxX - minX, height: maxY - minY))
@@ -190,8 +197,7 @@ enum CropDrag: Equatable {
             } else {
                 width = height * ratio
             }
-            let minimumHeight = max(minimum, minimum / ratio)
-            height = max(height, minimumHeight)
+            height = max(height, minimumHeight, minimumWidth / ratio)
             width = height * ratio
             let cx = x < 0 ? s.maxX - width / 2 : x > 0 ? s.minX + width / 2 : s.centre.x
             let cy = y < 0 ? s.maxY - height / 2 : y > 0 ? s.minY + height / 2 : s.centre.y

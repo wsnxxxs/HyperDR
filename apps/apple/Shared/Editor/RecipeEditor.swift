@@ -102,7 +102,7 @@ import Observation
             guard isEditingCrop != oldValue else { return }
             if !isEditingCrop {
                 // Commit the outgoing gesture before scheduling the cropped preview.
-                commitDrag()
+                endCropInteraction()
                 cancelUpright()
             }
             updatePreviewSize(force: true)
@@ -482,7 +482,19 @@ import Observation
     /// without submitting render work. Closing the pane commits an open gesture
     /// and submits the final cropped preview and its comparison original.
     func editingGeometry(_ isEditing: Bool) {
-        editing(Self.geometryDragID, isEditing)
+        if isEditing || drag?.id == Self.geometryDragID || abandoned?.id == Self.geometryDragID {
+            editing(Self.geometryDragID, isEditing)
+        }
+    }
+
+    /// Host teardown/cancellation: commits only the active crop gesture and
+    /// suppresses its late writes until its end notification. Safe to repeat
+    /// from pane exit, overlay disappearance or gesture cancellation; never
+    /// ends an unrelated adjustment gesture. Does not leave the crop pane.
+    @discardableResult
+    func endCropInteraction() -> Bool {
+        guard drag?.id == Self.geometryDragID else { return false }
+        return commitDrag()
     }
 
     /// The drag id of the crop pane's gestures.

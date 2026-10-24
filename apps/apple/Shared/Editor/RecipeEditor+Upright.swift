@@ -34,8 +34,10 @@ extension RecipeEditor {
         let side = min(1536, max(source.pixelSize.width, source.pixelSize.height))
         let size = HyperDRRender.PixelSize(width: max(1, Int(photo.width * Double(side) / max(photo.width, photo.height))),
                                            height: max(1, Int(photo.height * Double(side) / max(photo.width, photo.height))))
-        var request = EditorRenderRequest(sourceID: sourceID, recipe: analysisRecipe, size: size)
-        request.keepsSource = true
+        // A cached preview may still carry the previous crop/RAW variant.
+        // Permit preparation to load this exact identity geometry; keepsSource
+        // would either reuse cropped raster coordinates or reject a RAW change.
+        let request = EditorRenderRequest(sourceID: sourceID, recipe: analysisRecipe, size: size)
         let renderer = self.renderer
         uprightStatus = .analyzing(mode)
         EditorLog.notice("Upright analysis started")

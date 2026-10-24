@@ -99,4 +99,24 @@ import Testing
         await editor.close()
     }
 
+    @Test func closingAnActiveTurnGestureOnlyRendersTheFinalSize() async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-turn-close.jpg"))
+        await editor.settle()
+        editor.isEditingCrop = true
+        await editor.settle()
+        let before = await fake.requests.count
+        editor.editingGeometry(true)
+        var recipe = editor.recipe
+        recipe.geometry = recipe.geometry.turnedLeft()
+        editor.setRecipe(recipe)
+        editor.isEditingCrop = false
+        await editor.settle()
+        let submitted = await fake.requests.dropFirst(before)
+        #expect(submitted.count == 2, "one edited and one comparison render, without the outgoing preview size")
+        #expect(submitted.allSatisfy { $0.size == editor.previewSize && !$0.isInteractive })
+        await editor.close()
+    }
+
 }

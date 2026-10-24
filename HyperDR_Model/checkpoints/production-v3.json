@@ -30,7 +30,7 @@
     "selection_role": "checkpoint and epoch selection; not a fresh blind test"
   },
   "development_oof_reference": {
-    "run": "/home/ryan/runs/hyperdr/direct-fixed-incumbent-v3-r2",
+    "run": "runs/hyperdr/direct-fixed-incumbent-v3-r2",
     "folds": 4,
     "seeds_per_fold": 3,
     "primary_mean": 0.2370973630263435,
@@ -40,7 +40,7 @@
     ]
   },
   "training": {
-    "run": "/home/ryan/runs/hyperdr/direct-production-v3-20260813-r1",
+    "run": "runs/hyperdr/direct-production-v3-20260813-r1",
     "source_repository": "https://github.com/w1135766898/HyperDR_Model.git",
     "source_commit": "46a4ce098304e3b79608bdaf54b7fe0be999ddb1",
     "source_patch": "production-v3-training.patch",

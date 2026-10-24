@@ -217,6 +217,9 @@ first preregistered seed, fits folds 0-3, and selects epoch 4 on fold 4 at
 0.23068 capture-group-weighted MAE. That selection-fold value is not a fresh
 blind-test estimate; full release provenance is in
 `checkpoints/production-v3.json`.
+The checkpoint itself is not distributed with the repository (`checkpoints/*.pt`
+is ignored); the commands below that name it need a local copy. The app ships
+only the Core ML package in `models/research-cnn-v1.mlpackage`.
 
 The `reports/` directory contains generated local evaluation results and is
 ignored by Git; preserve any result needed for comparison or regenerate it from

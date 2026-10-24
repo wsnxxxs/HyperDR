@@ -1,6 +1,6 @@
 {
-  "dataset_root": "/home/ryan/datasets/hyperdr-apple",
-  "output_dir": "/home/ryan/runs/hyperdr/xmp-fixed3-baseline-fixes-20260804",
+  "dataset_root": "~/datasets/hyperdr-apple",
+  "output_dir": "runs/hyperdr/xmp-fixed3-baseline-fixes-20260804",
   "label_subset": "xmp",
   "target_mode": "fixed_3stops",
   "architecture": "baseline",

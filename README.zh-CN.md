@@ -14,53 +14,65 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wsnxxxs/HyperDR/releases">下载 Mac 版</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="apps/apple/README-iOS.md">在 iPhone 与 iPad 上构建</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="CHANGELOG.md">更新内容</a>
+  <a href="https://github.com/wsnxxxs/HyperDR/releases">下载 Mac 版</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="apps/apple/README-iOS.md">构建 iPhone 与 iPad 版</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="CHANGELOG.md">更新内容</a>
 </p>
 
 <br>
 
 <p align="center">
-  <img src=".github/readme/ipad-zh.png" width="100%" alt="在 iPad 上用 HyperDR 编辑一张 RAW 夜景，右侧为 HDR 调整面板">
+  <img src=".github/readme/mac-zh.png" width="100%" alt="HyperDR 的 Mac 版：EDR 画布上的 HDR 照片，右侧检查器里是直方图、HDR 和光线调整">
 </p>
 
 <br>
 
-多数修图软件一动滑块，就把 HDR 照片压回了 SDR。HyperDR 从相机文件到导出成片，
-始终保留比白更亮的那部分光，并在编辑时按屏幕真实的亮度余量显示出来。
+现在的 iPhone 和相机拍下的照片里，本来就保存着比白色更亮的高光，Mac、iPhone 和 iPad 的屏幕也能把它们真正点亮。可多数修图软件一动滑块，就把照片压回了普通的 SDR，那部分光也就丢了。HyperDR 从读取相机文件到写出成片，始终保留这部分高光，并在你编辑时按屏幕真实的亮度余量把它显示出来。
 
 <br>
 
-## 为什么是 HyperDR
+## HDR 是主角，不是附带
 
-### HDR 是主角，而不是附加项
+画布是一个 Metal EDR 图层，高光在屏幕上能亮到多少就显示多少。随时按住画布可以查看原图，也可以切成分屏对照前后差别。HDR 有自己的来源和一组专门的调整：
 
-画布是 Metal EDR 图层，高光在屏幕上能亮到多少，就显示多少。HDR 有自己的来源和独立的调整：
+- **真实高光**：直接使用相机在 RAW、HIF、HEIC 或增益图文件里记录的高光。
+- **+ 扩展**：把已有的高光向更大的余量延展。
+- **+ AI**：由设备上的神经网络推断文件里从未保存过的高光。
 
-- **真实高光** —— 相机实际记录下来的高光，来自 RAW、HIF、HEIC 或带增益图的文件。
-- **+ 扩展** —— 把已有的高光延展到更大的亮度余量。
-- **+ AI** —— 设备端 Core ML 模型，预测文件里从未保存过的高光。
+标着“只影响 HDR”的调整只塑造高光，不碰下面那张 SDR 画面，所以两种屏幕上看到的都是对的。
 
-标注“只影响 HDR”的调整只塑造高光，不改动下面的 SDR 画面，两个版本都恰到好处。
+### 用神经网络为普通照片补回 HDR
 
-### 你确认的画面，就是写入的画面
+很多照片本身没有任何 HDR 信息，比如一张普通的 JPEG、一张从网上存下来的图，或者早年拍的老照片。HyperDR 内置了一个我们自己训练的小型卷积神经网络，专门做一件事：看一张 SDR 照片，推断出它的高光原本应该亮多少。训练数据是 Apple 设备自己渲染的 HDR 照片和它们的增益图，所以它学到的是 Apple 那种克制、自然的提亮方式，而不是把整张图一起拉亮。
 
-<p align="center">
-  <img src=".github/readme/pipeline-zh.svg" width="100%" alt="管线：输入经解码后，由配方驱动同一张 GPU 渲染图，同时供给预览与导出">
-</p>
+模型大约有 63.5 万个参数，通过 Core ML 在设备上运行。它给出的结果是起点而不是定论：你可以用强度、范围和起始亮度去调它；照片本身已有相机记录的高光时，也可以只让 AI 补上文件里缺的那部分。它始终基于同一份显影推断，之后换什么风格或 LUT 都不会让它跑偏。
 
-预览与导出走同一张 GPU 渲染图 —— Core Image 加上我们自己的 Metal 内核，
-在线性 Display P3、扩展范围下计算。没有另一套“导出引擎”重新解读你的编辑。
-每个文件写完都会读回校验，通过后才交给“文件”、“照片”或分享面板。
-
-### 在任何屏幕上都正确的导出
+<br>
 
 <p align="center">
-  <img src=".github/readme/gainmap-zh.svg" width="100%" alt="SDR 底图加增益图，合成自适应 HDR 照片">
+  <img src=".github/readme/ipad-zh.png" width="100%" alt="HyperDR 在 iPad 上的 Studio 工作台：EDR 画布上的照片，右侧玻璃面板里有工具栏、直方图和当前工具">
 </p>
 
-自适应 HDR 同时保存一张调好的 SDR 画面和一张增益图（ISO 21496-1）。
-普通屏幕显示你调好的 SDR；HDR 屏幕则把高光点亮到它能达到的程度。
-不靠猜测，也不会退化成发灰的画面。
+<p align="center"><sub>iPad 上的 Studio 工作台</sub></p>
+
+<br>
+
+## 胶片风格，认得色彩空间的 LUT
+
+- **胶片**：Kodak Portra 400、Gold 200、Kodachrome 64、Vision3 500T 和 Fujifilm Velvia 100。可以单独关掉防光晕层，做出像 CineStill 改造 Vision3 500T 那样在高光边缘透出红晕的效果。
+- **颗粒与光晕**：按乳剂的物理散射过程计算，不是贴上去的纹理；任何照片都能用，不论有没有套用风格。
+- **LUT**：把 `.cube` 文件导入 HyperDR 自己的 LUT 库。每个 LUT 都记得自己的输入和输出色彩空间，照片给不了它需要的输入时就会被禁用，而不是假装它是 sRGB 硬套上去。
+- **相机 Log**：S-Log3、V-Log、F-Log2、LogC3、LogC4、Canon Log 3 的 LUT 会接收按场景线性重新显影的 RAW，保留文件自己的基准曝光、关闭色域压缩，让 18% 中灰正好落在曲线预期的位置。
+
+挑选时，每个风格都直接用你这张照片渲染出小样。强度在线性光里混合；风格只改变颜色和 SDR 画面，HDR 高光会保留下来。
+
+<br>
+
+## 在每块屏幕上都对的导出
+
+<p align="center">
+  <img src=".github/readme/gainmap-zh.svg" width="100%" alt="SDR 底图加上增益图，组成自适应 HDR 照片">
+</p>
+
+自适应 HDR 在一个文件里放着你调好的 SDR 画面和一张 ISO 21496-1 增益图。普通屏幕显示 SDR 画面，HDR 屏幕把高光点亮到它能达到的程度。选好用途，比如网页、社交平台或照片，格式、尺寸和质量都会自动定好；改动任意一项，就成了你自己的格式。
 
 | 输出 | 编码 |
 |---|---|
@@ -69,36 +81,29 @@
 | **HDR HEIC · AVIF** | PQ 或 HLG，10 位 |
 | **SDR** | JPEG · HEIC · TIFF |
 
-选择用途 —— 网页、社交平台或照片 —— HyperDR 会定好格式、尺寸与质量；
-改动任一设置，即成为你自己的格式。
-
-### 来自实测数据的胶片，认得色彩空间的 LUT
-
-- **胶片** —— Kodak Portra 400、Gold 200、Kodachrome 64、Vision3 500T 与 Fujifilm Velvia 100，按实测数据模拟曝光、显影，负片还会印放到相纸上。颗粒、光晕与防光晕层都是建模计算，而非叠加贴图。
-- **LUT** —— 每个 LUT 都记住自己的输入与输出空间。相机 Log 曲线（S-Log3、V-Log、F-Log2、LogC3、LogC4、Canon Log 3）由场景线性的 RAW 显影供给，中灰正好落在 LUT 预期的位置。
-- **强度** 在线性光中混合；风格改变的是 SDR 底图，HDR 高光保持不变。
-
-### 为展示而生的边框
+### 用来展示作品的边框
 
 <p align="center">
-  <img src=".github/readme/iphone-zh.png" width="100%" alt="iPhone 上的 HyperDR：HDR 调整、带 EXIF 说明的画廊边框，以及导出面板">
+  <img src=".github/readme/iphone-zh.png" width="100%" alt="HyperDR 在 iPhone 上：底部面板里的 HDR 调整、从照片小样中选中 Kodachrome 64，以及带 EXIF 说明文字的画廊边框">
 </p>
 
-画廊、展签、竖幅、细边与拍立得五种卡纸样式，五种纸色，可选用照片自身 EXIF 生成的说明文字。
-卡纸以严格为零的增益写入，在 HDR 屏幕上发光的只有照片，卡纸永远不会。
+Gallery、Label、Story、Hairline 和 Instant 五种样式，每种都有五种纸张色调，可以加阴影，以及从照片自己的 EXIF 读出的说明文字，比如机身、镜头、光圈和快门。边框的纸张是用严格为零的增益写进去的，所以在 HDR 屏幕上只有照片本身会亮起来，卡纸始终是安静的纸白。Mac 的边框面板和 iPad 的导出灯箱都会在实时的 EDR 画布上预览带框效果，和写出的文件一致。
 
-### 编辑不会悄悄变样
+<br>
 
-RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑一起保存。
-无论换一台设备，还是系统升级后再打开，都用同一个解码器显影，不会换成更新或更旧的版本。
-若该解码器不可用，HyperDR 会明确告诉你，而不是悄悄换成另一种样子。
+## 屏幕上确认的，就是写出的
 
-### 隐私、原生、自成一体
+<p align="center">
+  <img src=".github/readme/pipeline-zh.svg" width="100%" alt="处理流程：输入经过解码，配方驱动同一张 GPU 渲染图，同时供给预览和导出">
+</p>
 
-- 照片只在设备上处理。HyperDR 只读取你在系统照片选择器中选中的照片，也没有自己的图库。
-- 每个平台都是原生 SwiftUI，iOS 与 iPadOS 采用 Liquid Glass，不使用 Catalyst。
-- HEIF 由 HyperDR 自己的容器代码读写，HEVC 交给 VideoToolbox。App 不嵌入任何动态库，也不含 (L)GPL 代码。
-- 为大文件而建：在 iPhone 17 Pro 上，6100 万像素 RAW 与 6000 万像素 HIF 可以打开、1:1 平移并全尺寸导出。
+预览和导出走的是同一张 GPU 渲染图，由 Core Image 加上我们自己的 Metal 内核组成，在扩展范围的线性 Display P3 下计算，没有另一套导出引擎去重新解读你的编辑。裁切、旋转、透视校正和一键自动水平也是同一份配方的一部分。每个文件写完都会读回来校验，通过之后才交给“文件”、“照片”或分享面板。
+
+**编辑不会漂移。** RAW 由 Apple 的 `CIRAWFilter` 显影，所用的解码器版本会和编辑一起保存。下次打开、换一台设备或者系统升级之后，照片都会用同一个解码器显影；如果那个解码器不可用了，HyperDR 会直接告诉你，而不是悄悄显示另一种结果。
+
+**私密、自成一体。** HyperDR 没有自己的照片库，只读取你在系统选择器里挑出的照片，所有处理都在设备上完成。HEIF 的读写是我们自己的容器代码，HEVC 交给 VideoToolbox；应用里不嵌入任何动态库，也不含 (L)GPL 代码。
+
+**不怕大文件。** 61MP 的 RAW 和 60MP 的 HIF 已经可以在 iPhone 17 Pro 上打开、按 1:1 平移并全尺寸导出。
 
 <br>
 
@@ -106,22 +111,20 @@ RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑
 
 |  | |
 |---|---|
-| **打开** | Apple 解码器支持的相机 RAW（DNG、ARW、CR3、NEF、RAF、ORF、RW2 …）· HEIC / HEIF / HIF · AVIF · JPEG（含增益图 JPEG）· PNG · TIFF |
+| **打开** | Apple 解码器支持的相机 RAW（DNG、ARW、CR3、NEF、RAF、ORF、RW2 等）· HEIC / HEIF / HIF · AVIF · JPEG（含增益图 JPEG）· PNG · TIFF |
 | **写出** | 自适应 HDR HEIC · 增益图 JPEG · PQ / HLG 的 HEIC 与 AVIF · SDR 的 JPEG、HEIC 与 TIFF |
-| **存到** | “文件” · “照片”（存为新照片）· 分享面板 |
+| **存到** | 文件 · 照片（作为一张新照片）· 分享面板 |
 
 ## 获取 HyperDR
 
-**Mac** —— 从 [Releases](https://github.com/wsnxxxs/HyperDR/releases) 下载最新版本，
-解压后将 `HyperDR.app` 拖入“应用程序”。此版本为临时签名、未经公证；
-首次打开被阻止时，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。
+**Mac**：在 [Releases](https://github.com/wsnxxxs/HyperDR/releases) 下载最新版本，解压后把 `HyperDR.app` 拖进“应用程序”。这个版本是临时签名、没有经过公证的，如果 macOS 拦下了第一次启动，到“系统设置”→“隐私与安全性”里选择“仍要打开”即可。
 
-**iPhone 与 iPad** —— 用 Xcode 从源码构建，见[安装说明](apps/apple/README-iOS.md)。
+**iPhone 与 iPad**：用 Xcode 和免费的个人 Apple ID（Personal Team）从源码构建安装，不需要付费开发者账号，步骤见[安装说明](apps/apple/README-iOS.md)。
 
 需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 27。
 
-> HyperDR 0.5.1 为测试版。iPhone 上 1.1 亿像素 RAW 的全尺寸处理仍在验证中，
-> iOS 暂不支持在后台继续导出。
+> [!NOTE]
+> HyperDR 0.5.1 还是预发布版本。iPhone 上 110MP RAW 的全尺寸处理还在验证，iOS 也暂时不能在后台继续导出。
 
 <br>
 
@@ -131,13 +134,14 @@ RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑
 <summary><b>架构</b></summary>
 <br>
 
-| 层 | 位置 | 职责 |
+| 层 | 位置 | 作用 |
 |---|---|---|
-| App | `apps/apple/HyperDR`、`apps/apple/HyperDRiOS` | Mac 与 iPhone / iPad 的 SwiftUI 界面 |
-| 共享编辑器 | `apps/apple/Shared` | `RecipeEditor`、EDR 画布、导出快照、边框 |
+| 应用 | `apps/apple/HyperDR`、`apps/apple/HyperDRiOS` | Mac 版，以及 iPhone 与 iPad 版的 SwiftUI 界面 |
+| 共享编辑器 | `apps/apple/Shared` | `RecipeEditor`、EDR 画布、裁切、示波器、导出快照、边框 |
 | 配方与渲染 | `Packages/HyperDRRecipe`、`Packages/HyperDRRender` | 以数据表示的编辑；GPU 渲染图（Core Image + Metal、Core ML） |
 | 服务 | `Packages/HyperDRKit` | 输入格式、会话、导出规划与 `RecipeExportService` |
-| 引擎 | `modules/` | C++ 写入器、HEIF / 图像读取器、VideoToolbox 编解码、有界校验 —— 只通过 `modules/capi/include/hyperdr/hyperdr.h` 的 C ABI 访问 |
+| 引擎 | `modules/` | C++ 写入器、HEIF 与图像读取、VideoToolbox 编解码、有界校验，只通过 `modules/capi/include/hyperdr/hyperdr.h` 的 C ABI 调用 |
+| 模型 | `HyperDR_Model` | AI 高光模型的训练代码 |
 
 核心包不依赖 AppKit 或 UIKit。Swift 直接调用 C ABI，不使用 C++ 互操作。
 
@@ -147,22 +151,17 @@ RAW 由 Apple 的 `CIRAWFilter` 显影，所用解码器的确切版本随编辑
 <summary><b>构建与测试</b></summary>
 <br>
 
-需要装有 Xcode（含 iOS 与 Metal 工具链）的 macOS，以及 CMake、Ninja、vcpkg 和
-Python 3.12。依赖版本由 `vcpkg.json` 固定；每个构建目录使用各自的 vcpkg 安装根目录。
+需要装有 Xcode（含 iOS 与 Metal 工具链）的 macOS、CMake、Ninja、vcpkg 和 Python 3.12。依赖版本固定在 `vcpkg.json` 里；每个构建目录要使用各自的 vcpkg 安装根目录。
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-export TMPDIR="$(mktemp -d /tmp/hyperdr-build.XXXXXX)"
 python3.12 scripts/fetch_test_fixtures.py
-cmake --preset macos-arm64-codecs -B build -DPython3_EXECUTABLE="$(command -v python3.12)"
-python3.12 scripts/test.py native --build-dir build   # 引擎
-python3.12 scripts/test.py apple                      # xcframework、Swift 包、Mac App、本地化
-python3.12 scripts/test.py ios                        # 未签名的 iPhone / iPad 真机与模拟器构建
+python3.12 scripts/test.py native --build-dir build   # C++ 引擎
+python3.12 scripts/test.py apple                      # xcframework、Swift 包、Mac 应用与本地化检查
+python3.12 scripts/test.py ios                        # iPhone 与 iPad 的设备和模拟器无签名构建
 ```
 
-`bash scripts/build_xcframework.sh --platforms all` 构建全部三个 arm64 切片，
-并检查每个归档中是否含有 (L)GPL 符号。本地质量门禁见
-[tests/quality](tests/quality/README.md)；解析器模糊测试位于 `tests/fuzz`，按需启用。
+`bash scripts/build_xcframework.sh --platforms all` 会构建全部三个 arm64 切片，并检查每个归档里是否含有 (L)GPL 符号。本地质量门槛见 [tests/quality](tests/quality/README.md)；解析器模糊测试位于 `tests/fuzz`，按需开启。
 
 </details>
 
@@ -170,12 +169,4 @@ python3.12 scripts/test.py ios                        # 未签名的 iPhone / iP
 
 ## 许可
 
-HyperDR 采用双重许可：[GNU AGPL v3.0](LICENSE) 或商业许可，详见
-[LICENSING.md](LICENSING.md)。HyperDR 名称与 App 图标不在任一许可范围内。
-第三方组件保留各自的许可：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-<br>
-
-<p align="center">
-  <sub>Copyright © 2026 Renhe Wang</sub>
-</p>
+HyperDR 采用 [GNU AGPL v3.0](LICENSE) 与商业许可双重授权，详见 [LICENSING.md](LICENSING.md)。HyperDR 的名称和应用图标不在这两种许可的范围内。第三方组件各自保留原有许可，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

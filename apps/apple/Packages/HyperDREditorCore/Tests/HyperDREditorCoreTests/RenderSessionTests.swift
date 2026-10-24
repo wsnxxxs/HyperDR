@@ -96,6 +96,25 @@ import UniformTypeIdentifiers
         await editor.close()
     }
 
+    @Test func uprightAnalysisReopensIdentityAfterACroppedSource() async throws {
+        let url = try Self.tinyPhoto(width: 95, height: 63)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let session = try RenderSession()
+        let source = try await session.open(url, previewSize: PixelSize(width: 95, height: 63))
+        var cropped = Recipe(inputDomain: source.domain)
+        cropped.geometry = Geometry(quarterTurns: 1, crop: CropRect(centreX: 0.1, centreY: 0, width: 0.5, height: 0.5))
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: cropped, size: PixelSize(width: 32, height: 48)))
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        var analysis = cropped
+        analysis.geometry = .identity
+        let frame = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: analysis, size: source.pixelSize))
+        #expect(await reloads.count == 1)
+        #expect(frame.display.outputSize == source.pixelSize)
+        #expect(frame.request.recipe.geometry == .identity)
+        await session.close()
+    }
+
     @MainActor @Test func jpegOriginalAndHDRContentFollowTheRenderedFrames() async throws {
         let url = try Self.tinyPhoto(type: .jpeg)
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

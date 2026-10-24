@@ -69,4 +69,34 @@ import Testing
         await editor.close()
     }
 
+    @Test func endingCropInteractionIsIdempotentAndCannotEndOtherGestures() async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-lifecycle.jpg"))
+        await editor.settle()
+        editor.isEditingCrop = true
+        await editor.settle()
+        let before = await fake.requests.count
+        editor.editingGeometry(true)
+        var recipe = editor.recipe
+        recipe.geometry.angle = 9
+        editor.setRecipe(recipe)
+        #expect(editor.endCropInteraction())
+        #expect(!editor.endCropInteraction() && !editor.isDragging)
+        recipe.geometry.angle = 10
+        editor.setRecipe(recipe)
+        #expect(editor.recipe.geometry.angle == 9, "late cancelled gesture writes are suppressed")
+        editor.editingGeometry(false)
+        await editor.settle()
+        #expect(await fake.requests.count == before)
+        let exposure = Adjustments.declaration("tone.exposure")!
+        editor.editingChanged(exposure, true)
+        #expect(!editor.endCropInteraction())
+        editor.editingGeometry(false)
+        #expect(editor.isDragging, "late crop teardown cannot end an adjustment drag")
+        editor.editingChanged(exposure, false)
+        await editor.settle()
+        await editor.close()
+    }
+
 }

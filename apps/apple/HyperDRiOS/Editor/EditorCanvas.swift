@@ -65,7 +65,11 @@ struct EditorCanvas: View {
             .animation(.smooth(duration: 0.35), value: placement)
         }
         // A placement held from one visit to the crop pane never reaches the next.
-        .onChange(of: cropping) { cropFreeze = nil }
+        .onChange(of: cropping) {
+            cropFreeze = nil
+            // A hold never outlives the pane's change: the crop pane shows no original.
+            holdingOriginal = false
+        }
         // The new photo's embedded thumbnail until its first frame; over a
         // previous photo it covers that one entirely.
         .overlay { OpeningPlaceholder(placeholder, backdrop: editor.frame != nil) }
@@ -176,9 +180,15 @@ struct EditorCanvas: View {
         editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
     }
 
-    var mode: DisplayComposition.Mode { Self.mode(editor, comparison: comparison, holding: holdingOriginal) }
+    var mode: DisplayComposition.Mode {
+        Self.mode(editor, comparison: comparison, holding: holdingOriginal, cropping: cropping)
+    }
 
-    static func mode(_ editor: RecipeEditor, comparison: Comparison, holding: Bool) -> DisplayComposition.Mode {
+    /// What the canvas composes. The crop pane draws the edit alone, through
+    /// its geometry (as the Mac's does); the comparison chosen comes back after.
+    static func mode(_ editor: RecipeEditor, comparison: Comparison, holding: Bool,
+                     cropping: Bool = false) -> DisplayComposition.Mode {
+        guard !cropping else { return .edited }
         let original = editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
         guard original != nil else { return .edited }
         if holding { return .original }
@@ -262,7 +272,7 @@ struct EditorCanvas: View {
 
     private var status: some View {
         VStack(spacing: Space.s2) {
-            if holdingOriginal, original != nil { capsule(Text("ios.canvas.original")) }
+            if holdingOriginal, !cropping, original != nil { capsule(Text("ios.canvas.original")) }
             // The original is asked for but not there: the canvas shows the
             // edit (unlabelled) until it is, or says it failed.
             if wantsOriginal, original == nil, editor.frame != nil, session.openingStage == nil {
@@ -301,7 +311,7 @@ struct EditorCanvas: View {
     }
 
     /// Original, Split or the canvas held.
-    private var wantsOriginal: Bool { holdingOriginal || comparison != .edited }
+    private var wantsOriginal: Bool { !cropping && (holdingOriginal || comparison != .edited) }
 
     /// Renders the current recipe again after a failure (the next edit would too).
     private var retryRender: (label: Text, run: () -> Void)? {

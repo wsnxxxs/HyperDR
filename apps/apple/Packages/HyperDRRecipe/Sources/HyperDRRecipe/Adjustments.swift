@@ -51,7 +51,7 @@ public enum FilmFamily: String, CaseIterable, Sendable {
 
 /// The adjustment declarations. This table is the single source for the inspector,
 /// undo names, localization keys and the GPU nodes (product-vision principle 4,
-/// p7-adjustments §2.2–§2.7). 34 parameters: 6 of them RAW-only.
+/// p7-adjustments §2.2–§2.7). 34 parameters: 6 RAW-only, 2 independent physical effects.
 public enum Adjustments {
     /// Ceiling for HDR HyperDR generates itself: the analytic expansion on an `sdr`
     /// base and `rawEDR` (C1). Sources that already have HDR (`hdr`, `dual`) keep
@@ -61,6 +61,9 @@ public enum Adjustments {
     /// C1: automatic expansion start for the analytic expansion, in the declared
     /// percent unit. AI keeps the model's own start.
     public static let automaticExpansionStart = 25.0
+
+    /// Physical effects share the adjustment group but are independent of colour looks.
+    public static let effectIDs = ["effect.grain", "effect.halation"]
 
     public static let all: [ParameterDeclaration] = hdr + light + color + look + detail
 
@@ -159,6 +162,12 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "color.saturation", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        // Zero bypasses the effect. One is the stock's own 35 mm model when a film
+        // is selected, or the neutral 35 mm reference model without a film.
+        ParameterDeclaration(id: "effect.grain", group: .color, kind: .float, range: 0...200, step: 1,
+            default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "effect.halation", group: .color, kind: .float, range: 0...200, step: 1,
+            default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
     ]
 
     // MARK: - Look
@@ -193,13 +202,6 @@ public enum Adjustments {
         // Auto meters the original photo centre-weighted to 18.4 % grey, as spektrafilm's camera.
         ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -3...3, step: 0.1,
             default: .auto, format: .ev, scale: .direct,
-            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
-        ParameterDeclaration(id: "look.filmGrain", group: .look, kind: .float, range: 0...200, step: 1,
-            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
-            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
-        // Back-reflection halation around highlights; 100 % is the stock's own.
-        ParameterDeclaration(id: "look.filmHalation", group: .look, kind: .float, range: 0...200, step: 1,
-            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
         // Off: the film without its antihalation layer, as CineStill does to Vision3.
         ParameterDeclaration(id: "look.filmAntihalation", group: .look, kind: .bool,

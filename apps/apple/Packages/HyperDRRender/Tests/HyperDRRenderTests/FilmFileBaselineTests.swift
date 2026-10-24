@@ -77,8 +77,8 @@ private final class FilmFileStripes: @unchecked Sendable {
 
 private func fileFilmRecipe(_ domain: InputDomain, strength: Double) -> Recipe {
     Recipe(inputDomain: domain, values: ["look.film": .string("portra400"),
-        "look.filmStrength": .number(strength), "look.filmGrain": .number(0),
-        "look.filmHalation": .number(0), "look.filmExposure": .number(0)])
+        "look.filmStrength": .number(strength), "effect.grain": .number(0),
+        "effect.halation": .number(0), "look.filmExposure": .number(0)])
 }
 
 private func fileFilmClose(_ actual: [Float], _ expected: [Float], label: String, scale: Float = 1) {

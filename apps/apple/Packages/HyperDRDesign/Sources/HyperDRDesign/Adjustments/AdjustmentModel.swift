@@ -392,6 +392,34 @@ public struct AdjustmentPanel: Sendable {
         recipe.setValue(.string(space), for: id)
     }
 
+    /// The grain and halation a stock brings when it is put on a photo
+    /// without them: 100 % is the stock's own.
+    public static let filmEffectSeed = 100.0
+
+    /// Chooses a built-in film stock in one write, so it is one undo step:
+    /// the stock (which removes a LUT), its exposure back on the meter and
+    /// its antihalation layer back on. Grain and halation are Adjust's
+    /// (`Adjustments.effectIDs`) and work on every photo; a stock put on a
+    /// photo whose grain and halation are untouched brings its own (100 %),
+    /// and one replacing another stock leaves them as they are. "none" removes whichever look
+    /// is on.
+    public func chooseFilm(_ stock: String, in recipe: inout Recipe) {
+        if stock == "none" {
+            set(Recipe.filmID, option: "none", in: &recipe)
+            set(Recipe.lookID, reference: nil, in: &recipe)
+            return
+        }
+        let hadFilm = (recipe.conditionValue(Recipe.filmID)?.stringValue ?? "none") != "none"
+        set(Recipe.filmID, option: stock, in: &recipe)
+        guard recipe.conditionValue(Recipe.filmID)?.stringValue == stock else { return }
+        setAutomatic(Recipe.filmExposureID, in: &recipe)
+        reset(Recipe.filmAntihalationID, in: &recipe)
+        let effects = Adjustments.effectIDs
+        if !hadFilm, effects.allSatisfy({ recipe.isDefault($0) }) {
+            for id in effects { set(id, number: Self.filmEffectSeed, in: &recipe) }
+        }
+    }
+
     /// Back to Auto (a `floatOrAuto` parameter whose default is Auto).
     public func setAutomatic(_ id: String, in recipe: inout Recipe) {
         guard let declaration = Adjustments.declaration(id), declaration.kind == .floatOrAuto else { return }

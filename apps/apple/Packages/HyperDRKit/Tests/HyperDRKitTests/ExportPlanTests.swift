@@ -616,6 +616,30 @@ struct ExportMemoryPlanTests {
         #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)
     }
 
+    @Test func zeroColourStockEffectsReserveTheBaselineAndScatter() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        var recipe = Recipe(inputDomain: .rawEDR, values: [Recipe.filmID: .string("portra400"),
+                                                        "look.filmStrength": .number(0)])
+        var input = request(.custom(.init(encoding: .adaptive)), source: source(.rawEDR, size: size))
+        input.edit = ExportEditFacts(recipe: recipe, peakStops: 3)
+        let original = ExportPlanner.plan(input, budget: FixedExportMemoryBudget(bytes: 16 << 30))
+        for id in Adjustments.effectIDs {
+            recipe.setValue(.number(100), for: id)
+            let facts = ExportEditFacts(recipe: recipe, peakStops: 3)
+            #expect(facts.usesFilm && facts.needsLookBaseline)
+            input.edit = facts
+            let effect = ExportPlanner.plan(input, budget: FixedExportMemoryBudget(bytes: 16 << 30))
+            #expect(effect.memory.estimate.decode-original.memory.estimate.decode == size.pixels * 24)
+            let workspace = 4096 * 516 * 3 * 4 * MemoryLayout<Float>.stride
+            #expect(effect.memory.estimate.render-original.memory.estimate.render == size.pixels * 24 + workspace)
+            recipe.setValue(nil, for: id)
+        }
+        recipe.setValue(.number(100), for: "effect.grain")
+        recipe.setValue(nil, for: Recipe.filmID)
+        let generic = ExportEditFacts(recipe: recipe, peakStops: 3)
+        #expect(!generic.usesFilm && !generic.needsLookBaseline)
+    }
+
     @Test func filmFloatWorkspaceIsBoundedAndCountedDuringRendering() {
         let size = ExportPixelSize(width: 12800, height: 8600)
         let workspace = 4096 * 516 * 3 * 4 * MemoryLayout<Float>.stride

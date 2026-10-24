@@ -477,29 +477,29 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片曝光" } }
       }
     },
-    "ctrl.look.filmGrain.help" : {
-      "comment" : "Adjustment control help (look.filmGrain).",
+    "ctrl.effect.grain.help" : {
+      "comment" : "Adjustment control help (effect.grain).",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The film's grain, from its particle structure on a 35 mm frame. 100% is the stock's own grain; 0% is none." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片颗粒，按其在 35 mm 画幅上的颗粒结构计算。100% 为该胶片本身的颗粒；0% 为无颗粒。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film grain on any photo, with or without a look, sized as on a 35 mm frame. With a built-in film it is that stock's grain, where 100% is its own; 0% is none." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片颗粒，适用于任何照片，有无风格均可，按 35 mm 画幅的颗粒大小计算。选了内置胶片时使用该胶片的颗粒，100% 为其本身的颗粒；0% 为无颗粒。" } }
       }
     },
-    "ctrl.look.filmGrain.label" : {
-      "comment" : "Adjustment control name (look.filmGrain).",
+    "ctrl.effect.grain.label" : {
+      "comment" : "Adjustment control name (effect.grain).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Grain" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颗粒" } }
       }
     },
-    "ctrl.look.filmHalation.help" : {
-      "comment" : "Adjustment control help (look.filmHalation).",
+    "ctrl.effect.halation.help" : {
+      "comment" : "Adjustment control help (effect.halation).",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The reddish glow light reflected from the film base adds around bright highlights. 100% is the stock's own." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "片基反射的光在明亮高光周围形成的偏红辉光。100% 为该胶片本身的光晕。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The reddish glow around bright highlights, as light reflected from a film's base adds it, on any photo. With a built-in film it is that stock's, where 100% is its own; 0% is none." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "明亮高光周围偏红的辉光，如同片基反射的光所形成，适用于任何照片。选了内置胶片时使用该胶片的光晕，100% 为其本身的光晕；0% 为无光晕。" } }
       }
     },
-    "ctrl.look.filmHalation.label" : {
-      "comment" : "Adjustment control name (look.filmHalation).",
+    "ctrl.effect.halation.label" : {
+      "comment" : "Adjustment control name (effect.halation).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Halation" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "光晕" } }
@@ -1182,10 +1182,10 @@
       }
     },
     "group.color" : {
-      "comment" : "Adjustment group title.",
+      "comment" : "Adjustment group title: the colour controls, then grain and halation (named as the iPhone's Adjust tab).",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颜色" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整" } }
       }
     },
     "group.detail" : {
@@ -1221,6 +1221,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Look" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "风格" } }
+      }
+    },
+    "group.reset.color" : {
+      "comment" : "iPhone Adjust tab, a colour, grain or halation control's menu: resets that group only, not light.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Color, Grain and Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置颜色、颗粒与光晕" } }
+      }
+    },
+    "group.reset.light" : {
+      "comment" : "iPhone Adjust tab, a light control's menu: resets the light group only.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Light" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置光线" } }
       }
     },
     "group.reset" : {
@@ -1727,15 +1741,15 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整胶片曝光" } }
       }
     },
-    "undo.look.filmGrain" : {
-      "comment" : "Undo action name (look.filmGrain).",
+    "undo.effect.grain" : {
+      "comment" : "Undo action name (effect.grain).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Grain" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整颗粒" } }
       }
     },
-    "undo.look.filmHalation" : {
-      "comment" : "Undo action name (look.filmHalation).",
+    "undo.effect.halation" : {
+      "comment" : "Undo action name (effect.halation).",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Halation" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整光晕" } }
@@ -1788,6 +1802,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset All" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部重置" } }
+      }
+    },
+    "undo.resetGroup.color" : {
+      "comment" : "Undo action name: the Adjust group (colour, grain and halation) reset; light is not.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Color, Grain and Halation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置颜色、颗粒与光晕" } }
       }
     },
     "undo.resetGroup %@" : {

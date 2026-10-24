@@ -14,6 +14,7 @@ struct GraphUniform {
     var halation: SIMD4<Float> = .zero
     var scatter: SIMD4<Int32> = .zero
     var pair: SIMD4<Float> = .zero
+    var effects: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -28,6 +29,8 @@ struct AnalysisKey: Equatable {
     let color: ColorAdjustments
     let look: LookAdjustments
     let film: FilmAdjustments
+    let halation: Float
+    let stockProcessing: Bool
     let start, coverage: Float
 }
 
@@ -43,7 +46,7 @@ public struct SpatialAnalysis: @unchecked Sendable {
     public let peaks: SIMD4<Float>
     /// Original source capacity in stops, including authored headroom metadata.
     public let sourceHeadroom: Float
-    /// The film's halation glow, as film exposure on the cells; nil without halation.
+    /// Halation glow on the cells: film exposure for a stock, scene highlights otherwise.
     /// Its blur allows for the cells' and the render's B-spline sampling width.
     public var filmHalation: (any MTLTexture)? = nil
 }
@@ -93,11 +96,11 @@ extension RenderEngine {
     }
 
     /// Strength, grain amount, 1/pixel area (µm⁻²) for a render of `size`, and the exposure factor.
-    func filmUniform(_ source: RenderSource, _ film: FilmAdjustments, size: PixelSize) -> SIMD4<Float> {
-        guard !film.isIdentity, let stock = film.stock, let data = try? FilmStock.named(stock) else { return .zero }
+    func filmUniform(_ source: RenderSource, _ film: FilmAdjustments, grain: Float, active: Bool, size: PixelSize) -> SIMD4<Float> {
+        guard active, let stock = film.stock, let data = try? FilmStock.named(stock) else { return .zero }
         let inverseArea = FilmStock.inverseArea(longEdge: max(size.width, size.height), film: data.resource.filming)
         let exposure = film.exposure ?? ((try? filmMeter(source)) ?? 0)
-        return SIMD4(film.strength, film.grain, Float(inverseArea), exp2(exposure))
+        return SIMD4(film.strength, grain, Float(inverseArea), exp2(exposure))
     }
 
     /// The film's automatic exposure in stops: spektrafilm's centre-weighted meter
@@ -123,8 +126,8 @@ extension RenderEngine {
     }
 
     /// The stock's tables and spectral upsampling texture; one texel and row when no film is active.
-    func filmResources(_ film: FilmAdjustments) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
-        let stock = film.isIdentity ? nil : film.stock
+    func filmResources(_ film: FilmAdjustments, active: Bool = true, genericGrain: Bool = false) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
+        let stock = active ? film.stock : (genericGrain ? .portra400 : nil)
         if let cache = filmCache, cache.id == stock { return (cache.texture, cache.buffer) }
         filmCache = nil
         let texture: any MTLTexture, rows: [SIMD4<Float>]
@@ -151,6 +154,10 @@ extension RenderEngine {
         let t = edit.tone, c = edit.color, h = edit.hdr, l = edit.look
         let lut = l.isIdentity ? nil : l.lut
         let domain: UInt32 = source.domain == .sdr ? 0 : source.domain == .hdr ? 1 : source.domain == .rawEDR ? 2 : 3
+        let genericGrain = edit.film.stock == nil && edit.effects.grain > 0
+        let referenceArea = genericGrain ? (try? FilmStock.named(.portra400)).map {
+            Float(FilmStock.inverseArea(longEdge: max(size.width, size.height), film: $0.resource.filming))
+        } ?? 0 : 0
         return GraphUniform(tone0: SIMD4(t.exposure, t.contrast, t.highlights, t.shadows),
             tone1: SIMD4(t.blacks, c.warmth, c.tint, c.vibrance), color: SIMD4(c.saturation, lut == nil ? 0 : l.strength, range, h.strength),
             hdr: SIMD4(h.expansionStart ?? RenderParameter.expansionStart, h.coverage, h.sdrRolloff, shoulder ? 1 : 0),
@@ -159,8 +166,12 @@ extension RenderEngine {
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
             region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion),
-            film: filmUniform(source, edit.film, size: size),
-            pair: SIMD4(source.domain == .dual ? editedPairOffset(source) : 0, 0, 0, 0))
+            film: filmUniform(source, edit.film, grain: edit.effects.grain, active: edit.usesFilmProcessing, size: size),
+            pair: SIMD4(source.domain == .dual ? editedPairOffset(source)
+                        : (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1) ? 1 / 64 : 0), 0, 0, 0),
+            effects: SIMD4(edit.film.stock == nil ? edit.effects.grain : 0,
+                           edit.film.stock == nil ? edit.effects.halation : 0,
+                           referenceArea, edit.usesFilmProcessing ? 1 : 0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -169,7 +180,7 @@ extension RenderEngine {
         try Task.checkCancellation()
         try edit.validate(domain:source.domain)
         let source = try fixedAnalysisSource(source)
-        let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look, film: edit.film.withoutGrain,
+        let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look, film: edit.film, halation: edit.effects.halation, stockProcessing: edit.usesFilmProcessing,
                               start: edit.hdr.expansionStart ?? RenderParameter.expansionStart, coverage: edit.hdr.coverage)
         if let cached = analysisCache, cached.key == key { return cached.result }
         analysisCache = nil
@@ -186,19 +197,32 @@ extension RenderEngine {
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
         let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
-        let film = try filmResources(edit.film)
+        let film = try filmResources(edit.film, active: edit.usesFilmProcessing)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
         parameters.film.y = 0 // grain averages out in the cells
+        parameters.effects.x = 0
+        // Analysis excludes generic endpoint effects and their encoding floor.
+        // Turning grain on must not change the cached content statistics.
+        if source.domain != .dual { parameters.pair.x = 0 }
         try context.dispatch("graphCells", width: width, height: height,
             textures: [input, cells, peaks, resources.texture, masks, film.texture, try lookBaseline(source, edit: edit)], buffers: [resources.buffer, film.buffer], value: &parameters)
         var halation: (any MTLTexture)? = nil
-        if let stock = edit.film.stock, !edit.film.isIdentity, edit.film.halation > 0,
-           let data = try? FilmStock.named(stock), data.halationStrength(edit.film).max() > 0 {
+        if let stock = edit.film.stock, edit.usesFilmProcessing, edit.effects.halation > 0,
+           let data = try? FilmStock.named(stock), data.halationStrength(edit.film, amount: edit.effects.halation).max() > 0 {
             let filmRaw = try texture(), glow = try texture()
             try context.dispatch("graphFilmCells", width: width, height: height,
                 textures: [input, filmRaw, resources.texture, film.texture], buffers: [resources.buffer, film.buffer], value: &parameters)
             try filmBlur(filmRaw, into: glow, components: data.halationMapComponents(cells: max(width, height)),
+                         truncate: FilmStock.halationTruncate, context: context)
+            halation = glow
+        }
+        if edit.film.stock == nil && edit.effects.halation > 0 {
+            let raw = try texture(), glow = try texture()
+            try context.dispatch("graphEffectCells", width: width, height: height,
+                textures: [input, raw, resources.texture], buffers: [resources.buffer], value: &parameters)
+            let reference = try FilmStock.named(.portra400)
+            try filmBlur(raw, into: glow, components: reference.halationMapComponents(cells: max(width, height)),
                          truncate: FilmStock.halationTruncate, context: context)
             halation = glow
         }
@@ -296,7 +320,7 @@ extension RenderEngine {
     func graphRegionInBands(_ source: RenderSource, edit: RenderAdjustments, size: PixelSize,
                             region: CGRect, analysis: SpatialAnalysis) throws -> RenderPlanes {
         let height = Int(region.height)
-        guard edit.film.sourceHalo(size: size) > 0, height > 4 * Self.filmBandRows else {
+        guard (edit.sourceHalo(size: size) > 0 || !edit.effects.isIdentity), height > 4 * Self.filmBandRows else {
             return try graphRegion(source, edit: edit, size: size, region: region, analysis: analysis)
         }
         let count = (height + Self.filmBandRows - 1) / Self.filmBandRows
@@ -373,13 +397,13 @@ extension RenderEngine {
 #endif
         let model = try filteredModelGain(source,edit:edit)
         let configuration = try graphConfiguration(source, edit, analysis: analysis, modelPeak:model?.peak ?? 0)
-        let halo = edit.film.sourceHalo(size: size)
+        let halo = edit.sourceHalo(size: size)
         let inputRegion = region.insetBy(dx: CGFloat(-halo), dy: CGFloat(-halo))
             .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
         let target = try authoredSourceAtOutputGrid(source, size: size, region: inputRegion)
         let input = try target?.hdr ?? workingInput(source)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
-        let film = try filmResources(edit.film)
+        let film = try filmResources(edit.film, active: edit.usesFilmProcessing, genericGrain: edit.film.stock == nil && edit.effects.grain > 0)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)
 #if DEBUG || HYPERDR_FILM_PROFILE
@@ -388,17 +412,18 @@ extension RenderEngine {
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
         let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
         let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
-        let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm
+        let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm || (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1))
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
 #if DEBUG || HYPERDR_FILM_PROFILE
         context.diagnosticPhase("graphRegion.outputsAllocated", width: base.width, height: base.height)
 #endif
-        var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
+        var p = graphUniform(source, edit, size: size, region: region, range: configuration.range,
+            shoulder: configuration.shoulder)
         if let target { p.inputRegion = sourceSampling(target.source.texture, target.source.samplingRegion) }
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
-        if analysis.filmHalation != nil, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
-            p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film)), 1)
+        if analysis.filmHalation != nil, edit.usesFilmProcessing, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
+            p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film, amount: edit.effects.halation)), 1)
         }
         var scattered: (any MTLTexture)?
         if halo > 0, let stock = edit.film.stock {
@@ -430,8 +455,10 @@ extension RenderEngine {
 #endif
         }
         // The grain's sublayer kernels depend only on this render's pixel pitch.
-        let grainRows = edit.film.stock.flatMap { try? FilmStock.named($0) }?.packedGrainKernel(longEdge: max(size.width, size.height))
-            ?? [SIMD4<Float>(repeating: 0)]
+        let grainStock: FilmStockID? = edit.effects.grain > 0
+            ? (edit.film.stock ?? .portra400) : nil
+        let grainRows = grainStock.flatMap { try? FilmStock.named($0) }?
+            .packedGrainKernel(longEdge: max(size.width, size.height)) ?? [SIMD4<Float>(repeating: 0)]
         guard let grainKernel = device.makeBuffer(bytes: grainRows, length: grainRows.count * 16, options: .storageModeShared)
             else { throw RenderError.allocationFailed }
         try context.dispatch("graphOutput", width: base.width, height: base.height,
@@ -445,8 +472,8 @@ extension RenderEngine {
 #if DEBUG || HYPERDR_FILM_PROFILE
         context.diagnosticPhase("graphRegion.completed", width: base.width, height: base.height)
 #endif
-        let encoding: GainEncoding = source.domain == .dual
-            ? .pairedLog2(offset: editedPairOffset(source), headroom: configuration.range) : .log2
+        let encoding: GainEncoding = p.pair.x > 0
+            ? .pairedLog2(offset: p.pair.x, headroom: configuration.range) : .log2
         return RenderPlanes(base: base, gain: gain, gainChannelCount: rgbGain ? 3 : 1, encoding: encoding, baseColorSpace: Self.workingColorSpace,
             provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,
             aiPending: edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel && model == nil)

@@ -170,6 +170,16 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         recipe.setValue(.number(0), for: "look.strength")
         #expect(LookPreviews.base(recipe).conditionValue("look.strength")?.numberValue == 0)
     }
+
+    @Test func theTilesCompareColourWithoutTheEffects() {
+        var recipe = Recipe(inputDomain: .sdr)
+        recipe.setValue(.number(80), for: "effect.grain")
+        recipe.setValue(.number(50), for: "effect.halation")
+        recipe.setValue(.number(0.5), for: "tone.exposure")
+        let base = LookPreviews.base(recipe)
+        #expect(base.isDefault("effect.grain") && base.isDefault("effect.halation"))
+        #expect(base.value(for: "tone.exposure") == .number(0.5), "the photo's own edit stays")
+    }
 }
 
 @MainActor @Suite struct LookPreviewRegressionTests {

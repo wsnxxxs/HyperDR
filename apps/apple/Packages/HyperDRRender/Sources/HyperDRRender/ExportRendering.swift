@@ -141,7 +141,7 @@ extension RenderEngine: ExportStripeRendering {
         // fixed-scale analysis can miss. Scan GPU bands, retain only five words.
         var summary = SIMD8<UInt32>.zero
         var firstPair: ExportPairInfo?, provenance = PairProvenance.identity
-        let halo = edit.film.sourceHalo(size:request.photoSize)
+        let halo = edit.sourceHalo(size:request.photoSize)
         let tileSize = exportTileSize(lazy,request:request,halo:halo)
         let scanRows = min(rows,tileSize.height)
         if !request.includesGain {
@@ -279,7 +279,7 @@ extension RenderEngine: ExportStripeRendering {
         guard y >= 0, count > 0, y < state.request.canvasSize.height, count <= state.request.canvasSize.height-y else {
             throw RenderError.invalidRegion
         }
-        let tileSize = exportTileSize(state.lazy,request:state.request,halo:state.edit.film.sourceHalo(size:state.request.photoSize))
+        let tileSize = exportTileSize(state.lazy,request:state.request,halo:state.edit.sourceHalo(size:state.request.photoSize))
         if width <= tileSize.width && count <= tileSize.height {
             return try readExportTile(state,rect:ExportRect(x:0,y:y,width:width,height:count))
         }
@@ -322,7 +322,7 @@ extension RenderEngine: ExportStripeRendering {
             var packed = try autoreleasepool {
                 let region = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
                 let tile = try lazy.map { try materializeExportRegion($0, outputSize: request.photoSize, region: region,
-                    halo: edit.film.sourceHalo(size: request.photoSize)) } ?? source
+                    halo: edit.sourceHalo(size: request.photoSize)) } ?? source
                 let rendered = try render(tile, adjustments: edit, size: request.photoSize, region: region)
                 guard !rendered.aiPending else { throw RenderError.aiNotAvailable }
                 guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
@@ -350,7 +350,7 @@ extension RenderEngine: ExportStripeRendering {
             if start < end && left < right {
                 let region = CGRect(x:left-photo.x,y:start-photo.y,width:right-left,height:end-start)
                 let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region,
-                                                                      halo:edit.film.sourceHalo(size:request.photoSize)) } ?? source
+                                                                      halo:edit.sourceHalo(size:request.photoSize)) } ?? source
                 let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
                 guard !rendered.aiPending else { throw RenderError.aiNotAvailable }
                 guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }

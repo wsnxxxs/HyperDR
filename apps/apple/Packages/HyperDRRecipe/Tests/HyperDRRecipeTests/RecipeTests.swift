@@ -287,6 +287,12 @@ private extension ParameterDefault {
     #expect(recipe.needsLookBaseline)
     recipe.setValue(.number(0), for: "look.filmStrength")
     #expect(!recipe.needsLookBaseline)
+    for id in Adjustments.effectIDs {
+        recipe.setValue(.number(100), for: id)
+        #expect(recipe.needsLookBaseline)
+        recipe.setValue(nil, for: id)
+        #expect(!recipe.needsLookBaseline)
+    }
     recipe.setValue(.number(40), for: "look.filmStrength")
     recipe.setInputDomain(.sdr)
     #expect(!recipe.needsLookBaseline)

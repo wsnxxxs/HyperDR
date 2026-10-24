@@ -90,9 +90,9 @@ extension RenderAdjustments {
         look.input = try values.space("look.input")
         look.output = try values.space("look.output")
         film.strength = try values.number("look.filmStrength")
-        film.grain = try values.number("look.filmGrain")
+        effects.grain = try values.number("effect.grain")
         film.exposure = try values.optionalNumber("look.filmExposure")
-        film.halation = try values.number("look.filmHalation")
+        effects.halation = try values.number("effect.halation")
         film.antihalation = try values.bool("look.filmAntihalation")
         guard let stock = values.value("look.film")?.stringValue, Adjustments.filmStocks.contains(stock) else { throw RenderError.invalidAdjustment }
         film.stock = FilmStockID(rawValue: stock)
@@ -121,7 +121,7 @@ extension SourceOptions {
     }
 
     /// A film, or a log look, that will actually be applied (a film is chosen with a
-    /// strength above zero; or the recipe has a LUT, it is enabled, and its strength is
+    /// nonzero colour strength or physical effects; or a LUT is enabled and its strength is
     /// not zero). Film exposes the scene, so it takes RAW without Apple's tone curve.
     /// A bypassed look group reads as the defaults, so the comparison original stays
     /// on Apple's curve.
@@ -131,7 +131,8 @@ extension SourceOptions {
         guard recipe.inputDomain == .rawEDR else { return false }
         let values = RecipeValues(recipe:recipe,options:options)
         if let film = values.value("look.film")?.stringValue, film != Adjustments.filmStocks[0],
-           let strength = try? values.number("look.filmStrength"), strength != 0 { return true }
+           let strength = try? values.number("look.filmStrength"),
+           strength > 0 || Adjustments.effectIDs.contains(where: { ((try? values.number($0)) ?? 0) > 0 }) { return true }
         guard recipe.look != nil else { return false }
         guard (try? values.bool("look.enabled")) == true,
               let strength = try? values.number("look.strength"), strength != 0,

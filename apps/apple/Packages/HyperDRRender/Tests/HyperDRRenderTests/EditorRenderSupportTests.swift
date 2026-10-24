@@ -6,6 +6,26 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 @Suite(.serialized) struct EditorRenderSupportTests {
+    @Test(arguments: Adjustments.effectIDs)
+    func zeroColourStockEffectsReportAutomaticFilmExposure(effect: String) async throws {
+        let engine = try RenderEngine()
+        let pixel = SIMD4<Float>(0.046, 0.046, 0.046, 1)
+        let image = CIImage(bitmapData: withUnsafeBytes(of: pixel) { Data($0) }, bytesPerRow: 16,
+            size: CGSize(width: 1, height: 1), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
+        let source = try await engine.source(image: image, domain: .sdr)
+        var recipe = Recipe(inputDomain: .sdr, values: [
+            "look.film": .string("portra400"), "look.filmStrength": .number(0), effect: .number(100)])
+        let metered = Double(try await engine.filmMeter(source))
+        #expect(abs(metered - 2) < 0.01)
+        #expect(try await engine.resolvedAutomatic(source, recipe: recipe)["look.filmExposure"] == metered)
+        recipe.setValue(.number(1), for: "look.filmExposure")
+        #expect(try await engine.resolvedAutomatic(source, recipe: recipe)["look.filmExposure"] == nil)
+        #expect(try await engine.resolvedAutomatic(source, recipe: recipe, includingSet: true)["look.filmExposure"] == metered)
+        recipe.setValue(nil, for: "look.filmExposure")
+        recipe.setValue(.number(0), for: effect)
+        #expect(try await engine.resolvedAutomatic(source, recipe: recipe)["look.filmExposure"] == nil)
+    }
+
     @Test func transientGroupsMasksAndAutomaticReadouts() async throws {
         let engine = try RenderEngine()
         let values: [SIMD4<Float>] = [SIMD4(0.05,0.05,0.05,1),SIMD4(0.5,0.5,0.5,1),SIMD4(0.9,0.9,0.9,1)]

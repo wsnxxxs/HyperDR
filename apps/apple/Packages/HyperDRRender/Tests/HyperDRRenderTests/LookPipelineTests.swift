@@ -13,6 +13,73 @@ import Testing
         return url
     }
 
+    @Test func zeroColourRAWStockKeepsItsSceneAndAppleBaseline() async throws {
+        let url = try rawCopy()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try RenderEngine()
+        var recipe = Recipe(inputDomain: .rawEDR, values: [Recipe.filmID: .string("portra400"),
+            "look.filmExposure": .number(0), "hdr.range": .number(4)])
+        func render(_ recipe: Recipe) async throws -> RenderPlanes {
+            let options = try SourceOptions(recipe: recipe,
+                resolution: .preview(maximumSize: PixelSize(width: 128, height: 128)))
+            let source = try await engine.load(url, options: options)
+            return try await engine.render(source, recipe: recipe)
+        }
+        func hdr(_ planes: RenderPlanes) -> [Float] {
+            let p = RenderEngine.readPixels(planes)
+            let offset: Float
+            if case let .pairedLog2(value, _) = planes.encoding { offset = value } else { offset = 0 }
+            return (0..<(p.baseRGBA.count/4)).flatMap { i in (0..<3).map { c in
+                (p.baseRGBA[i*4+c]+offset)*exp2(p.gain[i*p.gainChannelCount+(p.gainChannelCount == 1 ? 0 : c)])-offset
+            } }
+        }
+        let noPhysics = try await render(recipe), s0 = RenderEngine.readPixels(noPhysics), h0 = hdr(noPhysics)
+        recipe.setValue(.number(100), for: "effect.grain"); recipe.setValue(.number(100), for: "effect.halation")
+        let physics = try await render(recipe), s1 = RenderEngine.readPixels(physics), h1 = hdr(physics)
+        for strength in [0.0, 1, 100] {
+            recipe.setValue(.number(strength), for: "look.filmStrength")
+            #expect(try SourceOptions(recipe: recipe).sceneLinear)
+            #expect(recipe.needsLookBaseline == (strength < 100))
+            let actualPlanes = try await render(recipe), actual = RenderEngine.readPixels(actualPlanes), actualHDR = hdr(actualPlanes)
+            var neutral = recipe
+            for id in Adjustments.effectIDs { neutral.setValue(.number(0), for: id) }
+            let colourPlanes = try await render(neutral), colour = RenderEngine.readPixels(colourPlanes), colourHDR = hdr(colourPlanes)
+            var checked = 0, worst: Float = 0
+            for i in 0..<(s0.baseRGBA.count/4) {
+                let expected = (0..<3).map { c in colour.baseRGBA[i*4+c]+s1.baseRGBA[i*4+c]-s0.baseRGBA[i*4+c] }
+                guard expected.allSatisfy({ $0 > 0.01 && $0 < 0.95 }) else { continue }
+                for c in 0..<3 {
+                    let expectedHDR = colourHDR[i*3+c]+h1[i*3+c]-h0[i*3+c]
+                    guard expectedHDR > 0.01 else { continue }
+                    checked += 1
+                    worst = max(worst, abs(actual.baseRGBA[i*4+c]-expected[c]), abs(actualHDR[i*3+c]-expectedHDR))
+                }
+            }
+            #expect(checked > 10 && worst < 1e-4, "RAW stock strength \(strength): \(worst)")
+        }
+    }
+
+    @Test func independentEffectsWorkWithAFullPartialAndDisabledRAWLogLook() async throws {
+        let url = try rawCopy()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try RenderEngine()
+        let lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        var recipe = Recipe(inputDomain: .rawEDR, look: LUTReference(contentHash: lut.contentHash, name: "Log"), values: [
+            "look.input": .string("slog3-sgamut3cine"), "look.output": .string("rec709"), "hdr.range": .number(4)])
+        for strength in [0.0, 40, 100] {
+            recipe.setValue(.number(strength), for: "look.strength")
+            recipe.setValue(.number(0), for: "effect.grain"); recipe.setValue(.number(0), for: "effect.halation")
+            let options = try SourceOptions(recipe: recipe,
+                resolution: .preview(maximumSize: PixelSize(width: 128, height: 128)))
+            let source = try await engine.load(url, options: options)
+            let plain = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: lut))
+            recipe.setValue(.number(100), for: "effect.grain"); recipe.setValue(.number(100), for: "effect.halation")
+            let actual = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: lut))
+            #expect(zip(plain.baseRGBA, actual.baseRGBA).contains { abs($0-$1) > 1e-6 })
+            #expect(actual.gainChannelCount == 3 && actual.gain.allSatisfy(\.isFinite))
+        }
+    }
+
     /// Check the user-visible crossfade against independently rendered endpoints,
     /// including zero, instead of comparing two copies of the same LUT formula.
     @Test(arguments: [false, true], [false, true])
@@ -27,8 +94,8 @@ import Testing
         let strength: String
         if isFilm {
             full.setValue(.string("portra400"), for: Recipe.filmID)
-            full.setValue(.number(0), for: "look.filmGrain")
-            full.setValue(.number(0), for: "look.filmHalation")
+            full.setValue(.number(0), for: "effect.grain")
+            full.setValue(.number(0), for: "effect.halation")
             full.setValue(.number(0), for: "look.filmExposure")
             strength = "look.filmStrength"
         } else {

@@ -104,11 +104,15 @@ import Observation
 
     /// The recipe without its LUT and spaces. Choosing a LUT preserves the
     /// switch and strength, including a disabled look or zero strength.
+    /// The tiles compare colour, which is all a look changes, so they leave
+    /// out the effects (grain and halation, which a tile's size would only
+    /// turn into noise).
     static func base(_ recipe: Recipe) -> Recipe {
         var base = recipe
         base.look = nil
         base.setValue(nil, for: Recipe.filmID)
         for id in ["look.input", "look.output"] { base.setValue(nil, for: id) }
+        for id in Adjustments.effectIDs { base.setValue(nil, for: id) }
         return base
     }
 

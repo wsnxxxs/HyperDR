@@ -97,12 +97,46 @@ public struct Geometry: Codable, Hashable, Sendable {
             return Self.largest(ratio: aspect.ratio(frame: frame) ?? frame.width / frame.height,
                                 centre: GeometryPoint(x: 0, y: 0), in: quad, frame: frame)
         }
+        let requested = crop.rect(in: frame)
+        guard requested.corners.allSatisfy({ $0.x.isFinite && $0.y.isFinite }),
+              crop.centreX.isFinite, crop.centreY.isFinite,
+              crop.width.isFinite, crop.height.isFinite, crop.width > 0, crop.height > 0 else {
+            var automatic = self
+            automatic.crop = nil
+            return automatic.resolvedCrop(for: photo)
+        }
         return Self.fitted(crop, in: quad, frame: frame)
     }
 
     /// The crop in frame pixels about the frame's centre.
     public func cropRect(for photo: GeometrySize) -> GeometryRect {
         resolvedCrop(for: photo).rect(in: frameSize(of: photo))
+    }
+
+    /// The exact output window in frame pixels. Continuous crop constraints
+    /// stay in `cropRect(for:)`; display and rasterization use this window.
+    /// Whole-pixel operations snap the translation on the *native* photo grid,
+    /// including odd dimensions, before any preview scaling takes place.
+    public func rasterCropRect(for photo: GeometrySize) -> GeometryRect {
+        let crop = cropRect(for: photo)
+        let output = (width: max(1, Int(crop.width.rounded())), height: max(1, Int(crop.height.rounded())))
+        var centre = crop.centre
+        if !transformsPixels {
+            let origin = transform(for: photo).apply(GeometryPoint(x: -photo.width / 2, y: -photo.height / 2))
+            let tx = Double(output.width) / 2 - centre.x + origin.x
+            let ty = Double(output.height) / 2 - centre.y + origin.y
+            centre.x += tx - tx.rounded()
+            centre.y += ty - ty.rounded()
+        }
+        return GeometryRect(centre: centre, size: GeometrySize(width: Double(output.width), height: Double(output.height)))
+    }
+
+    /// Native photo pixels (top-left, y down) to output pixels (top-left,
+    /// y down). One rounding rule for display, preview, ROI and export.
+    public func photoToOutput(for photo: GeometrySize) -> Homography {
+        let crop = rasterCropRect(for: photo)
+        return Homography.translation(x: crop.width / 2 - crop.centre.x, y: crop.height / 2 - crop.centre.y)
+            * transform(for: photo) * Homography.translation(x: -photo.width / 2, y: -photo.height / 2)
     }
 
     /// The output in whole pixels: the resolved crop at the photo's own scale.
@@ -116,8 +150,14 @@ public struct Geometry: Codable, Hashable, Sendable {
     static func fitted(_ crop: CropRect, in quad: [GeometryPoint], frame: GeometrySize) -> CropRect {
         let rect = crop.rect(in: frame)
         if rect.corners.allSatisfy({ contains(quad, $0) }) { return crop }
-        let centre = contains(quad, rect.centre) ? rect.centre : GeometryPoint(x: 0, y: 0)
-        let largest = largest(ratio: rect.width / max(rect.height, 1e-9), centre: centre, in: quad, frame: frame)
+        var centre = contains(quad, rect.centre) ? rect.centre : GeometryPoint(x: 0, y: 0)
+        var largest = largest(ratio: rect.width / max(rect.height, 1e-9), centre: centre, in: quad, frame: frame)
+        if largest.width <= 0 || largest.height <= 0 {
+            // A centre on the boundary has no positive inscribed rectangle.
+            // Recentring keeps the stored crop usable on the next resolution.
+            centre = GeometryPoint(x: 0, y: 0)
+            largest = Self.largest(ratio: rect.width / rect.height, centre: centre, in: quad, frame: frame)
+        }
         // Never larger than asked for.
         return largest.width < crop.width ? largest : CropRect(centre: centre, size: GeometrySize(width: rect.width, height: rect.height), frame: frame)
     }
@@ -125,19 +165,25 @@ public struct Geometry: Codable, Hashable, Sendable {
     /// The largest rectangle of `ratio` (width over height, in pixels) centred
     /// on `centre` inside the convex `quad`.
     static func largest(ratio: Double, centre: GeometryPoint, in quad: [GeometryPoint], frame: GeometrySize) -> CropRect {
-        let ratio = max(ratio, 1e-6)
+        let ratio = ratio.isFinite && ratio > 0 ? ratio : 1
         if isFrame(quad, frame) {
             // Nothing resampled: the photo is the frame itself, solved exactly.
             let height = max(0, min(frame.height / 2 - abs(centre.y), (frame.width / 2 - abs(centre.x)) / ratio)) * 2
             return CropRect(centre: centre, size: GeometrySize(width: height * ratio, height: height), frame: frame)
         }
-        var low = 0.0, high = max(frame.width, frame.height) * 4
-        for _ in 0..<60 {
-            let height = (low + high) / 2
-            let rect = GeometryRect(centre: centre, size: GeometrySize(width: height * ratio, height: height))
-            if rect.corners.allSatisfy({ contains(quad, $0) }) { low = height } else { high = height }
+        // Each oriented edge gives a half-plane constraint on the rectangle's
+        // half-height t: cross(edge, centre - a) >= t * (abs(dx) + ratio * abs(dy)).
+        // Solve the four constraints directly, independent of image resolution.
+        var halfHeight = Double.infinity
+        for index in quad.indices {
+            let a = quad[index], b = quad[(index + 1) % quad.count]
+            let dx = b.x - a.x, dy = b.y - a.y
+            let distance = abs(dx * (centre.y - a.y) - dy * (centre.x - a.x))
+            let support = abs(dx) + ratio * abs(dy)
+            if support > 0 { halfHeight = min(halfHeight, distance / support) }
         }
-        return CropRect(centre: centre, size: GeometrySize(width: low * ratio, height: low), frame: frame)
+        let height = halfHeight.isFinite ? max(0, halfHeight * 2) : 0
+        return CropRect(centre: centre, size: GeometrySize(width: height * ratio, height: height), frame: frame)
     }
 
     /// The quad is the frame's own rectangle (crop, turns and mirror only).
@@ -149,6 +195,8 @@ public struct Geometry: Codable, Hashable, Sendable {
     /// Inside the convex quad, edges included (a little tolerance, so a crop
     /// fitted exactly to an edge stays inside).
     public static func contains(_ quad: [GeometryPoint], _ point: GeometryPoint) -> Bool {
+        guard quad.count >= 3, point.x.isFinite, point.y.isFinite,
+              quad.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { return false }
         var sign = 0.0
         for index in quad.indices {
             let a = quad[index], b = quad[(index + 1) % quad.count]
@@ -161,7 +209,7 @@ public struct Geometry: Codable, Hashable, Sendable {
     }
 
     static func clamped(_ value: Double, _ range: ClosedRange<Double>) -> Double {
-        min(max(value, range.lowerBound), range.upperBound)
+        value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : 0
     }
 
     // MARK: Edits
@@ -183,10 +231,31 @@ public struct Geometry: Codable, Hashable, Sendable {
         return result
     }
 
+    /// Stores a box gesture's proposed frame fractions after applying the
+    /// aspect lock and transformed-photo bounds. Keeps the requested centre
+    /// when it lies in the photo, shrinks rather than enlarges, and recentres
+    /// when the centre is outside. Call with the gesture's original box plus
+    /// total translation, rather than repeatedly fitting the previous result.
+    /// `resolvedCrop(for:)` remains the authoritative visible/exported box.
+    public func settingCrop(_ proposed: CropRect, photo: GeometrySize) -> Geometry {
+        var result = self
+        let frame = frameSize(of: photo)
+        var proposed = proposed
+        if let ratio = aspect.ratio(frame: frame), proposed.width > 0, proposed.height > 0,
+           proposed.width.isFinite, proposed.height.isFinite {
+            let height = min(proposed.height * frame.height, proposed.width * frame.width / ratio)
+            proposed.width = height * ratio / frame.width
+            proposed.height = height / frame.height
+        }
+        result.crop = proposed
+        result.crop = result.resolvedCrop(for: photo)
+        return result
+    }
+
     /// A quarter turn anticlockwise: the crop turns with the photo.
     public func turnedLeft() -> Geometry {
         var result = self
-        result.quarterTurns = (quarterTurns + 1) % 4
+        result.quarterTurns = (((quarterTurns % 4) + 4) % 4 + 1) % 4
         result.aspect = aspect.turned
         // Frame fractions: the new x is the old y, the new y minus the old x.
         result.crop = crop.map { CropRect(centreX: $0.centreY, centreY: -$0.centreX, width: $0.height, height: $0.width) }

@@ -5,16 +5,20 @@ import SwiftUI
 import AppKit
 #endif
 
-/// Over the canvas in the crop pane: the crop box with its corners, and
-/// thirds while it is dragged. The canvas dims the photo outside it
-/// (`GeometryDisplay.dimsOutsideCrop`), in linear light, so HDR highlights
-/// dim too.
+/// Over the canvas in the crop pane: the crop box with its corners and the
+/// middles of its edges, and thirds while it is dragged. The canvas dims the
+/// photo outside it (`GeometryDisplay.dimsOutsideCrop`), in linear light, so
+/// HDR highlights dim too.
 ///
 /// - A corner or an edge resizes the box; inside it the box moves. A fixed
-///   ratio holds while resizing (Free lets each edge go its own way).
-/// - The box never leaves the photo: a drag stops where the photo ends.
+///   ratio holds while resizing (Free lets each edge go its own way). A finger
+///   takes hold of an edge within `CropDrag.reach` of it.
+/// - The box never leaves the photo: a drag stops where the photo ends, with a
+///   tap of the haptics (iOS) or the trackpad (Mac) when it does.
 /// - While a drag is under way the photo stays where it is (`freeze`); when
-///   it ends, the canvas fits the new crop.
+///   it ends, the canvas glides to fit the new crop (at once with Reduce Motion).
+/// - A double tap inside the box gives the largest crop of its ratio again,
+///   keeping the rotation and perspective; one undo step.
 struct CropOverlay: View {
     let layout: CropLayout
     /// Thirds over the crop while anything in the pane is dragged.
@@ -22,21 +26,53 @@ struct CropOverlay: View {
     @Binding var freeze: CropLayout?
     let write: (Geometry) -> Void
     let onEditing: (Bool) -> Void
+    /// Ends the crop gesture that never reported its end (cancelled, or the
+    /// overlay gone): the editor's `endCropInteraction()`, which commits it
+    /// as one undo step.
+    let onCancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: (kind: CropDrag, start: GeometryRect, geometry: Geometry)?
+    /// True while the drag gesture is alive; it falls back on its own when the
+    /// system cancels the gesture, which never calls `onEnded`.
+    @GestureState private var pressing = false
+    /// The glide to the fitted crop after a drag.
+    @State private var settling: Task<Void, Never>?
+    /// The drag is held at the photo's edge.
+    @State private var stopped = false
+    /// Counters for the haptics.
+    @State private var stops = 0
+    @State private var resets = 0
+
+    /// How long the canvas takes to fit the crop after a drag.
+    static let settleDuration = 0.3
 
     var body: some View {
         let box = layout.cropRect
+        let showsThirds = drag != nil || adjusting
         ZStack {
-            if drag != nil || adjusting { thirds(box) }
+            thirds(box)
+                .opacity(showsThirds ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: showsThirds)
             Rectangle()
                 .path(in: box)
                 .stroke(Color.white.opacity(0.9), lineWidth: 1)
-            corners(box)
+            handles(box)
                 .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .square))
         }
         .contentShape(.rect)
         .gesture(gesture(box))
+        // A cancelled drag (a system gesture, the view rebuilt) ends as a finished one.
+        .onChange(of: pressing) { _, now in if !now { endDrag(with: nil, cancelled: true) } }
+        .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
+            if box.contains(tap.location) { resetCrop() }
+        })
+        #if os(iOS)
+        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.6), trigger: stops)
+        .sensoryFeedback(.impact(weight: .light), trigger: resets)
+        #else
+        .sensoryFeedback(.alignment, trigger: stops)
+        #endif
         #if os(macOS)
         // The pointer says what a press would take hold of.
         .onContinuousHover { phase in
@@ -47,6 +83,17 @@ struct CropOverlay: View {
             }
         }
         #endif
+        // Leaving the pane mid-drag or mid-glide leaves nothing held.
+        .onDisappear {
+            settling?.cancel()
+            settling = nil
+            if drag != nil {
+                drag = nil
+                stopped = false
+                finishEditing(cancelled: true)
+            }
+            freeze = nil
+        }
         .allowsHitTesting(true)
         .accessibilityHidden(true)
     }
@@ -81,11 +128,10 @@ struct CropOverlay: View {
             }
         }
         .stroke(Color.white.opacity(0.45), lineWidth: 0.5)
-        .transition(.opacity)
     }
 
-    /// An L at each corner, just inside the box.
-    private func corners(_ box: CGRect) -> Path {
+    /// An L at each corner and a bar at the middle of each edge, just inside the box.
+    private func handles(_ box: CGRect) -> Path {
         let length = min(20, box.width / 3, box.height / 3), inset: CGFloat = 1.5
         return Path { path in
             for (x, y, dx, dy) in [(box.minX, box.minY, 1.0, 1.0), (box.maxX, box.minY, -1.0, 1.0),
@@ -95,36 +141,132 @@ struct CropOverlay: View {
                 path.addLine(to: corner)
                 path.addLine(to: CGPoint(x: corner.x, y: corner.y + length * dy))
             }
+            // The edges' bars only where they stand clear of the corners.
+            let bar = min(18, box.width / 5), column = min(18, box.height / 5)
+            if box.width > 3 * length + bar {
+                for y in [box.minY + inset, box.maxY - inset] {
+                    path.move(to: CGPoint(x: box.midX - bar / 2, y: y))
+                    path.addLine(to: CGPoint(x: box.midX + bar / 2, y: y))
+                }
+            }
+            if box.height > 3 * length + column {
+                for x in [box.minX + inset, box.maxX - inset] {
+                    path.move(to: CGPoint(x: x, y: box.midY - column / 2))
+                    path.addLine(to: CGPoint(x: x, y: box.midY + column / 2))
+                }
+            }
         }
     }
 
     private func gesture(_ box: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($pressing) { _, pressing, _ in pressing = true }
             .onChanged { value in
                 if drag == nil {
                     guard let kind = CropDrag.at(value.startLocation, box: box) else { return }
+                    // Taking hold mid-glide keeps the photo where it is now.
+                    settling?.cancel()
+                    settling = nil
                     drag = (kind, layout.geometry.cropRect(for: layout.photo), layout.geometry)
+                    stopped = false
                     freeze = layout
                     onEditing(true)
+                    #if os(macOS)
+                    if kind == .move { NSCursor.closedHand.set() }
+                    #endif
                 }
                 guard let drag else { return }
-                let scale = layout.scale
-                let delta = GeometryPoint(x: Double(value.translation.width) / scale,
-                                          y: Double(value.translation.height) / scale)
-                let frame = drag.geometry.frameSize(of: layout.photo)
-                let ratio = drag.geometry.aspect == .free ? nil
-                    : drag.geometry.aspect.ratio(frame: frame) ?? drag.start.width / drag.start.height
-                let rect = drag.kind.apply(delta, to: drag.start, ratio: ratio, quad: drag.geometry.quad(for: layout.photo),
-                                           minimum: max(frame.width, frame.height) * 0.06)
-                var geometry = drag.geometry
-                geometry.crop = CropRect(centre: rect.centre, size: rect.size, frame: frame)
+                let (geometry, stop) = dragged(drag, by: value.translation)
+                if stop, !stopped { stops += 1 }
+                stopped = stop
                 write(geometry)
             }
-            .onEnded { _ in
-                guard drag != nil else { return }
-                drag = nil
-                onEditing(false)
-                freeze = nil
+            .onEnded { value in
+                guard let drag else { return }
+                let (geometry, _) = dragged(drag, by: value.translation)
+                #if os(macOS)
+                Self.cursor(CropDrag.at(value.location, box: (freeze ?? layout).with(geometry).cropRect)).set()
+                #endif
+                endDrag(with: geometry, cancelled: false)
             }
+    }
+
+    /// Ends a drag once, however it ends: with the finger's last geometry, or
+    /// (cancelled) with what was last written. Then the canvas fits the crop.
+    private func endDrag(with geometry: Geometry?, cancelled: Bool) {
+        guard drag != nil else { return }
+        if let geometry { write(geometry) }
+        drag = nil
+        stopped = false
+        finishEditing(cancelled: cancelled)
+        settle(from: freeze ?? layout, to: geometry ?? layout.geometry)
+    }
+
+    /// Closes the crop drag in the editor. A cancelled one is committed by
+    /// `onCancel`; the end notice after it then clears the editor's guard
+    /// against the gesture's late writes, so the next edit is not dropped.
+    private func finishEditing(cancelled: Bool) {
+        if cancelled { onCancel() }
+        onEditing(false)
+    }
+
+    /// The geometry a drag leaves after the finger moved `translation` points,
+    /// and whether the photo's edge held it back.
+    private func dragged(_ drag: (kind: CropDrag, start: GeometryRect, geometry: Geometry),
+                         by translation: CGSize) -> (Geometry, stopped: Bool) {
+        // A press that has not moved changes nothing (an automatic crop stays automatic).
+        guard translation != .zero else { return (drag.geometry, false) }
+        let scale = (freeze ?? layout).scale
+        let delta = GeometryPoint(x: Double(translation.width) / scale, y: Double(translation.height) / scale)
+        let frame = drag.geometry.frameSize(of: layout.photo)
+        let ratio = drag.geometry.aspect == .free ? nil
+            : drag.geometry.aspect.ratio(frame: frame) ?? drag.start.width / drag.start.height
+        let result = drag.kind.resolve(delta, to: drag.start, ratio: ratio, quad: drag.geometry.quad(for: layout.photo),
+                                       minimum: max(frame.width, frame.height) * 0.06)
+        let geometry = drag.geometry.settingCrop(CropRect(centre: result.rect.centre, size: result.rect.size, frame: frame),
+                                                 photo: layout.photo)
+        return (geometry, result.stopped)
+    }
+
+    /// The largest crop of the ratio in force, centred: what the box is with
+    /// no crop of its own.
+    private func resetCrop() {
+        guard drag == nil, layout.geometry.crop != nil else { return }
+        var geometry = layout.geometry
+        geometry.crop = nil
+        let from = freeze ?? layout
+        settling?.cancel()
+        settling = nil
+        // Held where it is while the crop changes, then fitted.
+        freeze = from
+        write(geometry)
+        resets += 1
+        settle(from: from, to: geometry)
+    }
+
+    /// Glides the canvas from `start`'s placement to the one that fits
+    /// `geometry`'s crop, then lets the pane fit it as usual.
+    private func settle(from start: CropLayout, to geometry: Geometry) {
+        settling?.cancel()
+        let held = start.with(geometry), target = held.fitted
+        guard !reduceMotion, !held.settles(at: target) else {
+            settling = nil
+            freeze = nil
+            return
+        }
+        freeze = held
+        settling = Task { @MainActor in
+            let clock = ContinuousClock(), began = clock.now
+            while !Task.isCancelled {
+                let t = min(1, (clock.now - began) / .seconds(Self.settleDuration))
+                if t >= 1 { break }
+                // Ease out: quick at first, landing softly.
+                freeze = held.moving(towards: target, 1 - pow(1 - t, 3))
+                try? await Task.sleep(for: .milliseconds(8))
+            }
+            guard !Task.isCancelled else { return }
+            freeze = nil
+            settling = nil
+        }
     }
 }

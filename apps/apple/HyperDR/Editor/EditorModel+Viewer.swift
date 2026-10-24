@@ -45,6 +45,7 @@ extension EditorModel {
     var viewerHintKey: String? {
         guard document != nil, hasEditedFrame else { return nil }
         if isPeekingOriginal { return "canvas.peeking" }
+        if isCropping { return "canvas.hint.crop" }
         switch viewMode {
         case .compare: return "canvas.hint.split"
         case .original: return nil

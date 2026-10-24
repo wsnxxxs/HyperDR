@@ -15,11 +15,12 @@ extension OpenedSource {
         let full = nativeSize ?? raw?.nativeSize
             ?? PixelSize(width: Int(image.extent.width.rounded()), height: Int(image.extent.height.rounded()))
         let output = geometry.outputSize(of: GeometrySize(width: Double(full.width), height: Double(full.height)))
-        let base = try Self.transform(image, geometry)
-        let transformedHDR = hdr === image ? base : try Self.transform(hdr, geometry, photo: image.extent)
+        let photo = GeometrySize(width: Double(full.width), height: Double(full.height))
+        let base = try Self.transform(image, geometry, nativePhoto: photo)
+        let transformedHDR = hdr === image ? base : try Self.transform(hdr, geometry, photo: image.extent, nativePhoto: photo)
         let transformedGain = try gain.map { gain in
             AuthoredGainMap(standard: gain.standard, auxiliaryInfo: gain.auxiliaryInfo,
-                            image: try Self.transform(gain.image, geometry, photo: image.extent),
+                            image: try Self.transform(gain.image, geometry, photo: image.extent, nativePhoto: photo),
                             channelCount: gain.channelCount, baseColorSpace: gain.baseColorSpace,
                             alternateColorSpace: gain.alternateColorSpace,
                             auxiliaryColorSpace: gain.auxiliaryColorSpace, tags: gain.tags)
@@ -38,7 +39,10 @@ extension OpenedSource {
     /// zero. `photo` is the extent of the image the geometry is measured on
     /// (the base): a smaller gain map is scaled onto it, transformed, and
     /// scaled back to its own resolution.
-    static func transform(_ image: CIImage, _ geometry: Geometry, photo: CGRect? = nil) throws -> CIImage {
+    /// `nativePhoto` fixes the crop's pixel grid before a decoded preview is
+    /// resized. Auxiliary planes still use `photo` as their reference extent.
+    static func transform(_ image: CIImage, _ geometry: Geometry, photo: CGRect? = nil,
+                          nativePhoto: GeometrySize? = nil) throws -> CIImage {
         let extent = image.extent
         let reference = photo ?? extent
         guard extent.width > 0, extent.height > 0, reference.width > 0, reference.height > 0 else {
@@ -48,20 +52,19 @@ extension OpenedSource {
         let toBase = CGAffineTransform(translationX: reference.minX, y: reference.minY)
             .scaledBy(x: reference.width / extent.width, y: reference.height / extent.height)
             .translatedBy(x: -extent.minX, y: -extent.minY)
-        let size = GeometrySize(width: reference.width, height: reference.height)
-        let crop = geometry.cropRect(for: size)
-        let output = geometry.outputSize(of: size)
-        // Core Image (y up) to the photo's centred pixels (y down), through the
-        // geometry, to the output (y up, origin at the crop's corner).
-        let fromCI = Homography(m: [1, 0, -reference.midX, 0, -1, reference.midY, 0, 0, 1])
-        var toOutput = Homography(m: [1, 0, Double(output.width) / 2 - crop.centre.x,
-                                      0, -1, Double(output.height) / 2 + crop.centre.y, 0, 0, 1])
-        if !geometry.transformsPixels {
-            // Crop, turns and mirror move whole pixels: keep them on the grid.
-            let map = toOutput * geometry.transform(for: size) * fromCI
-            toOutput = Homography.translation(x: map.m[2].rounded() - map.m[2], y: map.m[5].rounded() - map.m[5]) * toOutput
-        }
-        let map = toOutput * geometry.transform(for: size) * fromCI
+        let size = nativePhoto ?? GeometrySize(width: reference.width, height: reference.height)
+        let nativeOutput = geometry.outputSize(of: size)
+        let sx = reference.width / size.width, sy = reference.height / size.height
+        let turned = geometry.quarterTurns % 2 != 0
+        let output = (width: max(1, Int((Double(nativeOutput.width) * (turned ? sy : sx)).rounded())),
+                      height: max(1, Int((Double(nativeOutput.height) * (turned ? sx : sy)).rounded())))
+        // Decoded CI pixels -> native top-left coordinates -> canonical output
+        // -> this resolution's CI pixels. Never re-snap a preview's translation.
+        let fromCI = Homography(m: [1 / sx, 0, -reference.minX / sx,
+                                   0, -1 / sy, reference.maxY / sy, 0, 0, 1])
+        let toCI = Homography(m: [Double(output.width) / Double(nativeOutput.width), 0, 0,
+                                 0, -Double(output.height) / Double(nativeOutput.height), Double(output.height), 0, 0, 1])
+        let map = toCI * geometry.photoToOutput(for: size) * fromCI
         let onBase = image.transformed(by: toBase).clampedToExtent()
         let transformed: CIImage
         if map.isAffine {
@@ -86,9 +89,9 @@ extension OpenedSource {
         let cropped = transformed.cropped(to: CGRect(x: 0, y: 0, width: output.width, height: output.height))
         guard photo != nil, extent.size != reference.size else { return cropped }
         // Back to the image's own resolution.
-        let sx = extent.width / reference.width, sy = extent.height / reference.height
-        let own = CGRect(x: 0, y: 0, width: max(1, (Double(output.width) * sx).rounded()),
-                         height: max(1, (Double(output.height) * sy).rounded()))
+        let auxiliaryX = extent.width / reference.width, auxiliaryY = extent.height / reference.height
+        let own = CGRect(x: 0, y: 0, width: max(1, (Double(output.width) * auxiliaryX).rounded()),
+                         height: max(1, (Double(output.height) * auxiliaryY).rounded()))
         return cropped.transformed(by: CGAffineTransform(scaleX: own.width / Double(output.width),
                                                          y: own.height / Double(output.height))).cropped(to: own)
     }

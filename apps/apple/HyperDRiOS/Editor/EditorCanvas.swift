@@ -64,6 +64,12 @@ struct EditorCanvas: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.smooth(duration: 0.35), value: placement)
         }
+        // A placement held from one visit to the crop pane never reaches the next.
+        .onChange(of: cropping) {
+            cropFreeze = nil
+            // A hold never outlives the pane's change: the crop pane shows no original.
+            holdingOriginal = false
+        }
         // The new photo's embedded thumbnail until its first frame; over a
         // previous photo it covers that one entirely.
         .overlay { OpeningPlaceholder(placeholder, backdrop: editor.frame != nil) }
@@ -150,19 +156,24 @@ struct EditorCanvas: View {
                                     var recipe = editor.recipe
                                     recipe.geometry = geometry
                                     editor.setRecipe(recipe)
-                                }, onEditing: { editor.editingGeometry($0) })
+                                }, onEditing: { editor.editingGeometry($0) },
+                                onCancel: { editor.endCropInteraction() })
                 } else if !cropping {
                     adornments
                 }
             }
     }
 
-    /// The crop pane's placement of the photo; also, once it is left, until
-    /// the cropped frame arrives (the whole photo drawn through the crop, so
-    /// it never shows uncropped). Nil when the frame shown is not the whole photo.
+    /// The crop pane's placement of the photo, drawn from whatever frame is
+    /// shown (on entering, the cropped one lands on its crop until the whole
+    /// photo arrives); also, once the pane is left, until the cropped frame
+    /// arrives (the whole photo drawn through the crop, so it never shows
+    /// uncropped). Nil outside the pane when the frame shown is not the whole photo.
     private func cropLayout(_ viewport: CGSize) -> CropLayout? {
-        guard let frame = editor.frame, let source = editor.frameSource, frame.request.recipe.geometry == .identity,
-              cropping || !editor.recipe.geometry.isIdentity, viewport.width > 0, viewport.height > 0 else { return nil }
+        guard let frame = editor.frame, let source = editor.frameSource,
+              CropLayout.drawsThroughGeometry(shown: frame.request.recipe.geometry, recipe: editor.recipe.geometry,
+                                              cropping: cropping),
+              viewport.width > 0, viewport.height > 0 else { return nil }
         if cropping, let cropFreeze { return cropFreeze.with(editor.recipe.geometry) }
         let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
         return CropLayout(photo: photo, geometry: editor.recipe.geometry, viewport: viewport,
@@ -174,9 +185,21 @@ struct EditorCanvas: View {
         editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
     }
 
-    var mode: DisplayComposition.Mode { Self.mode(editor, comparison: comparison, holding: holdingOriginal) }
+    var mode: DisplayComposition.Mode {
+        Self.mode(editor, comparison: comparison, holding: holdingOriginal, cropping: cropping)
+    }
 
-    static func mode(_ editor: RecipeEditor, comparison: Comparison, holding: Bool) -> DisplayComposition.Mode {
+    /// What the canvas composes. While it draws through the geometry (the crop
+    /// pane, and leaving it until the cropped frame arrives) it draws the edit
+    /// alone, as the Mac's does; the comparison chosen comes back after.
+    static func mode(_ editor: RecipeEditor, comparison: Comparison, holding: Bool,
+                     cropping: Bool = false) -> DisplayComposition.Mode {
+        if let frame = editor.frame,
+           CropLayout.drawsThroughGeometry(shown: frame.request.recipe.geometry, recipe: editor.recipe.geometry,
+                                           cropping: cropping) {
+            return .edited
+        }
+        guard !cropping else { return .edited }
         let original = editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
         guard original != nil else { return .edited }
         if holding { return .original }
@@ -201,7 +224,8 @@ struct EditorCanvas: View {
                                        mode: mode, splitRatio: splitRatio,
                                        previewsAsSDR: editor.previewsAsSDR,
                                        imageSize: CGSize(width: size.width, height: size.height),
-                                       geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping))
+                                       geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping,
+                                                               rendered: frame.request.recipe.geometry))
     }
 
     /// The split divider and the badge, in the canvas's coordinates.
@@ -260,7 +284,7 @@ struct EditorCanvas: View {
 
     private var status: some View {
         VStack(spacing: Space.s2) {
-            if holdingOriginal, original != nil { capsule(Text("ios.canvas.original")) }
+            if holdingOriginal, mode == .original, original != nil { capsule(Text("ios.canvas.original")) }
             // The original is asked for but not there: the canvas shows the
             // edit (unlabelled) until it is, or says it failed.
             if wantsOriginal, original == nil, editor.frame != nil, session.openingStage == nil {
@@ -299,7 +323,7 @@ struct EditorCanvas: View {
     }
 
     /// Original, Split or the canvas held.
-    private var wantsOriginal: Bool { holdingOriginal || comparison != .edited }
+    private var wantsOriginal: Bool { !cropping && (holdingOriginal || comparison != .edited) }
 
     /// Renders the current recipe again after a failure (the next edit would too).
     private var retryRender: (label: Text, run: () -> Void)? {

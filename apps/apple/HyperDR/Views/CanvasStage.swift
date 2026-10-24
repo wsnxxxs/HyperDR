@@ -1,5 +1,6 @@
 import SwiftUI
 import HyperDRDesign
+import HyperDRRecipe
 
 /// The photograph on the canvas: `PreviewCanvas` draws only the photo's
 /// pixels, and everything around them -- rounded corners, shadow, badge,
@@ -7,7 +8,9 @@ import HyperDRDesign
 /// (batch 3 §3.5).
 ///
 /// With focus, F fits the photo to the window, + / − zoom (§12 Q9), C
-/// compares, holding Space shows the original and Esc lets it go. The keys
+/// compares, holding Space shows the original and Esc lets it go. In the
+/// crop pane Return finishes the crop and Esc puts back the geometry the
+/// pane opened with (one undo step) and leaves it. The keys
 /// are taken here, not by `PreviewCanvas`, and only while the canvas itself
 /// has focus, so a focused text field keeps them. Holding the pointer on
 /// the photo for 240 ms shows the original too (`PressAndHold`).
@@ -54,6 +57,8 @@ struct CanvasStage: View {
 
     /// The current focus was given by the canvas itself, not the keyboard.
     @State private var focusedByPointer = false
+    /// The geometry when the crop pane opened, for Esc.
+    @State private var cropEntry: Geometry?
 
     var body: some View {
         PreviewCanvas(model: model, pointer: pointer)
@@ -67,7 +72,8 @@ struct CanvasStage: View {
                 if model.isCropping, let crop = model.cropLayout {
                     CropOverlay(layout: crop, adjusting: model.editor.editingParameter == RecipeEditor.geometryDragID,
                                 freeze: Bindable(model).cropFreeze, write: { model.setGeometry($0) },
-                                onEditing: { model.editor.editingGeometry($0) })
+                                onEditing: { model.editor.editingGeometry($0) },
+                                onCancel: { model.editor.endCropInteraction() })
                 }
             }
             .overlay {
@@ -84,9 +90,21 @@ struct CanvasStage: View {
             .onKeyPress(characters: Self.keys, action: handle)
             .onKeyPress(keys: [.space], phases: [.down, .repeat, .up], action: handleSpace)
             .onKeyPress(.escape) {
-                guard model.isPeekingOriginal else { return .ignored }
-                releaseHolds()
+                if model.isPeekingOriginal {
+                    releaseHolds()
+                    return .handled
+                }
+                guard model.isCropping else { return .ignored }
+                cancelCrop()
                 return .handled
+            }
+            .onKeyPress(.return) {
+                guard model.isCropping else { return .ignored }
+                model.isCropping = false
+                return .handled
+            }
+            .onChange(of: CropEntryTrigger(cropping: model.isCropping, serial: model.photoSerial), initial: true) { _, trigger in
+                cropEntry = trigger.cropping ? model.editor.recipe.geometry : nil
             }
             // One observation for both what the hint says and which photo it
             // is for, so the first photo's hint is announced once.
@@ -149,6 +167,13 @@ struct CanvasStage: View {
         !CanvasAdornments.legendRows(model: model, showsInspector: showsInspector).isEmpty
     }
 
+    /// Esc in the crop pane: the geometry it opened with, and back to Adjust.
+    private func cancelCrop() {
+        // Commits a drag still under way, then restores the entry as its own undo step.
+        if let cropEntry, !model.isEditingLocked { model.editor.cancelCrop(restoring: cropEntry) }
+        model.isCropping = false
+    }
+
     private func takeFocus() {
         focusedByPointer = true
         focused = true
@@ -184,6 +209,12 @@ struct CanvasStage: View {
         }
         return .handled
     }
+}
+
+/// The crop pane opening, or another photo while it is open.
+private struct CropEntryTrigger: Equatable {
+    var cropping: Bool
+    var serial: Int
 }
 
 /// What decides the hint: the photo on the canvas and what can be done now.

@@ -28,6 +28,8 @@ actor FakeEditorRendering: EditorRendering {
     var photos: [URL: Photo] = [:]
     var defaultPhoto = Photo()
     var embeddedPreview: CGImage?
+    /// Optional synthetic source for image analysis tests.
+    var thumbnailImage: CGImage?
     private var holdingOpens = false
     private var heldOpens: [Int: CheckedContinuation<Void, Never>] = [:]
     var modelBehavior = ModelBehavior.succeed
@@ -173,6 +175,7 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
+        if let thumbnailImage { return thumbnailImage }
         let space = CGColorSpace(name: CGColorSpace.displayP3)!
         guard let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {

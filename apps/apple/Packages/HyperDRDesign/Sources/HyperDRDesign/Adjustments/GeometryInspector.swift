@@ -5,7 +5,9 @@ import SwiftUI
 /// sidebar), beside `AdjustmentInspector`; the crop box itself is drawn over
 /// the canvas by the host.
 ///
-/// - Above: a quarter turn left, mirroring and reset, each one undo step.
+/// - Above: a quarter turn left, mirroring and reset, each one undo step;
+///   under them Auto (`GeometryUpright`), whose menu holds the other modes,
+///   with a line when it could not straighten the photo.
 /// - Ratio: the photo's own, free, square and the fixed ratios as tiles drawn
 ///   in their shape, in the photo's orientation, and a switch for the other
 ///   way up when the ratio has one.
@@ -15,6 +17,7 @@ public struct GeometryInspector: View {
     /// The photo's own size; nil before a photo.
     private let photo: GeometrySize?
     private let style: AdjustmentControlStyle
+    private let upright: GeometryUpright?
     private let onEditingChanged: (Bool) -> Void
 
     @State private var expanded: Set<Section> = [.aspect, .transform]
@@ -22,10 +25,11 @@ public struct GeometryInspector: View {
     enum Section: Hashable { case aspect, transform }
 
     public init(geometry: Binding<Geometry>, photo: GeometrySize?, style: AdjustmentControlStyle = .pointer,
-                onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+                upright: GeometryUpright? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
         _geometry = geometry
         self.photo = photo
         self.style = style
+        self.upright = upright
         self.onEditingChanged = onEditingChanged
     }
 
@@ -43,13 +47,52 @@ public struct GeometryInspector: View {
     // MARK: Actions
 
     private var actions: some View {
-        HStack(spacing: Space.s2) {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(spacing: Space.s2) { tiles }
+            if let upright { auto(upright) }
+        }
+    }
+
+    @ViewBuilder private var tiles: some View {
             action("rotate.left", Text("crop.rotate90", bundle: .module)) { geometry = geometry.turnedLeft() }
             action("arrow.left.and.right.righttriangle.left.righttriangle.right", Text("crop.flip", bundle: .module)) {
                 geometry = geometry.mirrored()
             }
             action("arrow.counterclockwise", Text("crop.reset", bundle: .module)) { geometry = .identity }
                 .disabled(geometry.isIdentity)
+    }
+
+    /// Auto as a button with a menu; while it analyses, a spinner in its place.
+    @ViewBuilder private func auto(_ upright: GeometryUpright) -> some View {
+        let title = GeometryUpright.name(.auto)
+        Group {
+            if upright.analyzing != nil {
+                Button {} label: {
+                    HStack(spacing: Space.s2) {
+                        ProgressView().controlSize(.small)
+                        title
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(true)
+            } else {
+                Menu {
+                    upright.menuItems
+                } label: {
+                    Label { title } icon: { Image(systemName: GeometryUpright.symbol) }
+                        .frame(maxWidth: .infinity)
+                } primaryAction: {
+                    upright.run(.auto)
+                }
+                .menuStyle(.button)
+            }
+        }
+        .controlSize(style == .touch ? .extraLarge : .large)
+        .help(title)
+        if let notice = upright.notice, upright.analyzing == nil {
+            Label { GeometryUpright.text(notice) } icon: { Image(systemName: "exclamationmark.triangle") }
+                .font(.system(size: 11))
+                .foregroundStyle(Color.hdr.inkMuted)
         }
     }
 

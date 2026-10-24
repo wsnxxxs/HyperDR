@@ -2,8 +2,9 @@ import HyperDRDesign
 import HyperDRRecipe
 import SwiftUI
 
-/// The Crop tool (ipad-studio §3.4): a quarter turn left, mirroring and
-/// reset as three large buttons; the ratios as tiles drawn in their shape, in
+/// The Crop tool (ipad-studio §3.4): a quarter turn left, mirroring, Auto
+/// (its other modes on a long press) and reset as large buttons, with a line
+/// when Auto changed nothing; the ratios as tiles drawn in their shape, in
 /// the way up of the crop (or the photo, before one), with the other way up a
 /// switch away; and rotation and perspective as Studio sliders. The crop box
 /// itself is on the canvas (`CropOverlay`). Every button is one undo step, and
@@ -13,6 +14,7 @@ struct PadCropTool: View {
     /// The photo's own size; nil before a photo.
     let photo: GeometrySize?
     var columns = 1
+    var upright: GeometryUpright?
     let onEditingChanged: (Bool) -> Void
 
     var body: some View {
@@ -23,8 +25,14 @@ struct PadCropTool: View {
                               symbol: "arrow.left.and.right.righttriangle.left.righttriangle.right") {
                     geometry = geometry.mirrored()
                 }
+                if let upright { PadUprightTile(upright: upright) }
                 PadActionTile(title: Text("ios.crop.reset"), symbol: "arrow.counterclockwise") { geometry = .identity }
                     .disabled(geometry.isIdentity)
+            }
+            if let notice = upright?.notice {
+                Label { GeometryUpright.text(notice) } icon: { Image(systemName: "exclamationmark.triangle") }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             PadSection(Text("ios.crop.aspect")) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: PadMetrics.rowSpacing)],
@@ -101,6 +109,41 @@ nonisolated enum PadCropReadout {
         if abs(value) < (degrees ? 0.05 : 0.5) { return degrees ? "0°" : "0" }
         let text = degrees ? String(format: "%+.1f°", value) : String(format: "%+.0f", value)
         return text.replacingOccurrences(of: "-", with: "\u{2212}")
+    }
+}
+
+/// Auto as a `PadActionTile`: a tap runs it, a long press offers the other
+/// modes; a spinner while it runs.
+private struct PadUprightTile: View {
+    let upright: GeometryUpright
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let running = upright.analyzing != nil
+        Menu {
+            upright.menuItems
+        } label: {
+            VStack(spacing: 4) {
+                if running {
+                    ProgressView().frame(height: 20)
+                } else {
+                    Image(systemName: GeometryUpright.symbol).font(.system(size: 17, weight: .medium))
+                }
+                GeometryUpright.name(.auto).font(.caption.weight(.medium)).lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(Color.primary)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .padRow()
+            .contentShape(.rect)
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: PadMetrics.rowRadius))
+            .hoverEffect(.highlight)
+        } primaryAction: {
+            upright.run(.auto)
+        }
+        .buttonStyle(.plain)
+        .disabled(running)
+        .opacity(isEnabled ? 1 : 0.4)
+        .accessibilityLabel(GeometryUpright.name(.auto))
     }
 }
 

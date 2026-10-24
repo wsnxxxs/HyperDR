@@ -24,6 +24,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
       - name: Configure core
         run: cmake --preset macos-arm64-core -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
       - name: Test core, native contracts and C ABI

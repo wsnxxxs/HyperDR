@@ -92,7 +92,7 @@ semantic versioning; dates use ISO 8601.
   LGPL library, and the app bundle embeds no dylibs.
 - Delete the Python panel, the LAN server, the web front end, the Tauri shell,
   the Windows launch and certificate scripts and their tests. The last
-  revision that contains them is `5cd997fd`; the Windows version stays at
+  revision that contains them is `722f62ce`; the Windows version stays at
   `6949167`. The engine's `panel-v1` request adapter is unchanged.
 
 - Remove external RAW DCP/XMP/LCP profiles, highlight-mode controls and sensor

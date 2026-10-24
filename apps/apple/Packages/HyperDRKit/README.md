@@ -102,7 +102,7 @@ preview service, EditOptions and their CLI parity check are gone. Recipe history
 uses `recipeSnapshot` and `resolvedSnapshot`; the legacy options field is empty
 for new exports and is never used to restore a Recipe.
 
-The real RenderEngine conformance is integrated from `5a4ab9f6`. Service tests
+The real RenderEngine conformance is integrated from `8bcba80a`. Service tests
 exercise all eight encodings through the real Recipe graph and both readers,
 including a caption/shadow card through gain-map, SDR and PQ paths; a transparent
 PNG against linear-black compositing; and an authored RGB/nonzero-offset pair
@@ -189,7 +189,7 @@ after measurement; JSON remains in `/tmp/p7-stream-real-memory/`.
 | After row writing, native bounded verification and thumbnail | 102,563,840 | 103,038,976 |
 | After independent ImageIO check | 103,022,592 | 103,399,424 |
 
-These numbers were remeasured after integrating `560fc86e` and rebuilding all
+These numbers were remeasured after integrating `ee1f401d` and rebuilding all
 three engine slices. At fixed width, the complete source/Render/package/native
 verification/system readback path stayed at 98.25/98.61 MiB across four times the
 height. Native-verification completion was 97.81/98.27 MiB. Unlike the earlier
@@ -243,7 +243,7 @@ RAW estimates, original size: both 9504×6336 and 12800×8600 (110.08MP),
 no frame/LUT/prediction overhead, native row input, HEIC10 / ISO JPEG8 at q95.
 Stage values are MiB and are not summed. Set `HYPERDR_MEMORY_ESTIMATES=1` and run
 `fullSizeRAWMemoryEstimates` to reproduce; the default row estimates are asserted
-against actual `ExportPlanner.plan` results. "Before" is 5866605f.
+against actual `ExportPlanner.plan` results. "Before" is 39128e9d.
 
 **Integration dependency:** the current Render contract still explicitly permits
 full-frame Apple RAW/decoder caches. Their existing reservation remains priced

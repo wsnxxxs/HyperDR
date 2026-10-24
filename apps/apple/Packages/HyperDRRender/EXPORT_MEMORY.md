@@ -30,7 +30,7 @@ links `Shared/Editor` and Kit as the apps do (not in the repository): the real
 `RecipeExportService` exports from its own `RenderEngine`. Footprint is sampled
 every 2 ms and checked against the kernel's lifetime peak.
 
-Before (main 8db4c890): AVIF used the whole-plane path (5977 MiB with the editor,
+Before (main 8fef3f6a): AVIF used the whole-plane path (5977 MiB with the editor,
 5264 without); RAW 9 film 100 % HEIC 1838 MiB with the editor; RAW 9 film 50 %
 2250 MiB, its export 272 s because every band reopened the RAW for the Apple
 endpoint. Four changes:

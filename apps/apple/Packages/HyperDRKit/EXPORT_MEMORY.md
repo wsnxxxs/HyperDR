@@ -119,7 +119,7 @@ establish the typical-device result. No constants are lowered to force admission
 
 ## Detached TIFF bitmap ownership
 
-The merged Render source loader (`c89a80ea`, with the R42/R47 tile/gain fixes)
+The merged Render source loader (`c2e80f47`, with the R42/R47 tile/gain fixes)
 materializes large TIFFs without auxiliary gain once through ImageIO. Its
 CGDataProvider retains the decoded native bitmap; CI wraps that backing rather
 than introducing another native-size float Render texture. Orientation and

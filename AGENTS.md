@@ -35,7 +35,7 @@ this checkout. This file summarizes what they decide.
   2026-10-20 (P3b-5); the app bundle embeds no dylibs and carries no LGPL code.
 - RAW is developed through `CIRAWFilter`; LibRaw is gone.
 - The Python panel, LAN server, web front end and Tauri shell were deleted on
-  2026-10-20 (last visible at `5cd997fd`). P7-4 removes the CLI, schema,
+  2026-10-20 (last visible at `722f62ce`). P7-4 removes the CLI, schema,
   panel-v1 adapter, C++ processing and ncnn; AI runs through Core ML in Render.
 - New code is Apple/POSIX only, with no `_WIN32` branches.
 - The AI model weights are private (user decision, 2026-10-25): no ONNX,
@@ -235,7 +235,7 @@ speed and memory showed no stable general improvement. It remains unverified
 on a physical device or with a real 110MP RAW; see
 `docs/reviews/raw-repeatability-film-2026-10-23/FINAL-NO-CACHE-2026-10-24.md`.
 This optimization was developed in an isolated worktree. The iPad Studio UI
-from main (9e927164) is now integrated, retaining the shared processing pipeline.
+from main (443ed355) is now integrated, retaining the shared processing pipeline.
 The iOS/iPadOS UI was redesigned on
 2026-10-21 (library, editor, frame, export, LUT library; see the `HyperDRiOS` row). Then: P7-3e (saving to the photo library, after the user's Photos
 Lab run using `prototypes/photos-lab/PhotosLab.xcodeproj`, merged into this

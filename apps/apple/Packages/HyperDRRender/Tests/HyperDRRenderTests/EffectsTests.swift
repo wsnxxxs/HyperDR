@@ -46,7 +46,7 @@ import Testing
                 // Around 12x HDR white, even 11 float32 ULPs exceed 1e-5.
                 // Retain the absolute floor and bound HDR roundoff per value.
                 let continuous = zip(original, actual).allSatisfy { a, b in
-                    abs(a-b) <= max(1e-5, 16*max(a.ulp, b.ulp))
+                    a.isFinite && b.isFinite && abs(a-b) <= max(1e-5, 16*max(a.ulp, b.ulp))
                 }
                 #expect(continuous, "model \(model) strength \(strength) grain \(amount): \(original[0]) -> \(actual[0]), max \(worst)")
             }

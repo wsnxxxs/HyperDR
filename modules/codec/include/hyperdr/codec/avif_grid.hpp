@@ -54,6 +54,26 @@ inline constexpr std::uint64_t kAvifSingleFrameBudget = kAvifLibaomFrameLimit / 
 inline constexpr std::uint32_t kAvifMaxCellSide = 4096;
 inline constexpr std::uint32_t kAvifCellAlignment = 64;
 
+// Pull-row exports stage 10-bit RGB and compressed AV1 samples on disk, and
+// own only ONE cell / libaom context at a time. Mirror these in host estimates.
+// Speed and quality are unchanged; there is no chroma or resolution reduction.
+inline constexpr std::uint32_t kAvifRowMaxCellSide = 1024;
+// Generic output verification also accepts grids from the older whole-image
+// writer: its one-cell-at-a-time decode bound is 4096, NOT the row writer's
+// 1024 encode bound. Do not use this compatibility ceiling to price row exports.
+inline constexpr std::uint32_t kAvifVerifyMaxCellSide = kAvifMaxCellSide;
+inline constexpr int kAvifRowMaxThreads = 2;
+[[nodiscard]] constexpr AvifGridLayout avif_row_grid_layout(std::uint32_t width,
+                                                           std::uint32_t height) noexcept {
+  const auto columns = std::max(1U, (width + kAvifRowMaxCellSide - 1) / kAvifRowMaxCellSide);
+  const auto rows = std::max(1U, (height + kAvifRowMaxCellSide - 1) / kAvifRowMaxCellSide);
+  const auto side = [](std::uint32_t size, std::uint32_t count) {
+    const auto balanced = (size + count - 1) / count;
+    return (balanced + kAvifCellAlignment - 1) / kAvifCellAlignment * kAvifCellAlignment;
+  };
+  return {columns, rows, side(width, columns), side(height, rows)};
+}
+
 // What libavif will decode, whatever the encoder wrote (AVIF_DEFAULT_IMAGE_SIZE_LIMIT
 // and the default dimension limit; neither can be raised). Past it a file is
 // written but cannot be opened by libavif, Chromium or our own check.

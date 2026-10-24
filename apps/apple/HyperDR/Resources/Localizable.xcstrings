@@ -1,6 +1,42 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "err.server.export_storage_full" : {
+      "comment" : "Export failure: the export's temporary files need more free storage than the disk has.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There is not enough free storage on this Mac to export this photo, so nothing was exported. Free up some space and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 的可用存储空间不足，无法导出这张照片，因此没有导出任何文件。请腾出一些空间后重试。"
+          }
+        }
+      }
+    },
+    "mac.err.export_storage_full.title" : {
+      "comment" : "Title of the export failure above.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enough storage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储空间不足"
+          }
+        }
+      }
+    },
     "settings.rawDevelopment" : {
       "extractionState" : "manual",
       "localizations" : {

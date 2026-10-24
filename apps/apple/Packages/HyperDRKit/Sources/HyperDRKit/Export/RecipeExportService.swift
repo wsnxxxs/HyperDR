@@ -137,8 +137,16 @@ public actor RecipeExportService: RecipeExportServicing {
             var lazySource: HyperDRRender.ExportSource?
             var source: RenderSource
             if actualRequest.allowsRowInput {
-                let lazy = try await renderEngine.openExportSource(photo.sourceURL,
-                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                // A partial RAW film/Log look develops Apple's endpoint once into
+                // a staged file, instead of a second decoder for every band.
+                let lazy: HyperDRRender.ExportSource
+                do {
+                    lazy = try await renderEngine.openExportSource(photo.sourceURL,
+                        options: SourceOptions(recipe: snapshot.recipe, resolution: .full),
+                        stagingLookBaseline: snapshot.recipe.needsLookBaseline)
+                } catch RenderError.insufficientStorage(let required, let available) {
+                    throw RecipeExportError.insufficientStorage(requiredBytes: required, availableBytes: available)
+                }
                 lazySource = lazy; source = lazy.analysisSource
             } else {
                 lazySource = nil

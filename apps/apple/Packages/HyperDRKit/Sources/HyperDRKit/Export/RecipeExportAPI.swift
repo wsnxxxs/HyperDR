@@ -7,6 +7,8 @@ public enum RecipeExportError: Error, Sendable, Equatable {
     case memoryExceeded(ExportBlockReason)
     case planBlocked([String])
     case verificationFailed(String)
+    /// Staging the export needs this much free storage; the volume has less.
+    case insufficientStorage(requiredBytes: Int64, availableBytes: Int64)
 }
 public enum RecipeExportStage: String, Sendable, Codable {
     case preparing, model, developing, rendering, encoding, verifying, publishing, delivering

@@ -65,6 +65,12 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
 
     /// Drops the open photo and its caches.
     func close() async
+
+    /// Gives up what the open photo holds besides the photo itself (its
+    /// preview development, full-size details and the renderer's caches)
+    /// while an export develops the photo. The next render develops it again
+    /// with the same settings; predictions are kept.
+    func yieldMemory() async
 }
 
 nonisolated enum EditorRenderingError: Error, Equatable, Sendable {
@@ -208,6 +214,8 @@ extension Recipe {
 // Test renderers without decoder graphs may keep their existing open implementation.
 extension EditorRendering {
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
+
+    func yieldMemory() async {}
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
               rawDecoderPreference: RAWDecoderPreference,

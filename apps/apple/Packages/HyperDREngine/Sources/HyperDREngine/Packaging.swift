@@ -195,8 +195,8 @@ extension Engine {
     }
 
     /// Packages repeatable bands without caller-owned whole float planes. AVIF
-    /// currently requires the ordinary whole-plane API. Verification may still
-    /// use whole-image decoder workspace after encoding finishes.
+    /// stages quantized rows on disk, encoding and verifying one cell at a time.
+    /// A separate system reader may still need native-area decoder workspace.
     public func packageRows(width: Int, height: Int, gainChannels: Int = 0,
                             gainMetadata: PackageGainMetadata? = nil, rows: Int = 256,
                             to output: URL, options: PackageOptions,

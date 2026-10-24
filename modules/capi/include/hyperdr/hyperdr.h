@@ -167,12 +167,15 @@ HYPERDR_API int hyperdr_package(hyperdr_engine*, const hyperdr_package_request* 
                                 char** out_report_json, hyperdr_error** err);
 
 /* Row entry points introduced in ABI 4; retained unchanged in ABI 5.
- * Supported: SDR JPEG/TIFF, ISO gain-map JPEG, Adaptive/PQ/HLG HEIC.
- * AVIF currently retains all YUV cells and must use hyperdr_package instead.
+ * Supported: SDR JPEG/TIFF, ISO gain-map JPEG, Adaptive/PQ/HLG HEIC,
+ * and PQ/HLG AVIF. AVIF stages 10-bit RGB (6 bytes/canvas pixel) and compressed
+ * AV1 samples on disk beside the output. At most one 1024x1024 4:4:4 cell and
+ * one encoder context (up to 2 threads) are resident; quality is unchanged.
+ * AVIF cells are independently predicted, so bytes/codes may differ at seams.
  * JPEG uses fixed Huffman tables to avoid a whole-frame coefficient store:
  * entropy bytes differ from whole-plane, decoded codes do not. TIFF uses strips.
  * HEIC assembles 512-row slabs and retains compressed tiles/container bytes.
- * Verification is bounded for JPEG, TIFF and HEIC; AVIF uses the whole-plane path.
+ * Verification is bounded for JPEG, TIFF, HEIC and row-written AVIF grids.
  * This query describes compiled paths, not runtime HEVC device availability. */
 HYPERDR_API int hyperdr_package_rows_supported(const char* format);
 /* Fill caller-provided, tightly packed float32 buffers: count*width*3 base

@@ -239,6 +239,11 @@ import HyperDRKit
         }
         // The engine's last line stays the secondary text.
         XCTAssertEqual(ErrorText(UserFacingError(code: "export_failed", detail: "engine said no")).detail, "engine said no")
+        // A full disk says so in words; the byte counts stay out of the sheet.
+        let full = UserFacingError(RecipeExportError.insufficientStorage(requiredBytes: 2_000_000_000, availableBytes: 1_000_000))
+        XCTAssertEqual(full.code, "export_storage_full")
+        XCTAssertTrue(english(full).contains("storage"), english(full))
+        XCTAssertNil(ErrorText(full).detail)
     }
 
     // MARK: Starting an export

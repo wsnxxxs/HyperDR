@@ -281,7 +281,55 @@ extension RenderEngine {
             return try renderAuthorRegion(source, edit: edit, size: size, region: region)
         }
         let analysis = try analysis(source, adjustments: edit)
-        return try graphRegion(source, edit: edit, size: size, region: region, analysis: analysis)
+        return try graphRegionInBands(source, edit: edit, size: size, region: region, analysis: analysis)
+    }
+
+    /// Rows of one band when film scatter renders a tall region.
+    static let filmBandRows = 256
+
+    /// Film scatter works on three float32 textures over the region and its
+    /// halo (48 B/pixel). A preview or detail region taller than four bands
+    /// renders in bands of at most `filmBandRows`, copied into one output, so
+    /// only one band's workspace is alive. A region renders exactly the pixels
+    /// of the whole render (FilmTests), so the output is the same. Export
+    /// bands (at most 516 rows) render as one region.
+    func graphRegionInBands(_ source: RenderSource, edit: RenderAdjustments, size: PixelSize,
+                            region: CGRect, analysis: SpatialAnalysis) throws -> RenderPlanes {
+        let height = Int(region.height)
+        guard edit.film.sourceHalo(size: size) > 0, height > 4 * Self.filmBandRows else {
+            return try graphRegion(source, edit: edit, size: size, region: region, analysis: analysis)
+        }
+        let count = (height + Self.filmBandRows - 1) / Self.filmBandRows
+        let rows = (height + count - 1) / count
+        var output: RenderPlanes?
+        for top in stride(from: 0, to: height, by: rows) {
+            try Task.checkCancellation()
+            try autoreleasepool {
+                let band = CGRect(x: region.minX, y: region.minY + CGFloat(top),
+                                  width: region.width, height: CGFloat(min(rows, height - top)))
+                let part = try graphRegion(source, edit: edit, size: size, region: band, analysis: analysis)
+                if output == nil {
+                    guard let allocation = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+                    let context = nodeContext(domain: source.domain, buffer: allocation)
+                    output = RenderPlanes(
+                        base: try context.texture(width: Int(region.width), height: height, format: part.base.pixelFormat),
+                        gain: try context.texture(width: Int(region.width), height: height, format: part.gain.pixelFormat),
+                        gainChannelCount: part.gainChannelCount, encoding: part.encoding, baseColorSpace: part.baseColorSpace,
+                        provenance: part.provenance, region: region, outputSize: part.outputSize, aiPending: part.aiPending)
+                }
+                guard let output, let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
+                    throw RenderError.allocationFailed
+                }
+                for (from, to) in [(part.base, output.base), (part.gain, output.gain)] {
+                    blit.copy(from: from, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                              sourceSize: MTLSize(width: from.width, height: from.height, depth: 1), to: to,
+                              destinationSlice: 0, destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: top, z: 0))
+                }
+                blit.endEncoding()
+                try finish(command)
+            }
+        }
+        return output!
     }
 
     /// Regions use integral output pixels, top-left origin, within the full `size`.

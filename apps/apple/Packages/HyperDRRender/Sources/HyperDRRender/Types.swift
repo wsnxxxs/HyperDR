@@ -11,6 +11,8 @@ public enum RenderError: Error, Sendable {
     case unsupportedRAWDecoder(String)
     case gpu(String)
     case invalidAdjustment, invalidLUT(String), aiNotAvailable, duplicateHDRSplit
+    /// An export's staged development needs more free storage than the volume has.
+    case insufficientStorage(required: Int64, available: Int64)
 }
 
 /// All textures and readback arrays use top-to-bottom rows, after source orientation.
@@ -204,6 +206,8 @@ public struct RenderSource: @unchecked Sendable {
     var gainSamplingRegion = CGRect(x:0,y:0,width:1,height:1)
     /// The full size before a geometry, when one is applied.
     var geometryUncroppedSize: PixelSize? = nil
+    /// An export band's staged Apple endpoint for a partial scene look.
+    var stagedLookBaseline: StagedLookBaseline? = nil
     /// Full size before the geometry: the photo as the file holds it, oriented.
     public var uncroppedSize: PixelSize { geometryUncroppedSize ?? nativeSize }
 }

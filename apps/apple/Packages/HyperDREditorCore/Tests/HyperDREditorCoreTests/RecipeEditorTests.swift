@@ -581,6 +581,77 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(await h.fake.completed.filter { $0.region != nil }.count == regions)
     }
 
+    /// An export gets the memory: the frames stay (the viewer can compare),
+    /// details go, nothing renders until it ends, then the details come back.
+    @Test func anExportKeepsTheShownFrameAndRendersNothingUntilItEnds() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        let shown = try #require(h.editor.frame), original = try #require(h.editor.originalFrame)
+        #expect(h.editor.shownDetail != nil)
+        await h.editor.yieldToExport()
+        #expect(await h.fake.yields == 1)
+        #expect(h.editor.frame?.request == shown.request && h.editor.originalFrame?.request == original.request)
+        #expect(h.editor.detailFrame == nil)
+        let before = await h.fake.requests.count
+        // A canvas resize and a pan while exporting wait.
+        h.editor.canvasPixelSize = PixelSize(width: 3000, height: 2000)
+        h.editor.setViewport(CanvasViewport(visible: CGRect(x: 3000, y: 2000, width: 1200, height: 800), displayedWidth: 6000))
+        await h.editor.settle()
+        #expect(await h.fake.requests.count == before)
+        h.editor.resumeAfterExport()
+        await h.editor.settle()
+        #expect(!h.editor.isYieldingToExport)
+        #expect(h.editor.originalFrame?.request.recipe == h.editor.recipe.original)
+        let detail = try #require(h.editor.shownDetail)
+        #expect(detail.request.region!.contains(CGRect(x: 3000, y: 2000, width: 1200, height: 800)))
+    }
+
+    /// The edit an export captured is the one the canvas shows: a render
+    /// still pending or running lands before the editor gives anything up.
+    @Test func anExportLetsTheCapturedEditLandFirst() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.7))
+        await h.editor.yieldToExport()
+        #expect(h.editor.frame?.request.recipe == h.editor.recipe)
+        h.editor.resumeAfterExport()
+    }
+
+    /// Two exports at once: renders wait for the second to end too.
+    @Test func overlappingExportsResumeAfterTheLast() async throws {
+        let h = Harness()
+        try await h.open()
+        await h.editor.yieldToExport()
+        await h.editor.yieldToExport()
+        let before = await h.fake.requests.count
+        h.editor.resumeAfterExport()
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.4))
+        await h.editor.settle()
+        #expect(h.editor.isYieldingToExport)
+        #expect(await h.fake.requests.count == before)
+        h.editor.resumeAfterExport()
+        await h.editor.settle()
+        #expect(!h.editor.isYieldingToExport && h.editor.frame?.request.recipe == h.editor.recipe)
+    }
+
+    @Test func anExportKeepsAShownOriginal() async throws {
+        let h = Harness()
+        try await h.open()
+        var both = zoomed
+        both.showsOriginal = true
+        h.editor.setViewport(both)
+        await h.editor.settle()
+        let original = try #require(h.editor.originalFrame)
+        await h.editor.yieldToExport()
+        #expect(h.editor.originalFrame?.request == original.request)
+        #expect(h.editor.originalDetailFrame == nil)
+        h.editor.resumeAfterExport()
+        await h.editor.settle()
+        #expect(h.editor.shownOriginalDetail != nil)
+    }
+
     @Test func noDetailWhileDraggingAndTheOriginalOnlyWhenShown() async throws {
         let h = Harness()
         try await h.open()

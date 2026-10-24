@@ -160,6 +160,12 @@ extension EditorModel {
                 try Task.checkCancellation()
                 if let thumbnail { export.thumbnail = .ready(thumbnail); exportThumbnailPersisted = true }
                 else if thumbnailFrame != nil { export.thumbnail = .unavailable }
+                // The export develops the photo again at full size: the editor
+                // keeps what the canvas shows and gives up the rest meanwhile.
+                let editor = self.editor
+                await editor.yieldToExport()
+                defer { editor.resumeAfterExport() }
+                try Task.checkCancellation()
                 let ticket = try await services.startExport(photo, job: job, destination: destination)
                 if thumbnailFrame == nil { fillDeferredExportThumbnail() }
                 if export.phase == .preparing { export.phase = .running }

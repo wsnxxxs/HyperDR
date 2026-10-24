@@ -455,6 +455,10 @@ nonisolated struct ExportStack: Sendable {
         waitingForSource = true
         DiagnosticLog.notice("Export", "Started \(choice); available to the app \(DeviceFacts.availableMemory)")
         task = Task { [weak self] in
+            // The export develops the photo again at full size: the editor
+            // keeps what the canvas shows and gives up the rest meanwhile.
+            await editor.yieldToExport()
+            defer { editor.resumeAfterExport() }
             do {
                 let opened = try await opening.task.value
                 let stack = try await stack.value
@@ -689,6 +693,7 @@ nonisolated struct ExportStack: Sendable {
                 return Failure(key: "ios.export.error.memory", detail: nil, suggestedLongEdge: reason.suggestedLongEdge)
             case .planBlocked(let codes): return Failure(key: "ios.export.blocked", detail: codes.joined(separator: ", "))
             case .verificationFailed(let reason): return Failure(key: "ios.export.error.verification", detail: reason)
+            case .insufficientStorage: return Failure(key: "ios.export.error.storage", detail: nil)
             case .invalidSnapshot, .invalidStripes: return Failure(key: "ios.export.error.other", detail: String(describing: error))
             }
         case EditorRenderingError.missingLUT:

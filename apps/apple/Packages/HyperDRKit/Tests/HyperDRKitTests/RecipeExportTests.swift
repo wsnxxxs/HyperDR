@@ -583,7 +583,7 @@ struct RecipeExportEnvironment {
         }
         let api: any RecipeExportServicing = service
         let diagnostic = try #require(await api.lastMemoryDiagnostic)
-        #expect(diagnostic.reason == (encoding == .avifPq ? .nonIncrementalWriter : .workingSet))
+        #expect(diagnostic.reason == .workingSet)
         #expect(diagnostic.check == .process && diagnostic.phase == .planning)
         #expect(diagnostic.availableBytes == 1 && diagnostic.requiredBytes > 1)
         #expect(diagnostic.requiredMiB > diagnostic.availableMiB)

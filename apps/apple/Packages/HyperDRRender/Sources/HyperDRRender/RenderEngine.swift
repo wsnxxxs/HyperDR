@@ -274,6 +274,18 @@ public actor RenderEngine {
         if let cached = lookBaselineCache, cached.id == source.renderID { return cached.texture }
         lookBaselineCache = nil
         try origin.revision.validate(origin.url)
+        if let staged = source.stagedLookBaseline {
+            // The same window the reopened graph below would develop, read from
+            // the export's staged endpoint (same canonical cells, same pixels).
+            let n = source.samplingRegion, e = staged.bounds
+            let rect = CGRect(x: e.minX + (n.minX * e.width).rounded(), y: e.minY + ((1-n.maxY) * e.height).rounded(),
+                              width: (n.width * e.width).rounded(), height: (n.height * e.height).rounded())
+            guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+            let texture = try staged.texture(region: rect, context: nodeContext(domain: .rawEDR, buffer: command))
+            guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
+            lookBaselineCache = (source.renderID, texture)
+            return texture
+        }
         var options = origin.options
         options.sceneLinear = false
         options.resolution = .preview(maximumSize: PixelSize(width: source.texture.width, height: source.texture.height))

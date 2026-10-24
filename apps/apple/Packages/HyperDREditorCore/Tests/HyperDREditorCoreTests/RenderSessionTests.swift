@@ -313,6 +313,37 @@ import UniformTypeIdentifiers
         func add() { count += 1 }
     }
 
+    /// An export took the memory: the next render develops the same variant
+    /// again, once, and draws exactly what it drew before.
+    @Test func renderingAfterYieldingDevelopsTheSameVariantAgain() async throws {
+        let url = try Self.tinyPhoto()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let session = try RenderSession()
+        let size = PixelSize(width: 48, height: 32)
+        let source = try await session.open(url, previewSize: size)
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        var recipe = Recipe(inputDomain: source.domain)
+        recipe.setValue(.number(0.4), for: "tone.exposure")
+        let request = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size)
+        let region = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: source.pixelSize,
+                                         region: CGRect(x: 8, y: 8, width: 32, height: 24))
+        let before = RenderEngine.readPixels(try await session.render(request).planes)
+        let detailBefore = RenderEngine.readPixels(try await session.render(region).planes)
+        let reloadsBefore = await reloads.count
+        await session.yieldMemory()
+        let after = RenderEngine.readPixels(try await session.render(request).planes)
+        #expect(await reloads.count == reloadsBefore + 1)
+        _ = try await session.render(request)
+        #expect(await reloads.count == reloadsBefore + 1, "Only the first render after yielding develops again")
+        let detailAfter = RenderEngine.readPixels(try await session.render(region).planes)
+        for (a, b) in [(after, before), (detailAfter, detailBefore)] {
+            #expect(a.baseRGBA.map(\.bitPattern) == b.baseRGBA.map(\.bitPattern))
+            #expect(a.gain.map(\.bitPattern) == b.gain.map(\.bitPattern))
+        }
+        await session.close()
+    }
+
     /// R23-001: a file replaced after opening is refused as `sourceChanged`.
     @Test func aReplacedFileIsReportedAsChanged() async throws {
         let session = try RenderSession()

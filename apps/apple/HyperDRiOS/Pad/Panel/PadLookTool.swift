@@ -10,7 +10,8 @@ import SwiftUI
 ///
 /// - Films: choosing one puts its exposure back on the meter and its
 ///   antihalation layer back on, in the same undo step, as on the iPhone and
-///   the Mac. Its strength, exposure, grain and halation follow the grid.
+///   the Mac. Its strength, exposure and antihalation layer follow the grid;
+///   grain and halation are the Adjust tool's, for every photo.
 /// - LUTs: the library's LUTs, then a tile that opens the library; the LUT's
 ///   strength and its input and output spaces follow the grid.
 struct PadLookTool: View {
@@ -68,12 +69,9 @@ struct PadLookTool: View {
         ForEach(control.options.filter { $0.id != "none" }, id: \.id) { option in
             LookTile(image: previews[LookPreviews.filmKey(option.id)], mark: option.id, name: AdjustmentText.option(option),
                      isCurrent: control.selectedOption == option.id) {
-                // One write, one undo step: the stock, its exposure back on the
-                // meter and its antihalation layer back on.
+                // One write, one undo step (`AdjustmentPanel.chooseFilm`).
                 var edited = recipe
-                panel.set(control.id, option: option.id, in: &edited)
-                panel.setAutomatic(Recipe.filmExposureID, in: &edited)
-                panel.reset(Recipe.filmAntihalationID, in: &edited)
+                panel.chooseFilm(option.id, in: &edited)
                 recipe = edited
             }
             .disabled(control.disabledOptions.contains(option.id))

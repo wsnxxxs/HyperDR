@@ -40,8 +40,8 @@ white (H1), `sdrOnly` only the base with gain compensation (H2).
 | `look.film` | choice (`Adjustments.filmStocks`: 5 stocks in `filmFamilies`) | `none` | all | whole · instant |
 | `look.filmStrength` | 0…100 %, 1 | 100 % | all, a film chosen | whole · instant |
 | `look.filmExposure` | floatOrAuto −3…3 EV, 0.1 | auto (centre-weighted meter of the original) | all, a film chosen | whole · instant |
-| `look.filmGrain` | 0…200 %, 1 | 100 % (the stock's grain on 35 mm) | all, a film chosen | whole · instant |
-| `look.filmHalation` | 0…200 %, 1 | 100 % (the stock's own) | all, a film chosen | whole · instant |
+| `effect.grain` | 0…200 %, 1 | 0 % (100 % is typical 35 mm grain) | all | whole · instant |
+| `effect.halation` | 0…200 %, 1 | 0 % (100 % is typical 35 mm halation) | all | whole · instant |
 | `look.filmAntihalation` | bool | on (off: the layer removed, as CineStill) | all, a film chosen | whole · instant |
 | `develop.luminanceNR` | 0…100 %, 1 | `fromSource` | `rawEDR` | whole · redevelop |
 | `develop.colorNR` | 0…100 %, 1 | `fromSource` | `rawEDR` | whole · redevelop |

@@ -209,6 +209,14 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(RecipeEdit.classify(from: setting(Recipe(), "tone.exposure", 1), to: Recipe()) == .parameter("tone.exposure"))
     }
 
+    @Test func aStockBringingItsGrainIsNamedAfterTheStock() {
+        // The colour group (grain, halation) is declared before the look:
+        // the step is still the stock the user chose.
+        var film = setting(setting(Recipe(), "effect.grain", 100), "effect.halation", 100)
+        film.setValue(.string("portra400"), for: Recipe.filmID)
+        #expect(RecipeEdit.classify(from: Recipe(), to: film) == .parameter(Recipe.filmID))
+    }
+
     @Test func viewStateAndBypassAreNotUndone() async throws {
         let h = Harness(undo: true)
         try await h.open()

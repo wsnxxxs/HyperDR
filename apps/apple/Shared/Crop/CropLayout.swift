@@ -19,7 +19,7 @@ struct CropLayout: Equatable {
     let margin: CGFloat
 
     init(photo: GeometrySize, geometry: Geometry, viewport: CGSize, margin: CGFloat) {
-        let crop = geometry.cropRect(for: photo)
+        let crop = geometry.rasterCropRect(for: photo)
         let room = CGSize(width: max(1, viewport.width - 2 * margin), height: max(1, viewport.height - 2 * margin))
         self.init(photo: photo, geometry: geometry, viewport: viewport,
                   scale: min(Double(room.width) / max(crop.width, 1), Double(room.height) / max(crop.height, 1)),
@@ -77,7 +77,7 @@ struct CropLayout: Equatable {
     }
 
     /// The crop in force, on the canvas.
-    var cropRect: CGRect { rect(geometry.cropRect(for: photo)) }
+    var cropRect: CGRect { rect(geometry.rasterCropRect(for: photo)) }
 
     /// The photo's outline on the canvas.
     var photoOutline: [CGPoint] { geometry.quad(for: photo).map(point) }
@@ -180,12 +180,19 @@ enum CropDrag: Equatable {
             // anchored at the opposite side (or centred when its edges stay).
             var width = maxX - minX, height = maxY - minY
             if x != 0 && y != 0 {
-                if width / s.width >= height / s.height { height = width / ratio } else { width = height * ratio }
+                if abs(width / s.width - 1) >= abs(height / s.height - 1) {
+                    height = width / ratio
+                } else {
+                    width = height * ratio
+                }
             } else if x != 0 {
                 height = width / ratio
             } else {
                 width = height * ratio
             }
+            let minimumHeight = max(minimum, minimum / ratio)
+            height = max(height, minimumHeight)
+            width = height * ratio
             let cx = x < 0 ? s.maxX - width / 2 : x > 0 ? s.minX + width / 2 : s.centre.x
             let cy = y < 0 ? s.maxY - height / 2 : y > 0 ? s.minY + height / 2 : s.centre.y
             return GeometryRect(centre: GeometryPoint(x: cx, y: cy), size: GeometrySize(width: width, height: height))

@@ -173,4 +173,24 @@ import Testing
         #expect(overflow.outputSize(of: photo) == (4000, 3000))
     }
 
+    @Test func rasterWindowKeepsOddPixelGridsAndOffsetsAcrossTurnsAndMirrors() {
+        let odd = GeometrySize(width: 95, height: 63)
+        for turns in 0..<4 {
+            for flipped in [false, true] {
+                let geometry = Geometry(quarterTurns: turns, flipped: flipped,
+                                        crop: CropRect(centreX: 0.071, centreY: -0.043, width: 0.53, height: 0.61))
+                let map = geometry.photoToOutput(for: odd)
+                #expect(abs(map.m[2] - map.m[2].rounded()) < 1e-10)
+                #expect(abs(map.m[5] - map.m[5].rounded()) < 1e-10)
+                let crop = geometry.rasterCropRect(for: odd)
+                let output = geometry.outputSize(of: odd)
+                #expect(crop.width == Double(output.width) && crop.height == Double(output.height))
+                let topLeft = geometry.transform(for: odd).inverse.apply(
+                    GeometryPoint(x: crop.minX, y: crop.minY))
+                let mapped = map.apply(GeometryPoint(x: topLeft.x + odd.width / 2, y: topLeft.y + odd.height / 2))
+                #expect(abs(mapped.x) < 1e-10 && abs(mapped.y) < 1e-10)
+            }
+        }
+    }
+
 }

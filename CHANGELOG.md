@@ -3,6 +3,14 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## 0.5.3 - 2026-10-25 (Apple pre-release)
+
+- The trained AI model is no longer distributed: its weights were removed from
+  the repository and its history, and builds from source and published
+  packages run without it. HDR comes from the captured highlights and Expand;
+  on Mac, iPhone and iPad the AI sources are shown as not included, and an AI
+  recipe cannot be exported. Builds given a private copy of the model keep AI.
+
 ## 0.5.2 - 2026-10-24 (Apple pre-release)
 
 - Grain and halation work on every photo: they sit at the end of the colour

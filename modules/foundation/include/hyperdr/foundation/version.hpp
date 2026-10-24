@@ -4,7 +4,7 @@ namespace hyperdr {
 
 // Product version shared by engine diagnostics, the C ABI and the Exif
 // Software tag. Keep it aligned with the native apps and release metadata.
-inline constexpr char kVersion[] = "0.5.2";
+inline constexpr char kVersion[] = "0.5.3";
 
 // Resume sidecars use this separate revision because a renderer change can
 // invalidate an existing output without being a user-visible product release.

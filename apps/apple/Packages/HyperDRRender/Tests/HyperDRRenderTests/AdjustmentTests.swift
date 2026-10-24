@@ -341,7 +341,9 @@ private func wideHalf() -> String {
             #expect(abs(amplified.baseRGBA[i*4+c]-expectedBase) < 1e-5)
             #expect(abs(amplified.baseRGBA[i*4+c]*exp2(amplified.gain[i*3+c])-expectedHDR) < 1e-4)
         } }
-        #expect(amplified.gain[0] > original.gain[0])
+        // This swap brightens blue; red's completed HDR/SDR ratio can remain
+        // exactly unchanged. The endpoint oracle above checks every channel.
+        #expect(amplified.gain.prefix(3).contains { $0 > original.gain[0]+1e-4 })
         edit.look.strength = 0
         let hdrOutputBypass = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         #expect(hdrOutputBypass.baseRGBA == original.baseRGBA && hdrOutputBypass.gain == original.gain)

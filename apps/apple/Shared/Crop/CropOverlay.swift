@@ -29,6 +29,9 @@ struct CropOverlay: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: (kind: CropDrag, start: GeometryRect, geometry: Geometry)?
+    /// True while the drag gesture is alive; it falls back on its own when the
+    /// system cancels the gesture, which never calls `onEnded`.
+    @GestureState private var pressing = false
     /// The glide to the fitted crop after a drag.
     @State private var settling: Task<Void, Never>?
     /// The drag is held at the photo's edge.
@@ -55,6 +58,8 @@ struct CropOverlay: View {
         }
         .contentShape(.rect)
         .gesture(gesture(box))
+        // A cancelled drag (a system gesture, the view rebuilt) ends as a finished one.
+        .onChange(of: pressing) { _, now in if !now { endDrag(with: nil) } }
         .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
             if box.contains(tap.location) { resetCrop() }
         })
@@ -80,7 +85,8 @@ struct CropOverlay: View {
             settling = nil
             if drag != nil {
                 drag = nil
-                onEditing(false)
+                stopped = false
+                finishEditing()
             }
             freeze = nil
         }
@@ -150,6 +156,7 @@ struct CropOverlay: View {
 
     private func gesture(_ box: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($pressing) { _, pressing, _ in pressing = true }
             .onChanged { value in
                 if drag == nil {
                     guard let kind = CropDrag.at(value.startLocation, box: box) else { return }
@@ -173,15 +180,28 @@ struct CropOverlay: View {
             .onEnded { value in
                 guard let drag else { return }
                 let (geometry, _) = dragged(drag, by: value.translation)
-                write(geometry)
-                self.drag = nil
-                onEditing(false)
-                let from = freeze ?? layout
                 #if os(macOS)
-                Self.cursor(CropDrag.at(value.location, box: from.with(geometry).cropRect)).set()
+                Self.cursor(CropDrag.at(value.location, box: (freeze ?? layout).with(geometry).cropRect)).set()
                 #endif
-                settle(from: from, to: geometry)
+                endDrag(with: geometry)
             }
+    }
+
+    /// Ends a drag once, however it ends: with the finger's last geometry, or
+    /// (cancelled) with what was last written. Then the canvas fits the crop.
+    private func endDrag(with geometry: Geometry?) {
+        guard drag != nil else { return }
+        if let geometry { write(geometry) }
+        drag = nil
+        stopped = false
+        finishEditing()
+        settle(from: freeze ?? layout, to: geometry ?? layout.geometry)
+    }
+
+    /// The one place a crop drag is closed (the host's `editingGeometry(false)`,
+    /// or the editor's close-out call for interactions once it has one).
+    private func finishEditing() {
+        onEditing(false)
     }
 
     /// The geometry a drag leaves after the finger moved `translation` points,

@@ -56,7 +56,7 @@ void roundtrips() {
         for (unsigned size : {256U, 512U, 1024U, 257U}) {
           h::testing::FixtureGeometry geometry{size, size == 257 ? 259U : size, depth, chroma, full,
                                                {}};
-          const auto f = h::testing::encode(geometry);
+          const auto f = h::testing::fixture(geometry);
           const auto a = decode(f), b = decode(f);
           require(a.luma == b.luma && a.chroma == b.chroma, "repeated VT decode differs");
           require(a.width == f.config.width && a.height == f.config.height &&
@@ -84,7 +84,7 @@ void roundtrips() {
         }
       }
   for (unsigned location : {0U, 1U}) {
-    const auto f = h::testing::encode({256, 256, 8, 1, true, location});
+    const auto f = h::testing::fixture({256, 256, 8, 1, true, location});
     // VT may elide the default Left location instead of writing explicit 0.
     // Preserve that absence: our reader's agreed interpretation is centered.
     if (location == 1)
@@ -219,7 +219,7 @@ void conversion() {
             << " code; serial/parallel exact\n";
 }
 void bad_samples() {
-  const auto fixture = h::testing::encode({256, 256, 8, 1, true, {}});
+  const auto fixture = h::testing::fixture({256, 256, 8, 1, true, {}});
   unsigned failures = 0;
   auto reject = [&](const std::vector<std::uint8_t>& bytes, const char* feature = "") {
     bool rejected = false;
@@ -309,7 +309,7 @@ void bad_samples() {
   std::cout << failures << " corrupt/framing/multi-picture samples rejected\n";
 }
 void preflight_cancellation() {
-  const auto fixture = h::testing::encode({256, 256, 8, 1, true, {}});
+  const auto fixture = h::testing::fixture({256, 256, 8, 1, true, {}});
   // Many short legal NAL headers exercise the scan, rather than jumping over
   // one large payload. Cancel before the untrusted access unit reaches VT.
   std::vector<std::uint8_t> sample(32U * 1024 * 1024 / 6 * 6);
@@ -342,7 +342,7 @@ void preflight_cancellation() {
   std::cout << "32MiB NAL preflight cancellation " << ms << "ms\n";
 }
 void cancellation_and_progress() {
-  const auto f = h::testing::encode({3200, 2112, 10, 2, true, {}});
+  const auto f = h::testing::fixture({3200, 2112, 10, 2, true, {}});
   for (bool first : {true, false}) {
     CancelToken token;
     bool caught = false;
@@ -415,7 +415,7 @@ void memory_grid() {
   // 9504x6336 = the Sony 61MP raster, fed by one reused synthetic tile sample.
   // Allocate the final float RGB only; each tile's YUV/RGB scratch is
   // transient.
-  const auto f = h::testing::encode({512, 512, 8, 1, true, {}});
+  const auto f = h::testing::fixture({512, 512, 8, 1, true, {}});
   constexpr unsigned w = 9504, hgt = 6336, cols = (w + 511) / 512, rows = (hgt + 511) / 512;
   const auto before = footprint();
   std::vector<float> output(std::size_t(w) * hgt * 3, 0);

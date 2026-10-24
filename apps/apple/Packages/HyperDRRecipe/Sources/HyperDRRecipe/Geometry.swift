@@ -113,6 +113,32 @@ public struct Geometry: Codable, Hashable, Sendable {
         resolvedCrop(for: photo).rect(in: frameSize(of: photo))
     }
 
+    /// The exact output window in frame pixels. Continuous crop constraints
+    /// stay in `cropRect(for:)`; display and rasterization use this window.
+    /// Whole-pixel operations snap the translation on the *native* photo grid,
+    /// including odd dimensions, before any preview scaling takes place.
+    public func rasterCropRect(for photo: GeometrySize) -> GeometryRect {
+        let crop = cropRect(for: photo)
+        let output = (width: max(1, Int(crop.width.rounded())), height: max(1, Int(crop.height.rounded())))
+        var centre = crop.centre
+        if !transformsPixels {
+            let origin = transform(for: photo).apply(GeometryPoint(x: -photo.width / 2, y: -photo.height / 2))
+            let tx = Double(output.width) / 2 - centre.x + origin.x
+            let ty = Double(output.height) / 2 - centre.y + origin.y
+            centre.x += tx - tx.rounded()
+            centre.y += ty - ty.rounded()
+        }
+        return GeometryRect(centre: centre, size: GeometrySize(width: Double(output.width), height: Double(output.height)))
+    }
+
+    /// Native photo pixels (top-left, y down) to output pixels (top-left,
+    /// y down). One rounding rule for display, preview, ROI and export.
+    public func photoToOutput(for photo: GeometrySize) -> Homography {
+        let crop = rasterCropRect(for: photo)
+        return Homography.translation(x: crop.width / 2 - crop.centre.x, y: crop.height / 2 - crop.centre.y)
+            * transform(for: photo) * Homography.translation(x: -photo.width / 2, y: -photo.height / 2)
+    }
+
     /// The output in whole pixels: the resolved crop at the photo's own scale.
     public func outputSize(of photo: GeometrySize) -> (width: Int, height: Int) {
         let rect = cropRect(for: photo)

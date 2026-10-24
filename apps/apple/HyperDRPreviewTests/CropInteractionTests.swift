@@ -82,4 +82,35 @@ import simd
         }
     }
 
+    func testThinCropsCanShrinkWithoutInflatingTheirShortEdge() {
+        for size in [GeometrySize(width: 4000, height: 200), GeometrySize(width: 200, height: 4000),
+                     GeometrySize(width: 400, height: 100)] {
+            let start = GeometryRect(centre: GeometryPoint(x: 0, y: 0), size: size)
+            let delta = GeometryPoint(x: -size.width * 0.1, y: -size.height * 0.1)
+            for ratio in [Double?.none, size.width / size.height] {
+                let result = CropDrag.resize(x: 1, y: 1).resolve(delta, to: start, ratio: ratio,
+                                                               quad: start.corners, minimum: 240)
+                XCTAssertEqual(result.rect.width, size.width * 0.9, accuracy: 1e-9)
+                XCTAssertEqual(result.rect.height, size.height * 0.9, accuracy: 1e-9)
+                XCTAssertEqual(result.rect.minX, start.minX, accuracy: 1e-9)
+                XCTAssertEqual(result.rect.minY, start.minY, accuracy: 1e-9)
+                XCTAssertFalse(result.stopped)
+                XCTAssertTrue(result.rect.corners.allSatisfy { Geometry.contains(start.corners, $0) })
+            }
+        }
+    }
+
+    func testMinimumLongEdgeKeepsTheLockedRatioAndNeverInflatesASmallStart() {
+        for size in [GeometrySize(width: 4000, height: 200), GeometrySize(width: 200, height: 4000),
+                     GeometrySize(width: 100, height: 5)] {
+            let start = GeometryRect(centre: GeometryPoint(x: 0, y: 0), size: size)
+            let result = CropDrag.resize(x: 1, y: 1).apply(GeometryPoint(x: -10000, y: -10000), to: start,
+                ratio: size.width / size.height, quad: start.corners, minimum: 240)
+            XCTAssertEqual(max(result.width, result.height), min(240, max(size.width, size.height)), accuracy: 1e-9)
+            XCTAssertEqual(result.width / result.height, size.width / size.height, accuracy: 1e-9)
+            XCTAssertEqual(result.minX, start.minX, accuracy: 1e-9)
+            XCTAssertEqual(result.minY, start.minY, accuracy: 1e-9)
+        }
+    }
+
 }

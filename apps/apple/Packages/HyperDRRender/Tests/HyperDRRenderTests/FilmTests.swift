@@ -100,7 +100,7 @@ private func code(_ value: Double) -> Int {
         for id in FilmStockID.allCases {
             for strength in [Float(1), 0.4] {
                 var edit = RenderAdjustments()
-                edit.film.stock = id; edit.film.strength = strength; edit.film.grain = 0; edit.film.exposure = 0.5; edit.film.halation = 0
+                edit.film.stock = id; edit.film.strength = strength; edit.effects.grain = 0; edit.film.exposure = 0.5; edit.effects.halation = 0
                 for (source, inputs, isSDR) in [(sdr, sdrValues, true), (hdr, values, false)] {
                     edit.hdr.enabled = !isSDR
                     let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
@@ -225,7 +225,7 @@ private func code(_ value: Double) -> Int {
         let source = try await engine.source(image: image, domain: .hdr)
         var edit = RenderAdjustments()
         edit.hdr.enabled = false
-        edit.film.stock = .portra400; edit.film.grain = 0; edit.film.exposure = 0; edit.film.halation = 0
+        edit.film.stock = .portra400; edit.effects.grain = 0; edit.film.exposure = 0; edit.effects.halation = 0
         // A 2700-pixel render of the 900-pixel field (the source is sampled at a third).
         let size = PixelSize(width: 2700, height: 120)
         #expect(edit.film.sourceHalo(size: size) > 3)
@@ -277,7 +277,7 @@ private func code(_ value: Double) -> Int {
                             size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
         let source = try await engine.source(image: image, domain: .hdr)
         var edit = RenderAdjustments()
-        edit.film.stock = .vision3500T; edit.film.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false
+        edit.film.stock = .vision3500T; edit.effects.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false; edit.effects.halation = 1
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
         let film = try FilmStock.named(.vision3500T), strength = film.halationStrength(edit.film)
         let raw = values.map { film.filmRaw($0) }
@@ -298,12 +298,12 @@ private func code(_ value: Double) -> Int {
             for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[(y * width + x) * 4 + c])) - code(expected[c]))) }
         } }
         #expect(worst <= 1, "\(worst) codes from the double reference")
-        edit.film.halation = 0
+        edit.effects.halation = 0
         let none = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
         let near = (12 * width + 348) * 4
         #expect(pixels.baseRGBA[near] > none.baseRGBA[near] + 0.01, "a red glow beside the highlight")
         #expect(pixels.baseRGBA[near] - none.baseRGBA[near] > pixels.baseRGBA[near + 2] - none.baseRGBA[near + 2])
-        edit.film.halation = 1; edit.film.antihalation = true
+        edit.effects.halation = 1; edit.film.antihalation = true
         let layered = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
         #expect(layered.baseRGBA[near] < pixels.baseRGBA[near], "the antihalation layer holds the glow back")
     }
@@ -322,7 +322,7 @@ private func code(_ value: Double) -> Int {
         let source = try await engine.source(image: image, domain: .hdr)
         var edit = RenderAdjustments()
         edit.hdr.enabled = false
-        edit.film.stock = .vision3500T; edit.film.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false
+        edit.film.stock = .vision3500T; edit.effects.grain = 0; edit.film.exposure = 0; edit.film.antihalation = false; edit.effects.halation = 1
         let region = CGRect(x: 2800, y: row, width: 400, height: 1)
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, region: region))
         let film = try FilmStock.named(.vision3500T), strength = film.halationStrength(edit.film)
@@ -362,19 +362,19 @@ private func code(_ value: Double) -> Int {
 
     /// Grain is deterministic per output pixel: the GPU draws the reference's noise, and a
     /// region of the render agrees with the whole.
-    @Test func gpuGrainMatchesTheDoubleReference() async throws {
+    @Test(arguments: [1.0, 2.0]) func gpuGrainMatchesTheDoubleReference(amount: Double) async throws {
         let engine = try RenderEngine()
         let grey = SIMD3<Double>(0.184, 0.184, 0.184)
         let source = try await engine.source(image: bitmap([grey, grey]), domain: .sdr)
         var edit = RenderAdjustments()
         edit.hdr.enabled = false
-        edit.film.stock = .portra400; edit.film.grain = 2; edit.film.exposure = 0
+        edit.film.stock = .portra400; edit.effects.grain = Float(amount); edit.film.exposure = 0
         let size = PixelSize(width: 4000, height: 2)
         let region = CGRect(x: 100, y: 0, width: 64, height: 2)
         let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size, region: region))
         var worst = 0, codes = Set<Int>()
         for y in 0..<2 { for x in 0..<64 {
-            let site = FilmGrainSite(x: 100 + x, y: y, longEdge: 4000, amount: 2)
+            let site = FilmGrainSite(x: 100 + x, y: y, longEdge: 4000, amount: amount)
             let expected = DoubleReference.prepare(grey, settings: edit, sdr: true, grain: site).base
             let i = y * 64 + x
             for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[i * 4 + c])) - code(expected[c]))) }
@@ -400,6 +400,7 @@ private func code(_ value: Double) -> Int {
         let source = try await engine.source(image: image, domain: .hdr)
         var edit = RenderAdjustments()
         edit.film.stock = .portra400; edit.film.strength = 0.6
+        edit.effects.grain = 1; edit.effects.halation = 1
         let size = PixelSize(width: 2 * width, height: 2 * height)
         #expect(edit.film.sourceHalo(size: size) > 0 && size.height > 4 * RenderEngine.filmBandRows)
         let banded = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size))
@@ -432,8 +433,8 @@ private func code(_ value: Double) -> Int {
         recipe.setValue(.string("vision3-500t"), for: "look.film")
         recipe.setValue(.number(60), for: "look.filmStrength")
         let edit = try RenderAdjustments(recipe: recipe)
-        #expect(edit.film.stock == .vision3500T && edit.film.strength == 0.6 && edit.film.grain == 1)
-        #expect(edit.film.halation == 1 && edit.film.antihalation)
+        #expect(edit.film.stock == .vision3500T && edit.film.strength == 0.6 && edit.effects.grain == 0)
+        #expect(edit.effects.halation == 0 && edit.film.antihalation)
         #expect(!edit.wholeImageIsIdentity)
         #expect(try RenderAdjustments(recipe: recipe, options: RenderOptions(bypassedGroups: [.look])).film.isIdentity)
         recipe.setValue(.string("kodachrome"), for: "look.film")
@@ -451,7 +452,7 @@ private func code(_ value: Double) -> Int {
         var recipe = Recipe(inputDomain: .sdr)
         recipe.setValue(.bool(false), for: "hdr.enabled")
         recipe.setValue(.string("portra400"), for: "look.film")
-        recipe.setValue(.number(0), for: "look.filmGrain")
+        recipe.setValue(.number(0), for: "effect.grain")
         recipe.setValue(.number(0.5), for: "tone.exposure")
         #expect(try await engine.resolvedAutomatic(source, recipe: recipe)["look.filmExposure"] == Double(metered))
         let automatic = RenderEngine.readPixels(try await engine.render(source, recipe: recipe))
@@ -473,5 +474,11 @@ private func code(_ value: Double) -> Int {
         #expect(try !SourceOptions(recipe: recipe, options: RenderOptions(bypassedGroups: [.look])).sceneLinear)
         recipe.setValue(.number(0), for: "look.filmStrength")
         #expect(try !SourceOptions(recipe: recipe).sceneLinear)
+        for id in Adjustments.effectIDs {
+            recipe.setValue(.number(100), for: id)
+            #expect(try SourceOptions(recipe: recipe).sceneLinear)
+            #expect(recipe.needsLookBaseline)
+            recipe.setValue(nil, for: id)
+        }
     }
 }

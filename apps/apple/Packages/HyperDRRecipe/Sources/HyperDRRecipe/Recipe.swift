@@ -274,8 +274,11 @@ extension Recipe {
             guard let value = conditionValue(id)?.numberValue else { return false }
             return value > 0 && value < 100
         }
-        if let stock = conditionValue(Self.filmID)?.stringValue, stock != "none",
-           partial("look.filmStrength") { return true }
+        if let stock = conditionValue(Self.filmID)?.stringValue, stock != "none" {
+            let strength = conditionValue("look.filmStrength")?.numberValue ?? 0
+            let effects = Adjustments.effectIDs.contains { (conditionValue($0)?.numberValue ?? 0) > 0 }
+            if partial("look.filmStrength") || (strength == 0 && effects) { return true }
+        }
         guard look != nil, conditionValue("look.enabled")?.boolValue == true, partial("look.strength"),
               let space = conditionValue("look.input")?.stringValue else { return false }
         return Adjustments.declaration("look.input")?.options.first { $0.id == space }?.domains == [.rawEDR]

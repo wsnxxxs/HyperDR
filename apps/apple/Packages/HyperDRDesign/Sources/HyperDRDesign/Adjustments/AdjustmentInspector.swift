@@ -397,8 +397,9 @@ extension AdjustmentText {
 
 /// The look group in the inspector: built-in films or imported LUTs, one at
 /// a time, each kind with its own row of looks shown on the photo and the
-/// controls that belong to it (the film's strength, exposure, grain and
-/// halation; the LUT's strength and spaces).
+/// controls that belong to it (the film's strength, exposure and
+/// antihalation layer; the LUT's strength and spaces). Grain and halation
+/// are Adjust's (the colour group's), for every photo.
 struct LookSection: View {
     @Binding var recipe: Recipe
     let state: AdjustmentGroupState
@@ -449,8 +450,7 @@ struct LookSection: View {
 
 /// `look.film` as tiles: None, then each stock on the photo (the preview
 /// key `film:` + stock; its colour mark until the preview is in). Choosing a
-/// stock puts its exposure back on the meter and its antihalation layer back
-/// on, in the same undo step; None removes whichever look is on.
+/// stock is `AdjustmentPanel.chooseFilm`; None removes whichever look is on.
 struct FilmPicker: View {
     @Binding var recipe: Recipe
     let control: AdjustmentControl
@@ -487,14 +487,7 @@ struct FilmPicker: View {
 
     private func choose(_ stock: String) {
         var edited = recipe
-        if stock == "none" {
-            panel.set(control.id, option: "none", in: &edited)
-            panel.set(Recipe.lookID, reference: nil, in: &edited)
-        } else {
-            panel.set(control.id, option: stock, in: &edited)
-            panel.setAutomatic(Recipe.filmExposureID, in: &edited)
-            panel.reset(Recipe.filmAntihalationID, in: &edited)
-        }
+        panel.chooseFilm(stock, in: &edited)
         recipe = edited
     }
 

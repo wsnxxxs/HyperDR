@@ -33,6 +33,30 @@ import HyperDRRecipe
             texture: baseSource.texture, baseSpace: RenderEngine.workingColorSpace, gainTexture: gainSource.texture)
     }
 
+    @Test func independentEffectsKeepTheAuthoredSDREndpoint() async throws {
+        let engine = try RenderEngine(), source = try await authored(engine, offset: 1/64)
+        let size = PixelSize(width: 2000, height: 2), region = CGRect(x: 100, y: 0, width: 64, height: 2)
+        for halation in [false, true] {
+            var edit = RenderAdjustments()
+            edit.hdr.range = 4
+            if halation { edit.effects.halation = 1 } else { edit.effects.grain = 1 }
+            let full = try await engine.render(source, adjustments: edit, size: size, region: region)
+            let hdr = RenderEngine.readPixels(full)
+            #expect(hdr.gainChannelCount == 3 && hdr.gain.allSatisfy(\.isFinite))
+            guard case let .pairedLog2(offset, _) = full.encoding else {
+                Issue.record("Effects must retain equal-offset RGB endpoint gain"); continue
+            }
+            #expect(offset == 0.015625)
+            edit.hdr.enabled = false
+            let sdr = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size, region: region))
+            #expect(sdr.baseRGBA == hdr.baseRGBA && sdr.gain.allSatisfy { $0 == 0 })
+            edit.hdr.enabled = true; edit.hdr.strength = 0.3
+            let partial = RenderEngine.readPixels(try await engine.render(source, adjustments: edit, size: size, region: region))
+            #expect(partial.baseRGBA == hdr.baseRGBA)
+            for i in hdr.gain.indices { #expect(abs(partial.gain[i] - 0.3 * hdr.gain[i]) < 1e-6) }
+        }
+    }
+
     private func pixels(_ pair: DisplayGainPair, weight: Float) -> [Float] {
         let base = RenderEngine.readTexture(pair.base), gain = RenderEngine.readTexture(pair.gain)
         return stride(from: 0, to: base.count, by: 4).flatMap { i -> [Float] in
@@ -120,7 +144,7 @@ import HyperDRRecipe
         let engine = try RenderEngine(), source = try await authored(engine)
         var edit = RenderAdjustments()
         if film {
-            edit.film.stock = .portra400; edit.film.grain = 0; edit.film.halation = 0
+            edit.film.stock = .portra400; edit.effects.grain = 0; edit.effects.halation = 0
         } else {
             edit.look.lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n0.8 0.7 0.6\n")
             edit.look.input = .displayP3; edit.look.output = .displayP3

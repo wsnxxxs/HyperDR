@@ -30,6 +30,13 @@ public enum AdjustmentText {
         case resetToDefault, setAuto, auto, resetGroup, resetAll, noLUT
     }
 
+    /// The reset menu item of a control on a tab shared by several groups
+    /// (the iPhone's Adjust), naming what it resets; elsewhere "Reset Group".
+    public static func resetGroup(_ group: AdjustmentGroupID, shared: Bool) -> Text {
+        guard shared else { return command(.resetGroup) }
+        return Text(LocalizedStringKey(group == .color ? "group.reset.color" : "group.reset.light"), bundle: .module)
+    }
+
     public static func command(_ command: Command) -> Text {
         switch command {
         case .resetToDefault: return Text("design.slider.reset", bundle: .module)
@@ -49,6 +56,10 @@ public enum AdjustmentText {
     /// The undo action name of a reset ("Reset Light", "Reset All").
     public static func undoName(_ reset: AdjustmentReset, locale: Locale = .current) -> String {
         switch reset {
+        case .group(.color):
+            // Titled Adjust, the colour group holds colour, grain and halation,
+            // not light: "Reset Adjust" would read as every adjustment.
+            return DesignStrings.string("undo.resetGroup.color", bundle: .module, locale: locale)
         case .group(let group):
             return String(format: DesignStrings.string("undo.resetGroup %@", bundle: .module, locale: locale),
                           DesignStrings.string(group.labelKey, locale: locale))
@@ -192,7 +203,7 @@ public enum AdjustmentSymbols {
         switch group {
         case .hdr: return "sun.max"
         case .light: return "circle.lefthalf.filled"
-        case .color: return "drop"
+        case .color: return "slider.horizontal.3"
         case .look: return "camera.filters"
         case .detail: return "camera.aperture"
         case .local: return "scope"
@@ -221,8 +232,8 @@ public enum AdjustmentSymbols {
         Entry(id: "look.strength", symbol: "camera.filters"),
         Entry(id: "look.filmStrength", symbol: "film"),
         Entry(id: "look.filmExposure", symbol: "camera.metering.center.weighted"),
-        Entry(id: "look.filmGrain", symbol: "circle.grid.3x3"),
-        Entry(id: "look.filmHalation", symbol: "sun.haze"),
+        Entry(id: "effect.grain", symbol: "circle.grid.3x3"),
+        Entry(id: "effect.halation", symbol: "sun.haze"),
         Entry(id: "look.filmAntihalation", symbol: "shield.lefthalf.filled"),
         Entry(id: "develop.luminanceNR", symbol: "aqi.low"),
         Entry(id: "develop.colorNR", symbol: "circle.hexagongrid"),

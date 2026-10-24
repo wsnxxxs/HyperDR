@@ -28,8 +28,10 @@ nonisolated enum RecipeEdit: Equatable, Sendable {
     /// (the controls write the recipe through a binding). A reset of a group
     /// is recognised when it changed two or more controls, Reset All when it
     /// changed controls in two or more groups; otherwise the write is named
-    /// after the first control it changed, which is also what that control's
-    /// own reset is called. Hosts that know what they reset say so through
+    /// after what it chose (a film, a LUT, a source: a choice or reference it
+    /// changed, ahead of the numbers it brought along, such as a stock's grain
+    /// and halation), else the first control it changed, which is also what
+    /// that control's own reset is called. Hosts that know what they reset say so through
     /// `RecipeEditor.resetGroup` and `resetAll`, which are always exact.
     static func classify(from before: Recipe, to after: Recipe) -> RecipeEdit? {
         let changed = Adjustments.all.filter { before.value(for: $0.id) != after.value(for: $0.id) }
@@ -42,7 +44,7 @@ nonisolated enum RecipeEdit: Equatable, Sendable {
                 return .resetAll
             }
         }
-        return .parameter(first.id)
+        return .parameter((changed.first { $0.kind == .choice || $0.kind == .reference } ?? first).id)
     }
 }
 

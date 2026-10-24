@@ -35,7 +35,7 @@ extension RenderEngine {
         if edit.hdr.expansionStart == nil && (edit.hdr.source ?? .defaultSource(for:source.domain)).expands {
             values["hdr.expansionStart"] = Adjustments.automaticExpansionStart
         }
-        if !edit.film.isIdentity && edit.film.exposure == nil {
+        if edit.usesFilmProcessing && edit.film.exposure == nil {
             values["look.filmExposure"] = Double(try filmMeter(source))
         }
         return values

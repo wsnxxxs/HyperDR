@@ -124,10 +124,10 @@ import HyperDRDesign
     func testThePreparingPanelAndCardSnapshots() throws {
         // Over the photograph the prompt is dark in both appearances: only the language differs.
         try snapshots("preparing-panel", size: CGSize(width: 640, height: 400), distinct: 2) {
-            backdrop(CameraSupportPanel(fileName: "DSC01468.ARW", canCancel: true, cancel: {}))
+            backdrop(CameraSupportPanel(fileName: "DSC01468.ARW", stage: "stage.decoding", canCancel: true, cancel: {}))
         }
         try snapshots("preparing-card", size: CGSize(width: 640, height: 400), distinct: 2) {
-            backdrop(CameraSupportCard(fileName: "DSC01468.ARW", canCancel: true, cancel: {})
+            backdrop(CameraSupportCard(fileName: "DSC01468.ARW", stage: "stage.decoding", canCancel: true, cancel: {})
                 .frame(maxHeight: .infinity, alignment: .bottom).padding(Space.s4))
         }
     }

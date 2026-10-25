@@ -24,6 +24,8 @@ struct PadSlider: View {
     @Binding private var value: Double
     private let spec: ParameterSpec
     private let tint: Color
+    /// Colours the bar shows in place of its fill, for a control that moves a colour.
+    private let gradient: [Color]?
     private let help: Text?
     private let onEditingChanged: (Bool) -> Void
     private let onResetGroup: (() -> Void)?
@@ -37,12 +39,13 @@ struct PadSlider: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.locale) private var locale
 
-    init(_ title: Text, value: Binding<Double>, spec: ParameterSpec, tint: Color = Color.hdr.accent, help: Text? = nil,
+    init(_ title: Text, value: Binding<Double>, spec: ParameterSpec, tint: Color = Color.hdr.accent, gradient: [Color]? = nil, help: Text? = nil,
          onEditingChanged: @escaping (Bool) -> Void = { _ in }, onResetGroup: (() -> Void)? = nil) {
         self.title = title
         _value = value
         self.spec = spec
         self.tint = tint
+        self.gradient = gradient
         self.help = help
         self.onEditingChanged = onEditingChanged
         self.onResetGroup = onResetGroup
@@ -95,7 +98,11 @@ struct PadSlider: View {
     /// default's mark, and the value's edge.
     @ViewBuilder private func bar(width: CGFloat) -> some View {
         let x = { (value: Double) in CGFloat(spec.fraction(of: value)) * width }
-        if let shown {
+        if let gradient, !isAutomatic {
+            Rectangle()
+                .fill(LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing))
+                .opacity(0.62)
+        } else if let shown {
             let fill = spec.fill(for: shown)
             Rectangle()
                 .fill(isChanged ? tint.opacity(0.30) : Color.white.opacity(isAutomatic ? 0.06 : 0.10))

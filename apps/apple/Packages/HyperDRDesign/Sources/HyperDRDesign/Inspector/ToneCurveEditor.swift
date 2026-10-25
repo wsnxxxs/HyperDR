@@ -23,8 +23,15 @@ enum ToneCurvePoints {
     static func flat(_ points: [CGPoint]) -> [Double] { points.flatMap { [Double($0.x), Double($0.y)] } }
 
     /// The curve a list of coordinates draws; identity when they are not a valid
-    /// SDR-only curve. For anything with an HDR segment use `CurveInterpolation`.
+    /// SDR-only curve. 
     static func curve(_ coordinates: [Double]) -> ToneCurve { (try? ToneCurve(coordinates)) ?? ToneCurve() }
+
+    /// The curve's output at `input`, as the renderer's own `ToneCurve` has it
+    /// (SDR and HDR segments interpolated apart, meeting at SDR white);
+    /// the identity for coordinates it does not accept.
+    static func value(_ coordinates: [Double], at input: Double) -> Double {
+        (try? ToneCurve(coordinates))?.value(at: input) ?? input
+    }
 
     /// The fixed points: the black and the SDR white.
     static func isFixed(_ point: CGPoint) -> Bool {
@@ -35,19 +42,21 @@ enum ToneCurvePoints {
 
     /// The output range of a point: an SDR point stays below white, an HDR
     /// point above it.
-    private static func yRange(hdr: Bool, maxValue: Double) -> ClosedRange<Double> {
-        hdr ? 1...max(1, maxValue) : 0...1
+    /// With `liftsOnly` (the HDR-only curve's SDR segment) an SDR point
+    /// cannot go below the diagonal: that curve only brightens below white.
+    private static func yRange(hdr: Bool, maxValue: Double, x: Double = 0, liftsOnly: Bool = false) -> ClosedRange<Double> {
+        hdr ? 1...max(1, maxValue) : (liftsOnly ? min(max(x, 0), 1) : 0)...1
     }
 
     /// A point added at `point` (clamped to the plot, 0…`maxValue`), with its
     /// index; nil when the curve is full or the point lies within the gap of
     /// another in x.
     static func inserted(_ coordinates: [Double], at point: CGPoint,
-                         maxValue: Double = 1) -> (coordinates: [Double], index: Int)? {
+                         maxValue: Double = 1, liftsOnly: Bool = false) -> (coordinates: [Double], index: Int)? {
         var points = points(coordinates)
         guard points.count < maxCount else { return nil }
         let x = min(max(Double(point.x), 0), max(maxValue, 1))
-        let range = yRange(hdr: x > 1, maxValue: maxValue)
+        let range = yRange(hdr: x > 1, maxValue: maxValue, x: x, liftsOnly: liftsOnly)
         let y = min(max(Double(point.y), range.lowerBound), range.upperBound)
         let needed = gap(hdr: x > 1)
         guard points.allSatisfy({ abs(Double($0.x) - x) >= needed }) else { return nil }
@@ -59,16 +68,17 @@ enum ToneCurvePoints {
     /// The point at `index` moved to `point`: y inside its segment, x between
     /// its neighbours (an HDR point may go as far as `maxValue`). The fixed
     /// points do not move.
-    static func moved(_ coordinates: [Double], index: Int, to point: CGPoint, maxValue: Double = 1) -> [Double] {
+    static func moved(_ coordinates: [Double], index: Int, to point: CGPoint, maxValue: Double = 1,
+                      liftsOnly: Bool = false) -> [Double] {
         var points = points(coordinates)
         guard points.indices.contains(index), index > 0, !isFixed(points[index]) else { return coordinates }
         let hdr = points[index].x > 1
         let needed = gap(hdr: hdr)
         let lower = Double(points[index - 1].x) + needed
         let upper = index + 1 < points.count ? Double(points[index + 1].x) - needed : max(maxValue, 1)
-        let range = yRange(hdr: hdr, maxValue: maxValue)
-        points[index] = CGPoint(x: min(max(Double(point.x), lower), max(lower, upper)),
-                                y: min(max(Double(point.y), range.lowerBound), range.upperBound))
+        let x = min(max(Double(point.x), lower), max(lower, upper))
+        let range = yRange(hdr: hdr, maxValue: maxValue, x: x, liftsOnly: liftsOnly)
+        points[index] = CGPoint(x: x, y: min(max(Double(point.y), range.lowerBound), range.upperBound))
         return flat(points)
     }
 
@@ -77,7 +87,8 @@ enum ToneCurvePoints {
     /// as it is, so the picture does not change: how a VoiceOver user makes
     /// the first point (they cannot tap the plot). Nil when the curve is full
     /// or no gap is wide enough.
-    static func insertedInWidestGap(_ coordinates: [Double], maxValue: Double = 1) -> (coordinates: [Double], index: Int)? {
+    static func insertedInWidestGap(_ coordinates: [Double], maxValue: Double = 1,
+                                    liftsOnly: Bool = false) -> (coordinates: [Double], index: Int)? {
         let points = points(coordinates)
         guard points.count < maxCount, let last = points.last else { return nil }
         var edges = points.map { Double($0.x) }
@@ -86,7 +97,8 @@ enum ToneCurvePoints {
         else { return nil }
         let x = (edges[widest] + edges[widest + 1]) / 2
         guard edges[widest + 1] - edges[widest] >= 2 * gap(hdr: x > 1) else { return nil }
-        return inserted(coordinates, at: CGPoint(x: x, y: CurveInterpolation(coordinates).value(at: x)), maxValue: maxValue)
+        return inserted(coordinates, at: CGPoint(x: x, y: value(coordinates, at: x)), maxValue: maxValue,
+                        liftsOnly: liftsOnly)
     }
 
     /// The curve without the point at `index`; the fixed points stay.
@@ -172,6 +184,7 @@ public struct ToneCurveEditor: View {
     private let hdrStops: Double?
     private let marker: Double?
     private let tint: ToneCurveTint
+    private let liftsOnly: Bool
     private let write: ([Double]) -> Void
     private let onEditingChanged: (Bool) -> Void
 
@@ -193,8 +206,12 @@ public struct ToneCurveEditor: View {
                   tint: ToneCurveTint(sdr: .hdr.accent), write: write, onEditingChanged: onEditingChanged)
     }
 
+    /// `liftsOnly`: the SDR segment's points stay on or above the diagonal
+    /// (the HDR-only curve brightens below white, never darkens).
     init(coordinates: [Double], style: AdjustmentControlStyle, hdrStops: Double?, marker: Double?,
-         tint: ToneCurveTint, write: @escaping ([Double]) -> Void, onEditingChanged: @escaping (Bool) -> Void) {
+         tint: ToneCurveTint, liftsOnly: Bool = false, write: @escaping ([Double]) -> Void,
+         onEditingChanged: @escaping (Bool) -> Void) {
+        self.liftsOnly = liftsOnly
         self.coordinates = coordinates
         self.style = style
         self.hdrStops = hdrStops.map { max($0, 0) }
@@ -236,7 +253,7 @@ public struct ToneCurveEditor: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("ctrl.tone.curve.label", bundle: .module))
         .accessibilityAction(named: Text("design.curve.addPoint", bundle: .module)) {
-            guard isEnabled, let added = ToneCurvePoints.insertedInWidestGap(coordinates, maxValue: 1 + stops) else { return }
+            guard isEnabled, let added = ToneCurvePoints.insertedInWidestGap(coordinates, maxValue: 1 + stops, liftsOnly: liftsOnly) else { return }
             write(added.coordinates)
         }
         .onDisappear { finishDrag() }
@@ -293,12 +310,13 @@ public struct ToneCurveEditor: View {
             context.stroke(line, with: .color(.hdr.inkMuted), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
         }
 
-        let interpolation = CurveInterpolation(coordinates)
+        let curve = (try? ToneCurve(coordinates)) ?? ToneCurve()
         func trace(_ from: Double, _ to: Double, count: Int, color: Color) {
             var path = Path()
-            for i in 0...count {
+            let samples = curve.samples(count: count + 1, from: from, through: to)
+            for (i, value) in samples.enumerated() {
                 let x = from + (to - from) * Double(i) / Double(count)
-                let p = l.view(CGPoint(x: x, y: min(max(interpolation.value(at: x), 0), l.maxValue)))
+                let p = l.view(CGPoint(x: x, y: min(max(value, 0), l.maxValue)))
                 i == 0 ? path.move(to: p) : path.addLine(to: p)
             }
             context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
@@ -336,7 +354,8 @@ public struct ToneCurveEditor: View {
                     let step = coordinates[index * 2] > 1 ? 0.1 : 0.02
                     let y = coordinates[index * 2 + 1] + (direction == .increment ? step : -step)
                     write(ToneCurvePoints.moved(coordinates, index: index,
-                                                to: CGPoint(x: coordinates[index * 2], y: y), maxValue: 1 + stops))
+                                                to: CGPoint(x: coordinates[index * 2], y: y), maxValue: 1 + stops,
+                                                liftsOnly: liftsOnly))
                 }
                 .accessibilityAction(named: Text("design.curve.removePoint", bundle: .module)) { remove(index) }
         }
@@ -366,7 +385,7 @@ public struct ToneCurveEditor: View {
                 // By the distance travelled, so the point keeps its grab offset.
                 let from = layout.view(start)
                 let to = layout.unit(CGPoint(x: from.x + drag.translation.width, y: from.y + drag.translation.height))
-                let moved = ToneCurvePoints.moved(coordinates, index: index, to: to, maxValue: layout.maxValue)
+                let moved = ToneCurvePoints.moved(coordinates, index: index, to: to, maxValue: layout.maxValue, liftsOnly: liftsOnly)
                 if moved != coordinates { write(moved) }
             }
             .onEnded { _ in finishDrag() }
@@ -381,7 +400,8 @@ public struct ToneCurveEditor: View {
 
     private func add(at location: CGPoint, layout: ToneCurvePlotLayout) {
         guard isEnabled, layout.rect.insetBy(dx: -Self.inset, dy: -Self.inset).contains(location),
-              let added = ToneCurvePoints.inserted(coordinates, at: layout.unit(location), maxValue: layout.maxValue)
+              let added = ToneCurvePoints.inserted(coordinates, at: layout.unit(location), maxValue: layout.maxValue,
+                                                liftsOnly: liftsOnly)
         else { return }
         write(added.coordinates)
     }
@@ -390,45 +410,5 @@ public struct ToneCurveEditor: View {
         guard isEnabled else { return }
         let removed = ToneCurvePoints.removed(coordinates, index: index)
         if removed != coordinates { write(removed) }
-    }
-}
-
-/// The curve through a list of points, the way the renderer bakes it:
-/// monotone cubic (Fritsch–Carlson) tangents, so the curve never overshoots
-/// its points. Past the last point it carries on straight at slope 1 (an HDR
-/// segment with no points is the identity); `ToneCurve` itself only holds
-/// the SDR segment.
-struct CurveInterpolation {
-    private let x: [Double], y: [Double], tangent: [Double]
-
-    init(_ coordinates: [Double]) {
-        let p = coordinates.count >= 4 ? coordinates : [0, 0, 1, 1]
-        let x = stride(from: 0, to: p.count - 1, by: 2).map { p[$0] }
-        let y = stride(from: 1, to: p.count, by: 2).map { p[$0] }
-        let n = min(x.count, y.count)
-        let slopes = (0..<(n - 1)).map { (y[$0 + 1] - y[$0]) / max(x[$0 + 1] - x[$0], 1e-9) }
-        var m = [slopes[0]] + (1..<(n - 1)).map { i in
-            slopes[i - 1] * slopes[i] <= 0 ? 0 : (slopes[i - 1] + slopes[i]) / 2
-        } + [slopes[n - 2]]
-        for i in slopes.indices {
-            if slopes[i] == 0 { m[i] = 0; m[i + 1] = 0; continue }
-            let a = m[i] / slopes[i], b = m[i + 1] / slopes[i]
-            let norm = a * a + b * b
-            if norm > 9 {
-                let factor = 3 / norm.squareRoot()
-                m[i] = factor * a * slopes[i]; m[i + 1] = factor * b * slopes[i]
-            }
-        }
-        self.x = Array(x.prefix(n)); self.y = Array(y.prefix(n)); tangent = m
-    }
-
-    func value(at input: Double) -> Double {
-        guard let last = x.last, let lastY = y.last else { return input }
-        if input <= x[0] { return y[0] }
-        if input >= last { return lastY + (input - last) }
-        let i = x.indices.dropLast().first { input <= x[$0 + 1] } ?? 0
-        let h = x[i + 1] - x[i], t = (input - x[i]) / h, t2 = t * t, t3 = t2 * t
-        return (2 * t3 - 3 * t2 + 1) * y[i] + (t3 - 2 * t2 + t) * h * tangent[i]
-            + (-2 * t3 + 3 * t2) * y[i + 1] + (t3 - t2) * h * tangent[i + 1]
     }
 }

@@ -73,11 +73,16 @@ public struct CurvePicking {
     /// curve's parameter id: 0…1 in the SDR segment, above 1 in the HDR one.
     public var inputs: [String: Double]
     public var toggle: () -> Void
+    /// Called with the curve's parameter id the section is showing, whenever
+    /// it changes and when picking starts: the curve the drag edits.
+    public var select: (String) -> Void
 
-    public init(isActive: Bool, inputs: [String: Double] = [:], toggle: @escaping () -> Void) {
+    public init(isActive: Bool, inputs: [String: Double] = [:], toggle: @escaping () -> Void,
+                select: @escaping (String) -> Void = { _ in }) {
         self.isActive = isActive
         self.inputs = inputs
         self.toggle = toggle
+        self.select = select
     }
 }
 
@@ -240,6 +245,8 @@ public struct ToneCurveSection: View {
             }
         }
         .disabled(!control.isAvailable)
+        .onChange(of: effectiveChannel) { _, now in picking?.select(now.id) }
+        .onChange(of: effectiveMode) { _, now in if now == .parameters, picking?.isActive == true { picking?.toggle() } }
     }
 
     // MARK: Points
@@ -266,13 +273,17 @@ public struct ToneCurveSection: View {
                 if let picking {
                     PickToolButton(isActive: picking.isActive, title: Text(picking.isActive ? "design.curve.pick.stop" : "design.curve.pick",
                                                                           bundle: .module),
-                                   size: style == .touch ? 44 : 22, action: picking.toggle)
+                                   size: style == .touch ? 44 : 22) {
+                        picking.select(channel.id)
+                        picking.toggle()
+                    }
                 }
             }
         }
         if let declaration = Adjustments.declaration(channel.id) {
             ToneCurveEditor(coordinates: coordinates(channel), style: style, hdrStops: stops,
                             marker: picking?.inputs[channel.id], tint: channel.tint,
+                            liftsOnly: channel == .lumaHDR,
                             write: { panel.set(channel.id, curve: $0, in: &recipe) },
                             onEditingChanged: { onEditingChanged(declaration, $0) })
                 .frame(maxWidth: width(hdr: stops != nil))

@@ -184,6 +184,8 @@ private struct Adjustments: View {
             onLUTLibrary: { window.showsLUTLibrary = true })
         .environment(\.lookPickerShown, model.lookPreviews.shown)
         .environment(\.whiteBalancePicking, model.whiteBalance.picking)
+        .environment(\.curvePicking, model.curvePick.picking)
+        .environment(\.mixerPicking, model.mixerPick.picking)
     }
 }
 

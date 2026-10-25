@@ -229,6 +229,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(sections.map(\.family) == [.display, .hdr, .log, .grading])
     #expect(sections[0].options.map(\.id) == ["srgb", "p3", "rec709", "rec2020"])
     #expect(sections[1].options.map(\.id) == ["hlg", "pq"])
+    #expect(sections[3].options.map(\.id) == ["davinci-dwg", "acescct-ap1"])
     #expect(sections.flatMap(\.options).count == input.options.count)
     // Outside RAW the input has no Log or grading section; the output keeps all four.
     var sdr = Recipe(inputDomain: .sdr)

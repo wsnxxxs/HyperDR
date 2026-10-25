@@ -28,9 +28,17 @@ struct DockGroup: Identifiable {
     var id: AdjustmentGroupID { states[0].group }
     var isMerged: Bool { states.count > 1 }
 
+    /// Controls the iPhone leaves to the Mac and the iPad Studio (adjust-tools, this
+    /// round): the colour mixer's and the grading's sliders, the parametric
+    /// curve's boundaries, and the curves themselves.
+    static func omitted(_ control: AdjustmentControl) -> Bool {
+        control.kind == .curve || control.id.hasPrefix("hsl.") || control.id.hasPrefix("grade.")
+            || ["tone.parametricSplit1", "tone.parametricSplit2", "tone.parametricSplit3"].contains(control.id)
+    }
+
     /// The controls the tab shows.
     var controls: [AdjustmentControl] {
-        let own = states.flatMap(\.controls)
+        let own = states.flatMap(\.controls).filter { !Self.omitted($0) }
         return id == .look ? own.filter { Self.lookControls.contains($0.id) } : own
     }
 

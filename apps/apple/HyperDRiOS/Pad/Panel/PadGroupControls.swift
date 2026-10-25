@@ -69,7 +69,7 @@ struct PadGroupControls: View {
     /// own controls (the curves' parameters, the colour mixer, the grading).
     private var padSectionControls: SectionControls {
         SectionControls(slider: { request in
-            AnyView(PadSlider(request.title, value: request.value, spec: request.spec, tint: request.tint ?? tint,
+            AnyView(PadSlider(request.title, value: request.value, spec: request.spec, tint: request.tint ?? tint, gradient: request.gradient,
                               help: request.help, onEditingChanged: request.onEditingChanged,
                               onResetGroup: request.onResetGroup))
         }, segments: { request in

@@ -1030,9 +1030,35 @@ import Observation
     private(set) var clippingMask: RenderMask?
     private(set) var detailClippingMask: RenderMask?
 
+    /// What a clipping mask depends on: the base and gain pair, the range
+    /// it is measured against and whether HDR is on. A strength, range or
+    /// switch edit of a photo whose base stays the same changes the last
+    /// three, so the base alone would keep the old marks.
+    private struct ClippingKey: Equatable {
+        let base: ObjectIdentifier
+        let gain: ObjectIdentifier
+        let range: Float
+        let hdrEnabled: Bool
+        let alternateHeadroom: Float
+        let baseHeadroom: Float
+        /// The HDR controls' values, for a render whose textures are shared.
+        let hdrValues: [ParameterValue?]
+
+        init(_ frame: EditorFrame) {
+            base = ObjectIdentifier(frame.display.base)
+            gain = ObjectIdentifier(frame.display.gain)
+            range = frame.renderedRange
+            hdrEnabled = frame.request.recipe.value(for: "hdr.enabled") != .bool(false)
+                && !frame.request.bypassedGroups.contains(.hdr)
+            alternateHeadroom = frame.display.alternateHeadroom
+            baseHeadroom = frame.display.baseHeadroom
+            hdrValues = ["hdr.strength", "hdr.range", "hdr.source"].map { frame.request.recipe.value(for: $0) }
+        }
+    }
+
     private struct ClippingRequest {
         /// The frame (its base texture) the mask on show was made for.
-        var shown: ObjectIdentifier?
+        var shown: ClippingKey?
         var task: Task<Void, Never>?
     }
     @ObservationIgnored private var wholeClipping = ClippingRequest()
@@ -1065,7 +1091,7 @@ import Observation
             }
             return
         }
-        let key = ObjectIdentifier(frame.display.base)
+        let key = ClippingKey(frame)
         let state = detail ? detailClipping : wholeClipping
         guard state.task == nil, state.shown != key else { return }
         let task = Task { [weak self] in
@@ -1076,7 +1102,7 @@ import Observation
         if detail { detailClipping.task = task } else { wholeClipping.task = task }
     }
 
-    private func finishClipping(_ mask: RenderMask?, key: ObjectIdentifier, detail: Bool) {
+    private func finishClipping(_ mask: RenderMask?, key: ClippingKey, detail: Bool) {
         if detail { detailClipping = ClippingRequest(shown: key); detailClippingMask = mask }
         else { wholeClipping = ClippingRequest(shown: key); clippingMask = mask }
         refreshClipping()

@@ -49,8 +49,12 @@ import Observation
         isActive ? cancel() : begin()
     }
 
+    /// Called when the mode turns on, so a host can end the others.
+    @ObservationIgnored var onBegin: () -> Void = {}
+
     func begin() {
         guard !isActive else { return }
+        onBegin()
         clearNotice()
         isActive = true
     }

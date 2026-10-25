@@ -131,15 +131,15 @@ private let identity = [0.0, 0, 1, 1]
 }
 
 @Test func theHDRSegmentIsIdentityWithoutPointsAndCarriesOnFromTheLastOne() {
-    #expect(CurveInterpolation(identity).value(at: 2.7) == 2.7)
-    let lifted = CurveInterpolation([0, 0, 1, 1, 2, 2.6])
-    #expect(abs(lifted.value(at: 2) - 2.6) < 1e-12)
-    #expect(abs(lifted.value(at: 3.5) - 4.1) < 1e-12, "slope 1 past the last point")
-    #expect(lifted.value(at: 1.5) > 1.5, "the segment between white and the point is lifted")
+    #expect(ToneCurvePoints.value(identity, at: 2.7) == 2.7)
+    let lifted = [0.0, 0, 1, 1, 2, 2.6]
+    #expect(abs(ToneCurvePoints.value(lifted, at: 2) - 2.6) < 1e-12)
+    #expect(abs(ToneCurvePoints.value(lifted, at: 3.5) - 4.1) < 1e-12, "slope 1 past the last point")
+    #expect(ToneCurvePoints.value(lifted, at: 1.5) > 1.5, "the segment between white and the point is lifted")
     // The SDR part matches the renderer's table.
     let sdr = [0.0, 0, 0.3, 0.45, 1, 1]
     for x in stride(from: 0.0, through: 1.0, by: 0.05) {
-        #expect(abs(CurveInterpolation(sdr).value(at: x) - ToneCurvePoints.curve(sdr).value(at: x)) < 1e-12)
+        #expect(abs(ToneCurvePoints.value(sdr, at: x) - ToneCurvePoints.curve(sdr).value(at: x)) < 1e-12)
     }
 }
 
@@ -234,5 +234,46 @@ private let identity = [0.0, 0, 1, 1]
     #expect(AdjustmentSections.kind(of: "grade.global.hue") == .grading)
     #expect(AdjustmentSections.kind(of: "grade.balance") == .grading)
     #expect(MixerBand.aqua.id(.luminance) == "hsl.aqua.luminance")
-    #expect(GradingZone.shadows.saturationID == "grade.shadows.saturation")
+    #expect(WheelZone.shadows.saturationID == "grade.shadows.saturation")
+}
+
+@Test func theCurveEyedropperAddsAPointAndMovesIt() throws {
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0.5)
+    #expect(edit.canEdit)
+    #expect(edit.coordinates(raisedByDrag: 0) == [0, 0, 0.5, 0.5, 1, 1], "a point is added where the curve is")
+    let raised = edit.coordinates(raisedByDrag: 24)
+    #expect(raised.count == 6 && abs(raised[3] - 0.6) < 1e-9)
+    let lowered = edit.coordinates(raisedByDrag: -2400)
+    #expect(lowered[3] == 0, "the point stays inside the plot")
+    #expect(throws: Never.self) { try ToneCurve(raised) }
+}
+
+@Test func theCurveEyedropperMovesAPointThatIsAlreadyThere() {
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 0.5, 0.4, 1, 1], input: 0.505)
+    #expect(edit.coordinates(raisedByDrag: 24).count == 6, "no second point")
+    #expect(abs(edit.coordinates(raisedByDrag: 24)[3] - 0.5) < 1e-9)
+}
+
+@Test func theCurveEyedropperWorksInTheHDRSegmentAndNotAtTheFixedPoints() throws {
+    let hdr = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 2)
+    let raised = hdr.coordinates(raisedByDrag: 45)
+    #expect(raised == [0, 0, 1, 1, 2, 2.5], "the identity is y = x above white")
+    #expect(throws: Never.self) { try ToneCurve(raised) }
+    #expect(hdr.coordinates(raisedByDrag: -900) == [0, 0, 1, 1, 2, 1], "an HDR point does not go below white")
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 1).canEdit)
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0).canEdit)
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 9).canEdit)
+}
+
+@Test func theHDROnlyCurveNeverGoesBelowTheDiagonalInItsSDRSegment() throws {
+    let coordinates = [0, 0, 0.5, 0.6, 1, 1]
+    let moved = ToneCurvePoints.moved(coordinates, index: 1, to: CGPoint(x: 0.5, y: 0.1), liftsOnly: true)
+    #expect(moved[3] == 0.5, "held on the diagonal")
+    #expect(ToneCurvePoints.moved(coordinates, index: 1, to: CGPoint(x: 0.5, y: 0.1))[3] == 0.1, "other curves darken freely")
+    let added = try #require(ToneCurvePoints.inserted([0, 0, 1, 1], at: CGPoint(x: 0.4, y: 0.1), liftsOnly: true))
+    #expect(added.coordinates[3] == 0.4)
+    let hdr = ToneCurvePoints.moved([0, 0, 1, 1, 2, 2], index: 2, to: CGPoint(x: 2, y: 1), maxValue: 5, liftsOnly: true)
+    #expect(hdr[5] == 1, "the HDR segment may press highlights down to white")
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0.5, liftsOnly: true)
+    #expect(edit.coordinates(raisedByDrag: -240)[3] == 0.5)
 }

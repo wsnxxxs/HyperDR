@@ -342,6 +342,7 @@ private struct ParameterTrack: View {
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.locale) private var locale
+    @Environment(\.sliderTrackGradient) private var gradient
 
     static let thumb: CGFloat = 13
     static let height: CGFloat = 16
@@ -370,14 +371,21 @@ private struct ParameterTrack: View {
                             .offset(x: x(spec.fraction(of: resolved)) - Self.thumb / 2, y: mid - Self.thumb / 2)
                     }
                 } else {
-                    Capsule()
-                        .fill(Color.hdr.controlTrack)
-                        .frame(width: width, height: 3)
-                        .offset(y: mid - 1.5)
-                    Rectangle()
-                        .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
-                        .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 3)
-                        .offset(x: x(fill.lowerBound), y: mid - 1.5)
+                    if let gradient {
+                        GradientTrack(stops: gradient, height: 5)
+                            .frame(width: width)
+                            .offset(y: mid - 2.5)
+                            .opacity(isEnabled ? 1 : 0.4)
+                    } else {
+                        Capsule()
+                            .fill(Color.hdr.controlTrack)
+                            .frame(width: width, height: 3)
+                            .offset(y: mid - 1.5)
+                        Rectangle()
+                            .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
+                            .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 3)
+                            .offset(x: x(fill.lowerBound), y: mid - 1.5)
+                    }
                     if spec.isCentred {
                         // The zero of a signed parameter.
                         Rectangle()

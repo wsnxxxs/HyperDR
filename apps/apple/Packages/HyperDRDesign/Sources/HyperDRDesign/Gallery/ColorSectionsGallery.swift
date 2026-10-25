@@ -31,7 +31,7 @@ public struct ColorSectionsGallery: View {
         .background(Color.hdr.surfacePanel)
     }
 
-    private func slider(_ id: String, _ title: Text, spec: ParameterSpec? = nil) -> some View {
+    private func slider(_ id: String, _ title: Text, spec: ParameterSpec? = nil, gradient: [Color]? = nil) -> some View {
         let value = Binding(get: { values[id] ?? 0 }, set: { values[id] = $0 })
         let spec = spec ?? Self.spec
         return Group {
@@ -41,6 +41,7 @@ public struct ColorSectionsGallery: View {
                 ParameterSlider(title, value: value, spec: spec)
             }
         }
+        .environment(\.sliderTrackGradient, gradient)
     }
 
     private var grading: some View {
@@ -51,20 +52,20 @@ public struct ColorSectionsGallery: View {
             if let hue { values[zone.hueID] = hue.rounded() }
             values[zone.saturationID] = saturation.rounded()
         }, resetWheel: { zone in values[zone.hueID] = 0; values[zone.saturationID] = 0 },
-                           wheelEditing: { _, _ in }, resetAll: { values = [:] }) { id, title in
+                           wheelEditing: { _, _ in }, resetAll: { values = [:] }) { id, title, gradient in
             let wide = id.hasSuffix(".hue")
             let spec = wide ? ParameterSpec(range: 0...360, step: 1, defaultValue: 0, origin: 0, format: .number(fractionDigits: 0))
                 : id.hasSuffix(".saturation") ? ParameterSpec(range: 0...100, step: 1, defaultValue: 0, origin: 0, format: .number(fractionDigits: 0))
                 : Self.spec
-            slider(id, title ?? Text(verbatim: id.hasSuffix("blending") ? "Blending" : "Balance"), spec: spec)
+            slider(id, title ?? Text(verbatim: id.hasSuffix("blending") ? "Blending" : "Balance"), spec: spec, gradient: gradient)
         }
     }
 
     private var mixer: some View {
         VStack {
             ColorMixerLayout(style: style, showsTitle: true, isChanged: { (values[$0] ?? 0) != 0 },
-                             resetAll: { values = [:] }, initialArrangement: arrangement == 0 ? .attribute : .band) { id, title, _ in
-                slider(id, title)
+                             resetAll: { values = [:] }, initialArrangement: arrangement == 0 ? .attribute : .band) { id, title, _, gradient in
+                slider(id, title, gradient: gradient)
             }
         }
     }

@@ -198,7 +198,7 @@ actor RenderSession: EditorRendering {
         }
         opened = Opened(editor: editor, revision: revision, source: source,
                         options: effectiveOptions, previewOptions: effectiveOptions)
-        EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") compatibility=\(source.sourceCompatibility?.rawValue ?? "native") in \(began.duration(to: clock.now))")
+        EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") compatibility=\(source.sourceCompatibility?.rawValue ?? "native") converter=\(source.rawCompatibility ?? "none") in \(began.duration(to: clock.now))")
         predictions = [:]
         predictionOrder = []
         return editor

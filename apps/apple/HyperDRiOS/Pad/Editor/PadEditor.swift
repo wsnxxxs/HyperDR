@@ -99,10 +99,11 @@ struct PadEditor: View {
         .onChange(of: viewport, initial: true) { _, viewport in editor.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init), initial: true) { editor.attach(undoManager: undoManager) }
         // The eyedropper belongs to the photo it was started on, and to the adjusting tools.
-        .onChange(of: editor.source?.id) { session.whiteBalance.reset() }
-        .onChange(of: locksEditing) { if locksEditing { session.whiteBalance.reset() } }
+        .onChange(of: editor.source?.id) { session.whiteBalance.reset(); session.curvePick.picker.reset() }
+        .onChange(of: locksEditing) { if locksEditing { session.whiteBalance.reset(); session.curvePick.picker.reset() } }
         .onChange(of: tool, initial: true) { _, tool in
             session.whiteBalance.reset()
+            session.curvePick.picker.reset()
             // The frame is drawn from the whole photo: leave zoom and split behind.
             // The crop pane shows the edit alone (`EditorCanvas.mode`) and keeps
             // the comparison chosen for when it is left.
@@ -153,6 +154,7 @@ struct PadEditor: View {
         EditorCanvas(session: session, editor: editor, comparison: comparison, splitRatio: $splitRatio,
                      transform: $transform, framed: tool == .frame, cropping: tool == .crop,
                      framePadding: 40, holdingOriginal: $holdingOriginal, whiteBalance: session.whiteBalance,
+                     targetPicker: session.curvePick.picker,
                      zoomRequest: zoomRequest, onHeadroom: { headroom = $0 })
             .clipped()
             .padding(.horizontal, 18)
@@ -216,6 +218,7 @@ struct PadEditor: View {
         } content: {
             toolContent(columns: layout.columns)
                 .environment(\.whiteBalancePicking, session.whiteBalance.picking)
+                .environment(\.curvePicking, session.curvePick.picking)
                 .environment(\.revealControl) { reveal($0) }
                 .disabled(locksEditing)
         } footer: {

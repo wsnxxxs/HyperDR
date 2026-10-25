@@ -59,6 +59,8 @@ import SwiftUI
     /// The white balance eyedropper (the iPad's Studio): its sampling is the
     /// editor's, the canvas wires the rest while a pick is on.
     let whiteBalance = WhiteBalancePicker()
+    /// The curve eyedropper: a press on the photo and a drag up or down.
+    let curvePick = CurvePickModel()
 
     /// Only newly opened RAWs use this preference. The photo already open and
     /// its export keep the decoder recorded in the recipe.
@@ -121,6 +123,11 @@ import SwiftUI
         whiteBalance.pick = { [editor] point in
             guard let editor else { throw CancellationError() }
             return try await editor.pickWhiteBalance(at: point)
+        }
+        if let editor {
+            curvePick.attach(editor)
+            curvePick.picker.onActivate = { [whiteBalance] in whiteBalance.reset() }
+            whiteBalance.onBegin = { [curvePick] in curvePick.picker.reset() }
         }
         editor?.onLookSpacesChanged = { [weak luts = exports.luts] old, new in
             luts?.record(from: old, to: new)

@@ -75,7 +75,7 @@ final class WhiteBalanceSurfaceView: NSView {
 
     /// The eyedropper symbol, white under black so it reads on any photo, its
     /// tip on the pixel that is picked.
-    private static let eyedropper: NSCursor = {
+    static let eyedropper: NSCursor = {
         let size = NSSize(width: 28, height: 28)
         let configuration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
         guard let symbol = NSImage(systemSymbolName: "eyedropper", accessibilityDescription: nil)?

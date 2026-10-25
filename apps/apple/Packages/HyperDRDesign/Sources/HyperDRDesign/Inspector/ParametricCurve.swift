@@ -1,10 +1,10 @@
+import HyperDRRecipe
 import SwiftUI
 
 /// The parametric curve's picture: four zones (shadows, darks, lights,
 /// highlights) split by three boundaries, each zone lifted or pressed by its
-/// amount, black and SDR white fixed, the zones blending smoothly. The
-/// renderer's own curve is what the photo gets; this is the drawing the plot
-/// shows while the amounts move, close to it and always monotone.
+/// amount, black and SDR white fixed, the zones blending smoothly. The values
+/// are the renderer's own curve; the plot only keeps them monotone.
 struct ParametricCurvePreview: Equatable {
     /// Shadows, darks, lights, highlights, −100…+100.
     var amounts: [Double]
@@ -13,24 +13,14 @@ struct ParametricCurvePreview: Equatable {
 
     static let neutral = ParametricCurvePreview(amounts: [0, 0, 0, 0], splits: [25, 50, 75])
 
-    /// How far a zone's full amount moves the curve, as a share of the zone's
-    /// width: low enough that the curve never turns back on itself.
-    private static let reach = 0.3
-
-    var edges: [Double] { [0] + splits.map { $0 / 100 } + [1] }
-
     var isIdentity: Bool { amounts.allSatisfy { $0 == 0 } }
 
+    /// The renderer's own curve (HyperDRRecipe's `ParametricCurve`), so the
+    /// plot shows what the photo gets.
     func value(at x: Double) -> Double {
-        let edges = edges
-        guard x > 0, x < 1, amounts.count == 4 else { return min(max(x, 0), 1) }
-        var y = x
-        for zone in 0..<4 where x > edges[zone] && x < edges[zone + 1] {
-            let width = edges[zone + 1] - edges[zone]
-            let s = sin(Double.pi * (x - edges[zone]) / width)
-            y += amounts[zone] / 100 * Self.reach * width * s * s
-        }
-        return y
+        guard amounts.count == 4, splits.count == 3 else { return min(max(x, 0), 1) }
+        return ParametricCurve.value(at: x, highlights: amounts[3], lights: amounts[2], darks: amounts[1],
+                                     shadows: amounts[0], splits: splits)
     }
 
     /// `count` samples across 0…1, made monotone.

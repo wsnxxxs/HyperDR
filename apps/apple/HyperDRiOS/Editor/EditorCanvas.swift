@@ -33,6 +33,9 @@ struct EditorCanvas: View {
     /// The white balance eyedropper, where the host offers one (the iPad's
     /// Studio): while it is active a layer over the photo takes the touch.
     var whiteBalance: WhiteBalancePicker? = nil
+    /// The curve eyedropper, where the host offers one: a press on the photo
+    /// and a drag up or down.
+    var targetPicker: TargetPicker? = nil
     /// A fit or actual-pixels request (the iPad's canvas bar).
     var zoomRequest: CanvasZoomRequest? = nil
     /// The screen's headroom as it changes (the iPad's canvas bar).
@@ -174,6 +177,8 @@ struct EditorCanvas: View {
                 // photo's rectangle is then not the cropped photo's.
                 if let whiteBalance, whiteBalance.isActive, !cropping, crop == nil, !framed {
                     WhiteBalanceTouchLayer(picker: whiteBalance, frames: whiteBalanceFrames)
+                } else if let targetPicker, targetPicker.isActive, !cropping, crop == nil, !framed {
+                    TargetPickTouchLayer(picker: targetPicker, imageFrame: transform?.imageFrame ?? .zero)
                 }
             }
     }

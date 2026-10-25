@@ -69,6 +69,7 @@ struct CanvasStage: View {
             .overlay { PhotoCorners(frame: photoFrame) }
             .overlay { if model.cropLayout == nil { PhotoBadge(model: model) } }
             .overlay { WhiteBalanceCanvasLayer(model: model) }
+            .overlay { TargetPickCanvasLayer(model: model) }
             .overlay {
                 if model.isCropping, let crop = model.cropLayout {
                     CropOverlay(layout: crop, adjusting: model.editor.editingParameter == RecipeEditor.geometryDragID,

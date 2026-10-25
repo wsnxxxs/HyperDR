@@ -236,3 +236,31 @@ private let identity = [0.0, 0, 1, 1]
     #expect(MixerBand.aqua.id(.luminance) == "hsl.aqua.luminance")
     #expect(GradingZone.shadows.saturationID == "grade.shadows.saturation")
 }
+
+@Test func theCurveEyedropperAddsAPointAndMovesIt() throws {
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0.5)
+    #expect(edit.canEdit)
+    #expect(edit.coordinates(raisedByDrag: 0) == [0, 0, 0.5, 0.5, 1, 1], "a point is added where the curve is")
+    let raised = edit.coordinates(raisedByDrag: 24)
+    #expect(raised.count == 6 && abs(raised[3] - 0.6) < 1e-9)
+    let lowered = edit.coordinates(raisedByDrag: -2400)
+    #expect(lowered[3] == 0, "the point stays inside the plot")
+    #expect(throws: Never.self) { try ToneCurve(raised) }
+}
+
+@Test func theCurveEyedropperMovesAPointThatIsAlreadyThere() {
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 0.5, 0.4, 1, 1], input: 0.505)
+    #expect(edit.coordinates(raisedByDrag: 24).count == 6, "no second point")
+    #expect(abs(edit.coordinates(raisedByDrag: 24)[3] - 0.5) < 1e-9)
+}
+
+@Test func theCurveEyedropperWorksInTheHDRSegmentAndNotAtTheFixedPoints() throws {
+    let hdr = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 2)
+    let raised = hdr.coordinates(raisedByDrag: 45)
+    #expect(raised == [0, 0, 1, 1, 2, 2.5], "the identity is y = x above white")
+    #expect(throws: Never.self) { try ToneCurve(raised) }
+    #expect(hdr.coordinates(raisedByDrag: -900) == [0, 0, 1, 1, 2, 1], "an HDR point does not go below white")
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 1).canEdit)
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0).canEdit)
+    #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 9).canEdit)
+}

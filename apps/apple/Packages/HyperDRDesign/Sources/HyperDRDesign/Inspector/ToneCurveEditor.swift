@@ -396,12 +396,15 @@ public struct ToneCurveEditor: View {
 /// The curve through a list of points, the way the renderer bakes it:
 /// monotone cubic (Fritsch–Carlson) tangents, so the curve never overshoots
 /// its points. Past the last point it carries on straight at slope 1 (an HDR
-/// segment with no points is the identity); `ToneCurve` itself only holds
-/// the SDR segment.
+/// segment with no points is the identity).
 struct CurveInterpolation {
     private let x: [Double], y: [Double], tangent: [Double]
+    /// The renderer's own curve when the coordinates are valid for it: the SDR
+    /// and HDR segments are interpolated separately, meeting at SDR white.
+    private let curve: ToneCurve?
 
     init(_ coordinates: [Double]) {
+        curve = try? ToneCurve(coordinates)
         let p = coordinates.count >= 4 ? coordinates : [0, 0, 1, 1]
         let x = stride(from: 0, to: p.count - 1, by: 2).map { p[$0] }
         let y = stride(from: 1, to: p.count, by: 2).map { p[$0] }
@@ -423,6 +426,7 @@ struct CurveInterpolation {
     }
 
     func value(at input: Double) -> Double {
+        if let curve { return curve.value(at: input) }
         guard let last = x.last, let lastY = y.last else { return input }
         if input <= x[0] { return y[0] }
         if input >= last { return lastY + (input - last) }

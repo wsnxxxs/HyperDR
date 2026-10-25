@@ -16,6 +16,8 @@ import UniformTypeIdentifiers
     let canvas = CanvasModel()
     /// The white balance eyedropper: wired to the canvas and editor in `init`.
     let whiteBalance = WhiteBalancePicker()
+    /// The curve eyedropper: a press on the photo and a drag up or down.
+    let curvePick = CurvePickModel()
     /// The editing session: the recipe, its undo steps, preview rendering and
     /// AI (p7-2b §2). The inspector binds to it.
     let editor: RecipeEditor
@@ -306,6 +308,7 @@ import UniformTypeIdentifiers
         }
         observeEditor()
         wireWhiteBalance()
+        wireTargetPickers()
     }
 
     deinit {

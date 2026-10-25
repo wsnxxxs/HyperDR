@@ -74,3 +74,20 @@ private let identity = [0.0, 0, 1, 1]
     #expect(AdjustmentSymbols.control(Adjustments.declaration("tone.curve")!)
             != AdjustmentSymbols.group(.light))
 }
+
+@Test func accessibilityCanAddPointsWithoutTheCurveChangingUntilTheyAreMoved() throws {
+    let first = try #require(ToneCurvePoints.insertedInWidestGap(identity))
+    #expect(first.index == 1)
+    #expect(first.coordinates == [0, 0, 0.5, 0.5, 1, 1])
+    // The next goes in the widest gap, on the curve.
+    let bent = [0.0, 0, 0.2, 0.4, 1, 1]
+    let next = try #require(ToneCurvePoints.insertedInWidestGap(bent))
+    #expect(next.index == 2)
+    #expect(next.coordinates[4] == 0.6)
+    #expect(abs(next.coordinates[5] - ToneCurvePoints.curve(bent).value(at: 0.6)) < 1e-12)
+    _ = try ToneCurve(next.coordinates)
+    // Full: nothing to add.
+    var full = identity
+    for i in 1...14 { full = try #require(ToneCurvePoints.inserted(full, at: CGPoint(x: Double(i) / 15, y: 0.5))).coordinates }
+    #expect(ToneCurvePoints.insertedInWidestGap(full) == nil)
+}

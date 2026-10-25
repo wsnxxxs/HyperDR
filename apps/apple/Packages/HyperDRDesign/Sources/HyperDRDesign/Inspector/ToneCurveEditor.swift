@@ -44,6 +44,20 @@ enum ToneCurvePoints {
         return flat(points)
     }
 
+    /// A point in the middle of the widest gap between two points, on the curve
+    /// as it is, so the picture does not change: how a VoiceOver user makes the
+    /// first point (they cannot tap the plot). Nil when the curve is full or
+    /// no gap is wide enough.
+    static func insertedInWidestGap(_ coordinates: [Double]) -> (coordinates: [Double], index: Int)? {
+        let points = points(coordinates)
+        guard points.count < maxCount,
+              let widest = points.indices.dropLast().max(by: { points[$0 + 1].x - points[$0].x < points[$1 + 1].x - points[$1].x })
+        else { return nil }
+        let x = Double(points[widest].x + points[widest + 1].x) / 2
+        guard Double(points[widest + 1].x - points[widest].x) >= 2 * gap else { return nil }
+        return inserted(coordinates, at: CGPoint(x: x, y: curve(coordinates).value(at: x)))
+    }
+
     /// The curve without the point at `index`; the end points stay.
     static func removed(_ coordinates: [Double], index: Int) -> [Double] {
         var points = points(coordinates)
@@ -114,6 +128,10 @@ public struct ToneCurveEditor: View {
         .overlay { RoundedRectangle(cornerRadius: Radius.md).strokeBorder(Color.hdr.line) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("ctrl.tone.curve.label", bundle: .module))
+        .accessibilityAction(named: Text("design.curve.addPoint", bundle: .module)) {
+            guard isEnabled, let added = ToneCurvePoints.insertedInWidestGap(coordinates) else { return }
+            write(added.coordinates)
+        }
         .onDisappear { finishDrag() }
         .onChange(of: isEnabled) { if !isEnabled { finishDrag() } }
     }

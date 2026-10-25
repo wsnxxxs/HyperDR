@@ -1099,6 +1099,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在风格中显示胶片曝光设置" } }
       }
     },
+    "design.curve.addPoint" : {
+      "comment" : "VoiceOver action on the tone curve: adds a control point in the widest gap, on the curve.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加控制点" } }
+      }
+    },
     "design.curve.reset" : {
       "comment" : "Button beside the tone curve's title: puts the curve back to a straight line.",
       "localizations" : {

@@ -616,3 +616,16 @@ with Kit/Render/Recipe/Engine dependencies. Set `HYPERDR_BENCH_QUALITY=100` and
 `HYPERDR_BENCH_BUDGET_BYTES=4294967296`; leave range at its benchmark default
 of 2 for the timing pair, or set `HYPERDR_BENCH_RANGE_STOPS=auto` for the
 unmodified default recipe. Generated files/reports are local under `build/`.
+
+
+The Kit disk preflight now admits the simultaneous storage demand before RAW
+or row development: any pending RAW look baseline (16 B/native pixel), the
+float32 replay (conservative RGB 24 B/final canvas pixel), AVIF RGB16 staging
+(6 B/canvas pixel), estimated compressed samples and final result (8 B/pixel
+each), plus the existing 256 MiB reserve. It checks again before row preparation
+using only the remaining demand once the RAW baseline is allocated. Thus a
+110MP RGB AVIF needs about 5.06 GB plus the reserve after baseline allocation,
+not just its 2.64 GB replay. The native spool preallocation remains mandatory.
+`ENOSPC`/`EDQUOT` from replay allocation, AVIF sample/staging writes or final
+assembly now cross ABI 5 as additive `insufficient_storage`; Kit maps these
+and POSIX/Cocoa disk-full failures to its localized insufficient-storage error.

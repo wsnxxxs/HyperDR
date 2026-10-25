@@ -60,6 +60,8 @@ public actor RecipeExportService: RecipeExportServicing {
         defer { busy = false }
         var pending: ExportID?
         var published = false
+        var storageRequired = ExportStorage.reserve
+        var storageDirectory = FileManager.default.temporaryDirectory
         var timings: [String: Double] = [:]
         var stage = RecipeExportStage.preparing
         let operationStart = ContinuousClock.now
@@ -132,6 +134,15 @@ public actor RecipeExportService: RecipeExportServicing {
                     throw RecipeExportError.invalidSnapshot
                 }
             }
+            storageDirectory = await sessions.exportStorageDirectory
+            storageRequired = ExportStorage.requiredBytes(plan: plan, source: actualRequest.source,
+                needsLookBaseline: snapshot.recipe.needsLookBaseline)
+            // RAW baseline uses tmp; the package replay/staging lives beside the
+            // retained result. Check the joint demand on both volumes before any
+            // development (the usual app layout puts them on the same volume).
+            try ExportStorage.check(required: storageRequired,
+                available: min(try ExportStorage.availableBytes(at: storageDirectory),
+                               try ExportStorage.availableBytes(at: FileManager.default.temporaryDirectory)))
             if request.source.domain == .rawEDR { emit(.developing) }
             else { emit(.preparing) }
             var lazySource: HyperDRRender.ExportSource?
@@ -252,6 +263,10 @@ public actor RecipeExportService: RecipeExportServicing {
                     throw HyperDRError(code: "unsupported_format", message: "Incremental export is unavailable")
                 }
                 actualRenderRows = plan.memory.renderRows
+                storageRequired = ExportStorage.requiredBytes(plan: plan, source: actualRequest.source,
+                    needsLookBaseline: snapshot.recipe.needsLookBaseline, baselineAllocated: true)
+                try ExportStorage.check(required: storageRequired,
+                    available: try ExportStorage.availableBytes(at: storageDirectory))
                 emit(.rendering)
                 let rows = try await rowRenderer.prepareRows(exportSource, recipe: snapshot.recipe, lut: frozenLUT,
                     modelGain: model, request: renderRequest, rows: plan.memory.renderRows)
@@ -443,6 +458,10 @@ public actor RecipeExportService: RecipeExportServicing {
         } catch {
             if let pending, !published { await sessions.discardExport(session, export: pending) }
             await renderEngine.clearCaches()
+            if ExportStorage.isStorageFailure(error) {
+                let available = (try? ExportStorage.availableBytes(at: storageDirectory)) ?? 0
+                throw RecipeExportError.insufficientStorage(requiredBytes: storageRequired, availableBytes: available)
+            }
             throw error
         }
     }

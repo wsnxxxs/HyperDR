@@ -50,8 +50,15 @@ class AvifSpool {
     if (!f) fail("open AVIF spool");
     file.reset(f);
   }
-  void seek(std::uint64_t offset) { require(fseeko(file.get(), off_t(offset), SEEK_SET) == 0, "seek AVIF spool failed"); }
-  void write(std::span<const std::uint8_t> b) { require(fwrite(b.data(), 1, b.size(), file.get()) == b.size(), "write AVIF spool failed (disk full?)"); }
+  void seek(std::uint64_t offset) {
+    // Seeking also flushes pending stdio writes: preserve disk-full/quota errno.
+    if (fseeko(file.get(), off_t(offset), SEEK_SET) != 0)
+      throw std::system_error(errno ? errno : EIO, std::generic_category(), "seek AVIF spool");
+  }
+  void write(std::span<const std::uint8_t> b) {
+    if (fwrite(b.data(), 1, b.size(), file.get()) != b.size())
+      throw std::system_error(errno ? errno : EIO, std::generic_category(), "write AVIF spool");
+  }
   void read(std::span<std::uint8_t> b) { require(fread(b.data(), 1, b.size(), file.get()) == b.size(), "read AVIF spool failed"); }
 };
 } // namespace hyperdr::internal

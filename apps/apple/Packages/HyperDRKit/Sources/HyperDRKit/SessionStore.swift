@@ -242,6 +242,7 @@ public actor SessionStore {
     private let beforeThumbnailWrite: @Sendable (Int32) -> Void
     private let openExportLeaf: OpenExportLeaf
     private let exportRoot: SessionExportFile?
+    var exportStorageDirectory: URL { supportDirectory }
     private let cacheDirectory: URL
     /// Copies handed to other apps (drag, share); outside the decode cache so
     /// its trimming never counts them.

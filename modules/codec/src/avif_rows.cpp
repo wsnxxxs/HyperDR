@@ -34,6 +34,9 @@ namespace hyperdr {
 namespace {
 using Bytes = std::vector<std::uint8_t>;
 void require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+void require_io(bool ok, const char* message) {
+  if (!ok) throw std::system_error(errno ? errno : EIO, std::generic_category(), message);
+}
 void check(avifResult r) { if (r != AVIF_RESULT_OK) throw std::runtime_error(std::string("AVIF: ") + avifResultToString(r)); }
 void number(Bytes& b, std::uint64_t n, unsigned size) {
   for (unsigned i = size; i; --i) b.push_back(std::uint8_t(n >> ((i - 1) * 8)));
@@ -405,15 +408,15 @@ AvifCellDigests write_avif_rows(const EncodingRows& base, const EncodingRows& co
   const auto xmp = make_xmp(photo, headroom, false); add_metadata("mime", Bytes(xmp.begin(), xmp.end()));
   const auto prefix = header(items, properties, references, std::uint32_t(media_size));
   std::unique_ptr<FILE, decltype(&fclose)> destination(fopen(path.c_str(), "wb"), &fclose);
-  require(bool(destination), "open AVIF destination failed");
-  require(fwrite(prefix.data(), 1, prefix.size(), destination.get()) == prefix.size(), "write AVIF header failed");
+  require_io(bool(destination), "open AVIF destination failed");
+  require_io(fwrite(prefix.data(), 1, prefix.size(), destination.get()) == prefix.size(), "write AVIF header failed");
   samples.seek(0); std::array<std::uint8_t, 65536> chunk{};
   for (std::uint64_t left = media_size; left;) {
     check_cancelled(); const auto count = std::min<std::uint64_t>(left, chunk.size());
     samples.read(std::span(chunk).first(count));
-    require(fwrite(chunk.data(), 1, count, destination.get()) == count, "write AVIF samples failed"); left -= count;
+    require_io(fwrite(chunk.data(), 1, count, destination.get()) == count, "write AVIF samples failed"); left -= count;
   }
-  require(fclose(destination.release()) == 0, "close AVIF destination failed");
+  require_io(fclose(destination.release()) == 0, "close AVIF destination failed");
   return decoded;
 }
 

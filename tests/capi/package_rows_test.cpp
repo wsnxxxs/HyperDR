@@ -16,6 +16,8 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <system_error>
+#include <cerrno>
 #include <vector>
 #include <unistd.h>
 #include <mach/mach.h>
@@ -29,6 +31,7 @@ struct Source {
   float gain_scale=1.f, gain_bias=0.f;
   hyperdr_cancel* token=nullptr;
   unsigned largest=0, reads=0;
+  int storage_error=0;
   std::vector<std::array<uint32_t,3>> progress_events;
   static void progress(void* context,uint32_t phase,uint32_t done,uint32_t total) {
     static_cast<Source*>(context)->progress_events.push_back({phase,done,total});
@@ -39,6 +42,7 @@ struct Source {
   static int read(void* context,unsigned y,unsigned count,float* base,float* gain) {
     auto& s=*static_cast<Source*>(context);s.largest=std::max(s.largest,count);
     ++s.reads;
+    if(s.storage_error)throw std::system_error(s.storage_error,std::generic_category(),"row storage");
     if(s.fail)return 1;
     if(s.cancel)hyperdr_cancel_request(s.token);
     for(unsigned row=0;row<count;++row)for(unsigned x=0;x<s.width;++x) {
@@ -135,6 +139,17 @@ int main(int argc,char** argv) try {
     footprint("after");if(std::string(argv[1])!="full")REQUIRE(source.largest<=rows);
     std::filesystem::remove_all(root);hyperdr_engine_destroy(engine);return 0;
   }
+  // Both disk-full and quota failures retain their typed ABI 5 error code.
+  for(const int storage_error:{ENOSPC,EDQUOT}) {
+    source.storage_error=storage_error;
+    request.format="avif-pq";request.output_path=stream_path.c_str();
+    char* report=nullptr;error=nullptr;
+    REQUIRE(hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error)!=0);
+    REQUIRE(error&&std::strcmp(error->code,"insufficient_storage")==0);
+    hyperdr_error_free(error);hyperdr_string_free(report);
+    REQUIRE(!std::filesystem::exists(stream));
+  }
+  source.storage_error=0;
   // The last strip/IFD can fail after all scanlines succeeded. No verification
   // may be needed to detect this, and KEEP must survive every writer failure.
   source.width=source.height=16;base.width=base.height=16;gain.plane.width=gain.plane.height=16;

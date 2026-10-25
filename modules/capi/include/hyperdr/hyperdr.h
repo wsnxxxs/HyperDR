@@ -193,7 +193,8 @@ typedef int (*hyperdr_package_row_callback)(void* user, uint32_t y, uint32_t cou
  * their plane data/size/row_bytes are ignored, format must be F32. rows is
  * 1..4096 (256 recommended). No caller planes are retained. The request, its
  * strings and callback context stay alive for this call. Stages and errors,
- * E5 staging/readback, cancellation and report match hyperdr_package. */
+ * E5 staging/readback, cancellation and report match hyperdr_package.
+ * ENOSPC/EDQUOT are reported as insufficient_storage (additive in ABI 5). */
 HYPERDR_API int hyperdr_package_rows(hyperdr_engine*, const hyperdr_package_request*,
     uint32_t rows, hyperdr_package_row_callback, void* user,
     char** out_report_json, hyperdr_error** err);

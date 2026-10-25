@@ -15,6 +15,8 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <cerrno>
 
 struct hyperdr_engine { hyperdr::Engine value; };
 struct hyperdr_cancel { hyperdr::CancelToken value; };
@@ -73,6 +75,11 @@ int boundary(hyperdr_error** error, Function function) noexcept {
     set_error(error, "invalid_options", exception.what());
   } catch (const std::bad_alloc&) {
     set_error(error, "out_of_memory", "cannot allocate native result");
+  } catch (const std::system_error& exception) {
+    const auto code = exception.code();
+    const bool storage = (code.category() == std::generic_category() || code.category() == std::system_category()) &&
+        (code.value() == ENOSPC || code.value() == EDQUOT);
+    set_error(error, storage ? "insufficient_storage" : "internal_error", exception.what());
   } catch (const std::exception& exception) {
     set_error(error, "internal_error", exception.what());
   } catch (...) {

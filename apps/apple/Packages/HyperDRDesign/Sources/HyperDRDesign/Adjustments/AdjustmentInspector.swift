@@ -111,7 +111,7 @@ public struct AdjustmentInspector: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.hdr.amber)
             }
-            ForEach(state.controls.filter { !ToneCurveSection.ownedIDs.contains($0.id) }) { control in
+            ForEach(state.controls.filter { !AdjustmentSections.isDrawnBySection($0.id) }) { control in
                 AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                               onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
             }
@@ -185,6 +185,23 @@ public struct AdjustmentRow: View {
     }
 
     public var body: some View {
+        if let section = AdjustmentSections.section(anchoredBy: control.id), section != .curves {
+            switch section {
+            case .mixer:
+                ColorMixerSection(recipe: $recipe, panel: panel, style: style,
+                                  showsTitle: !AdjustmentSections.fillsItsGroup(.mixer), onEditingChanged: onEditingChanged)
+            case .grading:
+                ColorGradingSection(recipe: $recipe, panel: panel, style: style,
+                                    showsTitle: !AdjustmentSections.fillsItsGroup(.grading), onEditingChanged: onEditingChanged)
+            case .curves:
+                EmptyView()
+            }
+        } else {
+            generated
+        }
+    }
+
+    @ViewBuilder private var generated: some View {
         let declaration = control.declaration
         switch control.kind {
         case .float, .floatOrAuto:

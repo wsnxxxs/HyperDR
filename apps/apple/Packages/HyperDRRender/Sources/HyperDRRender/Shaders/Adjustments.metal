@@ -17,6 +17,29 @@ float contrastY(float y, float c) {
     }
     return pow(target, 2.4f);
 }
+float3 colorLab(float3 rgb) {
+    float l=cb(dot(rgb,float3(.4813272912f,.4620679117f,.0564956029f)));
+    float m=cb(dot(rgb,float3(.2288381013f,.6532343999f,.1179544132f)));
+    float s=cb(dot(rgb,float3(.0839860178f,.2242727893f,.6922208389f)));
+    return float3(.2104542553f*l+.7936177850f*m-.0040720468f*s,
+                  1.9779984951f*l-2.4285922050f*m+.4505937099f*s,
+                  .0259040371f*l+.7827717662f*m-.8086757660f*s);
+}
+float3 colorPreserveY(float3 rgb,float target) {
+    float y=lum(rgb); return y>1e-8f ? rgb*(target/y) : float3(target);
+}
+float3 colorVibrance(float3 rgb,float amount) {
+    if(amount==0) return rgb;
+    float y=lum(rgb),scale=max(1.f,y);
+    float3 lab=colorLab(rgb/scale);
+    float relative=length(lab.yz)/max(.001f,lab.x),hue=atan2(lab.z,lab.y)*180.f/M_PI_F;
+    if(hue<0) hue+=360.f;
+    float skin=sm(20.f,30.f,hue)*(1-sm(75.f,90.f,hue))*(1-sm(.3f,.5f,relative));
+    float weight=amount>0 ? (1-sm(.08f,.45f,relative))*(1-2*skin/3) : .25f+.75f*sm(.08f,.45f,relative);
+    lab.yz*=1+amount*weight*(amount>0 ? 1.2f : .65f);
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y);
+}
+
 float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 1 ? amount == 1 : amount == 0) return rgb;
     float y = lum(rgb), target = y, a = amount;
@@ -42,10 +65,10 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         // Linear matrix M = D + 1*(w' - w'D), so w'M = w' exactly.
         return changed + (rawY(rgb) - rawY(changed));
     }
-    if (op == 7 || op == 8) {
+    if (op == 7) return colorVibrance(rgb,amount);
+    if (op == 8) {
         float3 chroma = rgb - y;
-        float saturation = maximum(abs(chroma)) / max(y,1e-6f);
-        float factor = op == 7 ? 1 + a*(1-sm(.15f,1.f,saturation)) : 1+a;
+        float factor = 1+a;
         return y + chroma * factor;
     }
     if (op == 1) target = contrastY(y,amount);

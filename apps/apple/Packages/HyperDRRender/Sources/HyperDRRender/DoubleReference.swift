@@ -22,7 +22,7 @@ public enum DoubleReference {
     private static func clamp(_ rgb: RGB, upper: Double) -> RGB {
         RGB(min(upper, max(0, rgb.x)), min(upper, max(0, rgb.y)), min(upper, max(0, rgb.z)))
     }
-    private static func labRGB(_ L: Double, _ A: Double, _ B: Double) -> RGB {
+    static func labRGB(_ L: Double, _ A: Double, _ B: Double) -> RGB {
         let l = L + 0.3963377774 * A + 0.2158037573 * B
         let m = L - 0.1055613458 * A - 0.0638541728 * B
         let s = L - 0.0894841775 * A - 1.2914855480 * B

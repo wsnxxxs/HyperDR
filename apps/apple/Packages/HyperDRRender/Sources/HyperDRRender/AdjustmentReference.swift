@@ -61,10 +61,10 @@ extension DoubleReference {
             let changed = rgb*diagonal
             func rawY(_ x: RGB) -> Double { 0.2289746*x.x+0.6917385*x.y+0.0792869*x.z }
             return changed + RGB(repeating: rawY(rgb)-rawY(changed))
-        case .vibrance, .saturation:
+        case .vibrance: return vibrance(rgb,amount:a)
+        case .saturation:
             let chroma = rgb-RGB(repeating:y)
-            let saturation = max(abs(chroma.x),abs(chroma.y),abs(chroma.z))/max(y,1e-6)
-            let amount = operation == .vibrance ? 1+a*(1-smoothStep(0.15,1,saturation)) : 1+a
+            let amount = 1+a
             return RGB(repeating:y)+chroma*amount
         }
     }

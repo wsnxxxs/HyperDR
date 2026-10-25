@@ -78,7 +78,9 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 @Test func groupsAndControlsFollowTheInputDomain() {
     let sdr = Recipe(inputDomain: .sdr)
     #expect(panel.groups(for: sdr).map(\.group) == [.hdr, .light, .color, .look], "no detail group outside RAW")
-    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation", "effect.grain", "effect.halation"],
+    let mixer = HSLBand.allCases.flatMap { band in HSLComponent.allCases.map { "hsl.\(band.rawValue).\($0.rawValue)" } }
+    let grading = GradingZone.allCases.flatMap { zone in HSLComponent.allCases.map { "grade.\(zone.rawValue).\($0.rawValue)" } } + ["grade.blending","grade.balance"]
+    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation"] + mixer + grading + ["effect.grain", "effect.halation"],
             "grain and halation on every photo, without a look")
     #expect(ids(sdr, .hdr).contains("hdr.coverage"))
     #expect(!ids(sdr, .hdr).contains("hdr.sdrRolloff"))
@@ -225,7 +227,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     let input = panel.control("look.input", in: raw)!
     let sections = AdjustmentText.optionSections(input)
     #expect(sections.map(\.family) == [.display, .hdr, .log])
-    #expect(sections[0].options.map(\.id) == ["srgb", "p3", "rec709"])
+    #expect(sections[0].options.map(\.id) == ["srgb", "p3", "rec709", "rec2020"])
     #expect(sections[1].options.map(\.id) == ["hlg", "pq"])
     #expect(sections.flatMap(\.options).count == input.options.count)
     // Outside RAW the input has no Log section; the output keeps all three.
@@ -358,8 +360,8 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 @Test func everyDeclaredKeyIsInTheCatalogueInBothLanguages() {
     let keys = AdjustmentText.declaredKeys
-    // `12 * 2`: the twelve LUT spaces, for look.input and look.output; then the film stocks.
-    #expect(keys.count == Adjustments.all.count * 3 + 6 + 12 * 2 + Adjustments.filmStocks.count + 5)
+    // `21 * 2`: the twenty-one LUT spaces, for look.input and look.output; then the film stocks.
+    #expect(keys.count == Adjustments.all.count * 3 + 6 + 21 * 2 + Adjustments.filmStocks.count + 5)
     for locale in [english, Locale(identifier: "zh-Hans")] {
         for key in keys.sorted() {
             #expect(DesignStrings.string(key, locale: locale) != key, "\(key) missing in \(locale.identifier)")

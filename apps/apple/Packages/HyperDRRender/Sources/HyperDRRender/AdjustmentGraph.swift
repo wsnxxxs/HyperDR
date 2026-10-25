@@ -18,6 +18,8 @@ struct GraphUniform {
     var effects: SIMD4<Float> = .zero
     var light: SIMD4<Float> = .zero
     var curveHDRTails: SIMD4<Float> = .zero
+    var lutExposure: SIMD4<Float> = .zero
+    var colorTools = ColorToolsUniform(ColorAdjustments())
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -242,7 +244,8 @@ extension RenderEngine {
                            referenceArea, edit.usesFilmProcessing ? 1 : 0),
             light: SIMD4(t.whites, Float(lut?.is3D == false ? lut!.values.count : 1), t.hasCurves ? 1024 : 0, Float(t.curveProbeStage)),
             curveHDRTails: SIMD4(Float(t.curve.coordinates[t.curve.coordinates.count-2]),Float(t.curve.coordinates.last!),
-                Float(t.curveHDR.coordinates[t.curveHDR.coordinates.count-2]),Float(t.curveHDR.coordinates.last!)))
+                Float(t.curveHDR.coordinates[t.curveHDR.coordinates.count-2]),Float(t.curveHDR.coordinates.last!)),
+            lutExposure: SIMD4(lut != nil && l.input.isLog ? exp2(l.exposure ?? ((try? lutMeter(source, lut: lut!, input: l.input, output: l.output)) ?? 0)) : 1, 0, 0, 0), colorTools: ColorToolsUniform(c))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing

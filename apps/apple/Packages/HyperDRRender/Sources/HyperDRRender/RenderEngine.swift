@@ -53,7 +53,7 @@ public actor RenderEngine {
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
-    var lutCache: (id: String, curve: ToneCurve, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lutCache: (id: String, tone: ToneAdjustments, texture: any MTLTexture, buffer: any MTLBuffer)?
     var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
     /// The look baseline of the rendered source, and separately of the fixed
     /// analysis source: a partial-strength render needs both, and one shared
@@ -104,7 +104,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "accumulateSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["curveProbe", "clippingMask", "displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "accumulateSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame",
                      "filmMeter", "graphFilmCells", "graphFilmExposure", "filmBlur"] {
@@ -750,7 +750,7 @@ public actor RenderEngine {
     }
 
     public nonisolated static func readTexture(_ texture: any MTLTexture) -> [Float] {
-        let components = texture.pixelFormat == .r32Float ? 1 : 4
+        let components = texture.pixelFormat == .r32Float ? 1 : (texture.pixelFormat == .rg32Float ? 2 : 4)
         return [Float](unsafeUninitializedCapacity:texture.width*texture.height*components) { pixels, initialized in
             texture.getBytes(pixels.baseAddress!,bytesPerRow:texture.width*components*4,
                              from:MTLRegionMake2D(0,0,texture.width,texture.height),mipmapLevel:0)

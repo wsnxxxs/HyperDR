@@ -86,6 +86,22 @@ actor RenderSession: EditorRendering {
                                                 photoSize: opened.editor.pixelSize, raw: opened.editor.domain == .rawEDR)
     }
 
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample {
+        let prepared = try await prepare(request)
+        let sample = try await engine.pickCurve(prepared.source,recipe: request.recipe,parameterID: parameterID,point: point,
+            lut: prepared.lut,modelGain: prepared.modelGain,options: prepared.options,size: request.size)
+        try checkCurrent(prepared.generation)
+        return sample
+    }
+
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
+        guard opened?.editor.id == frame.request.sourceID else { throw EditorRenderingError.staleSource }
+        let recipe = frame.request.recipe
+        let range = frame.renderedRange
+        let enabled = recipe.value(for: "hdr.enabled") != .bool(false) && !frame.request.bypassedGroups.contains(.hdr)
+        return try await engine.clippingMask(frame.display, range: range, hdrEnabled: enabled)
+    }
+
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
         await EmbeddedPreview.read(url)
     }
@@ -381,10 +397,20 @@ actor RenderSession: EditorRendering {
                                                  modelGain: prepared.modelGain, options: prepared.options,
                                                  includingSet: true)
             : [:]
+        let range: Float
+        if !prepared.options.bypassedGroups.contains(.hdr), case .number(let value) = request.recipe.value(for: "hdr.range") {
+            range = Float(value)
+        } else if let value = automatic["hdr.range"] {
+            range = Float(value)
+        } else {
+            let resolved = try await engine.resolvedAutomatic(source, recipe: request.recipe, lut: prepared.lut,
+                modelGain: prepared.modelGain, options: prepared.options)
+            range = Float(resolved["hdr.range"] ?? 3)
+        }
         try Task.checkCancellation()
         try checkCurrent(prepared.generation)
         return EditorFrame(request: request, planes: planes, display: display, modelGainPending: planes.aiPending,
-                           isDraftPreview: source.isDraftRAWPreview, automaticValues: automatic)
+                           isDraftPreview: source.isDraftRAWPreview, automaticValues: automatic, renderedRange: range)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {

@@ -11,6 +11,17 @@ public struct ToneAdjustments: Hashable, Sendable {
     public var whites: Float = RenderParameter.defaultNumber("tone.whites")
     public var curve = ToneCurve()
     public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
+    var curveProbeStage: UInt32 = 0
+    public var curveSDR = ToneCurve(), curveHDR = ToneCurve()
+    public var curveRed = ToneCurve(), curveGreen = ToneCurve(), curveBlue = ToneCurve()
+    public var parametricHighlights: Float = 0, parametricLights: Float = 0
+    public var parametricDarks: Float = 0, parametricShadows: Float = 0
+    public var parametricSplit1: Float = 0.25, parametricSplit2: Float = 0.5, parametricSplit3: Float = 0.75
+    public var hasCurves: Bool {
+        !curve.isIdentity || !curveSDR.isIdentity || !curveHDR.isIdentity || !curveRed.isIdentity
+        || !curveGreen.isIdentity || !curveBlue.isIdentity || parametricHighlights != 0
+        || parametricLights != 0 || parametricDarks != 0 || parametricShadows != 0
+    }
     public init() {}
     public var isIdentity: Bool { self == Self() }
 }

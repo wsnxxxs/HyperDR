@@ -65,8 +65,14 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 3 && y < .5f) { float t=y/.5f; target=.5f*(t+.8f*a*t*(1-t)*(1-t)); }
     // Whites deliberately crosses SDR white; the gain split retains that light.
     // This replaces the original plan's concern that a white-point control clips HDR.
-    if (op == 9 && y > 0) target = y*exp2(1.25f*a*y*y/(y*y+.25f));
-    if (op == 4 && y < .1f) target = max(0.f,y-.03f*a*(1-sm(0.f,.1f,y)));
+    if (op == 9 && y > 0) target = y*exp2(2.f*a*y/(y+.5f));
+    if (op == 4 && y < .5f) {
+        float encoded = (y<=.0031308f ? 12.92f*max(0.f,y) : 1.055f*pow(y,1.f/2.4f)-.055f);
+        float changed = a > 0 ? max(0.f,encoded-.1f*a*(1-sm(.1f,.5f,encoded)))
+                              : encoded-.12f*a*(1-sm(0.f,.5f,encoded));
+        target = (changed<=.04045f ? changed/12.92f : pow((changed+.055f)/1.055f,2.4f));
+        if(a<0) return rgb+(target-y);
+    }
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
 }
 struct PointUniform { uint op, sdr; float value, unused; };
@@ -90,6 +96,7 @@ struct GraphUniform {
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
     float4 light; // whites, curve table offset, curve table size
+    float4 curveHDRTails;
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -220,15 +227,33 @@ float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read
     return changed;
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
+float curveEncode(float y) { return y<=.0031308f ? 12.92f*y : 1.055f*pow(y,1.f/2.4f)-.055f; }
+float curveDecode(float x) { return x<=.04045f ? x/12.92f : pow((x+.055f)/1.055f,2.4f); }
+float curveLookup(float x,uint slot,constant GraphUniform& p,device const float4* table) {
+    float position=clamp(x,0.f,1.f)*1023.f;
+    uint i=min(uint(position),1022u), offset=uint(p.light.y)+slot*1024;
+    return mix(table[offset+i].x,table[offset+i+1].x,position-float(i));
+}
 float3 applyToneCurve(float3 rgb, constant GraphUniform& p, device const float4* table) {
+    if(p.light.z==0) return rgb;
     float y=lum(rgb);
-    if(p.light.z==0 || y<=0 || y>=1) return rgb;
-    float encoded=y<=.0031308f ? 12.92f*y : 1.055f*pow(y,1.f/2.4f)-.055f;
-    float position=encoded*(p.light.z-1);
-    uint i=min(uint(position),uint(p.light.z)-2), offset=uint(p.light.y);
-    float mapped=mix(table[offset+i].x,table[offset+i+1].x,position-float(i));
-    float target=mapped<=.04045f ? mapped/12.92f : pow((mapped+.055f)/1.055f,2.4f);
-    return rgb*(target/y);
+    if(y>0 && y<1)rgb*=curveDecode(curveLookup(curveEncode(y),0,p,table))/y;
+    for(uint c=0;c<3;c++)if(rgb[c]>0 && rgb[c]<1)
+        rgb[c]=curveDecode(curveLookup(curveEncode(rgb[c]),3+c,p,table));
+    return rgb;
+}
+float3 isoLogRatio(float3 numerator,float3 denominator);
+float3 endpointCurve(float3 rgb,uint slot,bool sdr,constant GraphUniform& p,device const float4* table) {
+    float y=lum(rgb);
+    if(y<=0 || (y<=1 && !sdr))return rgb;
+    float x=y>1 ? 1+log2(y) : curveEncode(y), mapped;
+    if(x>1) {
+        float bounded=min(x,5.f);
+        float2 tail=slot==0 ? p.curveHDRTails.xy : p.curveHDRTails.zw;
+        mapped=x>=tail.x ? tail.y+(x-tail.x) : curveLookup((bounded-1)/4,slot==0 ? 6 : 7,p,table);
+        mapped=exp2(max(1.f,mapped)-1);
+    } else mapped=curveDecode(max(x,curveLookup(x,slot,p,table)));
+    return rgb*(mapped/y);
 }
 // Light and colour in linear light; each look declares its own input transform.
 float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true) {
@@ -236,6 +261,11 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    if(p.light.w==1)return rgb;
+    if(p.light.w==2) {
+        float y=lum(rgb);
+        return p.light.z!=0 && y>0 && y<1 ? rgb*curveDecode(curveLookup(curveEncode(y),0,p,table))/y : rgb;
+    }
     rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
@@ -536,8 +566,22 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
         g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
     }
     float3 hdr=(pair.base+offset)*exp2(g)-offset;
+    // Probe the actual node input, before downstream curves/shoulder/rolloff.
+    if(p.light.w==3 || ((p.light.w==4 || p.light.w==5) && p.light.z==0)) {
+        base.write(float4(p.light.w==3 ? pair.base : hdr,pair.alpha),pos);gain.write(float4(0),pos);return;
+    }
+    if(p.light.z!=0) {
+        float y=lum(pair.base);
+        if(y>0 && y<1)pair.base*=curveDecode(curveLookup(curveEncode(y),1,p,table))/y;
+        pair.base=fit(pair.base,1.f);
+        if(p.light.w==5) { base.write(float4(hdr,pair.alpha),pos);gain.write(float4(0),pos);return; }
+        hdr=endpointCurve(hdr,0,false,p,table);
+        if(p.light.w==4) { base.write(float4(hdr,pair.alpha),pos);gain.write(float4(0),pos);return; }
+        hdr=endpointCurve(hdr,2,true,p,table);
+        g=isoLogRatio(max(hdr,0.f)+offset,pair.base+offset);
+    }
     float limit=exp2(p.color.z);
-    float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0);
+    float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0 || (p.light.z!=0 && peak>limit));
     bool physical=p.effects.x>0 || p.effects.y>0;
     // A newly enabled generic effect must not trigger the shoulder below its
     // legal ceiling. Cap only its actual overflow, continuously at that ceiling.
@@ -635,4 +679,14 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
         weight=p.mode.x==5 ? clamp(amount/p.color.z,0.f,1.f) : (amount>1e-6f ? 1.f : 0.f);
     }
     output.write(float4(weight,0,0,0),pos);
+}
+
+kernel void curveProbe(texture2d<float,access::sample> source [[texture(0)]],
+                       texture2d<float,access::write> output [[texture(1)]],
+                       texture3d<float,access::read> cube [[texture(2)]],
+                       constant GraphUniform& p [[buffer(0)]],device const float4* table [[buffer(1)]],
+                       uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float4 pixel=sourceSample(source,float2(p.region.zw)+.5f,float2(p.region.xy),p.inputRegion);
+    output.write(float4(graphScene(pixel,p,cube,table),1),pos);
 }

@@ -50,6 +50,10 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample
+
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask
+
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample
 
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
@@ -188,6 +192,8 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     /// parameters the recipe sets: the ruler marks it as their default.
     /// Whole-image renders only; a region's is empty.
     var automaticValues: [String: Double] = [:]
+    /// Global render capacity, including on detail/ROI frames.
+    var renderedRange: Float = 3
 
     var size: HyperDRRender.PixelSize { request.size }
 
@@ -238,6 +244,14 @@ extension EditorRendering {
     nonisolated var includesModel: Bool { true }
 
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
+
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample {
+        throw EditorRenderingError.unsupported("Curve sampling")
+    }
+
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
+        throw EditorRenderingError.unsupported("Clipping overlay")
+    }
 
     func yieldMemory() async {}
 

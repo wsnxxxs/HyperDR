@@ -50,10 +50,16 @@ extension DoubleReference {
             return scale(0.5*(t+0.8*a*t*(1-t)*(1-t)))
         case .whites:
             guard y > 0 else { return rgb }
-            return scale(y*exp2(1.25*a*y*y/(y*y+0.25)))
+            return scale(y*exp2(2*a*y/(y+0.5)))
         case .blacks:
-            guard y < 0.1 else { return rgb }
-            let target = max(0,y-0.03*a*(1-smoothStep(0,0.1,y)))
+            guard y < 0.5 else { return rgb }
+            let encoded = (y <= 0.0031308 ? 12.92*max(0,y) : 1.055*pow(y,1/2.4)-0.055)
+            let changed = a > 0
+                ? max(0, encoded - 0.1*a*(1-smoothStep(0.1,0.5,encoded)))
+                : encoded - 0.12*a*(1-smoothStep(0,0.5,encoded))
+            let target = (changed <= 0.04045 ? changed/12.92 : pow((changed+0.055)/1.055,2.4))
+            // Lift the floor with neutral light; scaling would amplify shadow chroma/noise.
+            if a < 0 { return rgb + RGB(repeating: target-y) }
             return y > 1e-8 ? scale(target) : rgb + RGB(repeating: target)
         case .warmth, .tint:
             let diagonal = operation == .warmth ? RGB(exp2(0.4*a),1,exp2(-0.4*a))
@@ -300,7 +306,7 @@ extension DoubleReference {
             for (op,value) in operations {
                 x = point(x,operation:op,value:Double(op == .whites ? whites : value),sdr:sdr && op == .exposure)
             }
-            x = toneCurve(x, curve: settings.tone.curve)
+            x = sceneCurves(x, tone: settings.tone)
             x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
             return point(x, operation: .saturation, value: Double(settings.color.saturation))
         }
@@ -343,13 +349,18 @@ extension DoubleReference {
         return peak <= knee ? peak : knee-width*expm1(-(peak-knee)/width)
     }
     public static func hdrOutput(_ pair: Split, expansion: Double = 0, settings: HDRAdjustments,
-                                 range: Double, shoulder: Bool, allowRolloff: Bool) -> Split {
+                                 range: Double, shoulder: Bool, allowRolloff: Bool, tone: ToneAdjustments = ToneAdjustments()) -> Split {
         var base = pair.base
         var gains = pair.gains
         for c in 0..<3 { gains[c] = max(gains[c],expansion)*Double(settings.strength) }
+        if tone.hasCurves {
+            let endpoints = endpointCurves(base: base, hdr: RGB(base.x*exp2(gains.x),base.y*exp2(gains.y),base.z*exp2(gains.z)), tone: tone)
+            base = endpoints.base
+            for c in 0..<3 { gains[c] = base[c] == 0 ? 0 : log2(max(endpoints.hdr[c]/base[c],1e-30)) }
+        }
         let peak = (0..<3).map { base[$0]*exp2(gains[$0]) }.max()!
         if peak > 0 {
-            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder)/peak,1e-30)))
+            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder || (tone.hasCurves && peak>exp2(range)))/peak,1e-30)))
         }
         if allowRolloff && settings.sdrRolloff > 0 {
             let m = max(base.x,base.y,base.z)

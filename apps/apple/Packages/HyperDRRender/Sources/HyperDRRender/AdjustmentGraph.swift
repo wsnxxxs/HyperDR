@@ -18,6 +18,9 @@ struct GraphUniform {
     var effects: SIMD4<Float> = .zero
     var light: SIMD4<Float> = .zero
     var curveHDRTails: SIMD4<Float> = .zero
+    var toneSpatialInfo: SIMD4<UInt32> = .zero
+    var toneSpatialSettings: SIMD4<Float> = .zero
+    var toneAtmosphere: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -70,9 +73,9 @@ extension RenderEngine {
         return source.texture
     }
 
-    func lookupResources(_ lut: ColorLUT?, tone: ToneAdjustments = ToneAdjustments()) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
+    func lookupResources(_ lut: ColorLUT?, tone: ToneAdjustments = ToneAdjustments(), spatial: ToneSpatialMap? = nil) throws -> (texture: any MTLTexture, buffer: any MTLBuffer, spatial: ToneSpatialMap?) {
         let id = lut?.id ?? ""
-        if let cache = lutCache, cache.id == id, cache.tone == tone { return (cache.texture, cache.buffer) }
+        if let cache = lutCache, cache.id == id, cache.tone == tone, cache.spatialID == spatial?.id { return (cache.texture, cache.buffer, spatial) }
         // Curve drags replace only the small table, keeping the installed 3D LUT.
         let cachedTexture = lutCache.flatMap { $0.id == id ? $0.texture : nil }
         lutCache = nil
@@ -97,13 +100,14 @@ extension RenderEngine {
         }
         var bufferValues = lut?.is3D == false ? lut!.values.map { SIMD4($0, 1) } : [SIMD4<Float>(repeating: 0)]
         if tone.hasCurves { bufferValues += tone.curveTables() }
+        if let spatial { bufferValues += spatial.values }
         let buffer = try bufferValues.withUnsafeBytes { bytes in
             guard let value = device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
                 else { throw RenderError.allocationFailed }
             return value
         }
-        lutCache = (id, tone, texture, buffer)
-        return (texture, buffer)
+        lutCache = (id, tone, spatial?.id, texture, buffer)
+        return (texture, buffer, spatial)
     }
 
     /// Strength, grain amount, 1/pixel area (µm⁻²) for a render of `size`, and the exposure factor.
@@ -218,7 +222,7 @@ extension RenderEngine {
     }
 
     func graphUniform(_ source: RenderSource, _ edit: RenderAdjustments, size: PixelSize,
-                      region: CGRect, range: Float = 3, shoulder: Bool = false) -> GraphUniform {
+                      region: CGRect, range: Float = 3, shoulder: Bool = false, spatial: ToneSpatialMap? = nil) -> GraphUniform {
         let t = edit.tone, c = edit.color, h = edit.hdr, l = edit.look
         let lut = l.isIdentity ? nil : l.lut
         let domain: UInt32 = source.domain == .sdr ? 0 : source.domain == .hdr ? 1 : source.domain == .rawEDR ? 2 : 3
@@ -242,7 +246,10 @@ extension RenderEngine {
                            referenceArea, edit.usesFilmProcessing ? 1 : 0),
             light: SIMD4(t.whites, Float(lut?.is3D == false ? lut!.values.count : 1), t.hasCurves ? 1024 : 0, Float(t.curveProbeStage)),
             curveHDRTails: SIMD4(Float(t.curve.coordinates[t.curve.coordinates.count-2]),Float(t.curve.coordinates.last!),
-                Float(t.curveHDR.coordinates[t.curveHDR.coordinates.count-2]),Float(t.curveHDR.coordinates.last!)))
+                Float(t.curveHDR.coordinates[t.curveHDR.coordinates.count-2]),Float(t.curveHDR.coordinates.last!)),
+            toneSpatialInfo: SIMD4(UInt32(spatial?.size.width ?? 0),UInt32(spatial?.size.height ?? 0),
+                UInt32((lut?.is3D == false ? lut!.values.count : 1)+(t.hasCurves ? 8192 : 0)),spatial == nil ? 0 : 1),
+            toneSpatialSettings: SIMD4(t.dehaze,t.clarity,0,0),toneAtmosphere: SIMD4(spatial?.air ?? .zero,0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -264,13 +271,15 @@ extension RenderEngine {
         func texture(_ format: MTLPixelFormat = .rgba32Float) throws -> any MTLTexture {
             try context.texture(width: width, height: height, format: format)
         }
+        // Finish the bounded spatial estimates before allocating the rest of
+        // analysis; their temporary guide textures need not coexist.
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, tone: edit.tone, spatial: try toneSpatialMap(source,edit: edit))
         let cells = try texture(), peaks = try texture(), masks = try texture()
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
         let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, tone: edit.tone)
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing)
         var parameters = graphUniform(source, edit, size: source.size,
-            region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
+            region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height), spatial: resources.spatial)
         parameters.film.y = 0 // grain averages out in the cells
         parameters.effects.x = 0
         // Analysis excludes generic endpoint effects and their encoding floor.
@@ -473,7 +482,7 @@ extension RenderEngine {
             .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
         let target = try authoredSourceAtOutputGrid(source, size: size, region: inputRegion)
         let input = try target?.hdr ?? workingInput(source)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, tone: edit.tone)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, tone: edit.tone, spatial: try toneSpatialMap(source,edit: edit))
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing, genericGrain: edit.film.stock == nil && edit.effects.grain > 0)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)
@@ -490,7 +499,7 @@ extension RenderEngine {
         context.diagnosticPhase("graphRegion.outputsAllocated", width: base.width, height: base.height)
 #endif
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range,
-            shoulder: configuration.shoulder)
+            shoulder: configuration.shoulder, spatial: resources.spatial)
         if let target { p.inputRegion = sourceSampling(target.source.texture, target.source.samplingRegion) }
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1

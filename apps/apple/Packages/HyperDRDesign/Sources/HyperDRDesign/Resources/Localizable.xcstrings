@@ -37,6 +37,12 @@
     "ctrl.tone.parametricSplit3.label" : {"comment": "Adjustment tone.parametricSplit3.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Highlight Boundary"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "高光分界"}}}},
     "ctrl.tone.parametricSplit3.help" : {"comment": "Adjustment tone.parametricSplit3.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Adjust highlight boundary."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整高光分界。"}}}},
     "undo.tone.parametricSplit3" : {"comment": "Adjustment tone.parametricSplit3.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Highlight Boundary"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整高光分界"}}}},
+    "ctrl.tone.dehaze.label" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去朦胧"}}}},
+    "ctrl.tone.dehaze.help" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Remove haze, or add a soft atmospheric veil."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去除雾霭，或添加柔和的雾气。"}}}},
+    "undo.tone.dehaze" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整去朦胧"}}}},
+    "ctrl.tone.clarity.label" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Clarity"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "清晰度"}}}},
+    "ctrl.tone.clarity.help" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Strengthen or soften midtone detail while protecting strong edges."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "增强或柔化中间调细节，同时保护强烈边缘。"}}}},
+    "undo.tone.clarity" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Clarity"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整清晰度"}}}},
     "crop.aspect" : {
       "comment" : "Crop inspector: the ratio section.",
       "localizations" : {

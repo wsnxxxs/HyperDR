@@ -52,8 +52,9 @@ public actor RenderEngine {
     var modelPredictionOrder: [ModelPredictionKey] = []
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
+    var toneSpatialCache: (key: ToneSpatialKey, map: ToneSpatialMap)?
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
-    var lutCache: (id: String, tone: ToneAdjustments, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lutCache: (id: String, tone: ToneAdjustments, spatialID: UUID?, texture: any MTLTexture, buffer: any MTLBuffer)?
     var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
     /// The look baseline of the rendered source, and separately of the fixed
     /// analysis source: a partial-strength render needs both, and one shared
@@ -138,6 +139,7 @@ public actor RenderEngine {
         hdrCache = nil
         outputCache = nil
         analysisCache = nil
+        toneSpatialCache = nil
         lutCache = nil
         filmCache = nil
         filmMeterCache.removeAll()

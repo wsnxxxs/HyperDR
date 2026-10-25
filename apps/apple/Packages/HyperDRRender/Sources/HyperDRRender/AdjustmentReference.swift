@@ -280,14 +280,16 @@ extension DoubleReference {
     /// downstream so changing them never reselects the SDR base.
     /// `grain` places the film's grain; without it the film is grainless. An automatic
     /// film exposure reads as zero here: pass the metered value in `settings`.
-    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil, baseline: RGB? = nil) -> Split {
+    /// Spatial tools take their fixed-grid sample and atmospheric light from
+    /// `toneSpatialAnalysis`, interpolated at this pixel's global coordinates.
+    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil, baseline: RGB? = nil, spatial: SIMD4<Double>? = nil, air: RGB = RGB(repeating: 1)) -> Split {
         let weight = !settings.look.isIdentity ? settings.look.strength : settings.film.isIdentity ? 0 : settings.film.strength
         if weight > 0 && weight < 1 {
             var full = settings
             if !full.look.isIdentity { full.look.strength = 1 } else { full.film.strength = 1 }
-            let styled = prepare(source, settings: full, sdr: sdr, grain: grain)
+            let styled = prepare(source, settings: full, sdr: sdr, grain: grain,spatial: spatial,air: air)
             var plain = settings; plain.look.lut = nil; plain.film.stock = nil
-            let original = prepare(baseline ?? source, settings: plain, sdr: sdr)
+            let original = prepare(baseline ?? source, settings: plain, sdr: sdr,spatial: spatial,air: air)
             let w = Double(weight)
             let base = original.base + (styled.base-original.base)*w
             if styled.gains == original.gains { return Split(base: base, gains: original.gains) }
@@ -301,10 +303,12 @@ extension DoubleReference {
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
             (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks)]
-        func adjusted(_ whites: Float) -> RGB {
+        func adjusted(_ whites: Float, useSpatial: Bool = true) -> RGB {
             var x = source
             for (op,value) in operations {
                 x = point(x,operation:op,value:Double(op == .whites ? whites : value),sdr:sdr && op == .exposure)
+                if useSpatial, op == .exposure, let spatial { x = dehaze(x,air: air,transmission: spatial.x,amount: Double(settings.tone.dehaze)) }
+                if useSpatial, op == .blacks, let spatial { x = clarity(x,lowFrequency: spatial.y,amount: Double(settings.tone.clarity)) }
             }
             x = sceneCurves(x, tone: settings.tone)
             x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
@@ -321,8 +325,8 @@ extension DoubleReference {
         let filmScene = x
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
         var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
-        if sdr, !(active && !settings.look.input.isSDR), settings.tone.whites > 0 {
-            var original = adjusted(0)
+        if sdr, !(active && !settings.look.input.isSDR), (settings.tone.whites > 0 || settings.tone.dehaze != 0 || settings.tone.clarity != 0) {
+            var original = adjusted(0,useSpatial: false)
             original = fitP3(original,upper:max(1,original.x,original.y,original.z))
             g = max(0,log2(max(1,x.x,x.y,x.z)/max(1,original.x,original.y,original.z)))
         }
@@ -360,7 +364,7 @@ extension DoubleReference {
         }
         let peak = (0..<3).map { base[$0]*exp2(gains[$0]) }.max()!
         if peak > 0 {
-            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder || (tone.hasCurves && peak>exp2(range)))/peak,1e-30)))
+            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder || ((tone.hasCurves || tone.dehaze != 0 || tone.clarity != 0) && peak>exp2(range)))/peak,1e-30)))
         }
         if allowRolloff && settings.sdrRolloff > 0 {
             let m = max(base.x,base.y,base.z)

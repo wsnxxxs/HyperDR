@@ -20,10 +20,14 @@ public struct RAWConvertedDNG: Sendable {
 public struct RAWEmbeddedPreview: Sendable {
     public let url: URL
     public let usedCache: Bool
+    /// EXIF orientation reported by the RAW container, when ImageIO does not
+    /// carry it in the extracted JPEG itself.
+    public let orientation: Int32?
 
-    public init(url: URL, usedCache: Bool = false) {
+    public init(url: URL, usedCache: Bool = false, orientation: Int32? = nil) {
         self.url = url
         self.usedCache = usedCache
+        self.orientation = orientation
     }
 }
 
@@ -287,6 +291,7 @@ extension RenderEngine {
         options.rawCompatibility = nil
         options.rawEmbeddedPreview = true
         options.rawDecoderVersion = nil
+        options.embeddedPreviewOrientation = preview.orientation
         options.sceneLinear = false
         options.draftRAWPreview = false
         return (nil, options)

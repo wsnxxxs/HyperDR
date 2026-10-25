@@ -9,11 +9,12 @@ import HyperDRRender
 public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
     public nonisolated let converterID: String
 
-    typealias Operation = @Sendable (_ source: URL, _ output: URL) async throws -> Void
+    typealias Operation = @Sendable (_ source: URL, _ output: URL) async throws -> Int32?
 
     private struct CacheResult: Sendable {
         let url: URL
         let usedCache: Bool
+        let orientation: Int32?
     }
     private struct Flight: Sendable {
         let id: UUID
@@ -46,15 +47,15 @@ public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
     public func extractEmbeddedPreview(from source: URL) async throws -> RAWEmbeddedPreview {
         try Task.checkCancellation()
         let result = try await cached(source, kind: "jpg", operation: extractOperation)
-        return RAWEmbeddedPreview(url: result.url, usedCache: result.usedCache)
+        return RAWEmbeddedPreview(url: result.url, usedCache: result.usedCache, orientation: result.orientation)
     }
 
     private func cached(_ source: URL, kind: String, operation: @escaping Operation) async throws -> CacheResult {
         let key = try Self.cacheKey(source, converterID: converterID, kind: kind)
         let output = root.appendingPathComponent(key + "." + kind)
-        if let cached = cachedFile(output) {
+        if let cached = cachedFile(output, kind: kind) {
             try Task.checkCancellation()
-            return CacheResult(url: cached, usedCache: true)
+            return cached
         }
         if let existing = flights[key] {
             return try await awaitFlight(key, flight: existing)
@@ -65,11 +66,12 @@ public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
                 let temporary = root.appendingPathComponent(key + "." + UUID().uuidString + "." + kind)
                 do {
-                    try await operation(source, temporary)
-                    let raced = try Self.publish(temporary, to: output)
-                    return CacheResult(url: output, usedCache: raced)
+                    let orientation = try await operation(source, temporary)
+                    let raced = try Self.publish(temporary, to: output, kind: kind, orientation: orientation)
+                    return CacheResult(url: output, usedCache: raced, orientation: orientation)
                 } catch {
                     try? FileManager.default.removeItem(at: temporary)
+                    try? FileManager.default.removeItem(at: temporary.appendingPathExtension("orientation"))
                     throw Self.mapped(error)
                 }
             } catch {
@@ -91,27 +93,55 @@ public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
         waiters[key] = nil
     }
 
-    private func cachedFile(_ url: URL) -> URL? {
+    private func cachedFile(_ url: URL, kind: String) -> CacheResult? {
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0 else {
             if fileManager.fileExists(atPath: url.path) { try? fileManager.removeItem(at: url) }
             return nil
         }
+        let orientation: Int32?
+        if kind == "jpg" {
+            let metadata = url.appendingPathExtension("orientation")
+            guard let text = try? String(contentsOf: metadata, encoding: .utf8),
+                  let value = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  (1...8).contains(value) else {
+                try? fileManager.removeItem(at: url)
+                try? fileManager.removeItem(at: metadata)
+                return nil
+            }
+            orientation = value
+        } else {
+            orientation = nil
+        }
         try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
-        return url
+        return CacheResult(url: url, usedCache: true, orientation: orientation)
     }
 
     /// Publish beside the cache file, so rename is atomic. Another converter
     /// instance may win the same key; its complete file is just as reusable.
-    private static func publish(_ temporary: URL, to output: URL) throws -> Bool {
+    private static func publish(_ temporary: URL, to output: URL, kind: String,
+                                orientation: Int32?) throws -> Bool {
+        let raced: Bool
         do {
             try FileManager.default.moveItem(at: temporary, to: output)
-            return false
+            raced = false
         } catch {
             guard FileManager.default.fileExists(atPath: output.path) else { throw error }
             try? FileManager.default.removeItem(at: temporary)
-            return true
+            raced = true
         }
+        if kind == "jpg" {
+            let metadata = output.appendingPathExtension("orientation")
+            let temporaryMetadata = temporary.appendingPathExtension("orientation")
+            try Data(String(orientation ?? 1).utf8).write(to: temporaryMetadata, options: .atomic)
+            do {
+                try FileManager.default.moveItem(at: temporaryMetadata, to: metadata)
+            } catch {
+                if !FileManager.default.fileExists(atPath: metadata.path) { throw error }
+                try? FileManager.default.removeItem(at: temporaryMetadata)
+            }
+        }
+        return raced
     }
 
     private func awaitFlight(_ key: String, flight: Flight) async throws -> CacheResult {

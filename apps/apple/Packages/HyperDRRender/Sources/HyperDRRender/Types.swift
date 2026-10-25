@@ -330,6 +330,8 @@ public struct SourceOptions: Hashable, Sendable {
     public var rawCompatibility: String? = nil
     /// An embedded JPEG replaces the RAW as an SDR photo.
     public var rawEmbeddedPreview = false
+    /// Transient EXIF orientation from the extraction report.
+    var embeddedPreviewOrientation: Int32? = nil
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()

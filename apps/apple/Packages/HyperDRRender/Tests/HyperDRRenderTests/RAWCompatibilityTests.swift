@@ -32,7 +32,7 @@ private final class CompatibilityConverter: RAWCompatibilityConverting, @uncheck
     func extractEmbeddedPreview(from source: URL) async throws -> RAWEmbeddedPreview {
         lock.withLock { extractions += 1 }
         guard let preview else { throw RAWCompatibilityError.noPreview }
-        return RAWEmbeddedPreview(url: preview, usedCache: true)
+        return RAWEmbeddedPreview(url: preview, usedCache: true, orientation: 6)
     }
 }
 
@@ -118,7 +118,7 @@ final class RAWCompatibilityTests: XCTestCase {
         XCTAssertEqual(source.domain, .sdr)
         XCTAssertEqual(source.sourceCompatibility, .embeddedPreview)
         XCTAssertNil(source.rawCompatibility)
-        XCTAssertEqual(source.nativeSize, PixelSize(width: 8, height: 4))
+        XCTAssertEqual(source.nativeSize, PixelSize(width: 4, height: 8))
         XCTAssertEqual(source.sourceOptions?.rawEmbeddedPreview, true)
 
         RenderEngine.registerRAWCompatibilityConverter(CompatibilityConverter(dng: nil, preview: nil, camera: "ILCE-7M5"))

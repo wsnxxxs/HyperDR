@@ -134,7 +134,8 @@ extension RenderEngine {
             opened.rawCompatibility = options.rawCompatibility
             return opened
         }
-        let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value ?? 1
+        let orientation = options.embeddedPreviewOrientation
+            ?? (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value ?? 1
         let auxiliary = [(kCGImageAuxiliaryDataTypeISOGainMap, AuthoredGainMap.Standard.iso),
                          (kCGImageAuxiliaryDataTypeHDRGainMap, .apple)].map { key, standard in
             (standard, CGImageSourceCopyAuxiliaryDataInfoAtIndex(source,0,key))

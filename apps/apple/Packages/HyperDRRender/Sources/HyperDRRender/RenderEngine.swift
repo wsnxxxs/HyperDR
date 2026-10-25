@@ -20,7 +20,8 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
         revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
         options.kind.rawValue,String(options.lensCorrection),String(linear),
         options.rawDecoderVersion ?? "system-default", options.rawCompatibility ?? "native",
-        String(options.rawEmbeddedPreview), number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+        String(options.rawEmbeddedPreview), String(options.embeddedPreviewOrientation ?? -1),
+        number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
         // Only a geometry that does something is named, so other ids are unchanged.
         + (options.geometry.isIdentity ? [] : [(try? Recipe(geometry: options.geometry).jsonString()) ?? "geometry"])
     let data = try! JSONSerialization.data(withJSONObject:fields)

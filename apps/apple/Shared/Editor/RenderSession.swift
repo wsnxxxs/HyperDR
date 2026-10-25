@@ -194,6 +194,7 @@ actor RenderSession: EditorRendering {
             effectiveOptions.rawEmbeddedPreview = openedOptions.rawEmbeddedPreview
             effectiveOptions.sceneLinear = openedOptions.sceneLinear
             effectiveOptions.draftRAWPreview = openedOptions.draftRAWPreview
+            effectiveOptions.embeddedPreviewOrientation = openedOptions.embeddedPreviewOrientation
         }
         opened = Opened(editor: editor, revision: revision, source: source,
                         options: effectiveOptions, previewOptions: effectiveOptions)

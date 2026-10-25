@@ -22,8 +22,10 @@ private actor ConversionCounter {
                 await count.add()
                 try await Task.sleep(for: .milliseconds(30))
                 try Data("converted".utf8).write(to: output)
+                return nil
             }, extract: { _, output in
                 try Data("preview".utf8).write(to: output)
+                return 6
             })
 
         async let first = converter.convertDNG(from: source)
@@ -40,6 +42,12 @@ private actor ConversionCounter {
         try Data("a different revision".utf8).write(to: source)
         _ = try await converter.convertDNG(from: source)
         #expect(await count.value == 2)
+
+        let preview = try await converter.extractEmbeddedPreview(from: source)
+        #expect(preview.orientation == 6)
+        let cachedPreview = try await converter.extractEmbeddedPreview(from: source)
+        #expect(cachedPreview.usedCache)
+        #expect(cachedPreview.orientation == 6)
     }
 
     @Test func engineFailuresKeepTheirPublicCompatibilityMeaning() async throws {

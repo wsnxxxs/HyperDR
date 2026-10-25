@@ -462,8 +462,9 @@ struct LookSection: View {
     /// is under Built-in (a film stays on while its LUT tab is browsed); any
     /// other look control is the LUT's.
     static func kind(revealing id: String?, current: Kind) -> Kind {
-        guard let id, id.hasPrefix(Recipe.filmID), Adjustments.declaration(id)?.group == .look else { return current }
-        return .builtIn
+        if id == lutExposureID { return .imported }
+        guard let id, Adjustments.declaration(id)?.group == .look else { return current }
+        return id.hasPrefix(Recipe.filmID) ? .builtIn : current
     }
 
     /// The kind shown, once chosen; until then the recipe's.
@@ -475,7 +476,9 @@ struct LookSection: View {
         let film = state.controls.first { $0.id == Recipe.filmID }
         let lut = state.controls.first { $0.id == Recipe.lookID }
         let filmControls = state.controls.filter { $0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.filmID }
-        let lutControls = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+        // A Log LUT's exposure stands right under the LUT, before its strength and spaces.
+        let lutRest = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+        let lutControls = lutRest.filter { $0.id == lutExposureID } + lutRest.filter { $0.id != lutExposureID }
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s4) {
             ParameterSegmented(Text("look.kind", bundle: .module),
                                selection: Binding(get: { kind }, set: { chosen = $0 }),

@@ -34,7 +34,16 @@ extension EditorModel {
                                      hdrRange: Float(outputCeilingStops)),
             previewsAsSDR: previewsAsSDR || editor.previewsAsSDR,
             geometry: crop?.display(clipsToCrop: !isCropping, dimsOutsideCrop: isCropping,
-                                    rendered: editedFrame?.request.recipe.geometry ?? .identity))
+                                    rendered: editedFrame?.request.recipe.geometry ?? .identity),
+            clipping: clippingMasks)
+    }
+
+    /// Render's dead black and clipping masks, while the editor shows them
+    /// (a white or black point drag, or the Option key held).
+    var clippingMasks: ClippingMasks? {
+        guard editor.showsClipping, !isCropping else { return nil }
+        let masks = ClippingMasks(whole: editor.clippingMask?.texture, detail: editor.detailClippingMask?.texture)
+        return masks.isEmpty ? nil : masks
     }
 
     /// Room around the crop in the crop pane, for its corners.

@@ -696,3 +696,45 @@ extension CanvasCompositionTests {
         }
     }
 }
+
+extension CanvasCompositionTests {
+    /// Render's mask paints dead black blue and clipping red on the edited side
+    /// only, and nothing changes without it.
+    func testClippingMasksPaintDeadBlackBlueAndClippedRed() async throws {
+        let renderer = try makePreviewRenderer()
+        let whole = try photo(renderer.device) { _, _ in 0.5 }
+        let compositor = try DisplayCompositor(device: renderer.device, library:renderer.library)
+        let out = try target(renderer.device,width:64,height:48)
+        let transform = CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:CGSize(width:64,height:48))
+        // Left half dead black, right half clipping, the middle column neither.
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rg32Float,width:8,height:6,mipmapped:false)
+        let mask = try XCTUnwrap(renderer.device.makeTexture(descriptor:descriptor))
+        var texels = [Float](repeating:0,count:8*6*2)
+        for y in 0..<6 { for x in 0..<8 where x != 4 { texels[(y*8+x)*2+(x < 4 ? 0 : 1)] = 1 } }
+        mask.replace(region:MTLRegionMake2D(0,0,8,6),mipmapLevel:0,withBytes:texels,bytesPerRow:8*8)
+
+        var command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+        try compositor.encode(CanvasComposition(edited:whole,headroom:1),transform:transform,target:out,command:command)
+        let plain = try read(out,after:command)
+
+        let content = CanvasComposition(edited:whole,headroom:1,clipping:ClippingMasks(whole:mask,detail:nil))
+        command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+        try compositor.encode(content,transform:transform,target:out,command:command)
+        let marked = try read(out,after:command)
+        func pixel(_ image: [Float], _ x: Int, _ y: Int) -> [Float] { (0..<3).map { image[(y*64+x)*4+$0] } }
+        let blue = pixel(marked,8,24), red = pixel(marked,56,24), neither = pixel(marked,32,24)
+        XCTAssertGreaterThan(blue[2],blue[0]); XCTAssertGreaterThan(blue[2],blue[1])
+        XCTAssertGreaterThan(red[0],red[1]); XCTAssertGreaterThan(red[0],red[2])
+        for c in 0..<3 { XCTAssertEqual(neither[c],pixel(plain,32,24)[c],accuracy:0.002) }
+
+        // The original side of a comparison is never marked.
+        var compare = CanvasComposition(original:whole,edited:whole,mode:.compare,headroom:1,
+                                        clipping:ClippingMasks(whole:mask,detail:nil))
+        compare.splitRatio = 0.5
+        command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+        try compositor.encode(compare,transform:transform,target:out,command:command)
+        let split = try read(out,after:command)
+        XCTAssertEqual(pixel(split,8,24)[2],pixel(plain,8,24)[2],accuracy:0.002, "the original side stays unmarked")
+        XCTAssertGreaterThan(pixel(split,56,24)[0],pixel(plain,56,24)[0] + 0.1, "the edited side is marked")
+    }
+}

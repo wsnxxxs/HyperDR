@@ -161,14 +161,15 @@ public enum AdjustmentText {
 
     /// The kinds of LUT space, in menu order.
     public enum LookSpaceFamily: String, CaseIterable, Sendable {
-        case display, hdr, log
+        case display, hdr, log, grading
 
-        /// Every space that is neither a display nor an HDR encoding is a
-        /// camera's Log encoding.
+        /// Every space that is neither a display, an HDR nor a grading
+        /// encoding is a camera's Log encoding.
         public init(_ id: String) {
             switch id {
             case "srgb", "p3", "rec709", "rec2020": self = .display
             case "hlg", "pq": self = .hdr
+            case "davinci-dwg", "acescct-ap1": self = .grading
             default: self = .log
             }
         }
@@ -178,6 +179,7 @@ public enum AdjustmentText {
             case .display: return Text("look.space.display", bundle: .module)
             case .hdr: return Text("look.space.hdr", bundle: .module)
             case .log: return Text("look.space.log", bundle: .module)
+            case .grading: return Text("look.space.grading", bundle: .module)
             }
         }
     }

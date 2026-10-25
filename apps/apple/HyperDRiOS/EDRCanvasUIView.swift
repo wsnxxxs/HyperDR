@@ -38,6 +38,8 @@ final class EDRCanvasUIView: UIView {
         /// The crop pane draws the photo through its geometry; the canvas's own
         /// zoom, pan and hold are off meanwhile.
         var geometry: GeometryDisplay? = nil
+        /// Dead black and clipping marks, while a white or black point is dragged.
+        var clipping: ClippingMasks? = nil
     }
 
     var content: Content? {
@@ -145,6 +147,7 @@ final class EDRCanvasUIView: UIView {
             composition.previewsAsSDR = content.previewsAsSDR
             composition.splitRatio = content.splitRatio
             composition.geometry = content.geometry
+            composition.clipping = content.geometry == nil ? content.clipping : nil
             if let original = content.original, content.geometry == nil {
                 composition.original = original
                 composition.originalDetail = content.originalDetail
@@ -309,5 +312,7 @@ struct EDRCanvas: UIViewRepresentable {
             && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail)
             && a.mode == b.mode && a.splitRatio == b.splitRatio && a.previewsAsSDR == b.previewsAsSDR
             && a.imageSize == b.imageSize && a.geometry == b.geometry
+            && a.clipping?.whole.map(ObjectIdentifier.init) == b.clipping?.whole.map(ObjectIdentifier.init)
+            && a.clipping?.detail.map(ObjectIdentifier.init) == b.clipping?.detail.map(ObjectIdentifier.init)
     }
 }

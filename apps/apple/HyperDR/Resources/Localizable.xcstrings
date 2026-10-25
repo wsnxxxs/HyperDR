@@ -7287,6 +7287,24 @@
         }
       }
     },
+    "lut.space.family.grading" : {
+      "comment" : "Heading in the LUT library's space menus.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grading Spaces"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调色空间"
+          }
+        }
+      }
+    },
     "settings.tab.general" : {
       "extractionState" : "manual",
       "localizations" : {

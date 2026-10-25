@@ -247,7 +247,16 @@ struct EditorCanvas: View {
                                        previewsAsSDR: editor.previewsAsSDR,
                                        imageSize: CGSize(width: size.width, height: size.height),
                                        geometry: crop?.display(clipsToCrop: !cropping, dimsOutsideCrop: cropping,
-                                                               rendered: frame.request.recipe.geometry))
+                                                               rendered: frame.request.recipe.geometry),
+                                       clipping: clippingMasks)
+    }
+
+    /// Render's dead black and clipping masks while a white or black point is
+    /// dragged.
+    private var clippingMasks: ClippingMasks? {
+        guard editor.showsClipping else { return nil }
+        let masks = ClippingMasks(whole: editor.clippingMask?.texture, detail: editor.detailClippingMask?.texture)
+        return masks.isEmpty ? nil : masks
     }
 
     /// The split divider and the badge, in the canvas's coordinates.

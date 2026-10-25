@@ -62,6 +62,7 @@ struct PreviewCanvas: NSViewRepresentable {
         _ = model.previewsAsSDR
         _ = model.showsHighlightZebra
         _ = model.showsShadowZebra
+        _ = model.clippingMasks
         _ = model.display.currentHeadroom
         _ = model.canvas.imageFrame
         _ = model.canvas.zoom

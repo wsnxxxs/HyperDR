@@ -1133,3 +1133,31 @@ extension RecipeEditorAITests {
         #expect(h.editor.sourceCompatibility == nil)
     }
 }
+
+@MainActor @Suite struct ClippingDisplayTests {
+    @Test func theWhiteAndBlackPointsShowItWhileTheyAreDragged() async throws {
+        let h = Harness()
+        try await h.open()
+        #expect(!h.editor.showsClipping)
+        for id in ["tone.whites", "tone.blacks"] {
+            h.editor.editingChanged(declaration(id), true)
+            #expect(h.editor.showsClipping, "dragging \(id)")
+            h.editor.editingChanged(declaration(id), false)
+            #expect(!h.editor.showsClipping)
+        }
+        let exposure = declaration("tone.exposure")
+        h.editor.editingChanged(exposure, true)
+        #expect(!h.editor.showsClipping, "other controls do not")
+        h.editor.editingChanged(exposure, false)
+    }
+
+    @Test func theHostsKeyShowsItWhileHeld() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.holdsClippingKey = true
+        #expect(h.editor.showsClipping)
+        h.editor.holdsClippingKey = false
+        #expect(!h.editor.showsClipping)
+        #expect(h.editor.clippingMask == nil && h.editor.detailClippingMask == nil)
+    }
+}

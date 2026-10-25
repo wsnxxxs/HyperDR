@@ -173,12 +173,17 @@ struct ColorMixerLayout<Slider: View>: View {
             if isExpanded || !showsTitle {
                 if showsTitle {
                     arrangementChoice
-                } else {
+                } else if layout == .split {
                     // The page names the section: its tools stand beside the choice.
                     HStack(spacing: Space.s2) {
                         arrangementChoice
                         header.fixedSize(horizontal: true, vertical: false)
                     }
+                } else {
+                    // A narrow page (the iPad's side panel): the tools above, so the
+                    // four choices have the whole width for their names.
+                    header
+                    arrangementChoice
                 }
                 if picking?.isActive == true {
                     Text("design.mixer.pickHint", bundle: .module)

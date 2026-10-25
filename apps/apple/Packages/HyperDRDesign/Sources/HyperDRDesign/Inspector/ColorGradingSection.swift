@@ -323,12 +323,16 @@ struct ColorGradingLayout<Slider: View>: View {
             if isExpanded || !showsTitle {
                 if showsTitle {
                     zoneChoice
-                } else {
+                } else if layout == .split {
                     // The page names the section: its reset stands beside the zones.
                     HStack(spacing: Space.s2) {
                         zoneChoice
                         header.fixedSize(horizontal: true, vertical: false)
                     }
+                } else {
+                    // A narrow page: the reset above, so the four zones have the whole width.
+                    header
+                    zoneChoice
                 }
                 switch layout {
                 case .stacked:

@@ -39,8 +39,17 @@ enum GradingWheelMath {
         return Color(.sRGB, red: rgb.x, green: rgb.y, blue: rgb.z, opacity: 1)
     }
 
+    /// A hue at full saturation for the rim and the tracks: the shader's colour
+    /// scaled so its brightest component is `peak`, so the hue reads clearly
+    /// while the angle still stands for the recipe's hue.
+    static func vivid(hue: Double, peak: Double = 0.85) -> Color {
+        let rgb = GradingColor.displayRGB(hue: hue, saturation: 100)
+        let scale = peak / max(rgb.max(), 0.001)
+        return Color(.sRGB, red: min(rgb.x * scale, 1), green: min(rgb.y * scale, 1), blue: min(rgb.z * scale, 1), opacity: 1)
+    }
+
     /// The colour circle at full saturation, from hue 0 round to 360.
-    static func ring(steps: Int = 24) -> [Color] { (0...steps).map { colour(hue: 360 * Double($0) / Double(steps), saturation: 100) } }
+    static func ring(steps: Int = 24) -> [Color] { (0...steps).map { vivid(hue: 360 * Double($0) / Double(steps)) } }
 
     /// Mid grey: the middle of the disc.
     static var neutral: Color { colour(hue: 0, saturation: 0) }
@@ -323,7 +332,7 @@ struct ColorGradingLayout<Slider: View>: View {
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
                     slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring())
                     slider(zone.saturationID, MixerAttribute.saturation.title,
-                           [GradingWheelMath.neutral, GradingWheel.tint(hue: current.hue, saturation: 100)])
+                           [GradingWheelMath.neutral, GradingWheelMath.vivid(hue: current.hue)])
                     slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
                 }
                 Divider().padding(.vertical, Space.s1)

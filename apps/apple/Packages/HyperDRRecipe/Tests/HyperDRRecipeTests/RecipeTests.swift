@@ -316,6 +316,10 @@ private extension ParameterDefault {
     recipe.setValue(curve.parameterValue, for: "tone.curve")
     let restored = try Recipe.decode(Data(recipe.jsonString().utf8))
     #expect(restored.value(for: "tone.curve") == curve.parameterValue)
+    let extended = try ToneCurve(curve.coordinates + [2, 3, 4, 4.5])
+    #expect(extended.samples() == curve.samples(), "HDR tangents must never change SDR interpolation")
+    #expect(extended.value(at: 1) == 1 && extended.value(at: 2) == 3)
+    #expect(extended.samples(count: 3, from: 1, through: 2) == [1,extended.value(at: 1.5),3])
     recipe.setValue(ToneCurve().parameterValue, for: "tone.curve")
     #expect(recipe.value(for: "tone.curve") == nil)
     #expect(throws: ToneCurve.Error.invalidPoints) { try ToneCurve([0,0, 0.8,0.4, 0.2,0.6, 1,1]) }

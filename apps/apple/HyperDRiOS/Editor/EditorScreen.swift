@@ -21,7 +21,11 @@ struct EditorScreen: View {
     let session: EditingSession
     let editor: RecipeEditor
 
+    #if DEBUG
+    @State private var pane = DebugLaunch.tool?.group.map(EditorPane.group) ?? EditorPane.group(.hdr)
+    #else
     @State private var pane = EditorPane.group(.hdr)
+    #endif
     @State private var comparison = Comparison.edited
     @State private var splitRatio = 0.5
     @State private var holdingOriginal = false

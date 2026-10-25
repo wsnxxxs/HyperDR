@@ -53,12 +53,20 @@ struct PadGroupControls: View {
                         }
                         .disabled(off)
                     }
-                    PadRows(columns: columns) {
-                        ForEach(rows) { control in
-                            row(control)
-                        }
-                        ForEach(state.unsupported, id: \.id) { declaration in
-                            PadUnsupportedRow(declaration: declaration)
+                    // Clarity and dehaze stand a little apart from the tones.
+                    let clusters = Self.clusters(rows)
+                    VStack(alignment: .leading, spacing: PadMetrics.rowSpacing + 8) {
+                        ForEach(clusters.indices, id: \.self) { index in
+                            PadRows(columns: columns) {
+                                ForEach(clusters[index]) { control in
+                                    row(control)
+                                }
+                                if index == clusters.count - 1 {
+                                    ForEach(state.unsupported, id: \.id) { declaration in
+                                        PadUnsupportedRow(declaration: declaration)
+                                    }
+                                }
+                            }
                         }
                     }
                     .disabled(off)
@@ -74,6 +82,16 @@ struct PadGroupControls: View {
                 .environment(\.sectionControls, padSectionControls)
             }
         }
+    }
+
+    /// The rows in the runs `AdjustmentPanel.startsCluster` divides them into.
+    static func clusters(_ rows: [AdjustmentControl]) -> [[AdjustmentControl]] {
+        var clusters: [[AdjustmentControl]] = [[]]
+        for control in rows {
+            if AdjustmentPanel.startsCluster(control.id), !clusters[clusters.count - 1].isEmpty { clusters.append([]) }
+            clusters[clusters.count - 1].append(control)
+        }
+        return clusters
     }
 
     @ViewBuilder private func sectionPage(_ kind: AdjustmentSections.Kind, curves: [AdjustmentControl]) -> some View {

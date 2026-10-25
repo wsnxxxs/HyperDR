@@ -304,8 +304,10 @@ struct AdjustmentControls: View {
                     }
                 } else {
                     ForEach(Array(layout.rings.enumerated()), id: \.element.id) { index, control in
-                        // A hairline where light's rings end and colour's begin.
-                        if index > 0, layout.rings[index - 1].group != control.group {
+                        // A hairline where light's rings end and colour's begin, and
+                        // before clarity and dehaze.
+                        if index > 0, layout.rings[index - 1].group != control.group
+                            || AdjustmentPanel.startsCluster(control.id) {
                             Capsule()
                                 .fill(Color.white.opacity(0.14))
                                 .frame(width: axis == .horizontal ? 1 : 28, height: axis == .horizontal ? 28 : 1)
@@ -383,8 +385,12 @@ struct AdjustmentControls: View {
         .popover(isPresented: $showingOptions) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s2) {
-                    ForEach(controls) { control in
+                    ForEach(controls.filter { !LookSpacesRow.isSpace($0.id) }) { control in
                         AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: .touch)
+                    }
+                    // The LUT's input and output, on one row.
+                    if let spaces = LookSpacesRow.spaces(in: controls) {
+                        LookSpacesRow(recipe: $recipe, input: spaces.input, output: spaces.output, panel: panel, style: .touch)
                     }
                 }
                 .padding(Space.s4)

@@ -39,3 +39,12 @@ private struct SectionsHost: View {
             .background(Color.hdr.surfacePanel)
     }
 }
+
+/// The clipping legend on a photo-like grey, to $HDR_SNAPSHOT_DIR.
+@MainActor @Test func clippingLegendSnapshot() throws {
+    guard let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"] else { return }
+    let view = ClippingLegend().padding(Space.s3).background(Color(white: 0.55))
+    let bitmap = try snapshot(view, width: 220, scheme: .light)
+    let data = try #require(bitmap.representation(using: .png, properties: [:]))
+    try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("clipping-legend.png"))
+}

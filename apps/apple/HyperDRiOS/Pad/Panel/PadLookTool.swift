@@ -61,12 +61,20 @@ struct PadLookTool: View {
                 .onAppear { shown(true) }
                 .onDisappear { shown(false) }
                 let controls = kind == .builtIn ? filmControls : lutControls
-                if !controls.isEmpty {
+                let rows = controls.filter { !LookSpacesRow.isSpace($0.id) }
+                if !rows.isEmpty {
                     PadRows(columns: columns) {
-                        ForEach(controls) { control in
+                        ForEach(rows) { control in
                             row(control).id(control.id)
                         }
                     }
+                }
+                // The LUT's input and output, side by side across the panel.
+                if let spaces = LookSpacesRow.spaces(in: controls) {
+                    PadSpacesRow(input: spaces.input, output: spaces.output) { id, option in
+                        panel.set(id, option: option, in: &recipe)
+                    }
+                    .id(LookSpacesRow.inputID)
                 }
             }
             .onChange(of: revealing) { chosenKind = Self.kind(revealing: revealing, current: kind) }
@@ -151,6 +159,7 @@ struct PadLookTool: View {
                           onEditingChanged: { onEditingChanged(declaration, $0) },
                           onResetGroup: { onReset(.group(.look)) })
                     .disabled(!control.isAvailable)
+                LookExposureAutoNote(control: control).padding(.horizontal, 4)
             }
         case .bool:
             PadToggleRow(title: AdjustmentText.label(declaration),
@@ -222,5 +231,66 @@ private struct LookTile: View {
         .animation(.smooth(duration: 0.2), value: isCurrent)
         .accessibilityLabel(name)
         .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A LUT's input and output spaces (controls-polish §7): two menu cells on
+/// one row, input → output, each menu under the same headings as elsewhere.
+private struct PadSpacesRow: View {
+    let input: AdjustmentControl
+    let output: AdjustmentControl
+    let choose: (String, String) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            cell(input)
+            Image(systemName: "arrow.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            cell(output)
+        }
+    }
+
+    private func cell(_ control: AdjustmentControl) -> some View {
+        let selected = control.options.first { $0.id == control.selectedOption }
+        return Menu {
+            Picker(selection: Binding(get: { control.selectedOption ?? "" }, set: { choose(control.id, $0) })) {
+                ForEach(AdjustmentText.optionSections(control)) { section in
+                    Section {
+                        ForEach(section.options, id: \.id) { option in
+                            AdjustmentText.option(option).tag(option.id)
+                                .disabled(control.disabledOptions.contains(option.id))
+                        }
+                    } header: {
+                        section.title
+                    }
+                }
+            } label: {
+                AdjustmentText.label(control.declaration)
+            }
+        } label: {
+            HStack(spacing: Space.s1) {
+                VStack(alignment: .leading, spacing: 1) {
+                    AdjustmentText.label(control.declaration)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    (selected.map(AdjustmentText.option) ?? Text(verbatim: ""))
+                        .font(.subheadline)
+                        .foregroundStyle(Color.primary)
+                        .truncationMode(.middle)
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: PadMetrics.row)
+            .padRow()
+            .contentShape(.rect)
+        }
+        .accessibilityLabel(AdjustmentText.label(control.declaration))
     }
 }

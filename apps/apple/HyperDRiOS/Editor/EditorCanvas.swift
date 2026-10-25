@@ -288,6 +288,15 @@ struct EditorCanvas: View {
                                  onNudge: { splitRatio = min(max(splitRatio + $0, SplitGeometry.ratioRange.lowerBound),
                                                              SplitGeometry.ratioRange.upperBound) })
                 }
+                if !visible.isNull, clippingMasks != nil {
+                    // What the clipping display's colours mean, while it shows.
+                    ClippingLegend()
+                        .padding(Space.s3)
+                        .frame(width: visible.width, height: visible.height, alignment: .bottomLeading)
+                        .position(x: visible.midX, y: visible.midY)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
                 if !visible.isNull, badge != nil || refining {
                     HStack(spacing: Space.s2) {
                         if refining { RefiningMark() }
@@ -302,6 +311,7 @@ struct EditorCanvas: View {
             }
             .animation(.smooth(duration: 0.2), value: mode)
             .animation(.smooth(duration: 0.2), value: refining)
+            .animation(.smooth(duration: 0.2), value: clippingMasks != nil)
         }
     }
 

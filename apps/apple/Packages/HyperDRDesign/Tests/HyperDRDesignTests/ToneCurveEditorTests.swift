@@ -59,6 +59,8 @@ private let identity = [0.0, 0, 1, 1]
     #expect(panel.group(group: .light, in: recipe)?.controls.first { $0.id == "tone.curve" }?.isDefault == false)
     panel.set("tone.curve", curve: [0, 0, 1, 1], in: &recipe)
     #expect(panel.group(group: .light, in: recipe)?.controls.first { $0.id == "tone.curve" }?.isDefault == true)
+    panel.set("tone.curveHDR", curve: [0,0,1,1,3,2], in: &recipe)
+    #expect(recipe.conditionValue("tone.curveHDR") == .array([0,0,1,1,3,2].map(ParameterValue.number)))
     // Not a curve: ignored.
     panel.set("tone.curve", curve: [0, 0, 0.5, 0.5], in: &recipe)
     #expect(panel.group(group: .light, in: recipe)?.controls.first { $0.id == "tone.curve" }?.isDefault == true)

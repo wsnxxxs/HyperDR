@@ -22,21 +22,16 @@ extension RenderEngine {
         guard channel != nil || ["tone.curve","tone.curveSDR","tone.curveHDR"].contains(parameterID) else {
             throw RenderError.invalidAdjustment
         }
-        if parameterID == "tone.curveSDR" || parameterID == "tone.curveHDR" {
-            edit.tone.curveSDR = ToneCurve(); edit.tone.curveHDR = ToneCurve()
-            let end = stride(from: 0,to: edit.tone.curve.coordinates.count,by: 2).first { edit.tone.curve.coordinates[$0] == 1 }!
-            edit.tone.curve = try ToneCurve(Array(edit.tone.curve.coordinates[...(end+1)]))
-            let planes = try render(source,adjustments: edit,size: size,region: region)
-            let pair = try displayPair(planes,source: source)
-            let pixel = Self.readTexture(pair.base)
-            var rgb = SIMD3(pixel[0],pixel[1],pixel[2])
-            if parameterID == "tone.curveHDR" {
-                let gain = Self.readTexture(pair.gain)
-                let g = pair.gainChannelCount == 1 ? SIMD3(repeating: gain[0]) : SIMD3(gain[0],gain[1],gain[2])
-                rgb = pair.gainToP3*((pair.p3ToGain*rgb+pair.baseOffset)*SIMD3(exp2(g.x),exp2(g.y),exp2(g.z))-pair.alternateOffset)
-            }
-            return CurveSample(coordinate: DoubleReference.curveCoordinate(DoubleReference.luma(.init(Double(rgb.x),Double(rgb.y),Double(rgb.z)))))
+        func endpointInput(_ stage: UInt32) throws -> CurveSample {
+            var probe = edit
+            probe.tone.curveProbeStage = stage
+            let planes = try render(source,adjustments: probe,size: size,region: region)
+            let pixel = Self.readTexture(planes.base)
+            return CurveSample(coordinate: DoubleReference.curveCoordinate(DoubleReference.luma(
+                .init(Double(pixel[0]),Double(pixel[1]),Double(pixel[2])))))
         }
+        if parameterID == "tone.curveSDR" { return try endpointInput(3) }
+        if parameterID == "tone.curveHDR" { return try endpointInput(4) }
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut,tone: edit.tone)
         let input = try workingInput(source)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
@@ -51,8 +46,7 @@ extension RenderEngine {
         let value = channel.map { Double(pixel[$0]) }
             ?? DoubleReference.luma(.init(Double(pixel[0]),Double(pixel[1]),Double(pixel[2])))
         if channel == nil {
-            let final = try pickCurve(source,recipe: recipe,parameterID: "tone.curveHDR",point: point,
-                lut: lut,modelGain: modelGain,options: options,size: size)
+            let final = try endpointInput(5)
             if final.coordinate > 1 { return final }
         }
         let coordinate = DoubleReference.curveCoordinate(value)

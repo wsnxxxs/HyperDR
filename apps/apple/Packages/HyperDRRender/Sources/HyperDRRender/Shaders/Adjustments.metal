@@ -96,6 +96,7 @@ struct GraphUniform {
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
     float4 light; // whites, curve table offset, curve table size
+    float4 curveHDRTails;
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -248,7 +249,8 @@ float3 endpointCurve(float3 rgb,uint slot,bool sdr,constant GraphUniform& p,devi
     float x=y>1 ? 1+log2(y) : curveEncode(y), mapped;
     if(x>1) {
         float bounded=min(x,5.f);
-        mapped=curveLookup((bounded-1)/4,slot==0 ? 6 : 7,p,table)+max(0.f,x-5);
+        float2 tail=slot==0 ? p.curveHDRTails.xy : p.curveHDRTails.zw;
+        mapped=x>=tail.x ? tail.y+(x-tail.x) : curveLookup((bounded-1)/4,slot==0 ? 6 : 7,p,table);
         mapped=exp2(max(1.f,mapped)-1);
     } else mapped=curveDecode(max(x,curveLookup(x,slot,p,table)));
     return rgb*(mapped/y);
@@ -564,10 +566,17 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
         g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
     }
     float3 hdr=(pair.base+offset)*exp2(g)-offset;
+    // Probe the actual node input, before downstream curves/shoulder/rolloff.
+    if(p.light.w==3 || ((p.light.w==4 || p.light.w==5) && p.light.z==0)) {
+        base.write(float4(p.light.w==3 ? pair.base : hdr,pair.alpha),pos);gain.write(float4(0),pos);return;
+    }
     if(p.light.z!=0) {
         float y=lum(pair.base);
         if(y>0 && y<1)pair.base*=curveDecode(curveLookup(curveEncode(y),1,p,table))/y;
+        pair.base=fit(pair.base,1.f);
+        if(p.light.w==5) { base.write(float4(hdr,pair.alpha),pos);gain.write(float4(0),pos);return; }
         hdr=endpointCurve(hdr,0,false,p,table);
+        if(p.light.w==4) { base.write(float4(hdr,pair.alpha),pos);gain.write(float4(0),pos);return; }
         hdr=endpointCurve(hdr,2,true,p,table);
         g=isoLogRatio(max(hdr,0.f)+offset,pair.base+offset);
     }

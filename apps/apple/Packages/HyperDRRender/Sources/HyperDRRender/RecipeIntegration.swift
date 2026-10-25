@@ -74,6 +74,8 @@ extension RenderAdjustments {
         tone.shadows = try values.number("tone.shadows")
         tone.whites = try values.number("tone.whites")
         tone.blacks = try values.number("tone.blacks")
+        tone.dehaze = try values.number("tone.dehaze")
+        tone.clarity = try values.number("tone.clarity")
         guard case .array(let points) = values.value("tone.curve") else { throw RenderError.invalidAdjustment }
         let coordinates = points.compactMap(\.numberValue)
         guard coordinates.count == points.count else { throw RenderError.invalidAdjustment }

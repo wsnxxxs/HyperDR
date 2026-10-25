@@ -279,6 +279,19 @@ extension RenderEngine {
         return version.rawValue
     }
 
+    static func rawNativeSize(_ native: CGSize, rotated: Bool) throws -> PixelSize {
+        let width = rotated ? native.height : native.width
+        let height = rotated ? native.width : native.height
+        // Some system/camera combinations return an empty native size even
+        // though ImageIO recognises the RAW container. Never feed that through
+        // crop geometry: 0 / 0 becomes NaN and Int(NaN) terminates the process.
+        guard width.isFinite, height.isFinite, width >= 1, height >= 1,
+              width <= Double(UInt32.max), height <= Double(UInt32.max) else {
+            throw RenderError.cannotDecodeSource
+        }
+        return PixelSize(width: Int(width), height: Int(height))
+    }
+
     static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
         guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
         // An unavailable recorded decoder must fail rather than silently change a saved edit.
@@ -302,9 +315,7 @@ extension RenderEngine {
         filter.isGamutMappingEnabled = !options.sceneLinear
         filter.isDraftModeEnabled = false
         let rotated = filter.orientation.rawValue >= 5
-        let native = filter.nativeSize
-        let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
-                                   height:Int(rotated ? native.width : native.height))
+        let nativeSize = try rawNativeSize(filter.nativeSize, rotated: rotated)
         // Final previews develop bounded native ROIs. Only the temporary
         // editable preview opts into CIRAWFilter's reduced demosaic.
         filter.scaleFactor = 1
@@ -345,6 +356,12 @@ extension RenderEngine {
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
         try Task.checkCancellation()
         guard let decoded = filter.outputImage else { throw RenderError.cannotDecodeSource }
+        let decodedExtent = decoded.extent
+        guard decodedExtent.minX.isFinite, decodedExtent.minY.isFinite,
+              decodedExtent.width.isFinite, decodedExtent.height.isFinite,
+              decodedExtent.width > 0, decodedExtent.height > 0 else {
+            throw RenderError.cannotDecodeSource
+        }
         // Keep geometry and preview sizing in native coordinates. The paired
         // transforms collapse when rasterized; CIRAWFilter still develops reduced pixels.
         let sx = Double(nativeSize.width) / decoded.extent.width

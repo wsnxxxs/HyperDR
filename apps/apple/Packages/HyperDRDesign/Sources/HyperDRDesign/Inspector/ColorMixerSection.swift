@@ -40,11 +40,6 @@ public enum MixerBand: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The name with its swatch in front, for a slider's title.
-    var swatchedTitle: Text {
-        Text(Image(systemName: "circle.fill")).foregroundStyle(swatch) + Text(verbatim: "  ") + title
-    }
-
     public func id(_ attribute: MixerAttribute) -> String { "hsl.\(rawValue).\(attribute.rawValue)" }
 
     /// What the track of an attribute shows: the hue runs between the
@@ -125,9 +120,9 @@ public struct ColorMixerSection: View {
             var edited = recipe
             for id in ColorMixerLayout<EmptyView>.ids { panel.reset(id, in: &edited) }
             recipe = edited
-        }, slider: { id, title, tint, gradient in
-            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint, gradient: gradient,
-                          onEditingChanged: onEditingChanged)
+        }, slider: { id, title, tint, mark, gradient in
+            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint, mark: mark,
+                          gradient: gradient, onEditingChanged: onEditingChanged)
         })
     }
 }
@@ -142,19 +137,21 @@ struct ColorMixerLayout<Slider: View>: View {
     let showsTitle: Bool
     let isChanged: (String) -> Bool
     let resetAll: () -> Void
-    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider
+    /// `mark` is the dot before a band's name in the by-attribute list.
+    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ mark: Color?, _ gradient: [Color]?) -> Slider
 
     @State private var isExpanded: Bool
     @State private var arrangement: Arrangement
     @State private var attribute = MixerAttribute.hue
     @State private var band = MixerBand.red
     @Environment(\.mixerPicking) private var picking
+    @Environment(\.sectionLayout) private var layout
 
     enum Arrangement: String { case attribute, band }
 
     init(style: AdjustmentControlStyle, showsTitle: Bool, isChanged: @escaping (String) -> Bool,
          resetAll: @escaping () -> Void, initialArrangement: Arrangement = .attribute,
-         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider) {
+         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color, _ mark: Color?, _ gradient: [Color]?) -> Slider) {
         self.style = style
         self.showsTitle = showsTitle
         self.isChanged = isChanged
@@ -174,17 +171,25 @@ struct ColorMixerLayout<Slider: View>: View {
         VStack(alignment: .leading, spacing: Space.s2) {
             if showsTitle { header }
             if isExpanded || !showsTitle {
-                SectionSegments(request: SectionSegmentsRequest(
-                    title: Text("design.mixer.arrangement", bundle: .module),
-                    options: [.init(id: Arrangement.attribute.rawValue, title: Text("design.mixer.arrangement.attribute", bundle: .module)),
-                              .init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
-                    selection: Binding(get: { arrangement.rawValue },
-                                       set: { arrangement = Arrangement(rawValue: $0) ?? .attribute })), style: style)
+                if showsTitle {
+                    arrangementChoice
+                } else {
+                    // The page names the section: its tools stand beside the choice.
+                    HStack(spacing: Space.s2) {
+                        arrangementChoice
+                        header.fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                if picking?.isActive == true {
+                    Text("design.mixer.pickHint", bundle: .module)
+                        .font(Font.hdr.caption)
+                        .foregroundStyle(Color.hdr.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 switch arrangement {
                 case .attribute: byAttribute
                 case .band: byBand
                 }
-                if !showsTitle, anyChanged { resetButton }
             }
         }
         .onChange(of: attribute) { _, now in picking?.setAttribute(now) }
@@ -195,51 +200,82 @@ struct ColorMixerLayout<Slider: View>: View {
             case .band: if picking?.isActive == true { picking?.toggle() }
             }
         }
+        // And to the section on screen: a page or tool left ends the pick.
+        .onDisappear { if picking?.isActive == true { picking?.toggle() } }
     }
 
-    // MARK: Arrangements
-
-    private var byAttribute: some View {
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-            HStack(spacing: Space.s2) {
-                SectionSegments(request: SectionSegmentsRequest(
-                    title: Text("design.mixer.attribute", bundle: .module),
-                    options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) },
-                    selection: Binding(get: { attribute.rawValue }, set: { attribute = MixerAttribute(rawValue: $0) ?? .hue })),
-                                style: style)
-                if let picking {
-                    PickToolButton(isActive: picking.isActive,
-                                   title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
-                                   size: style == .touch ? 44 : 28) {
-                        picking.setAttribute(attribute)
-                        picking.toggle()
-                    }
+    private var header: some View {
+        SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
+                         isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
+                         isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                         resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
+            if let picking, isExpanded || !showsTitle {
+                PickToolButton.mixer(isActive: picking.isActive, size: style == .touch ? 44 : 22) {
+                    picking.setAttribute(attribute)
+                    picking.toggle()
                 }
-            }
-            if picking?.isActive == true {
-                Text("design.mixer.pickHint", bundle: .module)
-                    .font(Font.hdr.caption)
-                    .foregroundStyle(Color.hdr.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(MixerBand.allCases) { band in
-                slider(band.id(attribute), band.swatchedTitle, band.swatch, band.gradient(attribute))
+                // It adjusts the attribute shown; one band's three have none.
+                .disabled(arrangement == .band)
             }
         }
     }
 
+    /// One choice: an attribute across the eight bands, or one band's three.
+    private var arrangementChoice: some View {
+        SectionSegments(request: SectionSegmentsRequest(
+            title: Text("design.mixer.arrangement", bundle: .module),
+            options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) }
+                + [.init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
+            selection: Binding(get: { arrangement == .band ? Arrangement.band.rawValue : attribute.rawValue },
+                               set: { id in
+                                   if let chosen = MixerAttribute(rawValue: id) {
+                                       attribute = chosen
+                                       arrangement = .attribute
+                                   } else {
+                                       arrangement = .band
+                                   }
+                               })), style: style)
+    }
+
+    // MARK: Arrangements
+
+    @ViewBuilder private var byAttribute: some View {
+        let spacing = style == .touch ? Space.s2 : Space.s1
+        switch layout {
+        case .stacked:
+            VStack(alignment: .leading, spacing: spacing) {
+                ForEach(MixerBand.allCases) { band in row(band) }
+            }
+        case .split:
+            // Two columns of four, the warm bands down the first.
+            let half = (MixerBand.allCases.count + 1) / 2
+            HStack(alignment: .top, spacing: Space.s4) {
+                ForEach([Array(MixerBand.allCases.prefix(half)), Array(MixerBand.allCases.dropFirst(half))], id: \.self) { column in
+                    VStack(alignment: .leading, spacing: spacing) {
+                        ForEach(column) { band in row(band) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func row(_ band: MixerBand) -> Slider {
+        slider(band.id(attribute), band.title, band.swatch, band.swatch, band.gradient(attribute))
+    }
+
     private var byBand: some View {
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
+        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
             swatches
             ForEach(MixerAttribute.allCases) { attribute in
-                slider(band.id(attribute), attribute.title, band.swatch, band.gradient(attribute))
+                slider(band.id(attribute), attribute.title, band.swatch, nil, band.gradient(attribute))
             }
         }
     }
 
     /// The eight zones as dots to pick from; a dot that has changes carries a mark.
     private var swatches: some View {
-        let side: CGFloat = style == .touch ? 34 : 22
+        let side: CGFloat = style == .touch ? 30 : 18
         return HStack(spacing: 0) {
             ForEach(MixerBand.allCases) { option in
                 Button { band = option } label: {
@@ -251,10 +287,10 @@ struct ColorMixerLayout<Slider: View>: View {
                         }
                         .overlay(alignment: .bottom) {
                             if isChanged(band: option) {
-                                Circle().fill(Color.hdr.inkStrong).frame(width: 4, height: 4).offset(y: 9)
+                                Circle().fill(Color.hdr.inkStrong).frame(width: 4, height: 4).offset(y: 8)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: style == .touch ? 44 : 30)
+                        .frame(maxWidth: .infinity, minHeight: style == .touch ? 44 : 32)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -265,42 +301,4 @@ struct ColorMixerLayout<Slider: View>: View {
         }
     }
 
-    // MARK: Header
-
-    private var resetButton: some View {
-        Button(action: resetAll) {
-            Text("design.mixer.reset", bundle: .module)
-                .font(.system(size: TypeScale.Size.caption, weight: .medium))
-                .foregroundStyle(Color.hdr.accent)
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var header: some View {
-        HStack(spacing: Space.s2) {
-            Button {
-                withHDRAnimation { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: Space.s1) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .opacity(style == .touch ? 0 : 1)
-                        .frame(width: style == .touch ? 0 : 10)
-                    Text("design.mixer.title", bundle: .module)
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkStrong)
-                }
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(style == .touch)
-            .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
-            Spacer(minLength: 0)
-            if anyChanged { resetButton }
-        }
-    }
 }

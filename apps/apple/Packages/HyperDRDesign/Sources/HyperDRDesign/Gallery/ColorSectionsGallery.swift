@@ -31,7 +31,7 @@ public struct ColorSectionsGallery: View {
         .background(Color.hdr.surfacePanel)
     }
 
-    private func slider(_ id: String, _ title: Text, spec: ParameterSpec? = nil, gradient: [Color]? = nil) -> some View {
+    private func slider(_ id: String, _ title: Text, spec: ParameterSpec? = nil, mark: Color? = nil, gradient: [Color]? = nil) -> some View {
         let value = Binding(get: { values[id] ?? 0 }, set: { values[id] = $0 })
         let spec = spec ?? Self.spec
         return Group {
@@ -39,6 +39,8 @@ public struct ColorSectionsGallery: View {
                 TouchParameterSlider(title, value: value, spec: spec)
             } else {
                 ParameterSlider(title, value: value, spec: spec)
+                    .environment(\.parameterSliderLayout, .inline(titleWidth: SectionMetrics.titleWidth))
+                    .environment(\.parameterSliderMark, mark)
             }
         }
         .environment(\.sliderTrackGradient, gradient)
@@ -64,8 +66,8 @@ public struct ColorSectionsGallery: View {
     private var mixer: some View {
         VStack {
             ColorMixerLayout(style: style, showsTitle: true, isChanged: { (values[$0] ?? 0) != 0 },
-                             resetAll: { values = [:] }, initialArrangement: arrangement == 0 ? .attribute : .band) { id, title, _, gradient in
-                slider(id, title, gradient: gradient)
+                             resetAll: { values = [:] }, initialArrangement: arrangement == 0 ? .attribute : .band) { id, title, _, mark, gradient in
+                slider(id, title, mark: mark, gradient: gradient)
             }
         }
     }

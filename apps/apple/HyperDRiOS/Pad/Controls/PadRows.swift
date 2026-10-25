@@ -55,6 +55,7 @@ struct PadSegments<Value: Hashable>: View {
                         if let symbol = option.symbol { Image(systemName: symbol).imageScale(.small) }
                         option.label.lineLimit(1).minimumScaleFactor(0.75)
                     }
+                    .padding(.horizontal, 5)
                     .font(.subheadline.weight(isCurrent ? .semibold : .regular))
                     .foregroundStyle(isCurrent ? tint : Color.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

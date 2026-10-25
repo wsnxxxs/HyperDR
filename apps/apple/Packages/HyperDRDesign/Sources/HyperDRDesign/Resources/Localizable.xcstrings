@@ -1,6 +1,26 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.lutExposure.autoNote" : {"comment": "Note under a Log LUT's exposure while it is on Auto: how the automatic value is measured.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Metered from the photo's brightness without the LUT"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "按不套 LUT 时的亮度自动测光"}}}},
+    "design.look.spaces" : {"comment": "Row naming a LUT's input and output colour spaces, shown as two menus: input → output.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Spaces"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "空间"}}}},
+    "design.clipping.shadows" : {"comment": "Canvas legend while the clipping display shows: the blue marks are shadows crushed to black.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Crushed black"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "死黑"}}}},
+    "design.clipping.highlights" : {"comment": "Canvas legend while the clipping display shows: the red marks are highlights clipped to white.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Clipped"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "削顶"}}}},
+    "design.grade.neutral" : {"comment": "VoiceOver action on a grading wheel: remove the zone's tint.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Neutral"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "恢复中性"}}}},
+    "design.grade.hueDown" : {"comment": "VoiceOver action on a grading wheel: turn the hue back by 10 degrees.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Hue −10°"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "色相 −10°"}}}},
+    "design.grade.hueUp" : {"comment": "VoiceOver action on a grading wheel: turn the hue by 10 degrees.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Hue +10°"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "色相 +10°"}}}},
+    "design.grade.wheelValue %@ %@" : {"comment": "VoiceOver value of a grading wheel.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Hue %@°, saturation %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "色相 %@°，饱和度 %@"}}}},
+    "design.grade.wheel %@" : {"comment": "VoiceOver name of a grading wheel; the argument is the zone (Shadows, Midtones…).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ color wheel"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@色轮"}}}},
+    "design.grade.zone" : {"comment": "VoiceOver name of the choice between the grading's shadows, midtones, highlights and global.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Zone"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "区域"}}}},
+    "design.curve.target.hdrNote" : {"comment": "Under the curve's target when it is HDR only.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changes the HDR version only; below SDR white it can only brighten."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只改 HDR 版本；SDR 白以下只能提亮。"}}}},
+    "design.curve.target.sdrNote" : {"comment": "Under the curve's target when it is SDR only.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changes the SDR base only; the HDR version stays as it is."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只改 SDR 底图，HDR 版本保持不变。"}}}},
+    "design.curve.target.hdr" : {"comment": "The luminance curve changes only the HDR version.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "HDR"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "HDR"}}}},
+    "design.curve.target.sdr" : {"comment": "The luminance curve changes only the SDR base.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "SDR"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "SDR"}}}},
+    "design.curve.target.both" : {"comment": "The luminance curve changes the SDR base and the HDR version.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Both"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "两者"}}}},
+    "design.curve.target" : {"comment": "Which version of the photo the luminance curve changes.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Applies to"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "作用于"}}}},
+    "design.curve.component.luma" : {"comment": "The luminance curve's dot among the curve's components (luminance, red, green, blue).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Luminance"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "亮度"}}}},
+    "design.curve.readout.hdr %@ %@" : {"comment": "While an HDR curve point is dragged: its input and output, in stops above SDR white.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "+%@ → +%@ stops"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "+%@ 档 → +%@ 档"}}}},
+    "design.curve.readout.sdr %@ %@" : {"comment": "While a curve point is dragged: its input and output, in percent of SDR white.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "In %@ → Out %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "输入 %@ → 输出 %@"}}}},
+    "design.section.changes %@" : {"comment": "Summary after a folded section's title (curves, mixer, grading): how many of its controls are changed.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ 处改动"}}}},
     "ctrl.tone.dehaze.label" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去朦胧"}}}},
     "ctrl.tone.dehaze.help" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Remove haze, or add a soft atmospheric veil."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去除雾霭，或添加柔和的雾气。"}}}},
     "undo.tone.dehaze" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整去朦胧"}}}},
@@ -2587,13 +2607,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Positive values crush the darkest parts to black; negative values lift black."
+            "value" : "Positive values crush the darkest parts to black; negative values lift black. While you drag, the photo marks crushed black in blue and clipped highlights in red; on the Mac, hold ⌥ to see them at any time."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正值把最暗的部分压成黑，负值把黑抬起。"
+            "value" : "正值把最暗的部分压成黑，负值把黑抬起。拖动时画面用蓝色标出死黑、红色标出削顶；Mac 上按住 ⌥ 也可随时查看。"
           }
         }
       }
@@ -3199,13 +3219,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Raise bright tones beyond SDR white into HDR, or lower them below white."
+            "value" : "Raise bright tones beyond SDR white into HDR, or lower them below white. While you drag, the photo marks clipped highlights in red and crushed black in blue; on the Mac, hold ⌥ to see them at any time."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正值把亮部推过 SDR 白形成 HDR 高光，负值把亮部压向白以下。"
+            "value" : "正值把亮部推过 SDR 白形成 HDR 高光，负值把亮部压向白以下。拖动时画面用红色标出削顶、蓝色标出死黑；Mac 上按住 ⌥ 也可随时查看。"
           }
         }
       }
@@ -3342,57 +3362,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "绿"
-          }
-        }
-      }
-    },
-    "design.curve.channel.luma" : {
-      "comment" : "Curve menu: luminance curve on both the SDR and the HDR version.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · Both"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 两者"
-          }
-        }
-      }
-    },
-    "design.curve.channel.lumaHDR" : {
-      "comment" : "Curve menu: luminance curve that changes only the HDR version.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · HDR only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 仅 HDR"
-          }
-        }
-      }
-    },
-    "design.curve.channel.lumaSDR" : {
-      "comment" : "Curve menu: luminance curve that changes only the SDR base.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · SDR only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 仅 SDR"
           }
         }
       }
@@ -4392,23 +4361,6 @@
         }
       }
     },
-    "design.mixer.arrangement.attribute" : {
-      "comment" : "Mixer arrangement: pick hue, saturation or brightness and see a slider for each color.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "By Attribute"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按属性"
-          }
-        }
-      }
-    },
     "design.mixer.arrangement.band" : {
       "comment" : "Mixer arrangement: pick a color and see its hue, saturation and brightness.",
       "localizations" : {
@@ -4422,23 +4374,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按色区"
-          }
-        }
-      }
-    },
-    "design.mixer.attribute" : {
-      "comment" : "VoiceOver name of the mixer's choice of attribute.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Attribute"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "属性"
           }
         }
       }

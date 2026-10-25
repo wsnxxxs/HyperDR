@@ -21,7 +21,13 @@ struct EditorScreen: View {
     let session: EditingSession
     let editor: RecipeEditor
 
+    #if DEBUG
+    @State private var pane = DebugLaunch.tool?.group.map(EditorPane.group) ?? EditorPane.group(.hdr)
+    @State private var section = DebugLaunch.section
+    #else
     @State private var pane = EditorPane.group(.hdr)
+    @State private var section: AdjustmentSections.Kind?
+    #endif
     @State private var comparison = Comparison.edited
     @State private var splitRatio = 0.5
     @State private var holdingOriginal = false
@@ -117,7 +123,7 @@ struct EditorScreen: View {
     // MARK: - Layout
 
     @ViewBuilder private var workspace: some View {
-        let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, frameOn: session.frame.isEnabled,
+        let dock = EditorDock(recipe: recipe, panel: panel, pane: $pane, section: $section, frameOn: session.frame.isEnabled,
                               photo: photo,
                               axis: layout.axis, large: layout.large,
                               onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
@@ -129,6 +135,14 @@ struct EditorScreen: View {
                       photoSize: photoSize, misfits: session.frameMisfits, axis: layout.axis, large: layout.large)
         }
         .disabled(locksEditing)
+        .environment(\.curvePicking, session.curvePick.picking)
+        .environment(\.mixerPicking, session.mixerPick.picking)
+        // The eyedroppers belong to their pages: leaving one ends its pick.
+        .onChange(of: section) { session.resetTargetPickers() }
+        .onChange(of: editor.source?.id) { session.resetTargetPickers() }
+        // Another photo comes in on the rings (a RAW's refined source is the same photo).
+        .onChange(of: session.photo?.url) { old, _ in if old != nil { section = nil } }
+        .onChange(of: locksEditing) { if locksEditing { session.resetTargetPickers() } }
         if layout.axis == .horizontal {
             VStack(spacing: 0) {
                 canvas
@@ -145,7 +159,8 @@ struct EditorScreen: View {
     private var canvas: some View {
         EditorCanvas(session: session, editor: editor, comparison: comparison, splitRatio: $splitRatio,
                      transform: $transform, framed: pane == .frame, cropping: pane == .crop,
-                     framePadding: isPad ? 56 : Space.s5, holdingOriginal: $holdingOriginal)
+                     framePadding: isPad ? 56 : Space.s5, holdingOriginal: $holdingOriginal,
+                     curvePicker: session.curvePick.picker, mixerPicker: session.mixerPick.picker)
     }
 
     private var undoButton: some View {

@@ -239,10 +239,31 @@ public struct AdjustmentPanel: Sendable {
         AdjustmentGroupID.displayOrder.compactMap { group(group: $0, in: recipe) }
     }
 
+    /// Controls shown elsewhere than their declaration's place (controls-polish
+    /// §6): the light group reads exposure, contrast, highlights, shadows,
+    /// whites, black point, then clarity and dehaze, the two that work on local
+    /// contrast. Only the panel's order; declarations and processing keep theirs.
+    static let shownAfter: [(id: String, after: String)] = [("tone.dehaze", "tone.clarity")]
+
+    /// The first control of a cluster the hosts set apart with a hairline or a
+    /// gap: clarity and dehaze after the tones.
+    public static func startsCluster(_ id: String) -> Bool { id == "tone.clarity" }
+
+    static func displayed(_ controls: [AdjustmentControl]) -> [AdjustmentControl] {
+        var shown = controls
+        for (id, after) in shownAfter {
+            guard let from = shown.firstIndex(where: { $0.id == id }), shown.contains(where: { $0.id == after }) else { continue }
+            let moved = shown.remove(at: from)
+            let anchor = shown.firstIndex { $0.id == after }!
+            shown.insert(moved, at: anchor + 1)
+        }
+        return shown
+    }
+
     public func group(group: AdjustmentGroupID, in recipe: Recipe) -> AdjustmentGroupState? {
         let visible = Adjustments.parameters(in: group).filter { isShown($0, in: recipe) }
         guard !visible.isEmpty else { return nil }
-        let all = visible.map { control($0, in: recipe) }
+        let all = Self.displayed(visible.map { control($0, in: recipe) })
         let header = all.first { Self.isHeaderToggle($0.declaration) }
         // Modified counts every declared parameter that applies to the photo,
         // including those an off switch hides, so a group reset is offered.

@@ -119,6 +119,8 @@ private struct SegmentBody: View {
             .labelStyle(.titleAndIcon)
             .font(.system(size: TypeScale.Size.caption, weight: increased && selected ? .semibold : .medium))
             .lineLimit(1)
+            .allowsTightening(true)
+            .minimumScaleFactor(0.85)
             .foregroundStyle(foreground(increased))
             .padding(.horizontal, fillsWidth ? 3 : size == .regular ? 12 : 8)
             .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: size == .regular ? 28 : 23)

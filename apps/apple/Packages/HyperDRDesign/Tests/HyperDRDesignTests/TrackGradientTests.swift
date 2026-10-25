@@ -24,11 +24,31 @@ import Testing
 @Test func wheelSwatchesAreTheShadersColours() {
     // Hue is the recipe's own angle, so the wheel's red end and its opposite differ,
     // and zero saturation is the neutral middle.
-    #expect(GradingWheelMath.ring().count == 25)
+    #expect(GradingWheelMath.ring(.dark).count == 25)
     #expect(GradingWheelMath.colour(hue: 40, saturation: 0) == GradingWheelMath.neutral)
     #expect(GradingWheelMath.colour(hue: 30, saturation: 80) != GradingWheelMath.colour(hue: 210, saturation: 80))
     let red = GradingColor.displayRGB(hue: 30, saturation: 100)
     #expect(red.x > red.z)
+}
+
+@Test func discAngleIsTheRecipesHue() {
+    // The disc is drawn with the hue as its angle, clockwise from the right as
+    // the puck is placed: the colour there has that OKLab hue, at both lightnesses.
+    for lightness in [GradingDisc.lightness(.light), GradingDisc.lightness(.dark)] {
+        for hue in stride(from: 0.0, to: 360, by: 30) {
+            let encoded = GradingDisc.rgb(hue: hue, saturation: 100, lightness: lightness)
+            func decode(_ v: Double) -> Double { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+            let lab = GradingDisc.oklab(linear: SIMD3(decode(encoded.x), decode(encoded.y), decode(encoded.z)))
+            var angle = atan2(lab.z, lab.y) * 180 / .pi
+            if angle < 0 { angle += 360 }
+            let error = abs(((angle - hue) + 540).truncatingRemainder(dividingBy: 360) - 180)
+            #expect(error < 1, "hue \(hue) drawn at \(angle)")
+            #expect(abs(lab.x - lightness) < 0.01)
+        }
+    }
+    // The puck for a hue sits at that angle: 90° is straight down, as y grows downwards.
+    let puck = GradingWheelMath.point(hue: 90, saturation: 100, center: .zero, radius: 10)
+    #expect(abs(puck.x) < 1e-9 && abs(puck.y - 10) < 1e-9)
 }
 
 /// Writes the colour sections with their gradient tracks, in light and dark,

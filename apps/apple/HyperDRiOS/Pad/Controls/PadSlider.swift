@@ -24,8 +24,11 @@ struct PadSlider: View {
     @Binding private var value: Double
     private let spec: ParameterSpec
     private let tint: Color
-    /// Colours the bar shows in place of its fill, for a control that moves a colour.
+    /// Colours a strip along the bar's foot shows, for a control that moves a
+    /// colour: the hue it turns to, the saturation it reaches.
     private let gradient: [Color]?
+    /// A dot before the name, for a control that stands for a colour (a mixer band).
+    private let mark: Color?
     private let help: Text?
     private let onEditingChanged: (Bool) -> Void
     private let onResetGroup: (() -> Void)?
@@ -39,8 +42,10 @@ struct PadSlider: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.locale) private var locale
 
-    init(_ title: Text, value: Binding<Double>, spec: ParameterSpec, tint: Color = Color.hdr.accent, gradient: [Color]? = nil, help: Text? = nil,
+    init(_ title: Text, value: Binding<Double>, spec: ParameterSpec, tint: Color = Color.hdr.accent, gradient: [Color]? = nil,
+         mark: Color? = nil, help: Text? = nil,
          onEditingChanged: @escaping (Bool) -> Void = { _ in }, onResetGroup: (() -> Void)? = nil) {
+        self.mark = mark
         self.title = title
         _value = value
         self.spec = spec
@@ -99,10 +104,13 @@ struct PadSlider: View {
     @ViewBuilder private func bar(width: CGFloat) -> some View {
         let x = { (value: Double) in CGFloat(spec.fraction(of: value)) * width }
         if let gradient, !isAutomatic {
+            // Data, not decoration: a thin strip along the foot, under the fill.
             Rectangle()
                 .fill(LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing))
-                .opacity(0.62)
-        } else if let shown {
+                .frame(height: 3)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        if let shown {
             let fill = spec.fill(for: shown)
             Rectangle()
                 .fill(isChanged ? tint.opacity(0.30) : Color.white.opacity(isAutomatic ? 0.06 : 0.10))
@@ -151,6 +159,9 @@ struct PadSlider: View {
 
     private var labels: some View {
         HStack(spacing: Space.s2) {
+            if let mark {
+                Circle().fill(mark).frame(width: 8, height: 8)
+            }
             title
                 .font(.subheadline)
                 .foregroundStyle(Color.primary)

@@ -112,6 +112,9 @@ public struct AdjustmentInspector: View {
                     .foregroundStyle(Color.hdr.amber)
             }
             ForEach(state.controls.filter { !AdjustmentSections.isDrawnBySection($0.id) }) { control in
+                if AdjustmentPanel.startsCluster(control.id), control.id != state.controls.first?.id {
+                    Rectangle().fill(Color.hdr.line).frame(height: 1)
+                }
                 AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                               onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
             }
@@ -224,6 +227,7 @@ public struct AdjustmentRow: View {
                     }
                     if let notice = picking?.notice { WhiteBalanceNoticeLine(notice) }
                     if control.id == "tone.exposure" { FilmExposureNote(recipe: recipe, panel: panel) }
+                    LookExposureAutoNote(control: control)
                 }
                 .disabled(!control.isAvailable)
             }
@@ -494,7 +498,11 @@ struct LookSection: View {
                     AdjustmentRow(recipe: $recipe, control: lut, panel: panel, style: style,
                                   onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
                 }
-                rows(lutControls)
+                rows(lutControls.filter { !LookSpacesRow.isSpace($0.id) })
+                if let spaces = LookSpacesRow.spaces(in: lutControls) {
+                    LookSpacesRow(recipe: $recipe, input: spaces.input, output: spaces.output, panel: panel, style: style)
+                        .id(LookSpacesRow.inputID)
+                }
             }
         }
         .onChange(of: revealing) { chosen = Self.kind(revealing: revealing, current: kind) }

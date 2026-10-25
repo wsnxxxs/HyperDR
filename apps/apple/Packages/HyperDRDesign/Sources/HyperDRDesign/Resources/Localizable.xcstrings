@@ -1071,6 +1071,34 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比分界线" } }
       }
     },
+    "design.filmNote.auto %@" : {
+      "comment" : "Under Light's exposure row, film on, exposure automatic: the exposure it takes (+0.59).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film auto exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片自动曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.autoPending" : {
+      "comment" : "Under Light's exposure row, film on, automatic exposure not measured yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film auto exposure · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片自动曝光 · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.manual %@" : {
+      "comment" : "Under Light's exposure row, film on, exposure set by hand: its value.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.hint" : {
+      "comment" : "Accessibility hint of the film exposure note under Light's exposure row.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows the film exposure setting in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在风格中显示胶片曝光设置" } }
+      }
+    },
     "design.wb.clamped" : {
       "comment" : "Under the temperature row: the neutral the pick needs lies beyond the slider's end, so the end was set.",
       "localizations" : {

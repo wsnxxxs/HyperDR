@@ -20,6 +20,8 @@ struct PadEditor: View {
 
     @State private var tool = PadTool.group(.hdr)
     @State private var expanded = true
+    /// A control to scroll to once its tool is shown (the film exposure note's tap).
+    @State private var revealed: String?
     /// Where the panel is now, for the toolbar's panel button.
     @State private var placement = PadLayout.Placement.side
     @State private var comparison = Comparison.edited
@@ -200,7 +202,8 @@ struct PadEditor: View {
 
     private func panel(_ layout: PadLayout) -> some View {
         let groups = groups
-        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool) { axis in
+        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool, reveal: revealed,
+                        onRevealed: { revealed = nil }) { axis in
             PadToolRail(items: PadTool.tools(groups).map { PadRailItem(tool: $0, marked: isModified($0, groups)) },
                         selection: tool, axis: axis, choose: choose, onBypass: bypass)
         } histogram: {
@@ -211,6 +214,7 @@ struct PadEditor: View {
         } content: {
             toolContent(columns: layout.columns)
                 .environment(\.whiteBalancePicking, session.whiteBalance.picking)
+                .environment(\.revealControl) { reveal($0) }
                 .disabled(locksEditing)
         } footer: {
             if editor.source != nil {
@@ -218,6 +222,16 @@ struct PadEditor: View {
                              size: editor.photoSize.map { ($0.width, $0.height) })
             }
         }
+    }
+
+    /// Opens the tool that holds the control and scrolls to its row.
+    private func reveal(_ id: String) {
+        guard let group = Adjustments.declaration(id)?.group else { return }
+        withAnimation(.smooth(duration: 0.3)) {
+            tool = .group(group)
+            expanded = true
+        }
+        revealed = id
     }
 
     /// A tool from the rail; the current one again folds the panel away.

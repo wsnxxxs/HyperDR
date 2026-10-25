@@ -1,4 +1,5 @@
 import CoreGraphics
+import Metal
 import XCTest
 @testable import HyperDR
 
@@ -95,5 +96,65 @@ import XCTest
         XCTAssertEqual(Int(data[4]), 255, "above white is held at white")
         XCTAssertEqual(Int(data[5]), 0)
         XCTAssertEqual(Int(data[8]), 0)
+    }
+
+    // MARK: A pick that outlives its mode
+
+    func testAPickStillBeingSampledDoesNotSpoilTheNextMode() async {
+        let picker = WhiteBalancePicker()
+        picker.photoPoint = { _ in CGPoint(x: 0.5, y: 0.5) }
+        var release: CheckedContinuation<Void, Never>?
+        picker.pick = { _ in
+            await withCheckedContinuation { release = $0 }
+            throw CancellationError()
+        }
+        picker.begin()
+        picker.click(at: .zero)
+        XCTAssertTrue(picker.isSampling)
+        // Another photo arrives while the first pick is out.
+        picker.reset()
+        XCTAssertFalse(picker.isSampling)
+        picker.begin()
+        XCTAssertTrue(picker.isActive)
+        release?.resume()
+        for _ in 0..<5 { await Task.yield(); try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(picker.isActive, "the old pick does not end the new mode")
+        XCTAssertFalse(picker.isSampling)
+        XCTAssertNil(picker.notice, "nor write its notice into it")
+        picker.move(to: .zero)
+        XCTAssertNotNil(picker.hover, "the new mode follows the pointer")
+    }
+
+    // MARK: What the canvas draws
+
+    private func texture() throws -> any MTLTexture {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 1, height: 1,
+                                                                  mipmapped: false)
+        return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+    }
+
+    func testTheLoupeReadsTheSideOfTheSplitUnderThePointer() throws {
+        let frames = WhiteBalanceFrames(original: try texture(), edited: try texture(), shown: .compare,
+                                        splitRatio: 0.25, imageFrame: CGRect(x: 100, y: 0, width: 400, height: 300))
+        XCTAssertEqual(frames.side(at: CGPoint(x: 150, y: 10)), .original)
+        XCTAssertEqual(frames.side(at: CGPoint(x: 250, y: 10)), .edited)
+        var original = frames
+        original.shown = .original
+        XCTAssertEqual(original.side(at: CGPoint(x: 450, y: 10)), .original)
+        var withoutOriginal = frames
+        withoutOriginal.original = nil
+        XCTAssertEqual(withoutOriginal.side(at: CGPoint(x: 150, y: 10)), .edited)
+    }
+
+    func testNoPointIsTakenWhileThePhotoIsDrawnThroughTheCrop() {
+        // 4000×3000 cropped to the middle 2000×2000, drawn in 800×600: the visible
+        // rectangle is (100, 0, 600, 600) and (160, 300) is 10 % across it.
+        let frame = CGRect(x: 100, y: 0, width: 600, height: 600)
+        let point = WhiteBalanceFrames.photoPoint(CGPoint(x: 160, y: 300), in: frame, drawsThroughCrop: false)
+        XCTAssertEqual(point?.x ?? 0, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(point?.y ?? 0, 0.5, accuracy: 1e-9)
+        XCTAssertNil(WhiteBalanceFrames.photoPoint(CGPoint(x: 160, y: 300), in: frame, drawsThroughCrop: true))
+        XCTAssertNil(WhiteBalanceFrames.photoPoint(CGPoint(x: 20, y: 300), in: frame, drawsThroughCrop: false))
     }
 }

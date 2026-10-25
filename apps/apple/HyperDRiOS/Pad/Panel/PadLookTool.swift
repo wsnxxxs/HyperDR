@@ -52,7 +52,7 @@ struct PadLookTool: View {
                 if !controls.isEmpty {
                     PadRows(columns: columns) {
                         ForEach(controls) { control in
-                            row(control)
+                            row(control).id(control.id)
                         }
                     }
                 }

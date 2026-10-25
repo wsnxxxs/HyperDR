@@ -216,6 +216,8 @@ public struct RenderSource: @unchecked Sendable {
 }
 
 extension RenderSource {
+    public var isDraftRAWPreview: Bool { domain == .rawEDR && origin?.options.draftRAWPreview == true }
+
     /// RAW stays native through CIRAWFilter; only the final area-downsample size
     /// changes with a preview bound. Reuse pixels when a different bound rounds
     /// to the exact same raster (e.g. first square bound vs fitted canvas).
@@ -312,6 +314,8 @@ public struct SourceOptions: Hashable, Sendable {
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()
     public var resolution: SourceResolution
+    /// Temporary editable RAW preview only. Export and AI always use native development.
+    public var draftRAWPreview = false
     /// Develop RAW without Apple's tone curve. Set when a log look is in effect,
     /// so the curve sees scene-linear reflectance. Part of the cache key: preview
     /// and export reopen the source when it changes.

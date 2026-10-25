@@ -498,6 +498,7 @@ extension RenderSessionTests {
         let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_RAW"]!)
         let decoder = ProcessInfo.processInfo.environment["HYPERDR_OPEN_DECODER"]
         let clock = ContinuousClock()
+        let side = Int(ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_SIDE"] ?? "1280") ?? 1280
         for run in 1...2 {
             let started = clock.now
             let engine = try RenderEngine()
@@ -506,14 +507,17 @@ extension RenderSessionTests {
             let preview = await session.openingPreview(url)
             let thumbnail = clock.now
             let restoring = decoder.map { Recipe(inputDomain: .rawEDR, rawDecoderVersion: $0) }
-            let source = try await session.open(url, previewSize: PixelSize(width: 1280, height: 1280), restoring: restoring)
+            let source = try await session.open(url, previewSize: PixelSize(width: side, height: side), restoring: restoring)
             let opened = clock.now
             var recipe = Recipe(inputDomain: source.domain, rawDecoderVersion: source.rawDecoderVersion)
-            let size = RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 1280)
+            let size = RecipeEditor.previewSize(source: source.pixelSize, canvasSide: side)
             var request = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size)
             let initialRecipe = recipe
-            let initialFrame = try await session.render(request)
+            _ = try await session.render(request)
             let first = clock.now
+            _ = try await session.refinePreview(sourceID: source.id)
+            let initialFrame = try await session.render(request)
+            let refined = clock.now
             recipe.setHDRSource(.capturedAI)
             request.recipe = recipe
             try await session.predictModelGain(request)
@@ -521,14 +525,14 @@ extension RenderSessionTests {
             request.usesModelGain = true
             _ = try await session.render(request)
             let finished = clock.now
-            print("OPEN_BENCH run=\(run) decoder=\(source.rawDecoderVersion ?? "default") init=\(started.duration(to: initialized)) thumbnail=\(initialized.duration(to: thumbnail)) thumbnailPixels=\(preview?.image.width ?? 0)x\(preview?.image.height ?? 0) native=\(preview?.pixelSize.width ?? 0)x\(preview?.pixelSize.height ?? 0) open=\(thumbnail.duration(to: opened)) firstFrame=\(opened.duration(to: first)) ai=\(first.duration(to: predicted)) aiFrame=\(predicted.duration(to: finished))")
+            print("OPEN_BENCH run=\(run) decoder=\(source.rawDecoderVersion ?? "default") init=\(started.duration(to: initialized)) thumbnail=\(initialized.duration(to: thumbnail)) thumbnailPixels=\(preview?.image.width ?? 0)x\(preview?.image.height ?? 0) native=\(preview?.pixelSize.width ?? 0)x\(preview?.pixelSize.height ?? 0) open=\(thumbnail.duration(to: opened)) firstFrame=\(opened.duration(to: first)) refinement=\(first.duration(to: refined)) ai=\(refined.duration(to: predicted)) aiFrame=\(predicted.duration(to: finished))")
             let referenceSource = try await engine.load(url, options: SourceOptions(recipe: initialRecipe, resolution: .preview(maximumSize: size)))
             let reference = try await engine.render(referenceSource, recipe: initialRecipe, size: size)
             let pixels = RenderEngine.readPixels(initialFrame.planes), expected = RenderEngine.readPixels(reference)
             let baseError = zip(pixels.baseRGBA, expected.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
             let gainError = zip(pixels.gain, expected.gain).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
             print("OPEN_REUSE_DIFF base=\(baseError) gain=\(gainError)")
-            #expect(baseError == 0 && gainError == 0)
+            #expect(baseError <= 0.000001 && gainError <= 0.00001)
             await session.close()
         }
     }
@@ -549,12 +553,21 @@ extension RenderSessionTests {
         await session.setBeforeReload { await reloads.add() }
         let frame = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
         #expect(await reloads.count == 0)
-        // An explicit reopen remains the reference path; identical pixels must
-        // be produced when only the maximum preview rectangle changed.
+        #expect(frame.isDraftPreview)
+        _ = try await session.refinePreview(sourceID: source.id)
+        let refined = try await session.render(frame.request)
+        #expect(!refined.isDraftPreview)
+        // After refinement, an explicit native reopen remains the reference path;
+        // fitting the same preview rectangle must produce identical pixels.
         let reopened = try await engine.load(url, options: SourceOptions(recipe: recipe, resolution: .preview(maximumSize: size)))
         let reference = try await engine.render(reopened, recipe: recipe, size: size)
-        #expect(RenderEngine.readPixels(frame.planes).baseRGBA == RenderEngine.readPixels(reference).baseRGBA)
-        #expect(RenderEngine.readPixels(frame.planes).gain == RenderEngine.readPixels(reference).gain)
+        // Sharing canonical native cells changes only float summation order at
+        // their boundaries; retain sub-code tolerances for the rendered endpoints.
+        let actual = RenderEngine.readPixels(refined.planes), expected = RenderEngine.readPixels(reference)
+        let baseError = zip(actual.baseRGBA, expected.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        let gainError = zip(actual.gain, expected.gain).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        #expect(baseError <= 0.000001)
+        #expect(gainError <= 0.00001)
         let changed = Recipe(inputDomain: source.domain, values: ["develop.sharpness": .number(90)], rawDecoderVersion: source.rawDecoderVersion)
         #expect(!reopened.reusesRAWPreview(options: try SourceOptions(recipe: changed, resolution: .preview(maximumSize: size))))
         #expect(!reopened.reusesRAWPreview(options: try SourceOptions(recipe: recipe, resolution: .preview(maximumSize: PixelSize(width: 64, height: 64)))))
@@ -731,5 +744,32 @@ extension RenderSessionTests {
             try await session.open(url, previewSize: PixelSize(width: 64, height: 64))
         }
         #expect(await attempts.versions == ["9.dng", "8.dng"])
+    }
+}
+
+extension RenderSessionTests {
+    @Test func scopesCannotShrinkTheCanvasRefinementOrReloadItAfterHandoff() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ARW")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW"), to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession()
+        let source = try await session.open(url, previewSize: .init(width: 2048, height: 2048))
+        let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: source.rawDecoderVersion)
+        var canvas = EditorRenderRequest(sourceID: source.id, recipe: recipe,
+            size: RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 2048))
+        canvas.isCanvasPreview = true
+        _ = try await session.render(canvas)
+        let reloads = Counter()
+        await session.setBeforeReload { await reloads.add() }
+        let scope = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: .init(width: 512, height: 512))
+        #expect(try await session.render(scope).isDraftPreview)
+        _ = try await session.refinePreview(sourceID: source.id)
+        #expect(try await session.render(scope).isDraftPreview == false)
+        let refined = try await session.render(canvas)
+        #expect(!refined.isDraftPreview && refined.planes.base.width == canvas.size.width)
+        #expect(await reloads.count == 0)
+        await session.close()
     }
 }

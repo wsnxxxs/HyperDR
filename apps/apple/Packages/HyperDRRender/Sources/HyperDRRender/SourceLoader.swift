@@ -13,6 +13,7 @@ struct OpenedSource {
     let raw: RAWDevelopment?
     var nativeSize: PixelSize? = nil
     var rawPreviewSize: PixelSize? = nil
+    var draftRAWPreview = false
     /// The full size before `applying(_:)`, once a geometry is applied.
     var uncroppedSize: PixelSize? = nil
 
@@ -33,7 +34,7 @@ struct OpenedSource {
             rawPreviewSize: scale < 1 ? PixelSize(
                 width: max(1, Int((image.extent.width * scale).rounded())),
                 height: max(1, Int((image.extent.height * scale).rounded()))) : nil,
-            uncroppedSize: uncroppedSize)
+            draftRAWPreview: draftRAWPreview, uncroppedSize: uncroppedSize)
     }
 
 }
@@ -299,9 +300,19 @@ extension RenderEngine {
         let native = filter.nativeSize
         let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
                                    height:Int(rotated ? native.width : native.height))
-        // Keep RAW development native. Reduced filter graphs can still allocate
-        // native-area float buffers; materialize downsamples bounded native ROIs.
+        // Final previews develop bounded native ROIs. Only the temporary
+        // editable preview opts into CIRAWFilter's reduced demosaic.
         filter.scaleFactor = 1
+        var draft = false
+        if options.draftRAWPreview, case .preview(let bound) = options.resolution {
+            guard bound.width > 0, bound.height > 0 else { throw RenderError.invalidSize }
+            let cropped = options.geometry.outputSize(of: nativeSize)
+            let scale = min(0.5, Double(bound.width) / Double(cropped.width),
+                            Double(bound.height) / Double(cropped.height))
+            // A reduced demosaic keeps the same decoder, boost and RAW settings.
+            filter.scaleFactor = Float(max(0.125, scale))
+            draft = true
+        }
         if filter.isContrastSupported { filter.contrastAmount = 0 }
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
         // Capture camera/Apple defaults before applying recipe overrides. UI values
@@ -328,7 +339,14 @@ extension RenderEngine {
         if filter.isSharpnessSupported, let value = raw.sharpness { filter.sharpnessAmount = value }
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
         try Task.checkCancellation()
-        guard let output = filter.outputImage else { throw RenderError.cannotDecodeSource }
+        guard let decoded = filter.outputImage else { throw RenderError.cannotDecodeSource }
+        // Keep geometry and preview sizing in native coordinates. The paired
+        // transforms collapse when rasterized; CIRAWFilter still develops reduced pixels.
+        let sx = Double(nativeSize.width) / decoded.extent.width
+        let sy = Double(nativeSize.height) / decoded.extent.height
+        let output = draft ? decoded.clampedToExtent().transformed(by: CGAffineTransform(
+            a: sx, b: 0, c: 0, d: sy, tx: -decoded.extent.minX * sx, ty: -decoded.extent.minY * sy))
+            .cropped(to: CGRect(x: 0, y: 0, width: nativeSize.width, height: nativeSize.height)) : decoded
         let development = RAWDevelopment(boost: filter.boostAmount, boostShadow: filter.boostShadowAmount,
             baselineExposure: filter.baselineExposure, localToneMap: filter.localToneMapAmount,
             extendedDynamicRange: filter.extendedDynamicRangeAmount,
@@ -344,7 +362,7 @@ extension RenderEngine {
         // CIRAWFilter already applies the file's orientation. The geometry goes
         // before the preview scale, which is then measured on the cropped photo.
         return try OpenedSource(domain: .rawEDR, image: output, hdr: output,
-                            baseSpace: workingColorSpace, gain: nil, raw: development)
+                            baseSpace: workingColorSpace, gain: nil, raw: development, draftRAWPreview: draft)
             .applying(options.geometry).rawVariant(resolution: options.resolution)
     }
 }

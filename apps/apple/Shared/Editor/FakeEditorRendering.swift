@@ -15,6 +15,7 @@ actor FakeEditorRendering: EditorRendering {
         var size = HyperDRRender.PixelSize(width: 6000, height: 4000)
         var sourceValues: [String: Double] = [:]
         var capabilities: Set<String> = []
+        var isDraftPreview = false
     }
 
     enum ModelBehavior: Sendable {
@@ -38,6 +39,8 @@ actor FakeEditorRendering: EditorRendering {
     var renderErrorForRequest: (@Sendable (EditorRenderRequest) -> EditorRenderingError?)?
     /// Thrown by every open while set.
     var openError: EditorRenderingError?
+    var refinementError: EditorRenderingError?
+    private(set) var refinementCount = 0
 
     private(set) var opened: [URL] = []
     private(set) var rawDecoderPreferences: [RAWDecoderPreference] = []
@@ -56,6 +59,8 @@ actor FakeEditorRendering: EditorRendering {
     private var current: EditorSource?
     private var holdingRenders = false
     private var holdingPredictions = false
+    private var holdingRefinements = false
+    private var heldRefinements: [Int: CheckedContinuation<Void, Never>] = [:]
     private var heldRenders: [Int: CheckedContinuation<Void, Never>] = [:]
     private var heldPredictions: [Int: CheckedContinuation<Void, Never>] = [:]
     private var nextHold = 0
@@ -93,6 +98,32 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     var heldRenderCount: Int { heldRenders.count }
+
+    func holdRefinements() { holdingRefinements = true }
+    var heldRefinementCount: Int { heldRefinements.count }
+    func releaseRefinements() {
+        holdingRefinements = false
+        let held = heldRefinements
+        heldRefinements = [:]
+        held.values.forEach { $0.resume() }
+    }
+    private func releaseRefinement(_ id: Int) { heldRefinements.removeValue(forKey: id)?.resume() }
+
+    func refinePreview(sourceID: UUID) async throws -> EditorSource? {
+        refinementCount += 1
+        if holdingRefinements {
+            nextHold += 1
+            let id = nextHold
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { heldRefinements[id] = $0 }
+            } onCancel: { Task { await self.releaseRefinement(id) } }
+        }
+        try Task.checkCancellation()
+        guard current?.id == sourceID else { throw EditorRenderingError.staleSource }
+        if let refinementError { throw refinementError }
+        current?.isDraftPreview = false
+        return current
+    }
 
     func holdPredictions() { holdingPredictions = true }
 
@@ -136,7 +167,8 @@ actor FakeEditorRendering: EditorRendering {
         if let openError { throw openError }
         let photo = photos[url] ?? defaultPhoto
         let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
-                                  sourceValues: photo.sourceValues, capabilities: photo.capabilities)
+                                  sourceValues: photo.sourceValues, capabilities: photo.capabilities,
+                                  isDraftPreview: photo.isDraftPreview)
         current = source
         return source
     }
@@ -173,7 +205,8 @@ actor FakeEditorRendering: EditorRendering {
         load(request)
         let wantsModel = request.recipe.hdrSource.usesModel && request.recipe.conditionValue("hdr.enabled")?.boolValue != false
         return EditorFrame(request: request, planes: planes, display: display,
-                           modelGainPending: wantsModel && !(request.usesModelGain && made.contains(Self.family(request))))
+                           modelGainPending: wantsModel && !(request.usesModelGain && made.contains(Self.family(request))),
+                           isDraftPreview: current.isDraftPreview)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {

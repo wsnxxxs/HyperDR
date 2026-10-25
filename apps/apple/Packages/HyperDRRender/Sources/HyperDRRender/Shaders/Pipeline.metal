@@ -120,6 +120,31 @@ kernel void sampleSourceArea(texture2d<float, access::read> src [[texture(0)]],
     float4 prior=p.options.x ? float4(0) : previous.read(pos);
     dst.write(prior+sum/(scale.x*scale.y),pos);
 }
+// Integrate only the canonical cell's INNER pixels. Successive dispatches run
+// in command order; each thread owns one destination texel within a dispatch.
+// options.xy = inner dimensions, options.zw = inner origin in the decoded halo bitmap.
+kernel void accumulateSourceArea(texture2d<float, access::read> src [[texture(0)]],
+                                 texture2d<float, access::read_write> dst [[texture(1)]],
+                                 constant AreaSampling &p [[buffer(0)]],
+                                 uint2 pos [[thread_position_in_grid]]) {
+    uint2 output=pos+p.output.zw;
+    if (output.x >= dst.get_width() || output.y >= dst.get_height()) return;
+    float2 scale=float2(p.source.xy)/float2(p.output.xy);
+    float2 low=float2(output)*scale, high=float2(output+1u)*scale;
+    uint2 begin=max(uint2(floor(low)),p.source.zw);
+    uint2 end=min(uint2(ceil(high)),p.source.zw+p.options.xy);
+    float4 sum=0;
+    for(uint y=begin.y;y<end.y;++y) {
+        float wy=max(0.f,min(high.y,float(y+1))-max(low.y,float(y)));
+        float4 row=0;
+        for(uint x=begin.x;x<end.x;++x) {
+            float wx=max(0.f,min(high.x,float(x+1))-max(low.x,float(x)));
+            row+=src.read(uint2(x,y)-p.source.zw+p.options.zw)*wx;
+        }
+        sum+=row*wy;
+    }
+    dst.write(dst.read(output)+sum/(scale.x*scale.y),output);
+}
 kernel void countTransparent(texture2d<float, access::read> src [[texture(0)]],
                              constant uint4 &region [[buffer(0)]], device atomic_uint* count [[buffer(1)]],
                              uint2 pos [[thread_position_in_grid]]) {

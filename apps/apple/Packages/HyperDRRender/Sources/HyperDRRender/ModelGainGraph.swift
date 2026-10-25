@@ -13,7 +13,8 @@ extension RenderEngine {
     /// Start inference outside the synchronous render path, then inject the returned
     /// prediction through render(recipe:modelGain:). Before it arrives, aiPending is true.
     public func predictModelGain(_ source: RenderSource, provider: CoreMLModelGainProvider) async throws -> ModelGainPrediction {
-        guard source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
+        guard !source.isDraftRAWPreview,
+              source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
         // Log look changes the developed texture, not the photograph the model sees.
         let key = ModelPredictionKey(source:source.modelSourceID,model:provider.modelID)
         if let cached = modelPredictionCache[key] {

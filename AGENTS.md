@@ -152,6 +152,11 @@ photo-dependent HDR content into the mat.
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
 CIRAWFilter decode; Core ML supplies AI gain when the build includes the model. The apps require iOS/iPadOS 27 and macOS 15 (below macOS 26 through the `#available` branches, not yet run on macOS 15); RAW decoder 9 still depends on the camera and file.
+RAW opens progressively with an editable `CIRAWFilter.scaleFactor` preview
+(0.125–0.5), then a background pass develops each canonical native cell once
+for both the canvas and fixed analysis grid and swaps in the result without
+resetting edits or undo. Draft pixels never enter AI inference, detail ROI
+or export.
 Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
 photos. Automatic selects decoder 9 when the system and file support it
 (including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without

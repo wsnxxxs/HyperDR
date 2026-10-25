@@ -3272,6 +3272,23 @@
         }
       }
     },
+    "ios.preview.refining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refining the preview…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在提升预览画质…"
+          }
+        }
+      }
+    },
     "ios.settings.about" : {
       "extractionState" : "manual",
       "localizations" : {

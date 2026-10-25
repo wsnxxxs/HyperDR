@@ -127,6 +127,8 @@ nonisolated struct EditorSource: Equatable, Sendable {
     var isDraftPreview = false
     var rawDecoderVersion: String? = nil
     var rawDecoderFallback: RAWDecoderFallback? = nil
+    /// Nil when Apple's native decoder developed the source directly.
+    var sourceCompatibility: SourceCompatibility? = nil
 }
 
 /// One render of the open photo.

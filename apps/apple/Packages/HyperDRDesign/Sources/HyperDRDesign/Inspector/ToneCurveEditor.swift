@@ -117,29 +117,33 @@ enum ToneCurvePoints {
 }
 
 /// How the plot is laid out: the SDR range 0…1 across and up, and past SDR
-/// white (when the curve has an HDR segment) a strip of `stops` stops, each
-/// `stopWidth` of the SDR range wide, in both directions, so the identity
-/// stays a straight diagonal. The reachable HDR part is the square above and
-/// to the right of white.
+/// white (when the curve has an HDR segment) a strip of `stops` stops in both
+/// directions, so the identity stays a straight diagonal. The strip is always
+/// `hdrShare` of the plot however many stops it holds (controls-polish §3.1):
+/// the SDR segment, where most of the editing is, keeps most of the room, and
+/// more stops only draw closer lines. The reachable HDR part is the square
+/// above and to the right of white.
 struct ToneCurvePlotLayout {
-    /// One stop's width, relative to the whole SDR range.
-    static let stopWidth = 0.3
+    /// The HDR strip's share of the plot's width (and height).
+    static let hdrShare = 0.28
 
     let rect: CGRect
     let stops: Double
 
-    var extent: Double { 1 + stops * Self.stopWidth }
+    /// One stop's width, relative to the whole SDR range.
+    var stopWidth: Double { stops > 0 ? Self.hdrShare / (1 - Self.hdrShare) / stops : 0 }
+    var extent: Double { 1 + stops * stopWidth }
     var maxValue: Double { 1 + stops }
     /// Pixels in the whole SDR range.
     var sdr: CGFloat { rect.width / extent }
 
     func offset(_ value: Double) -> CGFloat {
-        value <= 1 ? value * sdr : sdr * (1 + (value - 1) * Self.stopWidth)
+        value <= 1 ? value * sdr : sdr * (1 + (value - 1) * stopWidth)
     }
 
     func value(atOffset offset: CGFloat) -> Double {
         let units = Double(offset / sdr)
-        return units <= 1 ? units : 1 + (units - 1) / Self.stopWidth
+        return units <= 1 || stopWidth == 0 ? units : 1 + (units - 1) / stopWidth
     }
 
     func view(_ point: CGPoint) -> CGPoint {
@@ -185,6 +189,8 @@ public struct ToneCurveEditor: View {
     private let marker: Double?
     private let tint: ToneCurveTint
     private let liftsOnly: Bool
+    /// The photo is waiting for the curve eyedropper.
+    private let isPicking: Bool
     private let write: ([Double]) -> Void
     private let onEditingChanged: (Bool) -> Void
 
@@ -192,6 +198,7 @@ public struct ToneCurveEditor: View {
     @State private var dragStart: CGPoint?
     @State private var bracket = EditingBracket()
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var scheme
 
     static let inset: CGFloat = 12
     private static let space = "hyperdr.toneCurvePlot"
@@ -209,9 +216,10 @@ public struct ToneCurveEditor: View {
     /// `liftsOnly`: the SDR segment's points stay on or above the diagonal
     /// (the HDR-only curve brightens below white, never darkens).
     init(coordinates: [Double], style: AdjustmentControlStyle, hdrStops: Double?, marker: Double?,
-         tint: ToneCurveTint, liftsOnly: Bool = false, write: @escaping ([Double]) -> Void,
+         tint: ToneCurveTint, liftsOnly: Bool = false, isPicking: Bool = false, write: @escaping ([Double]) -> Void,
          onEditingChanged: @escaping (Bool) -> Void) {
         self.liftsOnly = liftsOnly
+        self.isPicking = isPicking
         self.coordinates = coordinates
         self.style = style
         self.hdrStops = hdrStops.map { max($0, 0) }
@@ -247,9 +255,14 @@ public struct ToneCurveEditor: View {
             }
             .coordinateSpace(.named(Self.space))
         }
+        .overlay(alignment: .topLeading) { dragReadout }
+        .animation(.smooth(duration: 0.15), value: dragged != nil)
         .aspectRatio(1, contentMode: .fit)
         .background(Color.hdr.histogramBackdrop, in: .rect(cornerRadius: Radius.md))
-        .overlay { RoundedRectangle(cornerRadius: Radius.md).strokeBorder(Color.hdr.line) }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.md)
+                .strokeBorder(isPicking ? Color.hdr.accent : Color.hdr.line, lineWidth: isPicking ? 1.5 : 1)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("ctrl.tone.curve.label", bundle: .module))
         .accessibilityAction(named: Text("design.curve.addPoint", bundle: .module)) {
@@ -264,35 +277,49 @@ public struct ToneCurveEditor: View {
 
     private func draw(_ context: inout GraphicsContext, layout l: ToneCurvePlotLayout) {
         let r = l.rect
+        let white = CGPoint(x: r.minX + l.sdr, y: r.maxY - l.sdr)
+        let amber = Color.hdr.amber
         if let hdr = l.hdrRect {
-            context.fill(Path(hdr), with: .color(.hdr.amberSoft))
-            context.stroke(Path(hdr), with: .color(.hdr.amberBorder), lineWidth: 1)
+            // The reachable HDR square: a faint amber wash, a line a stop.
+            context.fill(Path(hdr), with: .color(amber.opacity(scheme == .dark ? 0.07 : 0.09)))
+            var stopGrid = Path()
+            var stop = 1.0
+            while stop < l.stops - 0.01 {
+                let at = l.offset(1 + stop)
+                stopGrid.move(to: CGPoint(x: r.minX + at, y: hdr.minY)); stopGrid.addLine(to: CGPoint(x: r.minX + at, y: hdr.maxY))
+                stopGrid.move(to: CGPoint(x: hdr.minX, y: r.maxY - at)); stopGrid.addLine(to: CGPoint(x: hdr.maxX, y: r.maxY - at))
+                stop += 1
+            }
+            context.stroke(stopGrid, with: .color(amber.opacity(0.25)), lineWidth: 0.5)
+        }
+        if liftsOnly {
+            // Below the diagonal the HDR-only curve cannot go: it only brightens there.
+            var below = Path()
+            below.move(to: CGPoint(x: r.minX, y: r.maxY)); below.addLine(to: CGPoint(x: white.x, y: r.maxY))
+            below.addLine(to: white); below.closeSubpath()
+            context.fill(below, with: .color(Color.hdr.inkMuted.opacity(0.08)))
         }
         var grid = Path()
         for i in 1..<4 {
-            let t = Double(i) / 4
-            let at = l.offset(t)
-            grid.move(to: CGPoint(x: r.minX + at, y: r.maxY)); grid.addLine(to: CGPoint(x: r.minX + at, y: r.maxY - l.sdr))
-            grid.move(to: CGPoint(x: r.minX, y: r.maxY - at)); grid.addLine(to: CGPoint(x: r.minX + l.sdr, y: r.maxY - at))
+            let at = l.offset(Double(i) / 4)
+            grid.move(to: CGPoint(x: r.minX + at, y: r.maxY)); grid.addLine(to: CGPoint(x: r.minX + at, y: white.y))
+            grid.move(to: CGPoint(x: r.minX, y: r.maxY - at)); grid.addLine(to: CGPoint(x: white.x, y: r.maxY - at))
         }
         context.stroke(grid, with: .color(.hdr.histogramGrid), lineWidth: 1)
-        var stopGrid = Path()
-        var stop = 1.0
-        while stop < l.stops - 0.01 {
-            let at = l.offset(1 + stop)
-            stopGrid.move(to: CGPoint(x: r.minX + at, y: r.maxY - l.sdr)); stopGrid.addLine(to: CGPoint(x: r.minX + at, y: r.minY))
-            stopGrid.move(to: CGPoint(x: r.minX + l.sdr, y: r.maxY - at)); stopGrid.addLine(to: CGPoint(x: r.maxX, y: r.maxY - at))
-            stop += 1
+        let font = Font.system(size: 9, weight: .medium)
+        func label(_ text: Text, at point: CGPoint, anchor: UnitPoint, color: Color = .hdr.inkMuted) {
+            context.draw(context.resolve(text.font(font).foregroundStyle(color)), at: point, anchor: anchor)
         }
-        context.stroke(stopGrid, with: .color(.hdr.amberBorder), lineWidth: 0.5)
         if let hdr = l.hdrRect {
-            // The scale lies in the corner no curve reaches, under the HDR square.
-            let font = Font.system(size: 9, weight: .medium)
-            func label(_ text: Text, at point: CGPoint, anchor: UnitPoint) {
-                context.draw(context.resolve(text.font(font).foregroundStyle(Color.hdr.inkMuted)), at: point, anchor: anchor)
-            }
-            label(Text("design.curve.hdrAxis", bundle: .module), at: CGPoint(x: hdr.minX + 4, y: hdr.minY + 3), anchor: .topLeading)
-            label(Text("design.curve.sdrWhite", bundle: .module), at: CGPoint(x: r.minX + l.sdr - 3, y: r.maxY - 3), anchor: .bottomTrailing)
+            // SDR white across and up, dashed: where the HDR segment starts.
+            var edge = Path()
+            edge.move(to: CGPoint(x: white.x, y: r.minY)); edge.addLine(to: CGPoint(x: white.x, y: r.maxY))
+            edge.move(to: CGPoint(x: r.minX, y: white.y)); edge.addLine(to: CGPoint(x: r.maxX, y: white.y))
+            context.stroke(edge, with: .color(amber.opacity(0.55)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            label(Text("design.curve.hdrAxis", bundle: .module), at: CGPoint(x: hdr.minX + 4, y: hdr.minY + 3), anchor: .topLeading,
+                  color: amber)
+            label(Text("design.curve.sdrWhite", bundle: .module), at: CGPoint(x: white.x - 3, y: r.maxY - 3), anchor: .bottomTrailing,
+                  color: amber)
             var tick = 1.0
             while tick < l.stops + 0.01 {
                 label(Text(verbatim: "+\(Int(tick))"), at: CGPoint(x: r.minX + l.offset(1 + tick) - 2, y: r.maxY - 3), anchor: .bottomTrailing)
@@ -303,14 +330,17 @@ public struct ToneCurveEditor: View {
         diagonal.move(to: CGPoint(x: r.minX, y: r.maxY)); diagonal.addLine(to: l.view(CGPoint(x: l.maxValue, y: l.maxValue)))
         context.stroke(diagonal, with: .color(.hdr.lineStrong), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
 
+        let curve = (try? ToneCurve(coordinates)) ?? ToneCurve()
         if let marker, marker >= 0, marker <= l.maxValue {
+            // The picked pixel: its input, and where the curve takes it.
             var line = Path()
             let x = r.minX + l.offset(marker)
             line.move(to: CGPoint(x: x, y: r.maxY)); line.addLine(to: CGPoint(x: x, y: r.minY))
-            context.stroke(line, with: .color(.hdr.inkMuted), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+            context.stroke(line, with: .color(Color.hdr.accent.opacity(0.8)), lineWidth: 1)
+            let on = l.view(CGPoint(x: marker, y: min(max(curve.value(at: marker), 0), l.maxValue)))
+            context.fill(Path(ellipseIn: CGRect(x: on.x - 3, y: on.y - 3, width: 6, height: 6)), with: .color(.hdr.accent))
         }
 
-        let curve = (try? ToneCurve(coordinates)) ?? ToneCurve()
         func trace(_ from: Double, _ to: Double, count: Int, color: Color) {
             var path = Path()
             let samples = curve.samples(count: count + 1, from: from, through: to)
@@ -323,6 +353,29 @@ public struct ToneCurveEditor: View {
         }
         trace(0, 1, count: 192, color: tint.sdr)
         if l.stops > 0 { trace(1, l.maxValue, count: 96, color: tint.hdr) }
+    }
+
+    /// While a point is dragged: where it takes its input, in the plot's corner.
+    @ViewBuilder private var dragReadout: some View {
+        if let dragged, dragged * 2 + 1 < coordinates.count {
+            let x = coordinates[dragged * 2], y = coordinates[dragged * 2 + 1]
+            Group {
+                if x > 1 {
+                    Text("design.curve.readout.hdr \(stopsText(x - 1)) \(stopsText(y - 1))", bundle: .module)
+                } else {
+                    Text("design.curve.readout.sdr \(percent(x)) \(percent(y))", bundle: .module)
+                }
+            }
+            .font(.system(size: touch ? 12 : 10, weight: .medium).monospacedDigit())
+            .foregroundStyle(Color.hdr.inkStrong)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.hdr.surfaceCard, in: .capsule)
+            .overlay { Capsule().strokeBorder(Color.hdr.line) }
+            .padding(Self.inset + 2)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
     }
 
     // MARK: Points

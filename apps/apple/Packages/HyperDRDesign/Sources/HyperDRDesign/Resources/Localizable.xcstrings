@@ -1,6 +1,15 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.curve.target.hdrNote" : {"comment": "Under the curve's target when it is HDR only.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changes the HDR version only; below SDR white it can only brighten."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只改 HDR 版本；SDR 白以下只能提亮。"}}}},
+    "design.curve.target.sdrNote" : {"comment": "Under the curve's target when it is SDR only.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changes the SDR base only; the HDR version stays as it is."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只改 SDR 底图，HDR 版本保持不变。"}}}},
+    "design.curve.target.hdr" : {"comment": "The luminance curve changes only the HDR version.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "HDR"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "HDR"}}}},
+    "design.curve.target.sdr" : {"comment": "The luminance curve changes only the SDR base.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "SDR"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "SDR"}}}},
+    "design.curve.target.both" : {"comment": "The luminance curve changes the SDR base and the HDR version.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Both"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "两者"}}}},
+    "design.curve.target" : {"comment": "Which version of the photo the luminance curve changes.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Applies to"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "作用于"}}}},
+    "design.curve.component.luma" : {"comment": "The luminance curve's dot among the curve's components (luminance, red, green, blue).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Luminance"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "亮度"}}}},
+    "design.curve.readout.hdr %@ %@" : {"comment": "While an HDR curve point is dragged: its input and output, in stops above SDR white.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "+%@ → +%@ stops"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "+%@ 档 → +%@ 档"}}}},
+    "design.curve.readout.sdr %@ %@" : {"comment": "While a curve point is dragged: its input and output, in percent of SDR white.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "In %@ → Out %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "输入 %@ → 输出 %@"}}}},
     "design.section.changes %@" : {"comment": "Summary after a folded section's title (curves, mixer, grading): how many of its controls are changed.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ 处改动"}}}},
     "ctrl.tone.dehaze.label" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去朦胧"}}}},
     "ctrl.tone.dehaze.help" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Remove haze, or add a soft atmospheric veil."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去除雾霭，或添加柔和的雾气。"}}}},
@@ -3343,57 +3352,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "绿"
-          }
-        }
-      }
-    },
-    "design.curve.channel.luma" : {
-      "comment" : "Curve menu: luminance curve on both the SDR and the HDR version.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · Both"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 两者"
-          }
-        }
-      }
-    },
-    "design.curve.channel.lumaHDR" : {
-      "comment" : "Curve menu: luminance curve that changes only the HDR version.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · HDR only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 仅 HDR"
-          }
-        }
-      }
-    },
-    "design.curve.channel.lumaSDR" : {
-      "comment" : "Curve menu: luminance curve that changes only the SDR base.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Luminance · SDR only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "亮度 · 仅 SDR"
           }
         }
       }

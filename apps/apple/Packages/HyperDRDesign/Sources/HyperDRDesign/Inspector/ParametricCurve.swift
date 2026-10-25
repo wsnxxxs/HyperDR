@@ -51,9 +51,13 @@ struct ParametricCurvePreview: Equatable {
 struct ParametricCurveEditor: View {
     let preview: ParametricCurvePreview
     let style: AdjustmentControlStyle
+    /// The zone (0 shadows … 3 highlights) whose slider is being dragged.
+    var activeZone: Int? = nil
     let moveSplit: (Int, Double) -> Void
     let onEditingChanged: (Int, Bool) -> Void
 
+    /// The boundary being dragged, drawn solid.
+    @State private var activeSplit: Int?
     @Environment(\.isEnabled) private var isEnabled
 
     private static let inset: CGFloat = 12
@@ -67,12 +71,15 @@ struct ParametricCurveEditor: View {
                 ZStack(alignment: .topLeading) {
                     ForEach(0..<3, id: \.self) { index in
                         SplitHandle(index: index, percent: preview.splits[index], rect: rect, style: style,
-                                    space: Self.space, move: moveSplit, onEditingChanged: onEditingChanged)
+                                    space: Self.space, move: moveSplit) { index, editing in
+                            activeSplit = editing ? index : nil
+                            onEditingChanged(index, editing)
+                        }
                     }
                 }
                 .coordinateSpace(.named(Self.space))
             }
-            .frame(height: style == .touch ? 40 : 26)
+            .frame(height: style == .touch ? 36 : 18)
         }
     }
 
@@ -88,12 +95,28 @@ struct ParametricCurveEditor: View {
                 grid.move(to: point(t, 0)); grid.addLine(to: point(t, 1))
                 grid.move(to: point(0, t)); grid.addLine(to: point(1, t))
             }
-            context.stroke(grid, with: .color(.hdr.histogramGrid), lineWidth: 1)
-            var zones = Path()
-            for edge in preview.splits {
-                zones.move(to: point(edge / 100, 0)); zones.addLine(to: point(edge / 100, 1))
+            // The four zones as faint bands, alternate ones shaded; the zone being
+            // dragged is lit.
+            let edges = [0] + preview.splits.map { $0 / 100 } + [1]
+            for zone in 0..<4 {
+                let band = CGRect(x: point(edges[zone], 0).x, y: r.minY,
+                                  width: point(edges[zone + 1], 0).x - point(edges[zone], 0).x, height: r.height)
+                if zone == activeZone {
+                    context.fill(Path(band), with: .color(Color.hdr.accent.opacity(0.14)))
+                } else if zone % 2 == 1 {
+                    context.fill(Path(band), with: .color(Color.hdr.inkMuted.opacity(0.06)))
+                }
             }
-            context.stroke(zones, with: .color(.hdr.lineStrong), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+            context.stroke(grid, with: .color(.hdr.histogramGrid), lineWidth: 1)
+            for (index, edge) in preview.splits.enumerated() {
+                var line = Path()
+                line.move(to: point(edge / 100, 0)); line.addLine(to: point(edge / 100, 1))
+                if index == activeSplit {
+                    context.stroke(line, with: .color(.hdr.accent), lineWidth: 1)
+                } else {
+                    context.stroke(line, with: .color(.hdr.lineStrong), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                }
+            }
             var diagonal = Path()
             diagonal.move(to: point(0, 0)); diagonal.addLine(to: point(1, 1))
             context.stroke(diagonal, with: .color(.hdr.lineStrong), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
@@ -134,7 +157,8 @@ struct ParametricCurveEditor: View {
                 .foregroundStyle(isEnabled ? (start == nil ? Color.hdr.inkMuted : Color.hdr.accent) : Color.hdr.inkDisabled)
                 .padding(style == .touch ? 12 : 6)
                 .contentShape(.rect)
-                .position(x: x, y: style == .touch ? 20 : 13)
+                // Its point touches the plot's lower edge.
+                .position(x: x, y: style == .touch ? 18 : 9)
                 .gesture(drag)
                 .simultaneousGesture(TapGesture(count: 2).onEnded { move(index, Self.defaults[index]) })
                 .onDisappear { finish() }

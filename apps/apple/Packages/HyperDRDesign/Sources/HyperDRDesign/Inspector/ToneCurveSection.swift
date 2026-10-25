@@ -21,14 +21,33 @@ enum CurveChannel: String, CaseIterable, Identifiable, Sendable {
     /// Only these change the HDR version; with HDR switched off there is none.
     var needsHDR: Bool { self == .lumaHDR }
 
-    var title: Text {
+    /// What the curve changes: the luminance (on one or both versions) or a colour.
+    enum Component: Hashable, CaseIterable { case luma, red, green, blue }
+    /// Which version a luminance curve changes.
+    enum Target: String, Hashable, CaseIterable { case both, sdr, hdr }
+
+    var component: Component {
         switch self {
-        case .luma: Text("design.curve.channel.luma", bundle: .module)
-        case .lumaSDR: Text("design.curve.channel.lumaSDR", bundle: .module)
-        case .lumaHDR: Text("design.curve.channel.lumaHDR", bundle: .module)
-        case .red: Text("design.curve.channel.red", bundle: .module)
-        case .green: Text("design.curve.channel.green", bundle: .module)
-        case .blue: Text("design.curve.channel.blue", bundle: .module)
+        case .luma, .lumaSDR, .lumaHDR: .luma
+        case .red: .red
+        case .green: .green
+        case .blue: .blue
+        }
+    }
+
+    var target: Target {
+        switch self {
+        case .lumaSDR: .sdr
+        case .lumaHDR: .hdr
+        default: .both
+        }
+    }
+
+    static func luma(_ target: Target) -> CurveChannel {
+        switch target {
+        case .both: .luma
+        case .sdr: .lumaSDR
+        case .hdr: .lumaHDR
         }
     }
 
@@ -155,6 +174,10 @@ public struct ToneCurveSection: View {
     @State private var isExpanded: Bool
     @State private var mode: Mode
     @State private var channel = CurveChannel.luma
+    /// The version the luminance curve was last on, for coming back from a colour.
+    @State private var lumaTarget = CurveChannel.Target.both
+    /// The parametric zone whose slider is being dragged, lit on the plot.
+    @State private var activeZone: Int?
     @Environment(\.curvePicking) private var picking
 
     enum Mode: Hashable { case parameters, points }
@@ -245,7 +268,10 @@ public struct ToneCurveSection: View {
             }
         }
         .disabled(!control.isAvailable)
-        .onChange(of: effectiveChannel) { _, now in picking?.select(now.id) }
+        .onChange(of: effectiveChannel) { _, now in
+            picking?.select(now.id)
+            if now.component == .luma { lumaTarget = now.target }
+        }
         .onChange(of: effectiveMode) { _, now in if now == .parameters, picking?.isActive == true { picking?.toggle() } }
     }
 
@@ -254,49 +280,87 @@ public struct ToneCurveSection: View {
     @ViewBuilder private var pointsEditor: some View {
         let channel = effectiveChannel
         let stops = hdrStops(for: channel)
-        if availableChannels.count > 1 || picking != nil {
+        if availableChannels.count > 1 {
             HStack(spacing: Space.s2) {
-                if availableChannels.count > 1 {
-                    Picker(selection: Binding(get: { channel }, set: { self.channel = $0 })) {
-                        ForEach(availableChannels) { option in
-                            option.title.tag(option)
-                                .disabled(option.needsHDR && !hdrEnabled)
-                        }
-                    } label: {
-                        Text("design.curve.channel", bundle: .module)
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(minHeight: style == .touch ? 44 : nil)
-                }
+                CurveComponentPicker(components: availableComponents, selection: channel.component, style: style,
+                                     isChanged: isChanged(component:)) { choose($0) }
                 Spacer(minLength: 0)
-                if let picking {
-                    PickToolButton(isActive: picking.isActive, title: Text(picking.isActive ? "design.curve.pick.stop" : "design.curve.pick",
-                                                                          bundle: .module),
-                                   size: style == .touch ? 44 : 22) {
-                        picking.select(channel.id)
-                        picking.toggle()
-                    }
+                if channel.component == .luma, availableTargets.count > 1 {
+                    SectionSegments(request: SectionSegmentsRequest(
+                        title: Text("design.curve.target", bundle: .module),
+                        options: availableTargets.map { target in
+                            .init(id: target.rawValue, title: Self.title(target),
+                                  isEnabled: target != .hdr || hdrEnabled)
+                        },
+                        selection: Binding(get: { channel.target.rawValue },
+                                           set: { self.channel = .luma(CurveChannel.Target(rawValue: $0) ?? .both) })),
+                                    style: style)
+                        .fixedSize()
                 }
             }
+        }
+        if let note = Self.note(channel.target), channel.component == .luma {
+            note
+                .font(Font.hdr.caption)
+                .foregroundStyle(channel.target == .hdr ? Color.hdr.amber : Color.hdr.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if let declaration = Adjustments.declaration(channel.id) {
             ToneCurveEditor(coordinates: coordinates(channel), style: style, hdrStops: stops,
                             marker: picking?.inputs[channel.id], tint: channel.tint,
-                            liftsOnly: channel == .lumaHDR,
+                            liftsOnly: channel == .lumaHDR, isPicking: picking?.isActive == true,
                             write: { panel.set(channel.id, curve: $0, in: &recipe) },
                             onEditingChanged: { onEditingChanged(declaration, $0) })
-                .frame(maxWidth: width(hdr: stops != nil))
+                .frame(maxWidth: style == .touch ? 400 : .infinity)
+                .frame(maxWidth: .infinity)
         }
-        Text(style == .touch ? "design.curve.hint.touch" : "design.curve.hint.pointer", bundle: .module)
-            .font(Font.hdr.caption)
-            .foregroundStyle(Color.hdr.inkMuted)
-            .fixedSize(horizontal: false, vertical: true)
-            .transition(.opacity)
+        if isDefault(channel.id) {
+            // How to start, until there is a curve; then the plot speaks for itself.
+            Text(style == .touch ? "design.curve.hint.touch" : "design.curve.hint.pointer", bundle: .module)
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .transition(.opacity)
+        }
     }
 
-    private func width(hdr: Bool) -> CGFloat {
-        style == .touch ? (hdr ? 380 : 320) : (hdr ? 292 : 240)
+    private var availableComponents: [CurveChannel.Component] {
+        CurveChannel.Component.allCases.filter { component in availableChannels.contains { $0.component == component } }
+    }
+
+    private var availableTargets: [CurveChannel.Target] {
+        CurveChannel.Target.allCases.filter { availableChannels.contains(.luma($0)) }
+    }
+
+    private func isChanged(component: CurveChannel.Component) -> Bool {
+        availableChannels.contains { $0.component == component && !isDefault($0.id) }
+    }
+
+    /// A colour, or back to the luminance on the version it was last on.
+    private func choose(_ component: CurveChannel.Component) {
+        switch component {
+        case .luma: channel = .luma(lumaTarget)
+        case .red: channel = .red
+        case .green: channel = .green
+        case .blue: channel = .blue
+        }
+    }
+
+    private static func title(_ target: CurveChannel.Target) -> Text {
+        switch target {
+        case .both: Text("design.curve.target.both", bundle: .module)
+        case .sdr: Text("design.curve.target.sdr", bundle: .module)
+        case .hdr: Text("design.curve.target.hdr", bundle: .module)
+        }
+    }
+
+    /// What a one-version curve does, under the choice.
+    private static func note(_ target: CurveChannel.Target) -> Text? {
+        switch target {
+        case .both: nil
+        case .sdr: Text("design.curve.target.sdrNote", bundle: .module)
+        case .hdr: Text("design.curve.target.hdrNote", bundle: .module)
+        }
     }
 
     // MARK: Parameters
@@ -319,22 +383,29 @@ public struct ToneCurveSection: View {
     }
 
     @ViewBuilder private var parametricEditor: some View {
-        ParametricCurveEditor(preview: preview, style: style, moveSplit: moveSplit,
+        ParametricCurveEditor(preview: preview, style: style, activeZone: activeZone, moveSplit: moveSplit,
                               onEditingChanged: { index, editing in
             if let declaration = Adjustments.declaration(ParametricCurveIDs.splits[index]) {
                 onEditingChanged(declaration, editing)
             }
         })
-        .frame(maxWidth: width(hdr: false))
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s4) {
-            ForEach(ParametricCurveIDs.amounts, id: \.self) { id in
-                SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, onEditingChanged: onEditingChanged)
+        .frame(maxWidth: style == .touch ? 400 : .infinity)
+        .frame(maxWidth: .infinity)
+        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
+            ForEach(Array(ParametricCurveIDs.amounts.enumerated()), id: \.element) { index, id in
+                // Listed highlights first; the plot's zones go shadows first.
+                SectionSlider(recipe: $recipe, id: id, panel: panel, style: style) { declaration, editing in
+                    activeZone = editing ? ParametricCurveIDs.amounts.count - 1 - index : nil
+                    onEditingChanged(declaration, editing)
+                }
             }
         }
-        Text("design.curve.parametricHint", bundle: .module)
-            .font(Font.hdr.caption)
-            .foregroundStyle(Color.hdr.inkMuted)
-            .fixedSize(horizontal: false, vertical: true)
+if ParametricCurveIDs.all.allSatisfy(isDefault) {
+                    Text("design.curve.parametricHint", bundle: .module)
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Header
@@ -348,6 +419,79 @@ public struct ToneCurveSection: View {
         SubsectionHeader(title: AdjustmentText.label(control.declaration), style: style, isChanged: changedCount > 0,
                       canReset: !currentIsDefault, summary: SectionSummary.changes(changedCount),
                       isExpanded: style == .pointer ? $isExpanded : nil,
-                      resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) { EmptyView() }
+                      resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) {
+            if let picking, isExpanded {
+                PickToolButton(isActive: picking.isActive,
+                               title: Text(picking.isActive ? "design.curve.pick.stop" : "design.curve.pick", bundle: .module),
+                               size: style == .touch ? 44 : 22) {
+                    picking.select(effectiveChannel.id)
+                    picking.toggle()
+                }
+                .disabled(effectiveMode == .parameters)
+            }
+        }
+    }
+}
+
+/// The curve's components as small dots to choose from (controls-polish
+/// §3.1): the luminance (half black, half white), red, green and blue. A dot
+/// whose curve is changed carries a mark under it.
+struct CurveComponentPicker: View {
+    let components: [CurveChannel.Component]
+    let selection: CurveChannel.Component
+    let style: AdjustmentControlStyle
+    let isChanged: (CurveChannel.Component) -> Bool
+    let choose: (CurveChannel.Component) -> Void
+
+    private var side: CGFloat { style == .touch ? 28 : 18 }
+
+    var body: some View {
+        HStack(spacing: style == .touch ? Space.s1 : 2) {
+            ForEach(components, id: \.self) { component in
+                let isSelected = component == selection
+                Button { choose(component) } label: {
+                    dot(component)
+                        .frame(width: side, height: side)
+                        .overlay {
+                            Circle().strokeBorder(Color.hdr.inkStrong, lineWidth: isSelected ? 1.5 : 0).padding(-3)
+                        }
+                        .overlay(alignment: .bottom) {
+                            if isChanged(component) {
+                                Circle().fill(Color.hdr.inkStrong).frame(width: 3, height: 3).offset(y: 7)
+                            }
+                        }
+                        .frame(width: style == .touch ? 44 : 28, height: style == .touch ? 44 : 28)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(Self.title(component))
+                .accessibilityLabel(Self.title(component))
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("design.curve.channel", bundle: .module))
+    }
+
+    @ViewBuilder private func dot(_ component: CurveChannel.Component) -> some View {
+        switch component {
+        case .luma:
+            Circle()
+                .fill(LinearGradient(stops: [.init(color: .black, location: 0.5), .init(color: .white, location: 0.5)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .overlay { Circle().strokeBorder(Color.hdr.lineStrong) }
+        case .red: Circle().fill(Color.hdr.histogramRed)
+        case .green: Circle().fill(Color.hdr.histogramGreen)
+        case .blue: Circle().fill(Color.hdr.histogramBlue)
+        }
+    }
+
+    static func title(_ component: CurveChannel.Component) -> Text {
+        switch component {
+        case .luma: Text("design.curve.component.luma", bundle: .module)
+        case .red: Text("design.curve.channel.red", bundle: .module)
+        case .green: Text("design.curve.channel.green", bundle: .module)
+        case .blue: Text("design.curve.channel.blue", bundle: .module)
+        }
     }
 }

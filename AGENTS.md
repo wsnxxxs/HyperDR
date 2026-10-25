@@ -39,7 +39,19 @@ this checkout. This file summarizes what they decide.
   of HEIC exports and diagnostics use our HEIF reader (`container/heif_reader`)
   and the VideoToolbox tile decoder. libheif and libde265 were deleted on
   2026-10-20 (P3b-5); the app bundle embeds no dylibs and carries no LGPL code.
-- RAW is developed through `CIRAWFilter`; LibRaw is gone.
+- RAW is developed through `CIRAWFilter`. When the system cannot develop a
+  camera (an older OS, or a camera Apple does not support yet), Render falls
+  back automatically (user decision, 2026-10-25): the engine's LibRaw, used
+  under CDDL-1.0 and pinned by `cmake/ports/libraw`, only unpacks the file and
+  `modules/codec/src/raw_compat.cpp` writes a DNG (CFA for Bayer, LinearRaw
+  otherwise) that `CIRAWFilter` then develops like any DNG. Kit's
+  `RAWCompatibilityConverter` caches it under `decode-cache/raw-compatibility`;
+  `Recipe.rawCompatibility` records the converter id, and a saved recipe always
+  reopens through that converter. If LibRaw cannot read the camera or has no
+  colour matrix, the embedded JPEG opens as an SDR photo
+  (`Recipe.rawEmbeddedPreview`) with a prominent warning; otherwise opening
+  fails with `RenderError.rawUnsupported`. Debug builds force the fallback with
+  `-HyperDRForceRAWCompatibility`.
 - The Python panel, LAN server, web front end and Tauri shell were deleted on
   2026-10-20 (last visible at `722f62ce`). P7-4 removes the CLI, schema,
   panel-v1 adapter, C++ processing and ncnn; AI runs through Core ML in Render.
@@ -94,7 +106,7 @@ python3 scripts/test.py apple                    # xcframework, Swift packages, 
 python3 scripts/test.py ios                      # iOS/iPadOS target: engine slices when missing, device and simulator builds, unsigned (needs Xcode's iOS platform)
 ```
 
-- The C ABI is version 5. It accepts finished float32 planes through
+- The C ABI is version 6 (ABI 6 adds the RAW compatibility converter). It accepts finished float32 planes through
   `hyperdr_package` / `hyperdr_package_rows`; rendering belongs to HyperDRRender.
   Keep package metadata, E5 zero-gain frames and bounded verification intact.
   `tests/capi` covers both static/shared handles, packaging and 512 KB stacks.

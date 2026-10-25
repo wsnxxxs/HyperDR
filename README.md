@@ -169,7 +169,7 @@ macOS blocks the first launch, choose *Open Anyway* in System Settings → Priva
 Team); no paid developer account is needed. See the
 [installation notes](apps/apple/README-iOS.md).
 
-Requires iOS / iPadOS 27, or macOS 27 on Apple silicon.
+Requires iOS / iPadOS 27, or macOS 15 or later on Apple silicon.
 
 > [!NOTE]
 > HyperDR 0.5.3 is a pre-release. Full-size 110 MP RAW on iPhone is still being

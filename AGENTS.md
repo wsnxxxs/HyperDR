@@ -11,8 +11,14 @@ this checkout. This file summarizes what they decide.
   Mac Catalyst, on Apple Silicon. Core packages (edit recipe, GPU render
   graph, export planning) must not depend on AppKit or UIKit. Windows stopped
   at commit `6949167` on `main`; Android is out of scope. The first release
-  requires iOS/iPadOS 27 and macOS 27 (user decision, 2026-10-23); every
-  deployment target (Xcode, packages, CMake presets, vcpkg triplets) is 27.0.
+  requires iOS/iPadOS 27 (user decision, 2026-10-23) and macOS 15 (user
+  decision, 2026-10-25): the macOS deployment targets (Xcode, packages, the
+  macOS CMake presets, the `arm64-osx` vcpkg triplet) are 15.0, and the iOS
+  ones stay 27.0. Code that needs a newer API calls it under
+  `if #available(macOS 26, iOS 26, *)` (`__builtin_available` in C++), which
+  keeps macOS 26+ and iOS on the original code; only macOS 15 to 25 takes the
+  older branch. That branch builds and links but has not been run on a
+  macOS 15 machine.
 - Direction approved on 2026-10-20 and 2026-10-21: image processing moves to a
   GPU render graph (Core Image plus our own Metal kernels) shared by preview
   and export; decoding moves to the system (ImageIO, `CIRAWFilter`); each
@@ -104,7 +110,7 @@ python3 scripts/test.py ios                      # iOS/iPadOS target: engine sli
   missing or unused keys and hard-coded Chinese in views.
 - `scripts/build_xcframework.sh` builds the macOS arm64 slice by default;
   `--platforms all` adds the iOS device and iOS simulator slices (deployment
-  target 27.0). All hosts use the same writer library, so generate all three
+  target 27.0; the macOS slice is 15.0). All hosts use the same writer library, so generate all three
   slices whenever iOS work needs it.
   Each slice's archive is checked for retired (L)GPL symbols by
   `check_licenses.py --archive-only` inside the build script, right after the
@@ -145,7 +151,7 @@ photo-dependent HDR content into the mat.
 ## Current pipeline
 
 Mac, iPhone and iPad editing uses RecipeEditor and HyperDRRender. ImageIO and
-CIRAWFilter decode; Core ML supplies AI gain when the build includes the model. The apps require iOS/iPadOS 27 and macOS 27; RAW decoder 9 still depends on the camera and file.
+CIRAWFilter decode; Core ML supplies AI gain when the build includes the model. The apps require iOS/iPadOS 27 and macOS 15 (below macOS 26 through the `#available` branches, not yet run on macOS 15); RAW decoder 9 still depends on the camera and file.
 Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
 photos. Automatic selects decoder 9 when the system and file support it
 (including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without

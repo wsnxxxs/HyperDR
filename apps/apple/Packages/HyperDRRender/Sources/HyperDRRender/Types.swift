@@ -195,6 +195,9 @@ public struct RenderSource: @unchecked Sendable {
     public let authoredGainMap: AuthoredGainMap?
     /// System HDR reconstruction, oriented, in CI coordinates (bottom-left).
     public let hdrImage: CIImage
+    /// Headroom of a materialized image on systems that cannot tag CIImage.
+    var fallbackHDRHeadroom: Float? = nil
+    var hdrContentHeadroom: Float { fallbackHDRHeadroom ?? hdrImage.contentHeadroom }
     /// Author's base image, before working-space conversion, when a pair exists.
     public let authoredBaseImage: CIImage?
     public let rawSettings: RAWDevelopment?

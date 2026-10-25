@@ -1,6 +1,6 @@
 # HyperDR macOS
 
-Requires Apple Silicon, macOS 27 and Xcode 27.1. The Mac target uses the macOS arm64 engine slice.
+Runs on Apple Silicon with macOS 15 or later; building needs Xcode 27.1 (macOS SDK 27). The Mac target uses the macOS arm64 engine slice.
 Run from the repository root:
 
 ```sh

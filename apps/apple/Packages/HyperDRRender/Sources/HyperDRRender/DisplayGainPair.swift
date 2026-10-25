@@ -87,6 +87,7 @@ extension RenderEngine {
             domain: source.domain, size: source.size, nativeSize: source.nativeSize,
             authoredGainMap: metadata, hdrImage: source.hdrImage, authoredBaseImage: image,
             rawSettings: source.rawSettings, texture: base, baseSpace: source.baseSpace, gainTexture: source.gainTexture)
+        normalized.fallbackHDRHeadroom = source.fallbackHDRHeadroom
         normalized.samplingRegion = source.samplingRegion
         normalized.gainSamplingRegion = source.gainSamplingRegion
         normalized.geometryUncroppedSize = source.geometryUncroppedSize
@@ -151,12 +152,14 @@ extension RenderEngine {
             CIImage(mtlTexture: texture, options: [.colorSpace: Self.workingColorSpace])!
                 .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(texture.height)))
         }
+        let boundHDR = HeadroomImage(image(hdr), headroom: source.hdrContentHeadroom)
         var target = RenderSource(id: source.id, renderID: UUID(), origin: source.origin,
             domain: source.domain, size: size, nativeSize: source.nativeSize,
             authoredGainMap: source.authoredGainMap,
-            hdrImage: image(hdr).settingContentHeadroom(source.hdrImage.contentHeadroom),
+            hdrImage: boundHDR.image,
             authoredBaseImage: image(pair.base), rawSettings: source.rawSettings,
             texture: pair.base, baseSpace: Self.workingColorSpace, gainTexture: source.gainTexture)
+        target.fallbackHDRHeadroom = boundHDR.fallbackHeadroom
         target.samplingRegion = CGRect(x: region.minX / Double(size.width), y: region.minY / Double(size.height),
                                        width: region.width / Double(size.width), height: region.height / Double(size.height))
         target.gainSamplingRegion = source.gainSamplingRegion
@@ -209,8 +212,8 @@ extension RenderEngine {
             baseOffset = metadata.baseOffset; alternateOffset = metadata.alternateOffset
             baseHeadroom = Float(metadata.source.baseHeadroom ?? 0)
             taggedHeadroom = metadata.source.alternateHeadroom.map(Float.init)
-            if taggedHeadroom == nil && metadata.source.standard == .apple && source.hdrImage.contentHeadroom > 1 {
-                taggedHeadroom = log2(source.hdrImage.contentHeadroom)
+            if taggedHeadroom == nil && metadata.source.standard == .apple && source.hdrContentHeadroom > 1 {
+                taggedHeadroom = log2(source.hdrContentHeadroom)
             }
         case .authored(let metadata):
             gainSpace = metadata.gainWorkingColorSpace ?? planes.baseColorSpace
@@ -284,7 +287,7 @@ extension RenderEngine {
         }
         if measuresPeak { try finish(command) }
         let measuredHeadroom = measuresPeak ? Float(bitPattern:peak.contents().load(as:UInt32.self)) : 0
-        let alternateHeadroom = taggedHeadroom ?? max(measuredHeadroom, legacy ? log2(max(1,source.hdrImage.contentHeadroom)) : 0)
+        let alternateHeadroom = taggedHeadroom ?? max(measuredHeadroom, legacy ? log2(max(1,source.hdrContentHeadroom)) : 0)
         return DisplayGainPair(base:base,gain:gain,gainChannelCount:count,baseOffset:baseOffset,alternateOffset:alternateOffset,
             baseHeadroom:baseHeadroom,alternateHeadroom:alternateHeadroom,p3ToGain:p3ToGain,gainToP3:gainToP3,region:planes.region,outputSize:planes.outputSize)
     }

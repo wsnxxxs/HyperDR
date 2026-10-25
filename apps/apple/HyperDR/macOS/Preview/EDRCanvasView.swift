@@ -174,8 +174,19 @@ final class EDRCanvasView: NSView {
         if var composition = compositionProvider?() {
             if window != nil { composition.headroom = headroomPolicy.target(headroom.snapshot) }
             if headroomPolicy == .declaredCurrent {
-                metalLayer.preferredDynamicRange = .high
-                metalLayer.contentsHeadroom = max(1, exp2(max(composition.edited.alternateHeadroom, composition.original?.alternateHeadroom ?? 0)))
+                if #available(macOS 26, iOS 26, *) {
+                    metalLayer.preferredDynamicRange = .high
+                    metalLayer.contentsHeadroom = max(1, exp2(max(composition.edited.alternateHeadroom, composition.original?.alternateHeadroom ?? 0)))
+                } else {
+                    // macOS 15 to 25 have no way to declare the content's
+                    // headroom. The layer is extended-linear Display P3 in
+                    // rgba16Float with `wantsExtendedDynamicRangeContent` (set
+                    // in `EDRDisplayPass.configure`), so the system takes the
+                    // pixels to use whatever headroom the display has now
+                    // instead of the photo's declared one; values stay as
+                    // drawn. No `edrMetadata`: that is for PQ/HLG spaces.
+                    metalLayer.wantsExtendedDynamicRangeContent = true
+                }
             }
             content = .composition(composition)
         } else if showsSyntheticRamp {

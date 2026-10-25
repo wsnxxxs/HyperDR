@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HyperDRRender",
-    platforms: [.macOS("27.0"), .iOS("27.0")],
+    platforms: [.macOS("15.0"), .iOS("27.0")],
     products: [.library(name: "HyperDRRender", targets: ["HyperDRRender"])],
     dependencies: [.package(path: "../HyperDRRecipe")],
     targets: [

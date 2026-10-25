@@ -247,7 +247,7 @@ extension RenderEngine {
         let taggedHeadroom = max(source.authoredGainMap?.baseHeadroom ?? 0, source.authoredGainMap?.alternateHeadroom ?? 0)
         var result = SpatialAnalysis(size: PixelSize(width: width, height: height), cells: cells, masks: masks,
             expansion: expansion, peaks: summary.contents().load(as: SIMD4<Float>.self),
-            sourceHeadroom: max(log2(max(1, originalPeak)), log2(max(1, source.hdrImage.contentHeadroom)), Float(taggedHeadroom)))
+            sourceHeadroom: max(log2(max(1, originalPeak)), log2(max(1, source.hdrContentHeadroom)), Float(taggedHeadroom)))
         result.filmHalation = halation
         analysisCache = (key, result)
         return result

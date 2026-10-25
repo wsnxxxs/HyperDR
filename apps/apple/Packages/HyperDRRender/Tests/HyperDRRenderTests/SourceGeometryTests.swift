@@ -97,6 +97,7 @@ import HyperDRRecipe
         #expect(Self.colour(straight, x: 2, y: 2) == .red)
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func aGainMapTurnsAndCropsWithItsPhoto() async throws {
         let png = try Self.quarters(width: 64, height: 48)
         defer { try? FileManager.default.removeItem(at: png.deletingLastPathComponent()) }

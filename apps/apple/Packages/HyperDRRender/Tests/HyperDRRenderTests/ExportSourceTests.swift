@@ -207,6 +207,7 @@ private func licensedRAW() -> URL {
         catch RenderError.invalidSize {}
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func orientedRasterAndAuthoredPairMatchWhole() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
@@ -296,6 +297,7 @@ private func licensedRAW() -> URL {
         } catch RenderError.sourceChanged {}
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func translucentAuthoredPairFlattensToItsActualHDREndpoint() async throws {
         let engine = try RenderEngine(), size = PixelSize(width: 31, height: 19)
         let bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)

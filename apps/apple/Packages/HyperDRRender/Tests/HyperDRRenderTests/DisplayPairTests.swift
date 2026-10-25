@@ -57,6 +57,7 @@ private func samePairSamples(_ a: DisplayGainPair, _ b: DisplayGainPair) {
         samePairSamples(try await engine.exportTestPair(original,source:source),pair)
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func nativeISOAndLegacyNormalizeWithoutChangingExportPair() async throws {
         let engine = try RenderEngine()
         let space = CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
@@ -125,6 +126,7 @@ private func samePairSamples(_ a: DisplayGainPair, _ b: DisplayGainPair) {
         #expect(editedDisplay.gain === editedLegacy.gain && editedDisplay.alternateHeadroom == 2)
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func exportRetainsTheFirstBandsUntaggedLegacyHeadroom() async throws {
         let engine = try RenderEngine(), space = RenderEngine.workingColorSpace
         let bounds = CGRect(x:0,y:0,width:1,height:2)

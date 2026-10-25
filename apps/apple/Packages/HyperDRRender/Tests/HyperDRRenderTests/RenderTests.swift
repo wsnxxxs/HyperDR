@@ -178,6 +178,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
                 == .preview(maximumSize:PixelSize(width:2048,height:1365)))
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func authoredISOPairPassesThroughAndReconstructs() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".heic")
         defer { try? FileManager.default.removeItem(at: url) }

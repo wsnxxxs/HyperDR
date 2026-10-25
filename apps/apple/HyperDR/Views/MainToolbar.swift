@@ -37,7 +37,10 @@ struct MainToolbar: ToolbarContent {
                         .help("edit.redo")
                         .disabled(!model.canRedo)
                 }
-                ToolbarSpacer(.fixed, placement: .primaryAction)
+                // Before macOS 26 there is no toolbar spacer; the groups sit together.
+                if #available(macOS 26, iOS 26, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
             }
 
             // Buttons rather than a segmented Picker or toggles: in the toolbar
@@ -80,7 +83,9 @@ struct DocumentToolbar: ToolbarContent {
     @Binding var showsInspector: Bool
     var body: some ToolbarContent {
         // Over the inspector the items would start at its leading edge.
-        ToolbarSpacer(.flexible)
+        if #available(macOS 26, iOS 26, *) {
+            ToolbarSpacer(.flexible)
+        }
         if model.workspace == .editing {
             ToolbarItemGroup(placement: .primaryAction) {
                 HistoryButton(model: model, window: window)

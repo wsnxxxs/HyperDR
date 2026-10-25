@@ -7,12 +7,14 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 @Suite(.serialized) struct HDRInputTests {
+    @available(macOS 26, iOS 26, *)
     private func image(_ rgb: SIMD3<Float>) -> CIImage {
         let pixels = [SIMD4(rgb, 1)]
         return CIImage(bitmapData: pixels.withUnsafeBytes { Data($0) }, bytesPerRow: 16,
             size: CGSize(width: 1, height: 1), format: .RGBAf, colorSpace: RenderEngine.workingColorSpace)
     }
 
+    @available(macOS 26, iOS 26, *)
     private func authored(_ engine: RenderEngine, rgb: SIMD3<Float> = SIMD3(0.3, 0.2, 0.1),
                           offset: Float = 0, systemScale: Float = 1) async throws -> RenderSource {
         let base = image(rgb), hdr = image(((rgb + offset) * 4 - offset) * systemScale)
@@ -33,6 +35,7 @@ import HyperDRRecipe
             texture: baseSource.texture, baseSpace: RenderEngine.workingColorSpace, gainTexture: gainSource.texture)
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func independentEffectsKeepTheAuthoredSDREndpoint() async throws {
         let engine = try RenderEngine(), source = try await authored(engine, offset: 1/64)
         let size = PixelSize(width: 2000, height: 2), region = CGRect(x: 100, y: 0, width: 64, height: 2)
@@ -57,6 +60,7 @@ import HyperDRRecipe
         }
     }
 
+    @available(macOS 26, iOS 26, *)
     private func pixels(_ pair: DisplayGainPair, weight: Float) -> [Float] {
         let base = RenderEngine.readTexture(pair.base), gain = RenderEngine.readTexture(pair.gain)
         return stride(from: 0, to: base.count, by: 4).flatMap { i -> [Float] in
@@ -80,6 +84,7 @@ import HyperDRRecipe
         }
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func tinyExposureDoesNotReplaceAuthoredSDRBase() async throws {
         let engine = try RenderEngine(), source = try await authored(engine)
         let original = try await engine.displayPair(engine.render(source, adjustments: .init()), source: source)
@@ -91,6 +96,7 @@ import HyperDRRecipe
 
     @Test(arguments: ["tone.exposure", "tone.contrast", "tone.highlights", "tone.shadows", "tone.blacks",
                       "color.warmth", "color.tint", "color.vibrance", "color.saturation"])
+    @available(macOS 26, iOS 26, *)
     func allSmallEditsKeepBothEndpoints(parameter: String) async throws {
         let engine = try RenderEngine(), source = try await authored(engine)
         let original = try await engine.displayPair(engine.render(source, adjustments: .init()), source: source)
@@ -105,6 +111,7 @@ import HyperDRRecipe
         }
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func exposureScalesHDRAndNegativeExposureScalesSDR() async throws {
         let engine = try RenderEngine(), source = try await authored(engine)
         let original = try await engine.displayPair(engine.render(source, adjustments: .init()), source: source)
@@ -122,6 +129,7 @@ import HyperDRRecipe
         }
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func ISOEditingDoesNotSwitchToTheSystemHDRRendition() async throws {
         let engine = try RenderEngine()
         let source = try await authored(engine, systemScale: 0.25)
@@ -131,6 +139,7 @@ import HyperDRRecipe
         #expect(zip(expected, pixels(pair, weight: 1)).allSatisfy { abs($0 - $1) < 0.00001 })
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func offsetsPreserveHDRWhenTheSDRChannelIsBlack() async throws {
         let engine = try RenderEngine(), source = try await authored(engine, rgb: .zero, offset: 1/64)
         var edit = RenderAdjustments(); edit.tone.exposure = -1
@@ -140,6 +149,7 @@ import HyperDRRecipe
         #expect(pixels(pair, weight: 1).allSatisfy { abs($0 - 3/128) < 0.000001 })
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test(arguments: [false, true]) func partialLooksMixTheAuthoredEndpoints(film: Bool) async throws {
         let engine = try RenderEngine(), source = try await authored(engine)
         var edit = RenderAdjustments()
@@ -161,6 +171,7 @@ import HyperDRRecipe
         }
     }
 
+    @available(macOS 26, iOS 26, *)
     @Test func localHDRSamplesExposureProbe() async throws {
         guard ProcessInfo.processInfo.environment["HYPERDR_HDR_PROBE"] == "1" else { return }
         var root = URL(fileURLWithPath: #filePath)

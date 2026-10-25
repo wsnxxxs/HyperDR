@@ -227,7 +227,8 @@ public actor RenderEngine {
     }
 
     func materialize(_ opened: OpenedSource, id: UUID = UUID(),
-                             origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
+                             origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil,
+                             useImageHeadroom: Bool = true) throws -> RenderSource {
         let texture: any MTLTexture
         if let preview = opened.rawPreviewSize {
             texture = try rasterizeRAWPreview(opened.image, size: preview, space: opened.baseSpace)
@@ -242,15 +243,17 @@ public actor RenderEngine {
         let hdr = opened.domain == .rawEDR
             ? CIImage(mtlTexture:texture,options:[.colorSpace:Self.workingColorSpace])!
                 .transformed(by:CGAffineTransform(a:1,b:0,c:0,d:-1,tx:0,ty:CGFloat(texture.height)))
-                .settingContentHeadroom(opened.hdr.contentHeadroom)
             : opened.hdr
-        let source = RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
+        let boundHDR = HeadroomImage(hdr, headroom: opened.hdr.contentHeadroom,
+            writesImageMetadata: opened.domain == .rawEDR && useImageHeadroom)
+        var source = RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
             size: PixelSize(width: texture.width, height: texture.height),
             nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height),
             authoredGainMap: opened.gain,
-            hdrImage: hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
+            hdrImage: boundHDR.image, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture,
             geometryUncroppedSize: opened.uncroppedSize)
+        source.fallbackHDRHeadroom = opened.domain == .rawEDR ? boundHDR.fallbackHeadroom : nil
         return try canonicalizeAuthoredSource(source)
     }
 

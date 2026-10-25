@@ -503,13 +503,26 @@ import UniformTypeIdentifiers
     /// Waits until the editor has rendered `source`, or throws its render failure.
     private func firstFrame(of source: UUID) async throws {
         let editor = self.editor
-        for await state in Observations({
-            (edited: editor.frame?.request.sourceID, failure: editor.renderFailure, current: editor.source?.id)
-        }) {
+        /// Returns true once the first frame is there.
+        func settled(_ state: (edited: UUID?, failure: String?, current: UUID?)) throws -> Bool {
             try Task.checkCancellation()
             guard state.current == source else { throw CancellationError() }
-            if state.edited == source { return }
+            if state.edited == source { return true }
             if let failure = state.failure { throw UserFacingError(code: "decode_failed", detail: failure) }
+            return false
+        }
+        if #available(macOS 26, iOS 26, *) {
+            for await state in Observations({
+                (edited: editor.frame?.request.sourceID, failure: editor.renderFailure, current: editor.source?.id)
+            }) {
+                if try settled(state) { return }
+            }
+        } else {
+            for await state in LegacyObservations.values({
+                (edited: editor.frame?.request.sourceID, failure: editor.renderFailure, current: editor.source?.id)
+            }) {
+                if try settled(state) { return }
+            }
         }
         throw CancellationError()
     }
@@ -675,14 +688,25 @@ import UniformTypeIdentifiers
     private func observeEditor() {
         let editor = self.editor
         editorObserver = Task { [weak self] in
-            for await _ in Observations({
-                // Everything the model mirrors; `editorChanged` reads the values again.
-                (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure, editor.originalFailure,
-                 editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
-                 editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request)
-            }) {
-                guard let self, !Task.isCancelled else { return }
-                editorChanged()
+            if #available(macOS 26, iOS 26, *) {
+                for await _ in Observations({
+                    // Everything the model mirrors; `editorChanged` reads the values again.
+                    (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure, editor.originalFailure,
+                     editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
+                     editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request)
+                }) {
+                    guard let self, !Task.isCancelled else { return }
+                    editorChanged()
+                }
+            } else {
+                for await _ in LegacyObservations.values({
+                    (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure, editor.originalFailure,
+                     editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
+                     editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request)
+                }) {
+                    guard let self, !Task.isCancelled else { return }
+                    editorChanged()
+                }
             }
         }
     }

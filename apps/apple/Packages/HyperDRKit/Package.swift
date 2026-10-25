@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "HyperDRKit",
     defaultLocalization: "en",
-    platforms: [.macOS("27.0"), .iOS("27.0")],
+    platforms: [.macOS("15.0"), .iOS("27.0")],
     products: [.library(name: "HyperDRKit", targets: ["HyperDRKit"])],
     dependencies: [.package(path: "../HyperDREngine"), .package(path: "../HyperDRRecipe"), .package(path: "../HyperDRRender")],
     targets: [

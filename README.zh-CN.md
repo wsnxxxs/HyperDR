@@ -121,7 +121,7 @@ Gallery、Label、Story、Hairline 和 Instant 五种样式，每种都有五种
 
 **iPhone 与 iPad**：用 Xcode 和免费的个人 Apple ID（Personal Team）从源码构建安装，不需要付费开发者账号，步骤见[安装说明](apps/apple/README-iOS.md)。
 
-需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 27。
+需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 15 及更高版本。
 
 > [!NOTE]
 > HyperDR 0.5.3 还是预发布版本。iPhone 上 110MP RAW 的全尺寸处理还在验证，iOS 也暂时不能在后台继续导出。

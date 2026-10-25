@@ -9,9 +9,11 @@ synchronously. Request planes supply complete canvas dimensions/channel count an
 F32 format; data, size and row_bytes are ignored. Offsets, headrooms, gamut, Exif,
 quality, presentation_frame and frame_photo retain their whole-plane meanings.
 The callback fills borrowed tight RGB base/log2 gain buffers and returns before
-encoding continues. It is serialized, may revisit rows, and must be repeatable.
+encoding continues. It is serialized and visits each band once in ascending order.
 The native token and callback failures abort before publishing the staged file.
-No asynchronous queues or full-plane spool is hidden behind this entry.
+HDR writers reserve an anonymous, uncached float32 replay file beside the output
+before pulling rows. It is closed before verification and on cancellation/failure;
+there is no image-sized resident cache or asynchronous render queue.
 
 The Swift entry is `Engine.packageRows(width:height:gainChannels:gainMetadata:
 rows:to:options:read:)`; the throwing synchronous reader receives y/count and
@@ -23,8 +25,8 @@ borrowed mutable float buffers. Its original Swift error is preserved.
 | SDR JPEG | scanlines, fixed Huffman tables | stdio buffer |
 | SDR TIFF | libtiff scanlines/deflate strips | stdio/strip buffers |
 | ISO JPEG | separate base and gain JPEG streams in temporary files, MPF/ISO assembly in 64 KiB blocks | stdio buffers |
-| Adaptive HEIC, PQ/HLG HEIC | full-width 512-row slab, serial VT tile production | compressed tiles and container bytes retained |
-| AVIF PQ/HLG | **unsupported**, fall back to whole-plane | libavif currently retains all YUV grid cells |
+| Adaptive HEIC, PQ/HLG HEIC | full-width 512-row slab, bounded VT tile production | anonymous compressed sample spool |
+| AVIF PQ/HLG | RGB16 file staging, independent <=1024-square AV1 cells | anonymous pixels/sample spools, one cell codec and parallel verifier |
 
 JPEG's optimized Huffman pass needs whole-frame DCT coefficients. Streaming uses
 fixed tables instead; its entropy bytes/MPF sizes change, while quantizers,
@@ -34,15 +36,17 @@ whole-plane/CLI entropy optimization is unchanged. Framed gain JPEG keeps qualit
 
 Gain extrema and the exact same stratified gamma sample (at most 65,536 samples)
 are measured before encoding. Sampling indices, normalization, rational metadata,
-zero alignment and global dither coordinates match whole-plane packaging. Base
-and gain encoding can replay bands; the caller must preserve the frozen render
-source and recipe. `rows` controls the input slab (1..4096, default/recommended
+zero alignment and global dither coordinates match whole-plane packaging. The first scan stores exact base/gain floats; base and gain encoding replay that
+file without calling the renderer again. The disk allocation is
+`width * height * 4 * (3 + gainChannels)` bytes (16 B/pixel for mono,
+24 B/pixel for RGB). No half conversion or conservative range changes the
+codebook. SDR formats read once directly and need no replay file. `rows` controls the input slab (1..4096, default/recommended
 256); HEIC additionally needs its own 512-row source slab. Source/Render memory
 is separate and belongs in admission too.
 
 Memory scope: TIFF/JPEG write directly to staged files, without output-byte
-vectors or full float planes. HEIC removes full float input/reconstruction/YUV
-planes but still has O(compressed file size) container memory. Native verification
+vectors or full float planes. HEIC removes full resident float input/reconstruction/YUV
+planes and stores compressed samples on disk. Native verification
 now borrows compressed files through a read-only mapping: baseline JPEG uses
 scanlines (two gain rows for ISO interpolation), TIFF uses libtiff scanlines and
 its strip buffer, and HEIC uses one matching base/gain tile pair plus VT's bounded
@@ -68,9 +72,11 @@ its general JPEG acceptance. TIFF export validation requires the RGB16 layout th
 writer emits. Export grids must be upright: EXIF orientation other than 1 and
 nonidentity HEIF irot/imir are rejected, including on the gain item. The current
 writers emit Orientation=1 and no irot/imir; clean-aperture crops remain supported.
-AVIF **remains whole-YUV**: libavif's grid decoder assembles all cells
-into one image. Its file verification reports `boundedMemory=false`, and the row
-writer capability remains false. System ImageIO verification belongs to Kit.
+AVIF row verification decodes each cell while the next one encodes and matches
+sample digests/structure in the staged file before publication. It remains
+bounded to a cell. Whole-plane packaging still uses libavif's all-YUV path.
+System ImageIO verification belongs to Kit and independently requests one small
+HDR thumbnail; producing it can decode every AVIF cell again.
 
 ## Measured writer memory
 

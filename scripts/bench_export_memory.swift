@@ -1,6 +1,9 @@
 // Release-only local export footprint probe. Run one case per fresh process.
 // Build as an executable depending on HyperDRKit/Render/Recipe/Engine, then:
 // bench_export_memory INPUT ENCODING OUTPUT [none|FILM_STRENGTH] [live-editor]
+// Optional environment: HYPERDR_BENCH_QUALITY (90),
+// HYPERDR_BENCH_BUDGET_BYTES (2000000000), HYPERDR_BENCH_RANGE_STOPS (2;
+// use "auto" for the default recipe). under2GB always uses decimal 2 GB.
 // The 2 GB gate is decimal bytes, not 2 GiB. This is not a device guarantee:
 // run the same recipe on iPhone to validate Apple's device decoder as well.
 import Foundation
@@ -42,7 +45,8 @@ private func footprint() -> (current: UInt64, peak: UInt64) {
         let render = try RenderEngine()
         var recipe = Recipe(inputDomain: domain)
         if raw { recipe.rawDecoderVersion = await render.preferredRAWDecoder(input) }
-        recipe.setValue(.number(2), for: "hdr.range")
+        let range = ProcessInfo.processInfo.environment["HYPERDR_BENCH_RANGE_STOPS"] ?? "2"
+        if let stops = Double(range) { recipe.setValue(.number(stops), for: "hdr.range") }
         if encoding.isSDR { recipe.setValue(.bool(false), for: "hdr.enabled") }
         let strength = args.count > 4 ? Double(args[4]) : nil
         if let strength {
@@ -68,8 +72,10 @@ private func footprint() -> (current: UInt64, peak: UInt64) {
             preview = source
             frame = try await editor.render(source, recipe: recipe)
         } else { preview = nil; frame = nil }
-        let cap = 2_000_000_000
-        let request = ExportPlanRequest(choice: .custom(.init(encoding: encoding, gamut: .p3, quality: 90)),
+        let environment = ProcessInfo.processInfo.environment
+        let cap = environment["HYPERDR_BENCH_BUDGET_BYTES"].flatMap(Int.init) ?? 2_000_000_000
+        let quality = environment["HYPERDR_BENCH_QUALITY"].flatMap(Int.init) ?? 90
+        let request = ExportPlanRequest(choice: .custom(.init(encoding: encoding, gamut: .p3, quality: quality)),
             source: .init(domain: domain, pixelSize: .init(width: size.width, height: size.height)),
             edit: .init(recipe: recipe, peakStops: 2))
         let plan = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: cap))
@@ -85,12 +91,12 @@ private func footprint() -> (current: UInt64, peak: UInt64) {
         let report = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
         try FileManager.default.copyItem(at: result.file, to: output)
         let record: [String: Any] = [
-            "encoding": encoding.rawValue, "width": size.width, "height": size.height,
-            "filmStrength": strength as Any? ?? "none", "liveEditor": editor != nil,
+            "encoding": encoding.rawValue, "quality": quality, "budgetBytes": cap, "width": size.width, "height": size.height,
+            "filmStrength": strength as Any? ?? "none", "rangeStops": range, "liveEditor": editor != nil,
             "decoder": recipe.rawDecoderVersion ?? "none", "verified": result.verified,
             "usesRowInput": report.usesRowInput ?? false, "estimateBytes": plan.memory.estimate.peak,
             "startFootprintBytes": before.current, "peakFootprintBytes": after.peak,
-            "endFootprintBytes": after.current, "under2GB": after.peak > 0 && after.peak <= UInt64(cap),
+            "endFootprintBytes": after.current, "under2GB": after.peak > 0 && after.peak <= 2_000_000_000,
             "seconds": Double(duration.seconds) + Double(duration.attoseconds) / 1e18,
             "stages": report.stageSeconds, "outputBytes": result.byteCount
         ]

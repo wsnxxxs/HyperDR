@@ -500,8 +500,8 @@ struct ExportMemoryPlanTests {
             retainedBytes: 0, quality: 95))
         let oneCopy = ExportMemoryEstimate.streamedHEICSampleBytes
         let slab = size.width * 512 * 12
-        let rowOwners = 2 * 4 * (3 + 3) * size.width * 256
-        #expect(memory.packaging == memory.render + rowOwners + (32 << 20) + oneCopy)
+        let rowOwners = 4 * (3 + 3) * size.width * 256
+        #expect(memory.packaging == memory.decode + rowOwners + (32 << 20) + oneCopy)
         #expect(memory.encode - memory.packaging == slab)
         #expect(memory.peak == memory.encode)
     }
@@ -654,7 +654,8 @@ struct ExportMemoryPlanTests {
             }
             let plain = estimate(film: false), film = estimate(film: true)
             #expect(film.render - plain.render == workspace)
-            #expect(film.encode - plain.encode == workspace)
+            #expect(film.encode > plain.encode && film.encode - plain.encode <= workspace)
+            #expect(film.encode >= film.render) // Codec workspace need not overlap film readback.
             #expect(film.decode == plain.decode && film.verify == plain.verify)
             #expect(plain.decode == size.pixels * 24 + (512 << 20))
             #expect(film.fits(in: 4 << 30))

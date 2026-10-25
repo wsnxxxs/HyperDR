@@ -103,8 +103,8 @@ struct PackageRequest {
 // whose offsets differ), and invalid_argument for a malformed request.
 [[nodiscard]] std::string package_image(const PackageRequest& request);
 
-// Repeatable synchronous rows: fill tightly packed RGB base and (if present)
-// log2 gain. The callback may be replayed for statistics, base and gain encoding.
+// Single-pass synchronous rows: fill tightly packed RGB base and (if present)
+// log2 gain. HDR statistics and encoding replay an anonymous float32 file.
 class PackageCallbackFailed : public std::runtime_error {
  public: PackageCallbackFailed():std::runtime_error("package row callback failed") {}
 };

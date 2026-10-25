@@ -406,7 +406,7 @@ struct RecipeExportEnvironment {
         print("KIT_REAL_ROWS_MEMORY " + String(data: data, encoding: .utf8)!)
     }
 
-    @Test(arguments: [false, true]) func pullWritersReplayRowsAndMatchWholePlanePixels(realRender: Bool) async throws {
+    @Test(arguments: [false, true]) func pullWritersRenderOnceAndMatchWholePlanePixels(realRender: Bool) async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let calls = Mutex<[(Int, Int)]>([])
         let fake = StripeFake(onRead: { y, rows in calls.withLock { $0.append((y, rows)) } })
@@ -435,9 +435,9 @@ struct RecipeExportEnvironment {
         }
         let reads = calls.withLock { $0 }
         if realRender { return }
-        #expect(reads.count > 6) // Gain analysis and encoding replay the same rows.
+        #expect(reads.reduce(0) { $0 + $1.1 } == 5 * 64 + 600) // Each canvas row renders once.
         #expect(reads.allSatisfy { $0.1 <= 256 })
-        #expect(reads.filter { $0.0 == 0 }.count > 6)
+        #expect(reads.filter { $0.0 == 0 }.count == 6)
     }
 
     @Test func tinyHEICKeepsPreferredWriterBelowTiledDecoderAllowance() async throws {
@@ -921,35 +921,35 @@ struct RowWriterProgressTests {
             for y in ys { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
             return (bridge.started, events.withLock { $0 })
         }
-        // AVIF: the gain scan and the staging pass are rendering, up to 40 %;
+        // AVIF: one rendering pass fills the replay, up to 40 %;
         // each cell then counts once encoded and once verified, up to 90 %.
         do {
             let events = Mutex<[RecipeExportProgress]>([])
             let bridge = PackageRowBridge(source: FakeRows(fake: fake, request: request, report: fake.report(request)),
                 frame: nil, encoding: .avifPq, progress: { event in events.withLock { $0.append(event) } })
             var base = [Float](repeating: 0, count: 8 * 4 * 3)
-            for y in [0, 4, 0, 4] { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
+            for y in [0, 4] { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
             for (phase, done) in [(PackagePhase.encode, 1), (.encode, 2), (.verify, 1), (.verify, 2)] {
                 bridge.cell(phase, done: done, total: 2)
             }
             let avif = events.withLock { $0 }
             let fractions = avif.compactMap(\.fraction)
-            #expect(fractions.count == 8 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
-            #expect(abs(fractions[3] - 0.4) < 1e-9 && abs(fractions[7] - 0.9) < 1e-9)
-            #expect(avif.map(\.isFinishing) == [false, false, false, false, false, false, false, true])
+            #expect(fractions.count == 6 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
+            #expect(abs(fractions[1] - 0.4) < 1e-9 && abs(fractions[5] - 0.9) < 1e-9)
+            #expect(avif.map(\.isFinishing) == [false, false, false, false, false, true])
             let words = avif.map { $0.stageMessage.localized(locale: Locale(identifier: "zh-Hans")) }
-            #expect(words[0] == "渲染中" && words[3] == "渲染中" && words[4] == "编码中" && words[7] == "正在收尾")
+            #expect(words[0] == "渲染中" && words[1] == "渲染中" && words[2] == "编码中" && words[5] == "正在收尾")
         }
-        // PQ: the gain's extrema, then one HDR picture.
-        let (started, pq) = try run(.pq, [0, 4, 0, 4])
-        #expect(started.fraction == 0 && started.rowPasses == 2 && !started.isFinishing)
+        // PQ: scan and replay also render only once.
+        let (started, pq) = try run(.pq, [0, 4])
+        #expect(started.fraction == 0 && started.rowPasses == 1 && !started.isFinishing)
         let fractions = pq.compactMap(\.fraction)
-        #expect(fractions.count == 4 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
-        #expect(abs(fractions[1] - 0.45) < 1e-9 && abs(fractions[3] - 0.9) < 1e-9)
-        #expect(pq.map(\.isFinishing) == [false, false, false, true])
-        // A gain map whose gain is all zero is not read a third time.
-        let (_, zero) = try run(.adaptive, [0, 4, 0, 4])
-        #expect(zero.map(\.rowPasses) == [3, 2, 2, 2])
+        #expect(fractions.count == 2 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
+        #expect(abs(fractions[0] - 0.45) < 1e-9 && abs(fractions[1] - 0.9) < 1e-9)
+        #expect(pq.map(\.isFinishing) == [false, true])
+        // Zero gain uses the same single render pass.
+        let (_, zero) = try run(.adaptive, [0, 4])
+        #expect(zero.map(\.rowPasses) == [1, 1])
         #expect(zero.last?.isFinishing == true && abs((zero.last?.fraction ?? 0) - 0.9) < 1e-9)
         // SDR is a single pass.
         let (_, sdr) = try run(.sdrJPEG, [0, 4])

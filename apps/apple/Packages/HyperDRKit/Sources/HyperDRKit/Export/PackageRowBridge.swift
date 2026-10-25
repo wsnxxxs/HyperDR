@@ -15,29 +15,20 @@ final class PackageRowBridge: @unchecked Sendable {
     private var progressEnd = 0
     private var progressPass = 1
     /// The writer's sequential passes for this encoding; nil when unknown.
-    private var passes: Int?
-    private let encoding: ExportEncoding?
+    private let passes: Int?
     /// AVIF encodes its cells after the rows; see `cell(_:done:total:)`.
     private let cellsFollow: Bool
     private var cells = RecipeExportProgress.Cells(encoded: 0, verified: 0, total: 0)
-    private var gainIsZero = true
     private var nextThumbnailRow = 0
     private var sums: [SIMD3<Double>]
     private var counts: [Int]
 
     init(source: any ExportRowSource, frame: FrameSnapshot?, encoding: ExportEncoding? = nil,
          progress: @escaping @Sendable (RecipeExportProgress) -> Void = { _ in }) {
-        self.progress = progress; self.encoding = encoding
-        // `package_image_rows`: gain encodings scan the gain for its extrema
-        // first; gain maps then write the base and the gain as two pictures,
-        // PQ/HLG (HEIC and AVIF) reconstruct both in one; SDR writes the base once.
-        passes = encoding.map { encoding in
-            switch encoding {
-            case .adaptive, .isoGainMapJPEG: 3
-            case .pq, .hlg, .avifPq, .avifHlg: 2
-            case .sdrJPEG, .sdrTIFF: 1
-            }
-        }
+        self.progress = progress
+        // Every writer now pulls the rendered rows once. HDR writers keep an
+        // anonymous float32 replay while measuring the exact gain codebook.
+        passes = encoding.map { _ in 1 }
         cellsFollow = encoding?.isAVIF == true
         self.source = source; self.frame = frame
         width = source.report.canvasSize.width; height = source.report.canvasSize.height
@@ -108,16 +99,11 @@ final class PackageRowBridge: @unchecked Sendable {
             nextThumbnailRow = y + count
         }
         try Task.checkCancellation()
-        // Package may replay rows for extrema, base and auxiliary encoding.
+        // An unspecified/custom reader can still report sequential passes.
         // Report each sequential pass, never count repeated callback samples twice.
         if y == 0 && progressEnd == height { progressPass += 1; progressEnd = 0 }
         if y <= progressEnd && y + count > progressEnd {
             progressEnd = y + count
-            if progressPass == 1 && gainIsZero { gainIsZero = stripe.gain.allSatisfy { $0 == 0 } }
-            // An all-zero gain map is written without reading the rows again.
-            if progressPass == 1 && progressEnd == height && gainIsZero && encoding?.writesGainMap == true {
-                passes = passes.map { $0 - 1 }
-            }
             progress(.init(stage: .encoding, completedRows: progressEnd, totalRows: height,
                            includesRendering: true, rowPass: progressPass, rowPasses: passes, cellsFollow: cellsFollow))
         }

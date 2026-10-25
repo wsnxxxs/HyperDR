@@ -158,7 +158,7 @@ int main(int argc,char** argv) try {
   request.parameters_json="{\"quality\":93}";
   REQUIRE(hyperdr_package_rows_supported("avif-pq")&&hyperdr_package_rows_supported("avif-hlg"));
   // AVIF uses disk-staged independent cells, not the all-YUV AddImageGrid API.
-  // Verify its C ABI dispatch, global scan/encode pass count, dimensions and
+  // Verify its C ABI dispatch, single render pass count, dimensions and
   // bounded readback for both transfers and scalar/RGB gain.
   for(const char* format:{"avif-pq","avif-hlg"})for(unsigned channels:{1U,3U}) {
     source.channels=gain.plane.channels=channels;
@@ -166,7 +166,7 @@ int main(int argc,char** argv) try {
     request.format=format;request.gain=&gain;request.output_path=stream_path.c_str();
     source.reads=0;source.largest=0;char* report=nullptr;error=nullptr;
     const auto code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
-    REQUIRE(source.largest<=13&&source.reads==2*((source.height+12)/13));
+    REQUIRE(source.largest<=13&&source.reads==((source.height+12)/13));
     const auto encoding=*hyperdr::hdr_encoding_from_name(format);
     const auto verified=hyperdr::verify_encoded_file(stream,encoding);
     REQUIRE(verified.boundedMemory&&verified.width==source.width&&verified.height==source.height&&verified.pixels==std::uint64_t(source.width)*source.height);
@@ -233,7 +233,7 @@ int main(int argc,char** argv) try {
     request.output_path=stream_path.c_str();report=nullptr;error=nullptr;source.reads=0;source.largest=0;
     code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);
     const std::string row_report=report?report:"";status(code,report,error);
-    REQUIRE(source.largest<=13&&source.reads==2*((source.height+12)/13));
+    REQUIRE(source.largest<=13&&source.reads==((source.height+12)/13));
     const auto ga=whole_report.find("\"gain\":");const auto gb=row_report.find("\"gain\":");
     REQUIRE(ga!=std::string::npos&&gb!=std::string::npos&&whole_report.substr(ga)==row_report.substr(gb));
     const auto parsed=hyperdr::json::parse(row_report);const auto* metadata=parsed.find("gain");
@@ -274,10 +274,8 @@ int main(int argc,char** argv) try {
     source.reads=0;
     code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
     REQUIRE(source.largest<=13);
-    if(std::string(format)=="pq"||std::string(format)=="hlg") {
-      // Codebook + encode; CLLI must not cause a third render/read pass.
-      REQUIRE(source.reads==2*((source.height+12)/13));
-    }
+    // Statistics, both pictures and CLLI share one caller render/read pass.
+    REQUIRE(source.reads==((source.height+12)/13));
     const auto a=hyperdr::read_binary_file(whole),bbytes=hyperdr::read_binary_file(stream);
     const auto encoding=*hyperdr::hdr_encoding_from_name(format);
     const auto verified=hyperdr::verify_encoded_file(stream,encoding);
@@ -342,8 +340,8 @@ int main(int argc,char** argv) try {
     std::cout<<format<<" bytes_equal="<<(a==bbytes)<<" max_linear_difference="<<worst<<'\n';
     std::filesystem::remove(whole);std::filesystem::remove(stream);
   }
-  // An exact-zero full scan removes only the gain replay, preserving quantization,
-  // including unframed dither. Tiny positive values must still replay the source.
+  // Exact zero and tiny positive gain both render once; replay preserves the
+  // existing quantization, including unframed dither.
   for(bool framed:{false,true})for(float scale:{0.f,1e-6f}) {
     source.channels=gain.plane.channels=1;source.frame=framed;source.gain_scale=scale;
     request.format="adaptive";request.gain=&gain;
@@ -356,7 +354,7 @@ int main(int argc,char** argv) try {
     auto code=hyperdr_package(engine,&request,&report,&error);status(code,report,error);
     request.output_path=stream_path.c_str();report=nullptr;error=nullptr;source.reads=0;
     code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
-    REQUIRE(source.reads==(scale==0.f?2:3)*((source.height+12)/13));
+    REQUIRE(source.reads==((source.height+12)/13));
     const auto a=hyperdr::decode_image(whole),bimage=hyperdr::decode_image(stream);
     REQUIRE(a.linear_p3.pixels==bimage.linear_p3.pixels);
     std::filesystem::remove(whole);std::filesystem::remove(stream);

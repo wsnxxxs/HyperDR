@@ -96,7 +96,7 @@ HYPERDR_API void hyperdr_cancel_destroy(hyperdr_cancel*);
  *   input: the base space is fixed by this contract, so each writer stores the
  *   profile for it.
  * - This entry consumes whole planes. See hyperdr_package_rows for the
- *   additive repeatable row-callback entry.
+ *   additive single-pass row-callback entry.
  *
  * The report (hyperdr.package/v1) states the format, size, byte count, the
  * verification performed, and the gain parameters actually written (not the
@@ -170,20 +170,22 @@ HYPERDR_API int hyperdr_package(hyperdr_engine*, const hyperdr_package_request* 
  * Supported: SDR JPEG/TIFF, ISO gain-map JPEG, Adaptive/PQ/HLG HEIC,
  * and PQ/HLG AVIF. AVIF stages 10-bit RGB (6 bytes/canvas pixel) and compressed
  * AV1 samples on disk beside the output. At most one 1024x1024 4:4:4 cell and
- * one encoder context (up to 2 threads) are resident; quality is unchanged.
+ * one encoder context (up to 4 threads) are resident beside a cell verifier.
  * AVIF cells are independently predicted, so bytes/codes may differ at seams.
  * JPEG uses fixed Huffman tables to avoid a whole-frame coefficient store:
  * entropy bytes differ from whole-plane, decoded codes do not. TIFF uses strips.
- * HEIC assembles 512-row slabs and retains compressed tiles/container bytes.
+ * HEIC assembles 512-row slabs and spools compressed samples to disk.
+ * HDR rows first spool the exact float32 base/gain pair (16 or 24 B/pixel)
+ * into an anonymous, uncached file; no image-sized RAM cache is retained.
  * Verification is bounded for JPEG, TIFF, HEIC and row-written AVIF grids.
  * This query describes compiled paths, not runtime HEVC device availability. */
 HYPERDR_API int hyperdr_package_rows_supported(const char* format);
 /* Fill caller-provided, tightly packed float32 buffers: count*width*3 base
  * values and count*width*gain_channels gain values (NULL when there is no gain).
  * Called synchronously, serially, on the package thread. Buffers are borrowed
- * only inside the callback. The library may replay/revisit rows for global
- * statistics, gamma and separate base/gain encoding; always return identical
- * values. Return 0 on success, nonzero to abort (callback_failed, or cancelled
+ * only inside the callback. Each band is requested once, in ascending order;
+ * HDR statistics and encoding share the library's disk replay. Return 0 on
+ * success, nonzero to abort (callback_failed, or cancelled
  * when the cancel token is set). Never call another engine operation here. */
 typedef int (*hyperdr_package_row_callback)(void* user, uint32_t y, uint32_t count,
                                            float* base, float* gain);

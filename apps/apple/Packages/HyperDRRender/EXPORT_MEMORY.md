@@ -547,3 +547,72 @@ The independent stock effect is the difference of its complete and effect-free
 outputs: one extra `filmFromRaw` per pixel at partial/zero colour strength, held
 in shader registers without another full-resolution texture. At 100 % colour
 strength the old complete-stock path is evaluated once.
+
+
+### Single render pass for HDR row packaging (2026-10-25)
+
+AVIF, PQ/HLG HEIC and gain-map row writers now pull each rendered band only
+once. The complete finite scan still measures exact min/max and the same
+stratified gamma sample. It simultaneously writes the tight RGB base and
+mono/RGB gain as float32 to an anonymous file beside the package output.
+Encoding reuses the package band to read that file; no half conversion or
+widened gain range changes quantization, offsets or E5 zero alignment.
+
+The file is exclusively created with close-on-exec, immediately unlinked,
+marked `F_NOCACHE` and physically preallocated before rendering. Disk use is
+16 B/canvas pixel (mono gain) or 24 B/canvas pixel (RGB gain): about 1.45 GB
+at 60.2MP RGB, 2.64 GB at 110MP RGB, separate from AVIF's existing RGB16 and
+compressed sample files and any staged RAW look baseline. Insufficient storage
+fails before pulling the first band. Closing on success, cancellation or error
+reclaims the allocation. It adds no resident image, mmap or full-size cache.
+
+Kit's estimate takes the maximum of render/readback and replay/codec workspace
+for gain formats, since rendering no longer overlaps AV1/VT encoding. SDR
+writers retain their direct callback estimate. The 110MP admission and 61MP
+footprint goals remain unchanged; physical-device validation is still required.
+
+
+Mac spot check: Apple M6 / 24 GB, macOS 27.0.1, release benchmark,
+DSC01468.ARW (9504×6336, RAW 9), Captured, no film/frame/live editor,
+AVIF PQ q100, 256-row input, fixed two-stop range, 4 GiB admission budget.
+Separate fresh processes, run sequentially with no builds/tests beside them:
+
+| Metric | Before (77352dcd writer) | Float32 replay |
+| --- | ---: | ---: |
+| Total export | 46.121 s | 42.984 s |
+| Row renderer time | 4.145 s (two passes) | 2.397 s (one pass) |
+| Encoding, excluding row renderer | 26.123 s | 26.556 s |
+| Independent system verification | 2.585 s | 2.737 s |
+| Kernel peak physical footprint | 1,172,293,552 B (1118.0 MiB) | 1,206,585,384 B (1150.7 MiB) |
+| Output | 44,921,645 B | 44,921,645 B |
+
+This single pair is 6.8% faster overall and spends 42.2% less time in the row
+renderer. Decoder/analysis time also varies between fresh processes, so the
+whole-export difference is not entirely attributable to replay. Both peaks
+remain below decimal 2 GB; the modest peak variation does not reflect an
+image-sized RAM cache. The conservative estimate still requires more than a
+2 GB admission budget; the benchmark's `under2GB` reports measured footprint,
+independently of that budget. This is a Mac measurement, not a device claim.
+
+Before/after encoded bytes match exactly (SHA-256
+`097b7cdd1d706250f9692f30eac792dd944aff745b562b0c01572e6eeb3f462a`).
+A separate default-recipe comparison (automatic range, same RAW 9) built both
+Render and the macOS engine from 2ab8e535 and compared them with this version.
+Both produced the same 44,921,645-byte file and SHA-256, despite the encoder's
+two/four-thread setting. Decoded 10-bit YUV444 samples match exactly (maximum
+code difference 0, infinite PSNR). The reported 59.7 MB → 42.4 MB change was
+not reproduced with the same default Captured recipe; that recipe uses no AI,
+so the research-model offset changes do not apply to this comparison.
+
+The remaining final verification time is Kit's independent ImageIO HDR
+thumbnail readback (`ExportVerification.boundedSystem`), which visits AVIF
+cells to produce the thumbnail. Native `verify_avif_file` only checks structure
+and sample digests for the already-decoded cells; matching cells do not decode
+again. Retain the independent reader until a separate change deliberately
+revisits that verification contract.
+
+To reproduce, build `scripts/bench_export_memory.swift` as a release executable
+with Kit/Render/Recipe/Engine dependencies. Set `HYPERDR_BENCH_QUALITY=100` and
+`HYPERDR_BENCH_BUDGET_BYTES=4294967296`; leave range at its benchmark default
+of 2 for the timing pair, or set `HYPERDR_BENCH_RANGE_STOPS=auto` for the
+unmodified default recipe. Generated files/reports are local under `build/`.

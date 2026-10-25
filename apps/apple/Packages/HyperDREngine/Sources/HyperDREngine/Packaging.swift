@@ -205,7 +205,8 @@ extension Engine {
         format.withCString { hyperdr_package_rows_supported($0) != 0 }
     }
 
-    /// Packages repeatable bands without caller-owned whole float planes. AVIF
+    /// Pulls bands once without caller-owned whole float planes. HDR writers
+    /// replay an anonymous, uncached float32 file for the exact codebook. AVIF
     /// stages quantized rows on disk, then encodes one cell at a time while the
     /// previous cell is verified, reporting both through `progress`.
     /// A separate system reader may still need native-area decoder workspace.

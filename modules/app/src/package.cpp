@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -429,6 +430,71 @@ std::filesystem::path reserve_staging_beside(const std::filesystem::path& output
   throw std::runtime_error("cannot find a free staging name beside the output");
 }
 
+// Exact float32 replay of the first render pass. The codebook needs both the
+// true extrema and its stratified gamma sample, so headroom alone cannot replace
+// the scan. Disk, rather than an image-sized RAM cache, keeps 110MP exports bounded.
+class PackageRowSpool {
+ public:
+  PackageRowSpool(const std::filesystem::path& output, std::uint64_t bytes) {
+    if (bytes > std::uint64_t(std::numeric_limits<off_t>::max()))
+      throw std::invalid_argument("package row spool is too large");
+    if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
+    static std::atomic<std::uint64_t> sequence{0};
+    for (unsigned attempt = 0; attempt < 256; ++attempt) {
+      auto path = output;
+      path += ".rows." + std::to_string(::getpid()) + "." +
+          std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+      descriptor_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+      if (descriptor_ < 0) {
+        if (errno == EEXIST) continue;
+        throw std::system_error(errno, std::generic_category(), "create package row spool");
+      }
+      const auto fail = [&](const char* operation) {
+        const auto error = errno; ::close(descriptor_); descriptor_ = -1;
+        throw std::system_error(error, std::generic_category(), operation);
+      };
+      // No pixels may be written before unlink succeeds. Closing the descriptor
+      // releases the storage on success, cancellation, or any writer failure.
+      if (::unlink(path.c_str()) != 0) fail("unlink package row spool");
+      if (::fcntl(descriptor_, F_NOCACHE, 1) != 0) fail("disable package row spool caching");
+      fstore_t reservation{};
+      reservation.fst_flags = F_ALLOCATEALL;
+      reservation.fst_posmode = F_PEOFPOSMODE;
+      reservation.fst_length = off_t(bytes);
+      if (::fcntl(descriptor_, F_PREALLOCATE, &reservation) != 0) fail("reserve package row spool");
+      if (::ftruncate(descriptor_, off_t(bytes)) != 0) fail("size package row spool");
+      return;
+    }
+    throw std::runtime_error("cannot find a free package row spool name");
+  }
+  ~PackageRowSpool() { if (descriptor_ >= 0) ::close(descriptor_); }
+  PackageRowSpool(const PackageRowSpool&) = delete;
+  PackageRowSpool& operator=(const PackageRowSpool&) = delete;
+
+  void write(std::uint64_t offset, std::span<const float> values) {
+    transfer<true>(offset, reinterpret_cast<const char*>(values.data()), values.size_bytes());
+  }
+  void read(std::uint64_t offset, std::span<float> values) {
+    transfer<false>(offset, reinterpret_cast<char*>(values.data()), values.size_bytes());
+  }
+ private:
+  template<bool writing, class Pointer>
+  void transfer(std::uint64_t offset, Pointer data, std::size_t size) {
+    while (size) {
+      check_cancelled();
+      const auto count = [&] {
+        if constexpr (writing) return ::pwrite(descriptor_, data, size, off_t(offset));
+        else return ::pread(descriptor_, data, size, off_t(offset));
+      }();
+      if (count < 0 && errno == EINTR) continue;
+      if (count <= 0) throw std::system_error(count < 0 ? errno : EIO, std::generic_category(),
+          writing ? "write package row spool" : "read package row spool");
+      offset += std::uint64_t(count); data += count; size -= std::size_t(count);
+    }
+  }
+  int descriptor_ = -1;
+};
+
 // The fully closed staging file has passed verification before publication.
 void publish_package(const PackageRequest& request,const std::filesystem::path& path) {
   const int fd=::open(path.c_str(),O_RDONLY|O_CLOEXEC);
@@ -704,15 +770,26 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   const auto stride=std::size_t(width)*3,gstride=std::size_t(width)*channels;
   if(stride>std::numeric_limits<std::size_t>::max()/std::min(rows,height)/sizeof(float))throw std::invalid_argument("streaming band dimensions overflow");
   std::vector<float> base(stride*std::min(rows,height)),grid(gstride*std::min(rows,height));
+  std::unique_ptr<PackageRowSpool> spool;
+  if(needs_gain) spool=std::make_unique<PackageRowSpool>(request.output,
+      std::uint64_t(width)*height*(3+channels)*sizeof(float));
+  bool replay=false;
   unsigned cached=height;
   auto fetch=[&](unsigned y) {
     const auto first=(y/rows)*rows;
     if(cached==first)return;
     check_cancelled();const auto count=std::min(rows,height-first);
-    read(first,count,std::span(base).first(stride*count),std::span(grid).first(gstride*count));
+    auto b=std::span(base).first(stride*count),g=std::span(grid).first(gstride*count);
+    const auto offset=std::uint64_t(first)*(stride+gstride)*sizeof(float);
+    if(replay) {
+      spool->read(offset,b);spool->read(offset+b.size_bytes(),g);
+    } else read(first,count,b,g);
     check_cancelled();
     for(const auto v:std::span(base).first(stride*count))if(!std::isfinite(v))throw std::invalid_argument("SDR base contains a non-finite sample");
     for(const auto v:std::span(grid).first(gstride*count))if(!std::isfinite(v))throw std::invalid_argument("gain contains a non-finite sample");
+    if(spool&&!replay) {
+      spool->write(offset,b);spool->write(offset+b.size_bytes(),g);
+    }
     cached=first;
   };
   std::optional<QuantizedGain> gain;
@@ -736,6 +813,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     all_zero_gain=low==0.f&&high==0.f;
     gain=stream_codebook(*request.gain,request.encoding==OutputEncoding::Adaptive,request.presentation_frame,low,high,samples,negative);
     validate_encoding_headroom(request.encoding,gain->alternate_headroom);
+    replay=true;cached=height;
   }
   EncodingRows base_rows{width,height,3,[&](unsigned y,std::span<float> out) {
     fetch(y);std::copy_n(base.data()+std::size_t(y-cached)*stride,stride,out.data());
@@ -781,7 +859,8 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
       write_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame,staged.path);break;
     }
   }
-  // Release input row planes before native row/tile verification.
+  // Release input row planes and anonymous replay storage before verification.
+  spool.reset();
   base.clear();base.shrink_to_fit();grid.clear();grid.shrink_to_fit();
   check_cancelled();
   if(request.verify && !request.frame_photo)

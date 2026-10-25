@@ -280,10 +280,16 @@ extension ExportMemoryEstimate {
         // 32 MiB allowance for bounded metadata/box construction and filebuf;
         // encoding slabs/VT pictures have finished before assembly.
         let rowResident = resident + rgbScratch + readback + packageBand
-        // A row callback renders while the writer's slab and row owners are alive.
-        // These textures are released before container assembly or verification.
-        let encode = rowResident + filmWorkspace + codec + compressedCache
-        let assembly = heic ? rowResident + 32 * 1024 * 1024 + compressedCache : encode
+        // HDR writers spool the exact float32 pair once while scanning gain.
+        // Positioned, uncached I/O reuses packageBand; its 4*(3+channels) B/px
+        // disk allocation is never a resident image or a second readback band.
+        // Rendering finishes before codecs read the replay, so film/readback
+        // workspace no longer overlaps AV1/VT encoding for gain formats.
+        let rendering = rowResident + filmWorkspace
+        let encoding = resident + packageBand + codec + compressedCache
+        let encode = gain ? max(rendering, encoding)
+            : rendering + codec + compressedCache
+        let assembly = heic ? resident + packageBand + 32 * 1024 * 1024 + compressedCache : encode
         let render = resident + rgbScratch + filmWorkspace
         // Native verification releases input bands first and scans rows, or
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the

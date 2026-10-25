@@ -187,6 +187,8 @@ extension ExportMemoryEstimate {
         let pairBytes = needsGain ? 24 : 12
         let source = sourcePixels * (input.source.domain == .dual ? 48 : 16)
         // Match the empirical native decoder/ROI allowance used by row input.
+        // A compatibility DNG has the same native dimensions and is still
+        // developed by CIRAWFilter, so this reserve covers that path unchanged.
         // RAW 9's measured whole-development footprint exceeds the old 16 B/px
         // reserve even after removing the output texture (Mac, 2026-10-22).
         let rawCache = input.source.domain == .rawEDR

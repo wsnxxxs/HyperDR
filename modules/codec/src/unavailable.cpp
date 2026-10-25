@@ -6,6 +6,7 @@
 // configuration ever compiled both halves. Here the declarations, the call
 // sites, and the error messages are shared, and only these definitions differ.
 
+#include "hyperdr/codec/raw_compat.hpp"
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoder_capabilities.hpp"
 #include "hyperdr/codec/gain_map_jpeg.hpp"
@@ -31,6 +32,14 @@ void fail_without_codecs(const char* capability) {
 }
 
 #if !HYPERDR_WITH_CODECS
+const char* raw_converter_id() noexcept { return "libraw-unavailable/dng-1"; }
+std::string raw_convert_dng(const std::filesystem::path&, const std::filesystem::path&) {
+  fail_without_codecs("LibRaw DNG compatibility");
+}
+std::string raw_extract_preview(const std::filesystem::path&, const std::filesystem::path&) {
+  fail_without_codecs("LibRaw preview extraction");
+}
+
 void write_sdr_jpeg_rows(const EncodingRows&,const PhotoMetadata&,int,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming JPEG");}
 void write_sdr_tiff_rows(const EncodingRows&,const PhotoMetadata&,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming TIFF");}
 void write_gain_map_jpeg_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,const PhotoMetadata&,int,bool,const std::filesystem::path&){fail_without_codecs("streaming ISO JPEG");}

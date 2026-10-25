@@ -17,10 +17,13 @@ extension DoubleReference {
         // estimate. Relax their transmission instead of subtracting their light.
         let t = max(max(0.2,transmission),min(1,0.3/max(0.001,abs(y-a))))
         let recovered = (y-a)/t+a
-        // Recover luminance only: atmospheric colour errors cannot become blue
-        // edge fringes. Bound the correction to preserve bright surfaces/details.
-        let ratio = min(1.2,max(0.75,recovered/y))
-        return rgb*(1+(ratio-1)*amount)
+        // Bound luminance recovery and restore only modest original chroma.
+        // Never subtract atmospheric RGB: its colour errors create edge fringes.
+        let ratio = min(1.3,max(0.6,recovered/y))
+        let minimum = min(rgb.x,min(rgb.y,rgb.z))
+        let chromaLimit = y/max(1e-6,y-minimum)
+        let chroma = min(max(1,chromaLimit),1+min(0.3,0.3*(1/t-1))*amount)
+        return (RGB(repeating: y)+(rgb-RGB(repeating: y))*chroma)*(1+(ratio-1)*amount)
     }
     public static func clarity(_ rgb: RGB, lowFrequency: Double, amount: Double) -> RGB {
         let y = luma(rgb)

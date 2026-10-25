@@ -36,18 +36,21 @@ struct ToneToolsTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let engine = try RenderEngine()
         let dehazeOnly = ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_DEHAZE"] != nil
-        for file in (dehazeOnly ? ["DSC01468.ARW", "IMG_3250.heic"] : ["DSC01468.ARW", "IMG_3250.heic", "DSC01422.HIF"]) {
+        for file in ["DSC01468.ARW", "IMG_3250.heic", "DSC01422.HIF"] {
             let source = try await engine.load(URL(fileURLWithPath: samples).appendingPathComponent(file),
                 options: SourceOptions(resolution: .preview(maximumSize: .init(width: 1280, height: 1280))))
             let curves = ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_CURVES"] != nil
             let spatial = dehazeOnly || ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_SPATIAL"] != nil
-            let modes: [(String,Float,Float)] = spatial
+            let modes: [(String,Float,Float)] = dehazeOnly
+                ? [("before",0,0),("dehaze-plus50",0,0),("dehaze-plus100",0,0)]
+                : spatial
                 ? [("before",0,0),("dehaze-plus100",0,0),("dehaze-minus100",0,0),("clarity-plus100",0,0),("clarity-minus100",0,0)]
                 : curves
                 ? [("before",0,0),("curve-both",0,0),("curve-sdr",0,0),("curve-hdr",0,0),("curve-rgb",0,0),("curve-parametric",0,0)]
                 : [("before",0,0),("whites-plus100",1,0),("whites-minus100",-1,0),("blacks-plus100",0,1),("blacks-minus100",0,-1)]
             for (label, whites, blacks) in modes where !dehazeOnly || !label.hasPrefix("clarity") {
                 var edit = RenderAdjustments(); edit.tone.whites = whites; edit.tone.blacks = blacks
+                if label == "dehaze-plus50" { edit.tone.dehaze = 0.5 }
                 if label == "dehaze-plus100" { edit.tone.dehaze = 1 }
                 if label == "dehaze-minus100" { edit.tone.dehaze = -1 }
                 if label == "clarity-plus100" { edit.tone.clarity = 1 }

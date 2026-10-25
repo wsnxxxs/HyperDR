@@ -10,12 +10,13 @@ import Testing
     @Test func vibranceKeepsLuminanceAndProtectsSkin() {
         let skin = DoubleReference.oklabRGB(SIMD3(0.65, 0.06, 0.07))
         let cool = DoubleReference.oklabRGB(SIMD3(0.65, -0.06, -0.07))
-        func gain(_ rgb: SIMD3<Double>) -> Double {
+        func gain(_ rgb: SIMD3<Double>, _ amount: Double = 1) -> Double {
             let lab = DoubleReference.oklab(rgb)
-            let changed = DoubleReference.oklab(DoubleReference.vibrance(rgb, amount: 1))
+            let changed = DoubleReference.oklab(DoubleReference.vibrance(rgb, amount: amount))
             return hypot(changed.y,changed.z)/hypot(lab.y,lab.z)
         }
         #expect(gain(cool) > gain(skin))
+        #expect(gain(cool,-1) < gain(skin,-1))
         for rgb in [skin, cool, skin*8] {
             #expect(DoubleReference.vibrance(rgb, amount: 0) == rgb)
             for amount in [-1.0, 1] {

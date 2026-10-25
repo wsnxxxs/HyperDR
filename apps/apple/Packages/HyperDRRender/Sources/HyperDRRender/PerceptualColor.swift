@@ -26,8 +26,8 @@ extension DoubleReference {
         var hue = atan2(lab.z,lab.y)*180/Double.pi
         if hue < 0 { hue += 360 }
         let skin = smoothStep(20,30,hue)*(1-smoothStep(75,90,hue))*(1-smoothStep(0.3,0.5,relative))
-        let weight = amount > 0 ? (1-smoothStep(0.08,0.45,relative))*(1-2*skin/3)
-                                : 0.25+0.75*smoothStep(0.08,0.45,relative)
+        let weight = (amount > 0 ? 1-smoothStep(0.08,0.45,relative)
+                                 : 0.25+0.75*smoothStep(0.08,0.45,relative))*(1-2*skin/3)
         let factor = 1+amount*weight*(amount > 0 ? 1.2 : 0.65)
         lab.y *= factor; lab.z *= factor
         return preserveLuminance(oklabRGB(lab),target:y)

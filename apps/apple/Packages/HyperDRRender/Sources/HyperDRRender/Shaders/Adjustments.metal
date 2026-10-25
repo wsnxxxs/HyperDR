@@ -35,7 +35,7 @@ float3 colorVibrance(float3 rgb,float amount) {
     float relative=length(lab.yz)/max(.001f,lab.x),hue=atan2(lab.z,lab.y)*180.f/M_PI_F;
     if(hue<0) hue+=360.f;
     float skin=sm(20.f,30.f,hue)*(1-sm(75.f,90.f,hue))*(1-sm(.3f,.5f,relative));
-    float weight=amount>0 ? (1-sm(.08f,.45f,relative))*(1-2*skin/3) : .25f+.75f*sm(.08f,.45f,relative);
+    float weight=(amount>0 ? 1-sm(.08f,.45f,relative) : .25f+.75f*sm(.08f,.45f,relative))*(1-2*skin/3);
     lab.yz*=1+amount*weight*(amount>0 ? 1.2f : .65f);
     return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y);
 }

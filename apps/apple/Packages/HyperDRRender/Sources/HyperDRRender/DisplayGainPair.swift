@@ -87,6 +87,7 @@ extension RenderEngine {
             domain: source.domain, size: source.size, nativeSize: source.nativeSize,
             authoredGainMap: metadata, hdrImage: source.hdrImage, authoredBaseImage: image,
             rawSettings: source.rawSettings, texture: base, baseSpace: source.baseSpace, gainTexture: source.gainTexture)
+        normalized.modelCapture = source.modelCapture
         normalized.fallbackHDRHeadroom = source.fallbackHDRHeadroom
         normalized.samplingRegion = source.samplingRegion
         normalized.gainSamplingRegion = source.gainSamplingRegion
@@ -159,6 +160,7 @@ extension RenderEngine {
             hdrImage: boundHDR.image,
             authoredBaseImage: image(pair.base), rawSettings: source.rawSettings,
             texture: pair.base, baseSpace: Self.workingColorSpace, gainTexture: source.gainTexture)
+        target.modelCapture = source.modelCapture
         target.fallbackHDRHeadroom = boundHDR.fallbackHeadroom
         target.samplingRegion = CGRect(x: region.minX / Double(size.width), y: region.minY / Double(size.height),
                                        width: region.width / Double(size.width), height: region.height / Double(size.height))

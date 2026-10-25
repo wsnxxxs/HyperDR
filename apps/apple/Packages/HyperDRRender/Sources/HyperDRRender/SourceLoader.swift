@@ -11,6 +11,7 @@ struct OpenedSource {
     let baseSpace: CGColorSpace
     let gain: AuthoredGainMap?
     let raw: RAWDevelopment?
+    var modelCapture: ModelGainCapture = .empty
     var nativeSize: PixelSize? = nil
     var rawPreviewSize: PixelSize? = nil
     var draftRAWPreview = false
@@ -30,7 +31,7 @@ struct OpenedSource {
                         Double(bound.height) / Double(raw.nativeSize.height))
         }
         return Self(domain: domain, image: image, hdr: hdr, baseSpace: baseSpace,
-            gain: gain, raw: raw.atPreviewScale(Float(scale)), nativeSize: nativeSize,
+            gain: gain, raw: raw.atPreviewScale(Float(scale)), modelCapture: modelCapture, nativeSize: nativeSize,
             rawPreviewSize: scale < 1 ? PixelSize(
                 width: max(1, Int((image.extent.width * scale).rounded())),
                 height: max(1, Int((image.extent.height * scale).rounded()))) : nil,
@@ -87,6 +88,7 @@ private struct RasterPreviewPlan {
         return OpenedSource(domain: opened.domain, image: image,
             hdr: opened.hdr === opened.image ? image : resize(opened.hdr),
             baseSpace: opened.baseSpace, gain: opened.gain, raw: opened.raw,
+            modelCapture: opened.modelCapture,
             nativeSize: opened.nativeSize, rawPreviewSize: opened.rawPreviewSize,
             uncroppedSize: opened.uncroppedSize)
     }
@@ -97,12 +99,15 @@ extension RenderEngine {
                      progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> OpenedSource {
         try Task.checkCancellation()
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw RenderError.cannotOpenSource }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
+        let capture = ModelGainCapture(properties: properties)
         let type = CGImageSourceGetType(source).flatMap { UTType($0 as String) }
         if options.kind == .raw || (options.kind == .automatic && type?.conforms(to: .rawImage) == true) {
             progress?(.loadingDecoder)
-            return try openRAW(url, options: options)
+            var opened = try openRAW(url, options: options)
+            opened.modelCapture = capture
+            return opened
         }
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
         let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value ?? 1
         let auxiliary = [(kCGImageAuxiliaryDataTypeISOGainMap, AuthoredGainMap.Standard.iso),
                          (kCGImageAuxiliaryDataTypeHDRGainMap, .apple)].map { key, standard in
@@ -212,12 +217,12 @@ extension RenderEngine {
             let scaleX = base.extent.width/hdr.extent.width, scaleY = base.extent.height/hdr.extent.height
             let previewHDR = hdr.transformed(by:CGAffineTransform(scaleX:scaleX,y:scaleY))
             let opened = try OpenedSource(domain: .dual, image: base, hdr: previewHDR,
-                                baseSpace: nativeLinear, gain: gain, raw: nil, nativeSize:nativeSize)
+                                baseSpace: nativeLinear, gain: gain, raw: nil, modelCapture: capture, nativeSize:nativeSize)
                 .applying(options.geometry)
             return preview?.applying(to: opened) ?? opened
         }
         let opened = try OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
-                            baseSpace: workingColorSpace, gain: nil, raw: nil, nativeSize:nativeSize)
+                            baseSpace: workingColorSpace, gain: nil, raw: nil, modelCapture: capture, nativeSize:nativeSize)
             .applying(options.geometry)
         return preview?.applying(to: opened) ?? opened
     }

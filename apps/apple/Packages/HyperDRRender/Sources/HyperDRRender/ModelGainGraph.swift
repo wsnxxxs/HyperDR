@@ -16,7 +16,7 @@ extension RenderEngine {
         guard !source.isDraftRAWPreview,
               source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
         // Log look changes the developed texture, not the photograph the model sees.
-        let key = ModelPredictionKey(source:source.modelSourceID,model:provider.modelID)
+        let key = ModelPredictionKey(source:source.modelSourceID,model:provider.modelID(for: source.modelCapture))
         if let cached = modelPredictionCache[key] {
             modelPredictionOrder.removeAll { $0 == key }; modelPredictionOrder.append(key)
             return cached
@@ -26,9 +26,9 @@ extension RenderEngine {
         if input.domain == .sdr && input.id == key.source {
             prediction = try await provider.predict(source:input)
         } else if input.domain == .sdr {
-            prediction = try await provider.prediction(forSDRBase:input.hdrImage,sourceID:key.source,size:input.size)
+            prediction = try await provider.prediction(forSDRBase:input.hdrImage,sourceID:key.source,size:input.size,capture:source.modelCapture)
         } else {
-            prediction = try await provider.prediction(forSDRBase:sdrBase(input),sourceID:key.source,size:input.size)
+            prediction = try await provider.prediction(forSDRBase:sdrBase(input),sourceID:key.source,size:input.size,capture:source.modelCapture)
         }
         try Task.checkCancellation()
         guard prediction.sourceID == key.source, prediction.modelID == key.model else { throw RenderError.invalidAdjustment }

@@ -293,6 +293,7 @@ public actor RenderEngine {
             hdrImage: boundHDR.image, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture,
             geometryUncroppedSize: opened.uncroppedSize)
+        source.modelCapture = opened.modelCapture
         source.fallbackHDRHeadroom = opened.domain == .rawEDR ? boundHDR.fallbackHeadroom : nil
         return try canonicalizeAuthoredSource(source)
     }

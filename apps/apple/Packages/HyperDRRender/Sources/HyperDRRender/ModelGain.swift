@@ -38,6 +38,7 @@ public enum ModelGain {
     public static let analysisLongSide = 1024
     /// File stem of the converted Core ML model inside the package resources.
     public static let modelName = "research-cnn-v1"
+    public static let exifModelName = "research-exif-v1"
     /// Model version recorded by the conversion script; also embedded in the
     /// compiled model's metadata, which is what `ModelGainModel.version` reads.
     public static let modelVersion = "research-demo-fold0-seed908/v1"
@@ -52,7 +53,7 @@ public enum ModelGain {
         case package(URL)
     }
 
-    public static func bundledModel(in bundle: Bundle? = nil) -> BundledModel? {
+    public static func bundledModel(named modelName: String = modelName, in bundle: Bundle? = nil) -> BundledModel? {
         let bundle = bundle ?? .module
         for directory in [resourceDirectory, nil] {
             if let url = bundle.url(forResource: modelName, withExtension: "mlmodelc", subdirectory: directory) {

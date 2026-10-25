@@ -47,9 +47,14 @@ this checkout. This file summarizes what they decide.
 - The AI model weights are private (user decision, 2026-10-25): no ONNX,
   Core ML package, EXIF trees or checkpoint is committed, and history was
   rewritten to remove them. `HyperDR_Model/models/` and HyperDRRender's
-  `Resources/Models/*` (except its README) are ignored; a private copy of
-  `research-cnn-v1.mlpackage` placed there is bundled. Without it
-  (`ModelGain.isIncluded`, `EditorRendering.includesModel`) Mac, iPhone and iPad
+  `Resources/Models/*` (except its README) are ignored. Private copies of
+  `research-cnn-v1.mlpackage`, `research-exif-v1.mlpackage` and
+  `research-exif-v1.exif-level.json` placed there are bundled. Model 2 is
+  selected automatically when all six capture fields are usable and both its
+  spatial model and EXIF estimator are included; otherwise model 1 is used.
+  Missing or zero ISO, exposure time, aperture or focal lengths are not usable;
+  a recorded zero exposure bias is usable. There is no model picker. Without
+  model 1 (`ModelGain.isIncluded`, `EditorRendering.includesModel`), all platforms
   offer Captured and Expand, show AI as not included, and tests marked
   `.needsModel` skip. Published releases are built without the model.
 

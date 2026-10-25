@@ -178,7 +178,7 @@ public actor RecipeExportService: RecipeExportServicing {
                         }
                         defaultModelProvider = provider
                     }
-                    identity = provider.modelID
+                    identity = provider.modelID(for: source.modelCapture)
                     if let expected = snapshot.expectedModelIdentity, expected != identity {
                         throw RecipeExportError.missingModel
                     }

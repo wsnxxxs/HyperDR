@@ -127,7 +127,7 @@ def translate(graph: onnx.GraphProto, input_name: str, output_name: str,
             return constants[name]
         raise KeyError(f"graph input {name!r} is neither computed nor constant")
 
-    @mb.program(input_specs=[mb.TensorSpec(shape=shape)], opset_version=ct.target.iOS26)
+    @mb.program(input_specs=[mb.TensorSpec(shape=shape)], opset_version=ct.target.iOS18)
     def program(features):  # noqa: ANN001 - MIL program function signature
         values[input_name] = features
         for node in graph.node:
@@ -257,7 +257,7 @@ def main(argv: list[str]) -> int:
     program = translate(graph, input_name, output_name, spatial)
     precision = ct.precision.FLOAT16 if args.precision == "float16" else ct.precision.FLOAT32
     model = ct.convert(program, convert_to="mlprogram", compute_precision=precision,
-                       minimum_deployment_target=ct.target.iOS26,
+                       minimum_deployment_target=ct.target.iOS18,
                        inputs=[ct.TensorType(name=input_name, dtype=np.float32, shape=shape)])
     declared_input = model.get_spec().description.input[0].name
 
@@ -338,7 +338,7 @@ def main(argv: list[str]) -> int:
         },
         "output": {"name": output_name, "scale": "signed-log2-gain", "unit": "stops"},
         "computePrecision": args.precision,
-        "minimumDeploymentTarget": "iOS26/macOS26",
+        "minimumDeploymentTarget": "iOS18/macOS15",
         "mlpackageBytes": size,
         "weightsSha256": weights_sha256,
         "installed": installed,

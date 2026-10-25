@@ -363,8 +363,6 @@ actor RenderSession: EditorRendering {
         let generation = prepared.generation
         // AI belongs to the photograph, not the log look. Both developments
         // share modelSourceID; the new stable id must not force a second prediction.
-        let key = PredictionKey(source: prepared.source.modelSourceID, model: Self.modelID(request.recipe))
-        if predictions[key] != nil { return }
         let provider: CoreMLModelGainProvider
         if let loaded = self.provider { provider = loaded } else {
             // Loading the model off the actor keeps renders going meanwhile.
@@ -375,6 +373,8 @@ actor RenderSession: EditorRendering {
             }
             if self.provider == nil { self.provider = provider }
         }
+        let key = PredictionKey(source: prepared.source.modelSourceID, model: provider.modelID(for: prepared.source.modelCapture))
+        if predictions[key] != nil { return }
         let prediction: ModelGainPrediction
         do { prediction = try await engine.predictModelGain(prepared.source, provider: provider) } catch {
             throw Self.modelError(error)
@@ -387,12 +387,12 @@ actor RenderSession: EditorRendering {
         if predictionOrder.count > Self.predictionLimit { predictions[predictionOrder.removeFirst()] = nil }
     }
 
-    private static func modelID(_ recipe: Recipe) -> String { recipe.conditionValue("hdr.model")?.stringValue ?? "" }
-
     /// The prediction for the recipe's model, if it was made for this source.
     private func prediction(for recipe: Recipe, source: RenderSource) -> ModelGainPrediction? {
-        guard let prediction = predictions[PredictionKey(source: source.modelSourceID, model: Self.modelID(recipe))],
-              prediction.sourceID == source.modelSourceID, prediction.modelID == provider?.modelID else { return nil }
+        guard let provider else { return nil }
+        let identity = provider.modelID(for: source.modelCapture)
+        guard let prediction = predictions[PredictionKey(source: source.modelSourceID, model: identity)],
+              prediction.sourceID == source.modelSourceID, prediction.modelID == identity else { return nil }
         return prediction
     }
 

@@ -31,6 +31,7 @@ extension OpenedSource {
                                                          developedExtent: base.extent.size),
                                   nativeSize: nativeSize.map { _ in PixelSize(width: output.width, height: output.height) },
                                   rawPreviewSize: rawPreviewSize, draftRAWPreview: draftRAWPreview)
+        result.modelCapture = modelCapture
         result.uncroppedSize = full
         return result
     }

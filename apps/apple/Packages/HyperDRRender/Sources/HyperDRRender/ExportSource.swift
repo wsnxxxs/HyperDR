@@ -131,6 +131,7 @@ extension RenderEngine {
             domain:source.domain,size:full,nativeSize:full,authoredGainMap:opened.gain,hdrImage:hdrImage,
             authoredBaseImage:opened.gain == nil ? nil : baseImage,rawSettings:opened.raw,
             texture:base,baseSpace:opened.baseSpace,gainTexture:gainTexture)
+        result.modelCapture = source.analysisSource.modelCapture
         result.samplingRegion = normalized; result.gainSamplingRegion = gainRegion
         result.geometryUncroppedSize = opened.uncroppedSize
         result.stagedLookBaseline = source.stagedLookBaseline

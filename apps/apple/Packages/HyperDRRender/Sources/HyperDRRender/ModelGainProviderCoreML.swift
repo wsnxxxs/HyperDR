@@ -39,7 +39,8 @@ import Metal
 /// re-conversion. Callers should create one provider and keep it: the model is
 /// loaded once, and the last prediction is retained.
 public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendable {
-    /// Model identity for the graph's cache: model name, version, preprocessing
+    /// Pixel-only model identity. Use `modelID(for:)` for a photograph's cache.
+    /// Identity includes model name, version, preprocessing
     /// revision and the analysis scale. The grid's *size* follows from the source
     /// and this scale, and the source is the other half of the key, so the two
     /// together identify the prediction — but two providers configured with
@@ -47,6 +48,14 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
     public let modelID: String
     public let analysisLongSide: Int
     private let model: ModelGainModel
+    private let exifModel: ModelGainModel?
+    private let exifLevel: ModelGainExifLevel?
+
+    public func modelID(for capture: ModelGainCapture) -> String {
+        guard capture.isUsable, let exifModel, exifLevel != nil else { return modelID }
+        return [exifModel.modelIdentifier, exifModel.version, ModelGain.preprocessingRevision,
+                "analysis-\(analysisLongSide)", "exif-level-v1"].joined(separator: "/")
+    }
     private let context: CIContext
     private let device: any MTLDevice
     /// All model and cache access is serialized here, which keeps inference off
@@ -62,6 +71,10 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
         let model = try ModelGainModel(computeUnits: computeUnits, bundle: bundle)
         self.device = device
         self.model = model
+        let level = ModelGainExifLevel.bundled(in: bundle)
+        self.exifLevel = level
+        self.exifModel = level == nil || ModelGain.bundledModel(named: ModelGain.exifModelName, in: bundle) == nil
+            ? nil : try ModelGainModel(computeUnits: computeUnits, bundle: bundle, modelName: ModelGain.exifModelName)
         self.analysisLongSide = analysisLongSide
         self.modelID = [model.modelIdentifier, model.version, ModelGain.preprocessingRevision,
                         "analysis-\(analysisLongSide)"].joined(separator: "/")
@@ -85,8 +98,8 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
     /// and to carry the source orientation, exactly like `RenderSource.hdrImage`.
     /// `size` is the base's pixel size, from which the analysis grid follows.
     public func prediction(forSDRBase base: CIImage, sourceID: UUID,
-                          size: PixelSize) async throws -> ModelGainPrediction {
-        try await offCaller { try self.infer(base: base, sourceID: sourceID, size: size) }
+                          size: PixelSize, capture: ModelGainCapture = .empty) async throws -> ModelGainPrediction {
+        try await offCaller { try self.infer(base: base, sourceID: sourceID, size: size, capture: capture) }
     }
 
     private func offCaller(_ work: @escaping @Sendable () throws -> ModelGainPrediction) async throws -> ModelGainPrediction {
@@ -102,7 +115,7 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
         case .sdr:
             // The materialized source texture is already in the working space at
             // full resolution, so the analysis reduction reads it directly.
-            return try infer(texture: source.texture, sourceID: source.id, size: source.size)
+            return try infer(texture: source.texture, sourceID: source.modelSourceID, size: source.size, capture: source.modelCapture)
         case .rawEDR:
             // The extended-range development is not the picture the model was
             // trained on. The graph knows the SDR base and passes it explicitly.
@@ -115,30 +128,36 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
     }
 
     private func infer(texture: any MTLTexture, sourceID: UUID,
-                       size: PixelSize) throws -> ModelGainPrediction {
-        try infer(sourceID: sourceID, size: size) { tensor in
+                       size: PixelSize, capture: ModelGainCapture) throws -> ModelGainPrediction {
+        try infer(sourceID: sourceID, size: size, capture: capture) { tensor in
             try ModelGainInput.features(from: texture, tensorSize: tensor, device: self.device)
         }
     }
 
     private func infer(base: CIImage, sourceID: UUID,
-                       size: PixelSize) throws -> ModelGainPrediction {
-        try infer(sourceID: sourceID, size: size) { tensor in
+                       size: PixelSize, capture: ModelGainCapture) throws -> ModelGainPrediction {
+        try infer(sourceID: sourceID, size: size, capture: capture) { tensor in
             try ModelGainInput.features(from: base, context: self.context, tensorSize: tensor,
                                        device: self.device)
         }
     }
 
-    private func infer(sourceID: UUID, size: PixelSize,
+    private func infer(sourceID: UUID, size: PixelSize, capture: ModelGainCapture,
                        features build: (PixelSize) throws -> ModelGainFeatures) throws -> ModelGainPrediction {
         let tensor = ModelGain.tensorSize(for: size, longSide: analysisLongSide)
-        if let cached, cached.sourceID == sourceID, cached.tensor == tensor {
+        let identity = modelID(for: capture)
+        if let cached, cached.sourceID == sourceID, cached.tensor == tensor, cached.prediction.modelID == identity {
             return cached.prediction
         }
         let features = try build(tensor)
-        let grid = try model.gain(for: features)
+        let grid: ModelGainGrid
+        if capture.isUsable, let exifModel, let exifLevel {
+            grid = exifLevel.restoringLevel(of: try exifModel.gain(for: features), capture: capture)
+        } else {
+            grid = try model.gain(for: features)
+        }
         let texture = try makeTexture(grid)
-        let prediction = ModelGainPrediction(sourceID: sourceID, modelID: modelID, gain: texture)
+        let prediction = ModelGainPrediction(sourceID: sourceID, modelID: identity, gain: texture)
         cached = (sourceID, tensor, prediction)
         return prediction
     }

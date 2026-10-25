@@ -174,6 +174,7 @@ struct SourceRevision: Hashable {
 /// Immutable source assets. Full, latest-preview and fixed-analysis variants are
 /// retained for one asset/development family. Clients account for other retained sources.
 public struct RenderSource: @unchecked Sendable {
+    public internal(set) var modelCapture: ModelGainCapture = .empty
     /// Stable across engines and preview/full: path + file revision + normalized
     /// development parameters, including whether the log look developed scene-linear.
     /// Decoded-only sources receive a fresh identity.

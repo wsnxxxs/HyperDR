@@ -45,14 +45,14 @@ public final class ModelGainModel: @unchecked Sendable {
     }
 
     public init(computeUnits: MLComputeUnits = .all,
-                bundle: Bundle? = nil) throws {
+                bundle: Bundle? = nil, modelName: String = ModelGain.modelName) throws {
         guard !MLModel.availableComputeDevices.isEmpty else {
             throw ModelGainError.deviceUnavailable("Core ML has no available compute device")
         }
         let configuration = MLModelConfiguration()
         configuration.computeUnits = computeUnits
         let compiled: URL
-        switch ModelGain.bundledModel(in: bundle) {
+        switch ModelGain.bundledModel(named: modelName, in: bundle) {
         case .compiled(let url): compiled = url
         case .package(let url): compiled = try Self.compileOnce(url)
         case nil: throw ModelGainError.notIncluded
@@ -76,7 +76,7 @@ public final class ModelGainModel: @unchecked Sendable {
         inputName = input
         outputName = output
         let metadata = description.metadata[.creatorDefinedKey] as? [String: String] ?? [:]
-        modelIdentifier = metadata["hyperdr.modelId"] ?? ModelGain.modelName
+        modelIdentifier = metadata["hyperdr.modelId"] ?? modelName
         version = metadata["hyperdr.modelVersion"] ?? ModelGain.modelVersion
         // Catch a stale bundled asset now instead of on the first prediction.
         guard description.inputDescriptionsByName[inputName]?.multiArrayConstraint != nil else {

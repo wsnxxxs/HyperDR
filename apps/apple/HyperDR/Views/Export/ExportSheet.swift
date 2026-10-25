@@ -97,6 +97,7 @@ private struct ExportSettingsView: View {
             if model.export.phase == .cancelled {
                 InspectorNotice(Text("export.stoppedNotice"), style: .info)
             }
+            CompatibilityNotice(compatibility: model.editor.sourceCompatibility, place: .export)
             ForEach(ExportPresentation.groups(for: model.workflow), id: \.titleKey) { group in
                 FormatCardGroup(title: Text(LocalizedStringKey(group.titleKey)), items: items(group.ids),
                                 selection: selection, columns: group.columns)
@@ -483,6 +484,7 @@ private struct ExportResultView: View {
         VStack(spacing: 0) {
             ExportTitleBar(model: model)
             VStack(alignment: .leading, spacing: Space.s4) {
+                CompatibilityNotice(compatibility: model.editor.sourceCompatibility, place: .export)
                 if let result = model.export.result {
                     ExportResultCard(thumbnail: model.export.thumbnail.content(), fileName: result.fileName, facts: facts(result),
                                      warnings: DecodeDegradation.text(result.warnings).map { [Text($0)] } ?? [], isStale: stale,

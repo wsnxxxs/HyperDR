@@ -1,5 +1,6 @@
 import HyperDRDesign
 import HyperDRRecipe
+import HyperDRRender
 import SwiftUI
 
 /// The foot of the standing Studio panel: what the photo is, as a
@@ -12,6 +13,8 @@ struct PadPhotoInfo: View {
     let name: String?
     let domain: InputDomain?
     let size: (width: Int, height: Int)?
+    /// How the system could not develop the RAW itself, when it could not.
+    var compatibility: SourceCompatibility?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -45,6 +48,7 @@ struct PadPhotoInfo: View {
                     .minimumScaleFactor(0.8)
             }
             .foregroundStyle(.secondary)
+            if let compatibility { RAWCompatibilityLine(compatibility: compatibility) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PadMetrics.inset)

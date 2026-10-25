@@ -105,6 +105,9 @@ import SwiftUI
     private(set) var openFailureMessage: LocalizedStringKey = "ios.error.load"
     /// A failure over an open photo, shown for a moment.
     var notice: LocalizedStringKey?
+    /// A failure over an open photo that is too long for `notice`: the RAW of
+    /// another camera that nothing here can develop. Shown as an alert.
+    var editorFailure: LocalizedStringKey?
 
     @ObservationIgnored private var load: Task<Void, Never>?
     @ObservationIgnored private var factsTask: Task<Void, Never>?
@@ -192,6 +195,7 @@ import SwiftUI
         openFailed = false
         showsOpenFailure = false
         openFailureMessage = "ios.error.load"
+        editorFailure = nil
         // A notice belongs to the photo it was about.
         notice = nil
         isEditing = true
@@ -236,6 +240,8 @@ import SwiftUI
             fetchFraction = nil
             // The export session hashes the copy while the editor decodes it.
             exports.photoOpening(imported.url)
+            await exports.prepareRAWCompatibility()
+            try Task.checkCancellation()
             try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference)
             photo?.discard()
             photo = imported
@@ -251,10 +257,20 @@ import SwiftUI
             DiagnosticLog.error("Session", "\(imported == nil ? "Import" : "Open") failed: \(EditorLog.describe(error))")
             if case RenderError.unsupportedRAWDecoder(let version) = error {
                 openFailureMessage = "ios.error.rawDecoderUnavailable \(version)"
+            } else if case RenderError.unsupportedRAWCompatibility(let converter) = error {
+                openFailureMessage = "ios.error.rawDecoderUnavailable \(converter)"
+            } else if case RenderError.rawUnsupported(let camera) = error {
+                if let camera, !camera.isEmpty {
+                    openFailureMessage = "ios.error.rawUnsupported.model \(camera)"
+                } else {
+                    openFailureMessage = "ios.error.rawUnsupported"
+                }
             }
             if editor.source == nil {
                 openFailed = true
                 isEditing = false
+            } else if case RenderError.rawUnsupported = error {
+                editorFailure = openFailureMessage
             } else {
                 notice = openFailureMessage
             }
@@ -289,7 +305,11 @@ import SwiftUI
         factsTask?.cancel()
         facts = CaptureFacts()
         factsTask = Task {
-            let read = await Task.detached(priority: .utility) { CaptureFacts.read(url) }.value
+            let read = await Task.detached(priority: .utility) {
+                let original = CaptureFacts.read(url)
+                guard let converted = RenderEngine.rawCompatibilitySourceURL(for: url), converted != url else { return original }
+                return original.merging(CaptureFacts.read(converted))
+            }.value
             if !Task.isCancelled { facts = read }
         }
     }

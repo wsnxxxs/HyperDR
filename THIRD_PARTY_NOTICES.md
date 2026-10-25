@@ -9,6 +9,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 | Component | Purpose | Upstream license information |
 | --- | --- | --- |
+| LibRaw | Camera RAW sensor unpacking and capture metadata for DNG compatibility | CDDL-1.0 (selected from the upstream dual license); bundled dcraw, DCB/FBDD, X3F and Adobe notices in `licenses/LibRaw-COPYRIGHT.txt` |
+| JasPer | JPEG-2000 support inside LibRaw | JasPer License 2.0 (BSD-style) |
 | Little CMS 2 | ICC profile construction | MIT |
 | libavif | AVIF container and image encoding | BSD-2-Clause |
 | Alliance for Open Media libaom | AV1 codec selected by libavif's `aom` feature | BSD-2-Clause-style license and patent grant; see upstream `LICENSE` and `PATENTS` |
@@ -26,6 +28,15 @@ iOS and iPadOS 27 and later. HEVC
 encoding and decoding use Apple's VideoToolbox framework, and HEIF reading and
 writing use HyperDR's own code. No LGPL or GPL library is linked or shipped;
 every dependency above is statically linked.
+
+LibRaw is used under **CDDL-1.0**, without the alternative LGPL license,
+OpenMP or the historical GPL demosaic packs. Its full [CDDL-1.0 text](licenses/LibRaw-CDDL-1.0.txt)
+and [upstream copyright and dcraw-related notices](licenses/LibRaw-COPYRIGHT.txt)
+are distributed with the source. Distributors must make the corresponding
+LibRaw source and any modifications available under CDDL-1.0. The pinned
+snapshot is identified by `cmake/ports/libraw/portfile.cmake`; its upstream
+source archive is `https://github.com/LibRaw/LibRaw/archive/2caab57e269cc7fce17c3189e4d4d7e3e5861875.tar.gz`.
+No LibRaw code is copied into HyperDR's own source files.
 
 The exact dependency versions and feature choices are defined in
 [`vcpkg.json`](vcpkg.json) and [`CMakeLists.txt`](CMakeLists.txt). Consult the

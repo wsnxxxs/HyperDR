@@ -1,11 +1,13 @@
 """Reject GPL and LGPL dependencies from installed vcpkg metadata, the CMake link
 graph and the product binaries.
 
-Nothing HyperDR ships may be (L)GPL: every dependency is statically linked and
-permissively licensed, with no replaceable-library exception. An LGPL package
-is therefore a failure, as is any trace of libheif or libde265 (retired in
-P3b-5) in the link graph or in the Mach-O dependencies and undefined symbols
-of the C ABI library.
+Nothing HyperDR ships may be (L)GPL. LibRaw is the one non-permissive
+exception: it is linked under its CDDL-1.0 alternative, never its LGPL one,
+and without OpenMP or the old GPL demosaic packs. Every other dependency is
+statically linked and permissively licensed, with no replaceable-library
+exception. An LGPL package is therefore a failure, as is any trace of libheif
+or libde265 (retired in P3b-5) in the link graph or in the Mach-O dependencies
+and undefined symbols of the C ABI library.
 The checks follow installed metadata and the generated product graph; image
 codec dependencies have no separately fetched reference-codec exception list.
 
@@ -13,7 +15,7 @@ Two further checks cover what the link graph cannot: every installed vcpkg
 package must be listed in THIRD_PARTY_NOTICES.md (so a new dependency cannot
 ship unannounced), and the static engine archive the app really links
 (``libHyperDREngineCore.a``, built by scripts/build_xcframework.sh) must define
-no libheif or libde265 symbols.
+no libheif, libde265 or GPL demosaic-pack symbols.
 """
 import argparse
 import json
@@ -40,6 +42,8 @@ NOTICE_NAMES = {
     "libjpeg-turbo": "libjpeg-turbo",
     "liblzma": "liblzma",
     "libpng": "libpng",
+    "jasper": "JasPer",
+    "libraw": "LibRaw",
     "libyuv": "libyuv",
     "tiff": "libtiff",
     "zlib": "zlib",
@@ -49,6 +53,7 @@ NOTICES = Path(__file__).resolve().parents[2] / "THIRD_PARTY_NOTICES.md"
 # heif_image_*, ...), its C++ namespace, and libde265's de265_* API.
 RETIRED_HEIF_DEFINED = re.compile(r"^\S+\s+[TtSsDdBbRrWw]\s+(?:_heif_[a-z0-9]+_|_de265_|__ZN\d*heif\d*|__ZN\d+de265)", re.M)
 RETIRED_HEIF = re.compile(r"libheif|libde265|label\s*=\s*\"(?:heif|de265)\"", re.I)
+GPL_DEMOSAIC = re.compile(r"demosaic[-_ ]pack|LIBRAW_DEMOSAIC_PACK|demosaic.*gpl|gpl.*demosaic", re.I)
 
 def installed_ports(build, triplet):
     """Names of the vcpkg ports installed for the product, without build tooling."""
@@ -72,12 +77,16 @@ def check_notices(build, triplet):
     return failures
 
 def check_engine_archive(archive):
-    """The static library the app links must not carry libheif or libde265."""
+    """The static library must not carry retired codecs or GPL demosaic packs."""
     if not archive.is_file():
         raise RuntimeError(f"Missing engine archive: {archive}")
     symbols = subprocess.check_output(["nm", str(archive)], text=True, stderr=subprocess.DEVNULL)
     found = sorted({match.group(0).split()[-1] for match in RETIRED_HEIF_DEFINED.finditer(symbols)})
-    return [f"libheif/libde265 symbols defined in {archive}: {', '.join(found[:5])}"] if found else []
+    failures = [f"libheif/libde265 symbols defined in {archive}: {', '.join(found[:5])}"] if found else []
+    demosaic = sorted({line.split()[-1] for line in symbols.splitlines() if GPL_DEMOSAIC.search(line)})
+    if demosaic:
+        failures.append(f"GPL demosaic-pack symbols defined in {archive}: {', '.join(demosaic[:5])}")
+    return failures
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -94,7 +103,7 @@ def main():
         failures = check_engine_archive(args.engine_archive)
         if failures:
             raise RuntimeError("\n".join(failures))
-        print(f"License gate passed: {args.engine_archive} defines no libheif/libde265 symbols")
+        print(f"License gate passed: {args.engine_archive} defines no libheif/libde265 or GPL demosaic-pack symbols")
         return
     share = args.build / "vcpkg_installed" / args.triplet / "share"
     if not share.is_dir():
@@ -105,8 +114,6 @@ def main():
         raise RuntimeError("No installed copyright files were found")
     for notice in notices:
         package = notice.parent.name
-        if package.lower() == "libraw":
-            failures.append("LibRaw/CDDL dependency was retired in R3")
         content = notice.read_text(errors="replace")
         spdx = notice.with_name("vcpkg.spdx.json")
         licenses = []
@@ -116,8 +123,21 @@ def main():
                     value = entry.get(key, "NOASSERTION")
                     if value not in ("NOASSERTION", "NONE"):
                         licenses.append(value)
-        if any(GPL.search(value) or LGPL.search(value) for value in licenses):
+        if package.lower() != "libraw" and any(GPL.search(value) or LGPL.search(value) for value in licenses):
             failures.append(f"{package}: installed SPDX license {licenses}")
+        if package.lower() == "libraw":
+            # The port selects the CDDL alternative. Its SPDX expression still
+            # names the unselected LGPL one; require the selected license text
+            # and reject any GPL demosaic-pack addition explicitly.
+            if "COMMON DEVELOPMENT AND DISTRIBUTION LICENSE" not in content:
+                failures.append("libraw: selected CDDL-1.0 license text is missing")
+            if licenses and not any("CDDL-1.0" in value for value in licenses):
+                failures.append(f"libraw: SPDX does not offer CDDL-1.0: {licenses}")
+            if GPL_DEMOSAIC.search(content):
+                failures.append("libraw: GPL/LGPL demosaic pack notice is forbidden")
+            if GPL.search(content) or re.search(r"GNU\s+GENERAL\s+PUBLIC\s+LICENSE", content, re.I):
+                failures.append("libraw: GPL copyright notice or demosaic pack")
+            continue
         if package.lower() in ("libheif", "libde265"):
             failures.append(f"{package}: retired in P3b-5; HEIF is read by our own code")
         # Scan every notice too: standalone GPL notices are forbidden, including
@@ -136,12 +156,13 @@ def main():
     subprocess.run(["cmake", f"--graphviz={graph.resolve()}", str(args.build.resolve())], check=True,
                    stdout=subprocess.DEVNULL)
     linked = graph.read_text()
-    if re.search(r"\blibraw(?:::raw_r)?\b", linked, re.I):
-        failures.append("retired LibRaw dependency in CMake link graph")
+    # LibRaw itself is expected under CDDL-1.0; its old GPL demosaic packs are not.
     # These optional codec families are GPL; reject them even if a package
     # incorrectly labels its notice or attempts to use a system-installed copy.
     if RETIRED_HEIF.search(linked):
         failures.append("retired libheif/libde265 dependency in CMake link graph")
+    if GPL_DEMOSAIC.search(linked):
+        failures.append("GPL demosaic pack in CMake link graph")
     for pattern in (r"\bx265\b", r"\bx264\b", r"\b(?:postproc|avfilter)\b"):
         if re.search(pattern, linked, re.I):
             failures.append(f"forbidden GPL codec in CMake link graph: {pattern}")
@@ -149,7 +170,7 @@ def main():
     for binary in binaries:
         deps = subprocess.check_output(["otool", "-L", str(binary)], text=True)
         if re.search(r"libraw", deps, re.I):
-            failures.append(f"retired LibRaw runtime dependency: {binary}")
+            failures.append(f"LibRaw must be statically linked: {binary}")
         if re.search(r"(?:libx26[45]|libpostproc|libavfilter)", deps, re.I):
             failures.append(f"forbidden GPL runtime dependency: {binary}")
         if re.search(r"libheif|libde265", deps, re.I):

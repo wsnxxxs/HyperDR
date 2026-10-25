@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "hyperdr/image/frame.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/codec/raw_compat.hpp"
 
 namespace hyperdr {
 namespace {
@@ -49,6 +50,7 @@ std::string Engine::capabilities() const {
       .member("codecs", kCodecsAvailable).member("memoryBudgetBytes", config_.memory_budget_bytes)
       .member("effectiveMemoryBudgetBytes",
               effective_memory_budget(config_.memory_budget_bytes))
+      .member("raw_converter", raw_converter_id())
       .member("heicTileWorkers", config_.heic_tile_workers)
       .begin_object("encoder").member("backend", "videotoolbox")
       .member("main8", caps.main8).member("main10", caps.main10)
@@ -67,6 +69,19 @@ std::string Engine::capabilities() const {
   }
   return writer.end_array().end_object().take() + '\n';
 }
+std::string Engine::raw_convert_dng(const std::filesystem::path& raw,
+                                     const std::filesystem::path& dng, const CancelToken* cancel) const {
+  CancelScope cancellation(cancel);
+  ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
+  return hyperdr::raw_convert_dng(raw, dng);
+}
+std::string Engine::raw_extract_preview(const std::filesystem::path& raw,
+                                         const std::filesystem::path& jpeg, const CancelToken* cancel) const {
+  CancelScope cancellation(cancel);
+  ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
+  return hyperdr::raw_extract_preview(raw, jpeg);
+}
+
 std::string Engine::probe(const std::filesystem::path& source) const {
   ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
   if (is_raw_extension(lower_extension(source))) {

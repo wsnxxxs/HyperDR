@@ -9,6 +9,9 @@
     hyperdr_engine_destroy;
     hyperdr_capabilities;
     hyperdr_probe;
+    hyperdr_raw_converter_id;
+    hyperdr_raw_convert_dng;
+    hyperdr_raw_extract_preview;
     hyperdr_package;
     hyperdr_package_rows;
     hyperdr_package_rows_progress;

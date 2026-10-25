@@ -1,5 +1,6 @@
 import HyperDRDesign
 import HyperDRKit
+import HyperDRRender
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -338,8 +339,12 @@ struct ExportSheet: View {
         let blockers = plan?.blockers ?? []
         let lutMissing = model.luts.missingLook(editor)
         let misfits = model.frameMisfits(editor)
-        if !notices.isEmpty || !blockers.isEmpty || lutMissing != nil || misfits || model.sessionFailure != nil {
+        let warnsCompatibility = editor.sourceCompatibility?.isWarning == true
+        if warnsCompatibility || !notices.isEmpty || !blockers.isEmpty || lutMissing != nil || misfits || model.sessionFailure != nil {
             VStack(alignment: .leading, spacing: Space.s2) {
+                if warnsCompatibility {
+                    note(Text("ios.compat.preview.export"), symbol: "exclamationmark.triangle", warning: true)
+                }
                 ForEach(notices, id: \.self) { notice in
                     note(Text(verbatim: notice.phrase.text(locale: locale)), symbol: "info.circle", warning: false)
                 }

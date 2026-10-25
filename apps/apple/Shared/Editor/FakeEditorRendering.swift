@@ -16,6 +16,8 @@ actor FakeEditorRendering: EditorRendering {
         var sourceValues: [String: Double] = [:]
         var capabilities: Set<String> = []
         var isDraftPreview = false
+        var sourceCompatibility: SourceCompatibility? = nil
+        var rawCompatibility: String? = nil
     }
 
     enum ModelBehavior: Sendable {
@@ -168,7 +170,9 @@ actor FakeEditorRendering: EditorRendering {
         let photo = photos[url] ?? defaultPhoto
         let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
                                   sourceValues: photo.sourceValues, capabilities: photo.capabilities,
-                                  isDraftPreview: photo.isDraftPreview)
+                                  isDraftPreview: photo.isDraftPreview,
+                                  sourceCompatibility: photo.sourceCompatibility,
+                                  rawCompatibility: photo.rawCompatibility)
         current = source
         return source
     }

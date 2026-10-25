@@ -388,6 +388,21 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(!FileManager.default.fileExists(atPath: cache.appendingPathComponent("a.bin").path))
         #expect(FileManager.default.fileExists(atPath: cache.appendingPathComponent("b.bin").path))
     }
+
+    @Test func startupCleanupPrunesRAWCompatibilityCache() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store(maxAge: 3600)
+        let cache = environment.cache.appendingPathComponent("decode-cache/raw-compatibility", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let old = cache.appendingPathComponent("old.dng"), recent = cache.appendingPathComponent("recent.dng")
+        let now = Date()
+        for url in [old, recent] { try Data(repeating: 0x5a, count: 16).write(to: url) }
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-7200)], ofItemAtPath: old.path)
+        _ = await store.cleanupExpired(now: now)
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: recent.path))
+    }
 }
 
 extension SessionStoreTests {

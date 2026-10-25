@@ -250,13 +250,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HyperDR develops RAW with macOS, which doesn’t support this camera yet. macOS updates add new cameras; you can also convert the file to DNG or TIFF first."
+            "value" : "HyperDR couldn’t develop this camera’s RAW. It is newer than this macOS supports, and HyperDR’s own conversion couldn’t read it either. Update macOS, or convert the file to DNG with Adobe DNG Converter first."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HyperDR 用 macOS 自带的 RAW 显影，它还不支持这台相机。macOS 更新时会陆续加入新机型；也可以先把文件转成 DNG 或 TIFF 再打开。"
+            "value" : "无法显影这台相机的 RAW：它比当前 macOS 支持的更新，HyperDR 自带的转换也读不了。请更新 macOS，或先用 Adobe DNG Converter 把文件转成 DNG 再打开。"
           }
         }
       }
@@ -267,13 +267,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HyperDR develops RAW with macOS, which doesn’t support the %@ yet. macOS updates add new cameras; you can also convert the file to DNG or TIFF first."
+            "value" : "HyperDR couldn’t develop RAW from the %@. It is newer than this macOS supports, and HyperDR’s own conversion couldn’t read it either. Update macOS, or convert the file to DNG with Adobe DNG Converter first."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HyperDR 用 macOS 自带的 RAW 显影，它还不支持 %@。macOS 更新时会陆续加入新机型；也可以先把文件转成 DNG 或 TIFF 再打开。"
+            "value" : "无法显影 %@ 的 RAW：它比当前 macOS 支持的更新，HyperDR 自带的转换也读不了。请更新 macOS，或先用 Adobe DNG Converter 把文件转成 DNG 再打开。"
           }
         }
       }
@@ -8303,6 +8303,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在显影 RAW 照片"
+          }
+        }
+      }
+    },
+    "mac.compat.dng.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility mode: this macOS doesn’t support this camera yet, so the RAW was converted before developing. It is still a full RAW edit, but there is no lens correction and colors use a generic matrix."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容模式：当前 macOS 暂不支持这台相机，已先转换 RAW 再显影。仍是完整的 RAW 编辑，但没有镜头校正，色彩使用通用矩阵。"
+          }
+        }
+      }
+    },
+    "mac.compat.preview.warning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is not a RAW development. macOS can’t decode this RAW, so HyperDR opened the JPEG preview embedded in the file. Image quality and dynamic range are limited, and the size may be smaller than the original. Update macOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 RAW 显影。macOS 无法解码这个 RAW，HyperDR 打开的是文件里内嵌的 JPEG 预览：画质和动态范围受限，尺寸也可能比原片小。建议更新 macOS，或先用 Adobe DNG Converter 转换成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "mac.compat.preview.export" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This export comes from the RAW’s embedded JPEG preview, not a RAW development: quality and dynamic range are limited and the size may be smaller than the original. Update macOS, or convert to DNG with Adobe DNG Converter first, for a full result."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次导出基于 RAW 内嵌的 JPEG 预览，并非 RAW 显影：画质和动态范围受限，尺寸可能比原片小。想要完整效果，请更新 macOS，或先用 Adobe DNG Converter 转成 DNG。"
           }
         }
       }

@@ -121,6 +121,40 @@
         }
       }
     },
+    "ios.error.rawUnsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. This camera is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：这台相机比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "ios.error.rawUnsupported.model %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. The %@ is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：%@ 比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
     "ios.error.rawDecoderUnavailable %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3019,6 +3053,142 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "LUT 库"
+          }
+        }
+      }
+    },
+    "ios.compat.menu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW Compatibility"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 兼容性"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility Mode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容模式"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This system doesn’t support this camera yet, so the RAW was converted before developing. It is still a full RAW edit, but there is no lens correction and colors use a generic matrix."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统暂不支持这台相机，已先转换 RAW 再显影。仍是完整的 RAW 编辑，但没有镜头校正，色彩使用通用矩阵。"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility mode · no lens correction"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容模式 · 无镜头校正"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a RAW Development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 RAW 显影"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This system can’t decode this RAW, so HyperDR opened the JPEG preview embedded in the file. Image quality and dynamic range are limited, and the size may be smaller than the original. Update the system, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统无法解码这个 RAW，HyperDR 打开的是文件里内嵌的 JPEG 预览：画质和动态范围受限，尺寸也可能比原片小。建议更新系统，或先用 Adobe DNG Converter 转换成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JPEG preview, not a RAW development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JPEG 预览，不是 RAW 显影"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.export" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This export comes from the RAW’s embedded JPEG preview, not a RAW development: quality and dynamic range are limited and the size may be smaller than the original. Update the system, or convert to DNG with Adobe DNG Converter first, for a full result."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次导出基于 RAW 内嵌的 JPEG 预览，并非 RAW 显影：画质和动态范围受限，尺寸可能比原片小。想要完整效果，请更新系统，或先用 Adobe DNG Converter 转成 DNG。"
           }
         }
       }

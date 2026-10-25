@@ -15,6 +15,12 @@ class Engine {
   explicit Engine(EngineConfig config = {});
   [[nodiscard]] std::string capabilities() const;
   [[nodiscard]] std::string probe(const std::filesystem::path& source) const;
+  [[nodiscard]] std::string raw_convert_dng(const std::filesystem::path& raw,
+                                            const std::filesystem::path& dng,
+                                            const CancelToken* cancel = nullptr) const;
+  [[nodiscard]] std::string raw_extract_preview(const std::filesystem::path& raw,
+                                                const std::filesystem::path& jpeg,
+                                                const CancelToken* cancel = nullptr) const;
   [[nodiscard]] std::string package_rows(const PackageRequest&, std::uint32_t rows,
       const PackageRows&, const CancelToken* cancel = nullptr,
       const PackageProgress* progress = nullptr) const;

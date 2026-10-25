@@ -44,15 +44,27 @@ extension RenderEngine {
     /// Apple's endpoint into a staged file (`StagedLookBaseline`), before the
     /// scene-linear graph opens; it needs that endpoint's float32 size on disk.
     public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions(),
-                                 stagingLookBaseline: Bool = false) throws -> ExportSource {
+                                 stagingLookBaseline: Bool = false,
+                                 allowsRAWCompatibilityFallback: Bool = true) async throws -> ExportSource {
         try Task.checkCancellation()
         let revision = try SourceRevision(url:url)
         var fullOptions = options; fullOptions.resolution = .full
         fullOptions.draftRAWPreview = false
         clearImageCaches()
-        let staged = stagingLookBaseline && fullOptions.sceneLinear
-            ? try stageLookBaseline(url, options: fullOptions, revision: revision) : nil
-        let opened = try Self.open(url,options:fullOptions,deferred:true)
+        var staged: StagedLookBaseline?
+        if stagingLookBaseline && fullOptions.sceneLinear {
+            let baseline = try await stageLookBaseline(url, options: fullOptions, revision: revision,
+                                                       allowsFallback: allowsRAWCompatibilityFallback)
+            staged = baseline.staged
+            fullOptions.rawCompatibility = baseline.options.rawCompatibility
+            fullOptions.rawEmbeddedPreview = baseline.options.rawEmbeddedPreview
+            fullOptions.rawDecoderVersion = baseline.options.rawDecoderVersion
+            if fullOptions.rawEmbeddedPreview { fullOptions.sceneLinear = false }
+        }
+        let result = try await Self.openWithCompatibility(url, options: fullOptions, deferred: true,
+            allowsFallback: allowsRAWCompatibilityFallback, retryNativeDecoder: false, revision: revision)
+        fullOptions = result.options
+        let opened = result.opened
         let size = opened.nativeSize ?? opened.raw!.nativeSize
         try validate(size)
         var analysisOptions = fullOptions
@@ -72,7 +84,8 @@ extension RenderEngine {
             // Scene-linear Log/film developments keep the independent analysis
             // graph: retaining its warmed native cache raised the measured
             // opening footprint, reducing the full-size export memory margin.
-            analysis = try load(url,options:analysisOptions)
+            analysis = try await load(url,options:analysisOptions,
+                allowsRAWCompatibilityFallback: allowsRAWCompatibilityFallback)
         }
         analysisSource = analysis
         try revision.validate(url)
@@ -132,6 +145,8 @@ extension RenderEngine {
             authoredBaseImage:opened.gain == nil ? nil : baseImage,rawSettings:opened.raw,
             texture:base,baseSpace:opened.baseSpace,gainTexture:gainTexture)
         result.modelCapture = source.analysisSource.modelCapture
+        result.sourceCompatibility = opened.sourceCompatibility
+        result.rawCompatibility = opened.rawCompatibility
         result.samplingRegion = normalized; result.gainSamplingRegion = gainRegion
         result.geometryUncroppedSize = opened.uncroppedSize
         result.stagedLookBaseline = source.stagedLookBaseline

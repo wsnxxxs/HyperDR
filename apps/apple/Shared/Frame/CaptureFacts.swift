@@ -116,6 +116,15 @@ nonisolated struct CaptureFacts: Equatable, Sendable {
         return parts.isEmpty ? nil : parts.joined(separator: Self.separator)
     }
 
+    /// Original camera metadata wins; a converted DNG fills only fields that
+    /// ImageIO could not read from the unsupported RAW container.
+    func merging(_ fallback: CaptureFacts) -> CaptureFacts {
+        CaptureFacts(make: make ?? fallback.make, model: model ?? fallback.model,
+                     lens: lens ?? fallback.lens, focalLength: focalLength ?? fallback.focalLength,
+                     fNumber: fNumber ?? fallback.fNumber, exposureTime: exposureTime ?? fallback.exposureTime,
+                     iso: iso ?? fallback.iso, dateTimeOriginal: dateTimeOriginal ?? fallback.dateTimeOriginal)
+    }
+
     /// "2026.09.21".
     var dateLine: String? {
         guard let date = dateTimeOriginal?.prefix(10), date.count == 10 else { return nil }

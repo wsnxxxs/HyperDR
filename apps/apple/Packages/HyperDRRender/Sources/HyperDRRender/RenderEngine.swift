@@ -16,10 +16,12 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
     }
     let r = options.raw
     let linear = sceneLinear ?? options.sceneLinear
-    let fields = ["hyperdr.source/v4",url.path,String(revision.size ?? -1),
+    let fields = ["hyperdr.source/v5",url.path,String(revision.size ?? -1),
         revision.modified.map { String($0.timeIntervalSinceReferenceDate.bitPattern,radix:16) } ?? "unknown",
         options.kind.rawValue,String(options.lensCorrection),String(linear),
-        options.rawDecoderVersion ?? "system-default",number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+        options.rawDecoderVersion ?? "system-default", options.rawCompatibility ?? "native",
+        String(options.rawEmbeddedPreview), String(options.embeddedPreviewOrientation ?? -1),
+        number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
         // Only a geometry that does something is named, so other ids are unchanged.
         + (options.geometry.isIdentity ? [] : [(try? Recipe(geometry: options.geometry).jsonString()) ?? "geometry"])
     let data = try! JSONSerialization.data(withJSONObject:fields)
@@ -150,22 +152,36 @@ public actor RenderEngine {
 
     /// The caller owns any security scope needed to read this URL. No UI-thread I/O.
     public func load(_ url: URL, options: SourceOptions = SourceOptions(), preparingAnalysis: Bool = false,
-                     progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> RenderSource {
+                     allowsRAWCompatibilityFallback: Bool = true, retryNativeRAWDecoder: Bool = false,
+                     progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) async throws -> RenderSource {
+        try Task.checkCancellation()
+        let revision = try SourceRevision(url:url)
+        try Self.validateRecordedCompatibility(options)
+        var options = options
+        var key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
+        // Forcing a conversion must not be satisfied by an earlier native
+        // source cache entry with the same development options.
+        if !Self.forcesRAWCompatibility, let cached = sourceCache[key] {
+            if preparingAnalysis { _ = try fixedAnalysisSource(cached) }
+            return cached
+        }
+        let result = try await Self.openWithCompatibility(url, options: options,
+            allowsFallback: allowsRAWCompatibilityFallback, retryNativeDecoder: retryNativeRAWDecoder,
+            revision: revision, progress: progress)
+        options = result.options
+        key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
+        if let cached = sourceCache[key] {
+            if preparingAnalysis { _ = try fixedAnalysisSource(cached) }
+            return cached
+        }
         return try autoreleasepool {
-            try Task.checkCancellation()
-            let revision = try SourceRevision(url:url)
-            let key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
-            if let cached = sourceCache[key] {
-                if preparingAnalysis { _ = try fixedAnalysisSource(cached) }
-                return cached
-            }
             var familyKey = key
             familyKey.options.resolution = .full
             if sourceFamily?.key != familyKey {
                 clearImageCaches()
                 sourceFamily = (familyKey,familyKey.stableID)
             }
-            let opened = try Self.open(url, options: options, progress: progress)
+            let opened = result.opened
             progress?(.developing)
             let origin = (url: familyKey.url, options: familyKey.options, revision: revision)
             let source: RenderSource
@@ -301,6 +317,8 @@ public actor RenderEngine {
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture,
             geometryUncroppedSize: opened.uncroppedSize)
         source.modelCapture = opened.modelCapture
+        source.sourceCompatibility = opened.sourceCompatibility
+        source.rawCompatibility = opened.rawCompatibility
         source.fallbackHDRHeadroom = opened.domain == .rawEDR ? boundHDR.fallbackHeadroom : nil
         return try canonicalizeAuthoredSource(source)
     }

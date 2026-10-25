@@ -48,6 +48,8 @@ import Observation
 
     private(set) var recipe: Recipe
     private(set) var source: EditorSource?
+    /// Nil when the open photo uses Apple's native source decoder.
+    private(set) var sourceCompatibility: SourceCompatibility?
     /// The newest edited render. The previous photo's frame stays until the
     /// new photo's first frame arrives.
     private(set) var frame: EditorFrame?
@@ -348,13 +350,16 @@ import Observation
         previewSize = nil
         largestCanvasSide = nil
         source = opened
+        sourceCompatibility = opened.sourceCompatibility
         isRefiningPreview = opened.isDraftPreview
         sourceChanged = false
         if var restoring {
             restoring.setInputDomain(opened.domain)
             recipe = restoring
         } else {
-            recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion)
+            recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion,
+                            rawCompatibility: opened.rawCompatibility,
+                            rawEmbeddedPreview: opened.sourceCompatibility == .embeddedPreview)
         }
         if restoring == nil || historyURL != url { undo.clear() }
         historyURL = url
@@ -417,6 +422,7 @@ import Observation
         undo.clear()
         historyURL = nil
         source = nil
+        sourceCompatibility = nil
         sourceChanged = false
         frame = nil
         frameSource = nil

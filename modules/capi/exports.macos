@@ -7,6 +7,9 @@ _hyperdr_engine_create
 _hyperdr_engine_destroy
 _hyperdr_capabilities
 _hyperdr_probe
+_hyperdr_raw_converter_id
+_hyperdr_raw_convert_dng
+_hyperdr_raw_extract_preview
 _hyperdr_package
 _hyperdr_package_rows
 _hyperdr_package_rows_progress

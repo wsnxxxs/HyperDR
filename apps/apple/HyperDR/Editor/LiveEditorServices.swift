@@ -93,6 +93,7 @@ import os
             let kit = try await kitTask.value
             guard !stopped else { kit.stop(); return }
             self.kit = kit
+            RenderEngine.registerRAWCompatibilityConverter(kit.rawCompatibility)
             setEngine(.ready(version: Engine.version))
         } catch {
             setEngine(.failed(UserFacingError(code: "engine_unavailable",
@@ -118,9 +119,15 @@ import os
     }
 
     private func requireKit() async throws -> HyperDRKit {
-        if let kit { return kit }
-        do { return try await kitTask.value }
-        catch {
+        if let kit {
+            RenderEngine.registerRAWCompatibilityConverter(kit.rawCompatibility)
+            return kit
+        }
+        do {
+            let kit = try await kitTask.value
+            RenderEngine.registerRAWCompatibilityConverter(kit.rawCompatibility)
+            return kit
+        } catch {
             throw UserFacingError(code: "engine_unavailable", detail: String(describing: error))
         }
     }
@@ -220,7 +227,9 @@ import os
         let task = Task.detached {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            return read(url)
+            let original = read(url)
+            guard let converted = RenderEngine.rawCompatibilitySourceURL(for: url), converted != url else { return original }
+            return original.merging(read(converted))
         }
         records[photo.handle]?.captureFacts = task
         return await task.value

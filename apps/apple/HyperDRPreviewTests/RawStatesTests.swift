@@ -22,9 +22,10 @@ import HyperDRDesign
         let error = UserFacingError(code: "raw_unsupported", detail: "Leica M11-P", variant: "camera")
         let sentence = ErrorText(error)
         XCTAssertEqual(text(sentence.title, en), "This camera’s RAW isn’t supported")
-        XCTAssertEqual(text(sentence.message, en), "HyperDR develops RAW with macOS, which doesn’t support the Leica M11-P yet. macOS updates add new cameras; you can also convert the file to DNG or TIFF first.")
+        XCTAssertEqual(text(sentence.message, en), "HyperDR couldn’t develop RAW from the Leica M11-P. It is newer than this macOS supports, and HyperDR’s own conversion couldn’t read it either. Update macOS, or convert the file to DNG with Adobe DNG Converter first.")
         XCTAssertEqual(text(sentence.title, zh), "不支持这台相机的 RAW")
         XCTAssertTrue(text(sentence.message, zh).contains("Leica M11-P"))
+        XCTAssertTrue(text(sentence.message, zh).contains("Adobe DNG Converter"))
         XCTAssertNil(sentence.detail)
         XCTAssertFalse(sentence.body(locale: en).contains("\n\n"), "the model is not listed again below")
     }
@@ -33,7 +34,8 @@ import HyperDRDesign
         for error in [UserFacingError(code: "raw_unsupported", variant: "camera"), UserFacingError(code: "raw_unsupported")] {
             let sentence = ErrorText(error)
             XCTAssertEqual(text(sentence.title, en), "This camera’s RAW isn’t supported")
-            XCTAssertTrue(text(sentence.message, en).contains("doesn’t support this camera yet"))
+            XCTAssertTrue(text(sentence.message, en).contains("this camera’s RAW"))
+            XCTAssertTrue(text(sentence.message, en).contains("Update macOS"))
             XCTAssertNil(sentence.detail)
         }
     }

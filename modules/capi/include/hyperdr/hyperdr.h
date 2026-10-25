@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define HYPERDR_ABI_VERSION 5
+#define HYPERDR_ABI_VERSION 6
 
 typedef struct hyperdr_error {
   const char* code;
@@ -54,6 +54,27 @@ HYPERDR_API int hyperdr_probe(hyperdr_engine*, const char*, char**, hyperdr_erro
 HYPERDR_API hyperdr_cancel* hyperdr_cancel_create(void);
 HYPERDR_API void hyperdr_cancel_request(hyperdr_cancel*);
 HYPERDR_API void hyperdr_cancel_destroy(hyperdr_cancel*);
+
+/* --- RAW compatibility (ABI 6) ---------------------------------------------
+ * For camera RAW files the system RAW engine cannot develop. LibRaw only
+ * unpacks sensor data and metadata (Bayer data is not demosaiced); the result
+ * is a DNG the system develops like any other DNG. Output files are created
+ * exclusively and published atomically.
+ * Static stable id of this converter, e.g. "libraw-0.22.0/dng-2". It changes
+ * whenever the DNG written for the same input could change. */
+HYPERDR_API const char* hyperdr_raw_converter_id(void);
+/* report JSON: {"converter":id,"layout":"cfa"|"linear","make":s,"model":s,
+ *   "width":n,"height":n (default crop, before orientation),"orientation":1..8}
+ * Errors: raw_unsupported (detail_json {"container":"camera","model":...}) when
+ * LibRaw cannot read the file or has no colour matrix; plus the existing
+ * cancellation / I/O codes. */
+HYPERDR_API int hyperdr_raw_convert_dng(hyperdr_engine*, const char* raw_path, const char* dng_path,
+                                        hyperdr_cancel*, char** report, hyperdr_error**);
+/* Writes the largest embedded JPEG preview, unchanged, to jpeg_path.
+ * report: {"width":n,"height":n,"orientation":1..8}. Errors: no_preview when
+ * the file has no JPEG preview; raw_unsupported; cancellation / I/O. */
+HYPERDR_API int hyperdr_raw_extract_preview(hyperdr_engine*, const char* raw_path, const char* jpeg_path,
+                                            hyperdr_cancel*, char** report, hyperdr_error**);
 
 /* --- packaging --------------------------------------------------------------
  * The P7 GPU render graph renders in Swift, so the engine's export entry point

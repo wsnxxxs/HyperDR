@@ -35,6 +35,7 @@ struct EditorScreen: View {
     @State private var picked: PhotosPickerItem?
     @State private var confirmingReset = false
     @State private var confirmingClose = false
+    @State private var showingCompatibility = false
     @Environment(\.undoManager) private var undoManager
     @Environment(\.displayScale) private var displayScale
 
@@ -93,6 +94,7 @@ struct EditorScreen: View {
         } message: {
             Text("ios.close.message")
         }
+        .rawCompatibilityAlert(editor: editor, isPresented: $showingCompatibility)
         .sheet(isPresented: $showingExport) {
             ExportSheet(model: session.exports, editor: editor, frame: Binding(get: { session.frame }, set: { session.frame = $0 }))
         }
@@ -288,6 +290,7 @@ struct EditorScreen: View {
     private var moreMenu: some View {
         Menu {
             Section { comparisonMenu }
+            RAWCompatibilityMenuItem(editor: editor, showing: $showingCompatibility)
             Section {
                 Button("ios.menu.choosePhoto", systemImage: "photo.on.rectangle") { pickingPhoto = true }
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }

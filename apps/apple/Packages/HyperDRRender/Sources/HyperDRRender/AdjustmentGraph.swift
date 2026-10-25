@@ -249,7 +249,7 @@ extension RenderEngine {
             light: SIMD4(t.whites, Float(lut?.is3D == false ? lut!.values.count : 1), t.hasCurves ? 1024 : 0, Float(t.curveProbeStage)),
             curveHDRTails: SIMD4(Float(t.curve.coordinates[t.curve.coordinates.count-2]),Float(t.curve.coordinates.last!),
                 Float(t.curveHDR.coordinates[t.curveHDR.coordinates.count-2]),Float(t.curveHDR.coordinates.last!)),
-lutExposure: SIMD4(lut != nil && l.input.isLog ? exp2(l.exposure ?? ((try? lutMeter(source, lut: lut!, input: l.input, output: l.output)) ?? 0)) : 1, 0, 0, 0), colorTools: ColorToolsUniform(c),
+            lutExposure: SIMD4(lut != nil && l.input.isLog ? exp2(l.exposure ?? ((try? lutMeter(source, lut: lut!, input: l.input, output: l.output)) ?? 0)) : 1, 0, 0, 0), colorTools: ColorToolsUniform(c),
             toneSpatialInfo: SIMD4(UInt32(spatial?.size.width ?? 0),UInt32(spatial?.size.height ?? 0),
                 UInt32((lut?.is3D == false ? lut!.values.count : 1)+(t.hasCurves ? 8192 : 0)),spatial == nil ? 0 : 1),
             toneSpatialSettings: SIMD4(t.dehaze,t.clarity,0,0),toneAtmosphere: SIMD4(spatial?.air ?? .zero,0))

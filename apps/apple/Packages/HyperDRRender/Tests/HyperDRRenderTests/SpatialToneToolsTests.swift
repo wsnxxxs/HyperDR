@@ -5,6 +5,26 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 struct SpatialToneToolsTests {
+    @Test func dehazePreservesLargeWhiteSurfaces() async throws {
+        let size = PixelSize(width: 64,height: 48)
+        let pixels: [DoubleReference.RGB] = (0..<(size.width*size.height)).map { i in
+            // A broad white surface below a brighter atmospheric-light patch.
+            i%64 < 56 ? .init(0.72,0.75,0.8) : .init(repeating: 1)
+        }
+        let rgba = pixels.flatMap { [Float($0.x),Float($0.y),Float($0.z),Float(1)] }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) },bytesPerRow: size.width*16,
+            size: CGSize(width: size.width,height: size.height),format: .RGBAf,colorSpace: RenderEngine.workingColorSpace)
+        let engine = try RenderEngine(), source = try await engine.source(image: image,domain: .hdr)
+        var edit = RenderAdjustments(); edit.tone.dehaze = 1; edit.hdr.range = 4; edit.hdr.coverage = 0
+        let result = RenderEngine.readPixels(try await engine.render(source,adjustments: edit))
+        for i in pixels.indices {
+            let offset = 4*i, g = exp2(Double(result.gain[i*result.gainChannelCount]))
+            let output = DoubleReference.RGB(Double(result.baseRGBA[offset]),Double(result.baseRGBA[offset+1]),Double(result.baseRGBA[offset+2]))*g
+            #expect(DoubleReference.luma(output) >= 0.74*DoubleReference.luma(pixels[i]))
+            #expect(abs(output.x/output.z-pixels[i].x/pixels[i].z) < 0.001)
+        }
+    }
+
     @Test func dehazeAndClarityMatchTheReferenceAndKeepRegionsStable() async throws {
         let size = PixelSize(width: 64,height: 48)
         var rgb: [DoubleReference.RGB] = (0..<(size.width*size.height)).map { i in

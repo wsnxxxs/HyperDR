@@ -373,9 +373,14 @@ float4 toneSpatialSample(float2 uv,constant GraphUniform& p,device const float4*
 }
 float3 spatialDehaze(float3 rgb,float3 air,float transmission,float amount) {
     if(amount==0)return rgb;
-    if(amount<0)return mix(rgb,air,-amount*.65f);
-    float3 clear=(rgb-air)/max(.2f,transmission)+air;
-    return mix(rgb,clear,amount);
+    if(amount<0)return mix(rgb,air,-amount*.45f);
+    float y=lum(rgb),a=lum(air);if(y<=0)return rgb;
+    // Near-air white objects/sky have an unreliable dark-channel estimate.
+    float t=max(max(.2f,transmission),min(1.f,.3f/max(.001f,abs(y-a))));
+    float recovered=(y-a)/t+a;
+    // Luminance-only, bounded recovery prevents colour fringes and black holes.
+    float ratio=clamp(recovered/y,.75f,1.2f);
+    return rgb*(1+(ratio-1)*amount);
 }
 float3 spatialClarity(float3 rgb,float low,float amount) {
     float y=lum(rgb);if(amount==0 || y<=0)return rgb;

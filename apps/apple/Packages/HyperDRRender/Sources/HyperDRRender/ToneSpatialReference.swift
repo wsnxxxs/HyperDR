@@ -10,9 +10,17 @@ public struct ReferenceToneSpatial: Sendable {
 extension DoubleReference {
     public static func dehaze(_ rgb: RGB, air: RGB, transmission: Double, amount: Double) -> RGB {
         guard amount != 0 else { return rgb }
-        if amount < 0 { return rgb + (air-rgb)*(-amount*0.65) }
-        let clear = (rgb-air)/max(0.2,transmission)+air
-        return rgb+(clear-rgb)*amount
+        if amount < 0 { return rgb + (air-rgb)*(-amount*0.45) }
+        let y = luma(rgb), a = luma(air)
+        guard y > 0 else { return rgb }
+        // White objects and sky near atmospheric light carry no reliable haze
+        // estimate. Relax their transmission instead of subtracting their light.
+        let t = max(max(0.2,transmission),min(1,0.3/max(0.001,abs(y-a))))
+        let recovered = (y-a)/t+a
+        // Recover luminance only: atmospheric colour errors cannot become blue
+        // edge fringes. Bound the correction to preserve bright surfaces/details.
+        let ratio = min(1.2,max(0.75,recovered/y))
+        return rgb*(1+(ratio-1)*amount)
     }
     public static func clarity(_ rgb: RGB, lowFrequency: Double, amount: Double) -> RGB {
         let y = luma(rgb)

@@ -78,6 +78,28 @@ extension RenderAdjustments {
         let coordinates = points.compactMap(\.numberValue)
         guard coordinates.count == points.count else { throw RenderError.invalidAdjustment }
         do { tone.curve = try ToneCurve(coordinates) } catch { throw RenderError.invalidAdjustment }
+        guard case .array(let curveSDRPoints) = values.value("tone.curveSDR") else { throw RenderError.invalidAdjustment }
+        do { tone.curveSDR = try ToneCurve(curveSDRPoints.map { guard case .number(let x) = $0 else { throw RenderError.invalidAdjustment }; return x }) }
+        catch { throw RenderError.invalidAdjustment }
+        guard case .array(let curveHDRPoints) = values.value("tone.curveHDR") else { throw RenderError.invalidAdjustment }
+        do { tone.curveHDR = try ToneCurve(curveHDRPoints.map { guard case .number(let x) = $0 else { throw RenderError.invalidAdjustment }; return x }) }
+        catch { throw RenderError.invalidAdjustment }
+        guard case .array(let curveRedPoints) = values.value("tone.curveRed") else { throw RenderError.invalidAdjustment }
+        do { tone.curveRed = try ToneCurve(curveRedPoints.map { guard case .number(let x) = $0 else { throw RenderError.invalidAdjustment }; return x }) }
+        catch { throw RenderError.invalidAdjustment }
+        guard case .array(let curveGreenPoints) = values.value("tone.curveGreen") else { throw RenderError.invalidAdjustment }
+        do { tone.curveGreen = try ToneCurve(curveGreenPoints.map { guard case .number(let x) = $0 else { throw RenderError.invalidAdjustment }; return x }) }
+        catch { throw RenderError.invalidAdjustment }
+        guard case .array(let curveBluePoints) = values.value("tone.curveBlue") else { throw RenderError.invalidAdjustment }
+        do { tone.curveBlue = try ToneCurve(curveBluePoints.map { guard case .number(let x) = $0 else { throw RenderError.invalidAdjustment }; return x }) }
+        catch { throw RenderError.invalidAdjustment }
+        tone.parametricHighlights = try values.number("tone.parametricHighlights")
+        tone.parametricLights = try values.number("tone.parametricLights")
+        tone.parametricDarks = try values.number("tone.parametricDarks")
+        tone.parametricShadows = try values.number("tone.parametricShadows")
+        tone.parametricSplit1 = try values.number("tone.parametricSplit1")
+        tone.parametricSplit2 = try values.number("tone.parametricSplit2")
+        tone.parametricSplit3 = try values.number("tone.parametricSplit3")
         color.warmth = try values.number("color.warmth")
         color.tint = try values.number("color.tint")
         color.vibrance = try values.number("color.vibrance")

@@ -50,6 +50,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample
+
     func clippingMask(_ frame: EditorFrame) async throws -> RenderMask
 
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample
@@ -242,6 +244,10 @@ extension EditorRendering {
     nonisolated var includesModel: Bool { true }
 
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
+
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample {
+        throw EditorRenderingError.unsupported("Curve sampling")
+    }
 
     func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
         throw EditorRenderingError.unsupported("Clipping overlay")

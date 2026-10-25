@@ -306,7 +306,7 @@ extension DoubleReference {
             for (op,value) in operations {
                 x = point(x,operation:op,value:Double(op == .whites ? whites : value),sdr:sdr && op == .exposure)
             }
-            x = toneCurve(x, curve: settings.tone.curve)
+            x = sceneCurves(x, tone: settings.tone)
             x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
             return point(x, operation: .saturation, value: Double(settings.color.saturation))
         }
@@ -349,13 +349,18 @@ extension DoubleReference {
         return peak <= knee ? peak : knee-width*expm1(-(peak-knee)/width)
     }
     public static func hdrOutput(_ pair: Split, expansion: Double = 0, settings: HDRAdjustments,
-                                 range: Double, shoulder: Bool, allowRolloff: Bool) -> Split {
+                                 range: Double, shoulder: Bool, allowRolloff: Bool, tone: ToneAdjustments = ToneAdjustments()) -> Split {
         var base = pair.base
         var gains = pair.gains
         for c in 0..<3 { gains[c] = max(gains[c],expansion)*Double(settings.strength) }
+        if tone.hasCurves {
+            let endpoints = endpointCurves(base: base, hdr: RGB(base.x*exp2(gains.x),base.y*exp2(gains.y),base.z*exp2(gains.z)), tone: tone)
+            base = endpoints.base
+            for c in 0..<3 { gains[c] = base[c] == 0 ? 0 : log2(max(endpoints.hdr[c]/base[c],1e-30)) }
+        }
         let peak = (0..<3).map { base[$0]*exp2(gains[$0]) }.max()!
         if peak > 0 {
-            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder)/peak,1e-30)))
+            gains += RGB(repeating: log2(max(softShoulder(peak,range:range,active:shoulder || (tone.hasCurves && peak>exp2(range)))/peak,1e-30)))
         }
         if allowRolloff && settings.sdrRolloff > 0 {
             let m = max(base.x,base.y,base.z)

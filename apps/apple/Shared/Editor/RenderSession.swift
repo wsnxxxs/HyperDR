@@ -86,6 +86,14 @@ actor RenderSession: EditorRendering {
                                                 photoSize: opened.editor.pixelSize, raw: opened.editor.domain == .rawEDR)
     }
 
+    func pickCurve(_ request: EditorRenderRequest, parameterID: String, at point: CGPoint) async throws -> CurveSample {
+        let prepared = try await prepare(request)
+        let sample = try await engine.pickCurve(prepared.source,recipe: request.recipe,parameterID: parameterID,point: point,
+            lut: prepared.lut,modelGain: prepared.modelGain,options: prepared.options,size: request.size)
+        try checkCurrent(prepared.generation)
+        return sample
+    }
+
     func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
         guard opened?.editor.id == frame.request.sourceID else { throw EditorRenderingError.staleSource }
         let recipe = frame.request.recipe

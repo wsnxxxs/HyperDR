@@ -153,15 +153,15 @@ extension RenderEngine {
         guard isRAWSource(url, options: options) else { return options }
         if options.rawEmbeddedPreview {
             return try await useEmbeddedPreview(url, options: options, revision: revision,
-                                                progress: progress).options
+                                                progress: progress)
         }
         if let id = options.rawCompatibility {
             let converter = try requireCompatibilityConverter(id)
             return try await useConvertedDNG(url, options: options, revision: revision,
-                                             converter: converter, progress: progress).options
+                                             converter: converter, progress: progress)
         }
         if forcesRAWCompatibility {
-            return try await recoverRAW(url, options: options, revision: revision, progress: progress).options
+            return try await recoverRAW(url, options: options, revision: revision, progress: progress)
         }
         return options
     }
@@ -200,7 +200,7 @@ extension RenderEngine {
                options.rawDecoderVersion?.split(separator: ".").first == "9" {
                 throw RenderError.cannotDecodeSource
             }
-            options = try await recoverRAW(url, options: options, revision: revision, progress: progress).options
+            options = try await recoverRAW(url, options: options, revision: revision, progress: progress)
             if options.rawCompatibility != nil {
                 return try openRecoveredDNG(url, options: options, deferred: deferred,
                     allowAutomaticDecoderFallback: retryNativeDecoder, revision: revision, progress: progress)
@@ -233,8 +233,7 @@ extension RenderEngine {
     }
 
     private static func recoverRAW(_ url: URL, options: SourceOptions, revision: SourceRevision,
-                                   progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws
-        -> (opened: OpenedSource?, options: SourceOptions) {
+                                   progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws -> SourceOptions {
         guard let converter = compatibilityConverter() else { throw RenderError.cannotDecodeSource }
         do {
             return try await useConvertedDNG(url, options: options, revision: revision,
@@ -242,7 +241,7 @@ extension RenderEngine {
         } catch RenderError.rawUnsupported(let camera) {
             do {
                 return try await useEmbeddedPreview(url, options: options, revision: revision,
-                                                    progress: progress, camera: camera)
+                                                    progress: progress)
             } catch RAWCompatibilityError.noPreview {
                 throw RenderError.rawUnsupported(camera: camera)
             } catch RenderError.rawUnsupported(let previewCamera) {
@@ -253,8 +252,7 @@ extension RenderEngine {
 
     private static func useConvertedDNG(_ url: URL, options: SourceOptions, revision: SourceRevision,
                                         converter: any RAWCompatibilityConverting,
-                                        progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws
-        -> (opened: OpenedSource?, options: SourceOptions) {
+                                        progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws -> SourceOptions {
         if let recorded = options.rawCompatibility, recorded != converter.converterID {
             throw RenderError.unsupportedRAWCompatibility(recorded)
         }
@@ -274,13 +272,11 @@ extension RenderEngine {
         if !wasRecorded {
             options.rawDecoderVersion = try decoderForConvertedDNG(converted.url, requested: options.rawDecoderVersion)
         }
-        return (nil, options)
+        return options
     }
 
     private static func useEmbeddedPreview(_ url: URL, options: SourceOptions, revision: SourceRevision,
-                                           progress: (@Sendable (SourceLoadPhase) -> Void)?,
-                                           camera: String? = nil) async throws
-        -> (opened: OpenedSource?, options: SourceOptions) {
+                                           progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws -> SourceOptions {
         guard let converter = compatibilityConverter() else { throw RenderError.cannotDecodeSource }
         let began = ContinuousClock.now
         let preview = try await converter.extractEmbeddedPreview(from: url)
@@ -294,7 +290,7 @@ extension RenderEngine {
         options.embeddedPreviewOrientation = preview.orientation
         options.sceneLinear = false
         options.draftRAWPreview = false
-        return (nil, options)
+        return options
     }
 
     /// A version selected on the original maps by generation to the DNG's own
@@ -316,16 +312,13 @@ extension RenderEngine {
     /// Selection runs before the first open. If Apple has no usable filter,
     /// select on the converted DNG; a conversion failure returns nil so the
     /// normal open can report the embedded-preview result or its final error.
-    static func decoderSelectionURL(_ url: URL, forceConversion: Bool) async throws -> URL? {
-        if !forceConversion, !forcesRAWCompatibility, let filter = usableSelectionFilter(url) {
-            _ = filter
-            return url
-        }
+    static func decoderSelectionURL(_ url: URL) async throws -> URL? {
+        if !forcesRAWCompatibility, usableSelectionFilter(url) != nil { return url }
         guard compatibilityConverter() != nil else { return nil }
         let revision = try SourceRevision(url: url)
         do {
             var options = SourceOptions(kind: .raw)
-            options = try await recoverRAW(url, options: options, revision: revision, progress: nil).options
+            options = try await recoverRAW(url, options: options, revision: revision, progress: nil)
             if options.rawEmbeddedPreview { return nil }
             return resolvedCompatibility(url, revision: revision, kind: .convertedDNG,
                                          converterID: options.rawCompatibility)

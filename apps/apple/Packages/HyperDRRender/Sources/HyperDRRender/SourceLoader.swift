@@ -260,7 +260,7 @@ extension RenderEngine {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let identifier = CGImageSourceGetType(source),
               UTType(identifier as String)?.conforms(to: .rawImage) == true else { return nil }
-        let selection = try await Self.decoderSelectionURL(url, forceConversion: false)
+        let selection = try await Self.decoderSelectionURL(url)
         guard let selection else { return nil }
         guard let filter = CIRAWFilter(imageURL: selection) else { throw RenderError.cannotDecodeSource }
         let version = String(generation)
@@ -283,7 +283,7 @@ extension RenderEngine {
 
     /// Retry generation 8 explicitly: the system default may itself be 9.
     public func fallbackRAWDecoder(_ url: URL) async -> String? {
-        guard let selection = try? await Self.decoderSelectionURL(url, forceConversion: false),
+        guard let selection = try? await Self.decoderSelectionURL(url),
               let filter = Self.usableSelectionFilter(selection) ?? CIRAWFilter(imageURL: selection) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue, allowing9: false)

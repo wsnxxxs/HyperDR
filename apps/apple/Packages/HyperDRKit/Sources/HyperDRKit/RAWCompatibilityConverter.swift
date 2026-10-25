@@ -110,6 +110,7 @@ public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
                 return nil
             }
             orientation = value
+            try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: metadata.path)
         } else {
             orientation = nil
         }

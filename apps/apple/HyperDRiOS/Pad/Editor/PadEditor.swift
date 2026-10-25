@@ -18,10 +18,18 @@ struct PadEditor: View {
     let session: EditingSession
     let editor: RecipeEditor
 
+    #if DEBUG
+    @State private var tool = DebugLaunch.tool ?? PadTool.group(.hdr)
+    #else
     @State private var tool = PadTool.group(.hdr)
+    #endif
     @State private var expanded = true
     /// A control to scroll to once its tool is shown (the film exposure note's tap).
+    #if DEBUG
+    @State private var revealed: String? = DebugLaunch.reveal
+    #else
     @State private var revealed: String?
+    #endif
     /// Where the panel is now, for the toolbar's panel button.
     @State private var placement = PadLayout.Placement.side
     @State private var comparison = Comparison.edited

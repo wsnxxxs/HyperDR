@@ -89,14 +89,42 @@ private struct EditorRoot: View {
 #if DEBUG
 /// `-HyperDROpen <path>` opens a file at launch, for trying the editor in the
 /// Simulator without the picker; `-HyperDRLandscape` turns the window to
-/// landscape at launch (iPadOS refuses it later, in a windowed scene).
+/// landscape at launch (iPadOS refuses it later, in a windowed scene);
+/// `-HyperDRTool light|color|look|crop|frame` starts the iPad Studio on that tool.
 /// Developer-only.
 enum DebugLaunch {
+    /// `-HyperDRReveal <parameter id>` scrolls the panel to that control once its tool is shown.
+    static var reveal: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-HyperDRReveal"), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+
+    static var tool: PadTool? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-HyperDRTool"), index + 1 < arguments.count else { return nil }
+        switch arguments[index + 1] {
+        case "light": return .group(.light)
+        case "color": return .group(.color)
+        case "look": return .group(.look)
+        case "crop": return .crop
+        case "frame": return .frame
+        default: return nil
+        }
+    }
+
+
     static func open(into session: EditingSession) {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-HyperDRLandscape"),
-           let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+        if arguments.contains("-HyperDRLandscape") {
+            // The scene may not be connected yet when the app starts.
+            for delay in [0.0, 1.0, 2.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+                    }
+                }
+            }
         }
         guard let index = arguments.firstIndex(of: "-HyperDROpen"), index + 1 < arguments.count else { return }
         session.open(.file(URL(filePath: arguments[index + 1])))

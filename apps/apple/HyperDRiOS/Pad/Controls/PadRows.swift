@@ -47,7 +47,10 @@ struct PadSegments<Value: Hashable>: View {
     @Namespace private var highlight
 
     var body: some View {
-        HStack(spacing: 0) {
+        // Two or three share the row evenly; four or more by their names'
+        // lengths, so a long one ("Luminance") is not cut for a short one ("Hue").
+        let row = options.count >= 4 ? AnyLayout(ApportionedRow()) : AnyLayout(HStackLayout(spacing: 0))
+        row {
             ForEach(options) { option in
                 let isCurrent = option.value == selection
                 Button { choose(option.value) } label: {
@@ -55,8 +58,9 @@ struct PadSegments<Value: Hashable>: View {
                         if let symbol = option.symbol { Image(systemName: symbol).imageScale(.small) }
                         option.label.lineLimit(1).minimumScaleFactor(0.75)
                     }
-                    .padding(.horizontal, 5)
-                    .font(.subheadline.weight(isCurrent ? .semibold : .regular))
+                    .padding(.horizontal, 7)
+                    // Four or more share the row: a size smaller, so the names fit a side panel.
+                    .font((options.count >= 4 ? Font.footnote : .subheadline).weight(isCurrent ? .semibold : .regular))
                     .foregroundStyle(isCurrent ? tint : Color.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
@@ -82,6 +86,35 @@ struct PadSegments<Value: Hashable>: View {
         .animation(.smooth(duration: 0.25), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Segments side by side, each as wide as its name plus an equal share of
+/// the room left; with too little room, each gives up a share of its own.
+struct ApportionedRow: SwiftUI.Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified) }
+        return CGSize(width: proposal.width ?? ideals.reduce(0) { $0 + $1.width },
+                      height: proposal.height ?? ideals.map(\.height).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = Self.widths(ideal: subviews.map { $0.sizeThatFits(.unspecified).width }, in: bounds.width)
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width
+        }
+    }
+
+    static func widths(ideal: [CGFloat], in width: CGFloat) -> [CGFloat] {
+        let total = ideal.reduce(0, +)
+        guard !ideal.isEmpty, total > 0 else { return ideal.map { _ in width / CGFloat(max(ideal.count, 1)) } }
+        if width >= total {
+            let extra = (width - total) / CGFloat(ideal.count)
+            return ideal.map { $0 + extra }
+        }
+        return ideal.map { $0 * width / total }
     }
 }
 

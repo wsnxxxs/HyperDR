@@ -126,6 +126,7 @@ private struct EditorWindow: View {
     @State private var windowWidth: CGFloat = 1440
     @State private var zoomKey = ZoomKeyMonitor()
     @State private var openCancelKey = OpenCancelKeyMonitor()
+    @State private var clippingKey = ClippingKeyMonitor()
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -193,9 +194,10 @@ private struct EditorWindow: View {
                 if let found {
                     zoomKey.install(window: found, canvas: model.canvas)
                     openCancelKey.install(window: found, model: model)
-                } else { zoomKey.remove(); openCancelKey.remove() }
+                    clippingKey.install(window: found, editor: model.editor)
+                } else { zoomKey.remove(); openCancelKey.remove(); clippingKey.remove() }
             })
-            .onDisappear { zoomKey.remove(); openCancelKey.remove() }
+            .onDisappear { zoomKey.remove(); openCancelKey.remove(); clippingKey.remove() }
             #if DEBUG
             .task {
                 StressWindow.runIfRequested()

@@ -2223,6 +2223,188 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR (stops)" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR（档）" } }
       }
+    },
+    "design.mixer.title" : {
+      "comment" : "Title of the colour mixer section in the adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color Mixer" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "混色器" } }
+      }
+    },
+    "design.mixer.reset" : {
+      "comment" : "Button resetting every colour zone of the mixer.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Mixer" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置混色器" } }
+      }
+    },
+    "design.mixer.arrangement" : {
+      "comment" : "VoiceOver name of the switch between the mixer's two ways of showing its sliders.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看方式" } }
+      }
+    },
+    "design.mixer.arrangement.attribute" : {
+      "comment" : "Mixer arrangement: pick hue, saturation or brightness and see a slider for each color.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "By Attribute" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按属性" } }
+      }
+    },
+    "design.mixer.arrangement.band" : {
+      "comment" : "Mixer arrangement: pick a color and see its hue, saturation and brightness.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "By Color" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按色区" } }
+      }
+    },
+    "design.mixer.attribute" : {
+      "comment" : "VoiceOver name of the mixer's choice of attribute.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Attribute" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "属性" } }
+      }
+    },
+    "design.mixer.attribute.hue" : {
+      "comment" : "Mixer attribute: how far a color's hue shifts.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "色相" } }
+      }
+    },
+    "design.mixer.attribute.saturation" : {
+      "comment" : "Mixer attribute: how saturated a color is.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saturation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "饱和度" } }
+      }
+    },
+    "design.mixer.attribute.luminance" : {
+      "comment" : "Mixer attribute: how bright a color is.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luminance" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "明亮度" } }
+      }
+    },
+    "design.mixer.band.red" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Red" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "红色" } }
+      }
+    },
+    "design.mixer.band.orange" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Orange" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "橙色" } }
+      }
+    },
+    "design.mixer.band.yellow" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Yellow" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "黄色" } }
+      }
+    },
+    "design.mixer.band.green" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Green" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "绿色" } }
+      }
+    },
+    "design.mixer.band.aqua" : {
+      "comment" : "Mixer color zone between green and blue.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Aqua" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "浅绿色" } }
+      }
+    },
+    "design.mixer.band.blue" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "蓝色" } }
+      }
+    },
+    "design.mixer.band.purple" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Purple" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紫色" } }
+      }
+    },
+    "design.mixer.band.magenta" : {
+      "comment" : "Mixer color zone.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Magenta" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "洋红色" } }
+      }
+    },
+    "design.mixer.pick" : {
+      "comment" : "Tooltip of the mixer eyedropper: press a color on the photo and drag up or down to adjust it.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust colors on the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在照片上调整颜色" } }
+      }
+    },
+    "design.mixer.pick.stop" : {
+      "comment" : "Tooltip of the mixer eyedropper while it is on.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop adjusting on the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止在照片上调整" } }
+      }
+    },
+    "design.mixer.pickHint" : {
+      "comment" : "Line under the mixer's attribute choice while the eyedropper is on.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press a color on the photo and drag up or down." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在照片上按住一处颜色，上下拖动。" } }
+      }
+    },
+    "design.grade.title" : {
+      "comment" : "Title of the colour grading section in the adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color Grading" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "颜色分级" } }
+      }
+    },
+    "design.grade.reset" : {
+      "comment" : "Button resetting every zone of the colour grading.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Grading" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置颜色分级" } }
+      }
+    },
+    "design.grade.zone.shadows" : {
+      "comment" : "Colour grading zone: the darkest tones.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shadows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阴影" } }
+      }
+    },
+    "design.grade.zone.midtones" : {
+      "comment" : "Colour grading zone: the middle tones.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Midtones" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "中间调" } }
+      }
+    },
+    "design.grade.zone.highlights" : {
+      "comment" : "Colour grading zone: the brightest tones.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Highlights" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光" } }
+      }
+    },
+    "design.grade.zone.global" : {
+      "comment" : "Colour grading zone: the whole photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全局" } }
+      }
     }
   },
   "version" : "1.0"

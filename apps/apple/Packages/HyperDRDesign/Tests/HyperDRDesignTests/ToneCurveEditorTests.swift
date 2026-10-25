@@ -194,3 +194,43 @@ private let identity = [0.0, 0, 1, 1]
     #expect(ParametricCurvePreview.moved(splits, index: 2, to: 120) == [25, 50, 95])
     #expect(ParametricCurvePreview.moved(splits, index: 0, to: -5) == [5, 50, 75])
 }
+
+// MARK: - Colour grading wheel
+
+@Test func theWheelPutsHueAndSaturationWhereTheyAre() {
+    let center = CGPoint(x: 100, y: 100)
+    // Hue 0 is to the right, going clockwise (down on screen); saturation 50 is half way out.
+    let right = GradingWheelMath.point(hue: 0, saturation: 50, center: center, radius: 80)
+    #expect(abs(right.x - 140) < 1e-9 && abs(right.y - 100) < 1e-9)
+    let down = GradingWheelMath.point(hue: 90, saturation: 100, center: center, radius: 80)
+    #expect(abs(down.x - 100) < 1e-9 && abs(down.y - 180) < 1e-9)
+    for (hue, saturation) in [(10.0, 20.0), (135, 70), (200, 100), (359, 5)] {
+        let point = GradingWheelMath.point(hue: hue, saturation: saturation, center: center, radius: 80)
+        let back = GradingWheelMath.colour(at: point, center: center, radius: 80)
+        #expect(abs((back.hue ?? -1) - hue) < 1e-9)
+        #expect(abs(back.saturation - saturation) < 1e-9)
+    }
+}
+
+@Test func theWheelHoldsAtTheRimAndLeavesTheHueAtTheMiddle() {
+    let center = CGPoint(x: 100, y: 100)
+    let past = GradingWheelMath.colour(at: CGPoint(x: 300, y: 100), center: center, radius: 80)
+    #expect(past.saturation == 100)
+    #expect(past.hue == 0)
+    let middle = GradingWheelMath.colour(at: CGPoint(x: 101, y: 100.5), center: center, radius: 80)
+    #expect(middle.hue == nil)
+    #expect(middle.saturation == 0)
+}
+
+@Test func onlyTheFirstControlOfASectionIsARow() {
+    #expect(AdjustmentSections.section(anchoredBy: "tone.curve") == .curves)
+    #expect(AdjustmentSections.kind(of: "tone.parametricLights") == .curves)
+    #expect(AdjustmentSections.isDrawnBySection("tone.curveRed"))
+    #expect(!AdjustmentSections.isDrawnBySection("tone.exposure"))
+    #expect(!AdjustmentSections.isDrawnBySection("tone.curve"))
+    #expect(AdjustmentSections.kind(of: "hsl.aqua.luminance") == .mixer)
+    #expect(AdjustmentSections.kind(of: "grade.global.hue") == .grading)
+    #expect(AdjustmentSections.kind(of: "grade.balance") == .grading)
+    #expect(MixerBand.aqua.id(.luminance) == "hsl.aqua.luminance")
+    #expect(GradingZone.shadows.saturationID == "grade.shadows.saturation")
+}

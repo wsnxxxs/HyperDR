@@ -31,10 +31,10 @@ struct PadGroupControls: View {
         if let state = off ? switchedOn() ?? actual : actual {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
             let rows = state.controls.filter {
-                $0.id != lead?.id && $0.kind != .curve && !ToneCurveSection.ownedIDs.contains($0.id)
+                $0.id != lead?.id && $0.kind != .curve && !AdjustmentSections.isDrawnBySection($0.id)
             }
             // The curves share one section; the others it draws itself are its channels.
-            let curves = state.controls.filter { $0.kind == .curve && !ToneCurveSection.ownedIDs.contains($0.id) }
+            let curves = state.controls.filter { $0.kind == .curve && !AdjustmentSections.isDrawnBySection($0.id) }
             VStack(alignment: .leading, spacing: 12) {
                 if let lead {
                     VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
@@ -61,7 +61,23 @@ struct PadGroupControls: View {
             }
             .saturation(off ? 0 : 1)
             .animation(.smooth(duration: 0.2), value: off)
+            .environment(\.sectionControls, padSectionControls)
         }
+    }
+
+    /// The panel's own bars and segments for the sections that arrange their
+    /// own controls (the curves' parameters, the colour mixer, the grading).
+    private var padSectionControls: SectionControls {
+        SectionControls(slider: { request in
+            AnyView(PadSlider(request.title, value: request.value, spec: request.spec, tint: request.tint ?? tint,
+                              help: request.help, onEditingChanged: request.onEditingChanged,
+                              onResetGroup: request.onResetGroup))
+        }, segments: { request in
+            AnyView(PadSegments(options: request.options.map {
+                PadSegments<String>.Option(value: $0.id, label: $0.title, symbol: $0.systemImage, isEnabled: $0.isEnabled)
+            }, selection: request.selection.wrappedValue) { request.selection.wrappedValue = $0 }
+                .accessibilityLabel(request.title))
+        })
     }
 
     private var tint: Color { group == .hdr ? Color.hdr.amber : Color.hdr.accent }
@@ -91,6 +107,28 @@ struct PadGroupControls: View {
     }
 
     @ViewBuilder private func row(_ control: AdjustmentControl) -> some View {
+        if let section = AdjustmentSections.section(anchoredBy: control.id), section != .curves {
+            sectionRow(section)
+        } else {
+            generatedRow(control)
+        }
+    }
+
+    /// A section standing for its controls: the colour mixer, the grading.
+    @ViewBuilder private func sectionRow(_ section: AdjustmentSections.Kind) -> some View {
+        switch section {
+        case .mixer:
+            ColorMixerSection(recipe: $recipe, panel: panel, style: .touch,
+                              showsTitle: !AdjustmentSections.fillsItsGroup(.mixer), onEditingChanged: onEditingChanged)
+        case .grading:
+            ColorGradingSection(recipe: $recipe, panel: panel, style: .touch,
+                                showsTitle: !AdjustmentSections.fillsItsGroup(.grading), onEditingChanged: onEditingChanged)
+        case .curves:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder private func generatedRow(_ control: AdjustmentControl) -> some View {
         let declaration = control.declaration
         switch control.kind {
         case .float, .floatOrAuto:

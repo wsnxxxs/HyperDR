@@ -272,8 +272,10 @@ extension RenderEngine {
     /// New photos prefer generation 9, then 8 (including their DNG variants).
     /// Older cameras without either retain their supported system default.
     public func preferredRAWDecoder(_ url: URL) async -> String? {
-        guard let selection = try? await Self.decoderSelectionURL(url, forceConversion: false),
-              let filter = Self.usableSelectionFilter(selection) ?? CIRAWFilter(imageURL: selection) else { return nil }
+        // Keep selection lazy. If Apple has no usable filter, openRAW's
+        // compatibility path selects generation 9/8 on the converted DNG and
+        // can retry its DNG generation without confusing it for a native retry.
+        guard !Self.forcesRAWCompatibility, let filter = Self.usableSelectionFilter(url) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue)
     }

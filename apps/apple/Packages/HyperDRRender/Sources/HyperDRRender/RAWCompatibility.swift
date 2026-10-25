@@ -169,6 +169,7 @@ extension RenderEngine {
                                       revision: SourceRevision,
                                       progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) async throws
         -> (opened: OpenedSource, options: SourceOptions) {
+        let recordedConversion = options.rawCompatibility != nil
         var options = try await prepareRequiredCompatibility(url, options: options, revision: revision, progress: progress)
         guard isRAWSource(url, options: options) else {
             return (try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }, options)
@@ -177,7 +178,11 @@ extension RenderEngine {
            let version = options.rawDecoderVersion, CIRAWFilter(imageURL: url) == nil {
             throw RenderError.unsupportedRAWDecoder(version)
         }
-        if options.rawCompatibility != nil || options.rawEmbeddedPreview || !allowsFallback {
+        if options.rawCompatibility != nil {
+            return try openRecoveredDNG(url, options: options, deferred: deferred,
+                allowAutomaticDecoderFallback: retryNativeDecoder && !recordedConversion, revision: revision, progress: progress)
+        }
+        if options.rawEmbeddedPreview || !allowsFallback {
             let opened = try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }
             return (opened, options)
         }
@@ -192,6 +197,32 @@ extension RenderEngine {
                 throw RenderError.cannotDecodeSource
             }
             options = try await recoverRAW(url, options: options, revision: revision, progress: progress).options
+            if options.rawCompatibility != nil {
+                return try openRecoveredDNG(url, options: options, deferred: deferred,
+                    allowAutomaticDecoderFallback: retryNativeDecoder, revision: revision, progress: progress)
+            }
+            let opened = try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }
+            return (opened, options)
+        }
+    }
+
+    private static func openRecoveredDNG(_ url: URL, options: SourceOptions, deferred: Bool,
+                                         allowAutomaticDecoderFallback: Bool, revision: SourceRevision,
+                                         progress: (@Sendable (SourceLoadPhase) -> Void)?) throws
+        -> (opened: OpenedSource, options: SourceOptions) {
+        do {
+            let opened = try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }
+            return (opened, options)
+        } catch RenderError.cannotDecodeSource {
+            guard allowAutomaticDecoderFallback,
+                  options.rawDecoderVersion?.split(separator: ".").first == "9",
+                  let id = options.rawCompatibility,
+                  let converted = resolvedCompatibility(url, revision: revision, kind: .convertedDNG, converterID: id),
+                  let filter = CIRAWFilter(imageURL: converted),
+                  let fallback = selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
+                      systemDefault: filter.decoderVersion.rawValue, allowing9: false) else { throw RenderError.cannotDecodeSource }
+            var options = options
+            options.rawDecoderVersion = fallback
             let opened = try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }
             return (opened, options)
         }

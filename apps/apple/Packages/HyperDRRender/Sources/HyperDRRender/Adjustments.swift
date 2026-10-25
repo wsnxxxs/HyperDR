@@ -8,6 +8,7 @@ public struct ToneAdjustments: Hashable, Sendable {
     public var contrast: Float = RenderParameter.defaultNumber("tone.contrast")
     public var highlights: Float = RenderParameter.defaultNumber("tone.highlights")
     public var shadows: Float = RenderParameter.defaultNumber("tone.shadows")
+    public var whites: Float = RenderParameter.defaultNumber("tone.whites")
     public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
     public init() {}
     public var isIdentity: Bool { self == Self() }
@@ -84,7 +85,7 @@ public struct RenderAdjustments: Hashable, Sendable {
 
     func validate(domain: InputDomain) throws {
         for (id,value) in [("tone.exposure",tone.exposure),("tone.contrast",tone.contrast),
-            ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.blacks",tone.blacks),
+            ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.whites",tone.whites),("tone.blacks",tone.blacks),
             ("color.warmth",color.warmth),("color.tint",color.tint),("color.vibrance",color.vibrance),
             ("color.saturation",color.saturation),("hdr.strength",hdr.strength),("hdr.coverage",hdr.coverage),
             ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength),("look.filmStrength",film.strength),("effect.grain",effects.grain),("effect.halation",effects.halation)] {

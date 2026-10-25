@@ -234,6 +234,30 @@ private func wideHalf() -> String {
         #expect(log2(highlight/0.6) > 0.4 && log2(highlight/0.6) < 0.5)
     }
 
+    @Test func whitesCrossesWhiteWithoutClipping() async throws {
+        let xs = (0...64).map { Double($0)/32 }
+        let engine = try RenderEngine()
+        for domain in [InputDomain.sdr, .hdr] {
+            let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: domain)
+            for amount: Float in [-1, 0, 1] {
+                var edit = RenderAdjustments()
+                edit.tone.whites = amount
+                edit.hdr.coverage = 0
+                edit.hdr.range = 4
+                let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                let reference = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: .whites, value: Double(amount)).x }
+                #expect(zip(reference, reference.dropFirst()).allSatisfy { $0 <= $1 })
+                for i in xs.indices {
+                    let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                    // SDR fixtures contain only values up to white; HDR also exercises the extension.
+                    if domain == .hdr || xs[i] <= 1 { #expect(abs(actual - reference[i]) < 0.00005) }
+                }
+                #expect(pixels.baseRGBA[0] == 0)
+                if amount == 1 { #expect(pixels.gain[32*pixels.gainChannelCount] > 0.99) }
+            }
+        }
+    }
+
     @Test func analyticExpansionMasksAndFixedScaleCache() async throws {
         let engine = try RenderEngine(), width = 16, height = 12
         let values = (0..<(width*height)).map { i -> SIMD3<Double> in

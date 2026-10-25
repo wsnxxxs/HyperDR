@@ -44,6 +44,9 @@ extension DoubleReference {
             guard y < 0.5 else { return rgb }
             let t = y/0.5
             return scale(0.5*(t+0.8*a*t*(1-t)*(1-t)))
+        case .whites:
+            guard y > 0 else { return rgb }
+            return scale(y*exp2(1.25*a*y*y/(y*y+0.25)))
         case .blacks:
             guard y < 0.1 else { return rgb }
             let target = max(0,y-0.03*a*(1-smoothStep(0,0.1,y)))
@@ -288,7 +291,7 @@ extension DoubleReference {
         var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
-            (.shadows,settings.tone.shadows),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
+            (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
         for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
         let active = !settings.look.isIdentity
         // A log look keeps linear-P3 negatives through the primary matrix. Fit after
@@ -299,7 +302,7 @@ extension DoubleReference {
         if logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         let filmScene = x
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
-        var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
+        var g = !sdr || settings.tone.whites > 0 || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
         var base = fitP3(x*exp2(-g))
         if !settings.film.isIdentity, let stock = settings.film.stock, let film = try? FilmStock.named(stock) {
             let exposed = filmScene*exp2(Double(settings.film.exposure ?? 0))

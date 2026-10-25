@@ -15,6 +15,7 @@ struct GraphUniform {
     var scatter: SIMD4<Int32> = .zero
     var pair: SIMD4<Float> = .zero
     var effects: SIMD4<Float> = .zero
+    var light: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -171,7 +172,8 @@ extension RenderEngine {
                         : (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1) ? 1 / 64 : 0), 0, 0, 0),
             effects: SIMD4(edit.film.stock == nil ? edit.effects.grain : 0,
                            edit.film.stock == nil ? edit.effects.halation : 0,
-                           referenceArea, edit.usesFilmProcessing ? 1 : 0))
+                           referenceArea, edit.usesFilmProcessing ? 1 : 0),
+            light: SIMD4(t.whites, 0, 0, 0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing

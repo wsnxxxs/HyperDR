@@ -138,6 +138,8 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "highlights"),
         ParameterDeclaration(id: "tone.shadows", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "shadows"),
+        ParameterDeclaration(id: "tone.whites", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "tone.blacks", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "blacks"),
     ]

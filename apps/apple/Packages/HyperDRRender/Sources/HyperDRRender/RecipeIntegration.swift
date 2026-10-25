@@ -72,6 +72,7 @@ extension RenderAdjustments {
         tone.contrast = try values.number("tone.contrast")
         tone.highlights = try values.number("tone.highlights")
         tone.shadows = try values.number("tone.shadows")
+        tone.whites = try values.number("tone.whites")
         tone.blacks = try values.number("tone.blacks")
         color.warmth = try values.number("color.warmth")
         color.tint = try values.number("color.tint")

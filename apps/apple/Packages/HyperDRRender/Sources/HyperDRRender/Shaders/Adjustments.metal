@@ -57,6 +57,9 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         }
     }
     if (op == 3 && y < .5f) { float t=y/.5f; target=.5f*(t+.8f*a*t*(1-t)*(1-t)); }
+    // Whites deliberately crosses SDR white; the gain split retains that light.
+    // This replaces the original plan's concern that a white-point control clips HDR.
+    if (op == 9 && y > 0) target = y*exp2(1.25f*a*y*y/(y*y+.25f));
     if (op == 4 && y < .1f) target = max(0.f,y-.03f*a*(1-sm(0.f,.1f,y)));
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
 }
@@ -80,6 +83,7 @@ struct GraphUniform {
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
+    float4 light; // x: whites
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -215,7 +219,7 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
-    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false);rgb=pointOp(rgb,4,p.tone1.x,false);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
@@ -234,7 +238,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float3 filmScene=rgb;
     rgb=fit(rgb,max(1.f,maximum(rgb)));
-    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
+    float g=(p.flags.x!=0 || p.flags.z || p.light.x>0) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
     float3 stockDelta=0;
     bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
@@ -285,7 +289,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
         float3 original=graphScene(baseline,p,cube,table);
         original=fit(original,max(1.f,maximum(original)));
-        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : 0;
+        float oldGain=(p.flags.x!=0 || p.light.x>0) ? log2(max(1.f,maximum(original))) : 0;
         float3 oldBase=fit(original*exp2(-oldGain),1.f);
         float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
         renderedHDR=hdr;

@@ -231,10 +231,10 @@ public final class RenderNodeContext {
 }
 
 public enum AdjustmentOperation: UInt32, CaseIterable, Sendable {
-    case exposure, contrast, highlights, shadows, blacks, warmth, tint, vibrance, saturation
+    case exposure, contrast, highlights, shadows, blacks, warmth, tint, vibrance, saturation, whites
     public var parameterID: String {
         ["tone.exposure", "tone.contrast", "tone.highlights", "tone.shadows", "tone.blacks",
-         "color.warmth", "color.tint", "color.vibrance", "color.saturation"][Int(rawValue)]
+         "color.warmth", "color.tint", "color.vibrance", "color.saturation", "tone.whites"][Int(rawValue)]
     }
 }
 

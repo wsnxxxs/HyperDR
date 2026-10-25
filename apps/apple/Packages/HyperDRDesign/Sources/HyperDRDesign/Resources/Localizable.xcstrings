@@ -575,6 +575,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "强度" } }
       }
     },
+    "ctrl.tone.whites.label" : {
+      "comment" : "Adjustment control name (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Whites" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "白色" } }
+      }
+    },
+    "ctrl.tone.whites.help" : {
+      "comment" : "Adjustment control help (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Raise bright tones beyond SDR white into HDR, or lower them below white." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正值把亮部推过 SDR 白形成 HDR 高光，负值把亮部压向白以下。" } }
+      }
+    },
+    "undo.tone.whites" : {
+      "comment" : "Undo action name (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Whites" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整白色" } }
+      }
+    },
     "ctrl.tone.blacks.help" : {
       "comment" : "Adjustment control help (tone.blacks).",
       "localizations" : {

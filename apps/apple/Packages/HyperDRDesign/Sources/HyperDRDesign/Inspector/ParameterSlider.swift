@@ -62,6 +62,7 @@ public struct ParameterSlider: View {
     private let mask: ParameterMaskLink?
     private let onReset: (() -> Void)?
     private let readoutHelp: Text?
+    private let accessory: AnyView?
     private let onEditingChanged: (Bool) -> Void
 
     @State private var maskHold = MaskHold()
@@ -75,10 +76,13 @@ public struct ParameterSlider: View {
     }
 
     /// A row whose title and help are already `Text`s: from this package's
-    /// catalogue, as the generated adjustment controls are.
+    /// catalogue, as the generated adjustment controls are. An `accessory`
+    /// (the white balance eyedropper) sits between the title and the readout.
     public init(_ title: Text, value: Binding<Double>, spec: ParameterSpec,
                 help: Text? = nil, mask: ParameterMaskLink? = nil, readoutHelp: Text? = nil,
+                accessory: AnyView? = nil,
                 onEditingChanged: @escaping (Bool) -> Void = { _ in }, onReset: (() -> Void)? = nil) {
+        self.accessory = accessory
         self.title = title
         _value = value
         self.spec = spec
@@ -95,6 +99,7 @@ public struct ParameterSlider: View {
                 FieldTitle(title: title, help: help, mask: mask)
                     .accessibilityHidden(true)
                 Spacer(minLength: 0)
+                if let accessory { accessory }
                 if let automatic = spec.automatic, !spec.isAutomatic(value) {
                     AutoButton { if value != automatic.value { value = automatic.value } }
                 }
@@ -225,7 +230,9 @@ private struct ParameterReadout: View {
                     .strokeBorder(border, lineWidth: focused ? 2 : 1)
             }
             .contentShape(.rect(cornerRadius: Radius.xs))
+            #if os(macOS)
             .pointerStyle(isEnabled ? .horizontalText : .default)
+            #endif
             .hdrAnimation(Motion.fast, value: hovered)
             .focused($focused)
             .focusEffectDisabled()

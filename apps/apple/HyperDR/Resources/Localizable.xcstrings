@@ -3099,6 +3099,23 @@
         }
       }
     },
+    "mac.wb.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Click a neutral grey area of the photo · Esc to cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按照片中的中性灰处 · Esc 取消"
+          }
+        }
+      }
+    },
     "mac.welcome.description" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -65,7 +65,7 @@ public enum Adjustments {
     /// Physical effects share the adjustment group but are independent of colour looks.
     public static let effectIDs = ["effect.grain", "effect.halation"]
 
-    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + grading + look + detail
+    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + grading + effects + look + detail
 
     public static let byID: [String: ParameterDeclaration] =
         Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -168,6 +168,9 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "color.saturation", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+    ]
+
+    private static let effects: [ParameterDeclaration] = [
         // Zero bypasses the effect. One is the stock's own 35 mm model when a film
         // is selected, or the neutral 35 mm reference model without a film.
         ParameterDeclaration(id: "effect.grain", group: .color, kind: .float, range: 0...200, step: 1,

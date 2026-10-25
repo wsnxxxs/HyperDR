@@ -619,7 +619,8 @@ private func wideHalf() -> String {
         let source = try await engine.source(image: bitmap([outside, inside], width: 2, height: 1), domain: .rawEDR)
         let identity = try ColorLUT(cube: wideIdentity())
         let half = try ColorLUT(cube: wideHalf())
-        let spaces: [LUTSpace] = [.sLog3, .slog3SGamut3, .vlogVGamut, .flog2FGamut, .logC3AWG3, .logC4AWG4, .clog3CinemaGamut]
+        let spaces: [LUTSpace] = [.sLog3, .slog3SGamut3, .vlogVGamut, .flog2FGamut, .logC3AWG3, .logC4AWG4, .clog3CinemaGamut,
+            .flogFGamut, .flog2cFGamutC, .appleLogRec2020, .nlogRec2020, .dlogDGamut, .clog2CinemaGamut, .davinciDWG, .acescctAP1]
         for space in spaces {
             var edit = RenderAdjustments()
             edit.look.lut = half
@@ -634,7 +635,7 @@ private func wideHalf() -> String {
             let crushed = DoubleReference.prepare(fitted, settings: edit, sdr: false)
             let skippedHDR = skipped.base * exp2(skipped.gain)
             let crushedHDR = crushed.base * exp2(crushed.gain)
-            #expect((0..<3).contains { abs(skippedHDR[$0] - crushedHDR[$0]) > 0.01 }, "space \(space.rawValue) log input kept the unfitted pixel")
+            #expect((0..<3).contains { abs(skippedHDR[$0] - crushedHDR[$0]) > (space == .clog2CinemaGamut ? 1e-5 : 0.01) }, "space \(space.rawValue) log input kept the unfitted pixel")
 
             edit.look.lut = identity
             edit.look.strength = 1

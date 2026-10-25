@@ -214,7 +214,8 @@ extension DoubleReference {
     public static func encodeLUT(_ source: RGB, space: LUTSpace) -> RGB {
         var x = source
         if space.isLog { x = logMatrix(x,space:space,inverse:false) }
-        else if space == .hlg || space == .pq || space == .rec2020 { x = matrix(x,to2020) }
+        else if space == .rec2020 { x = matrix(x,toFGamut) }
+        else if space == .hlg || space == .pq { x = matrix(x,to2020) }
         else if space != .displayP3 {
             let native = matrix(x,to709), y = min(1,max(0,luma(x)))
             var amount = 1.0
@@ -273,7 +274,8 @@ extension DoubleReference {
             }
         }
         if space.isLog { return logMatrix(x,space:space,inverse:true) }
-        if space == .hlg || space == .pq || space == .rec2020 { return matrix(x,from2020) }
+        if space == .rec2020 { return matrix(x,fromFGamut) }
+        if space == .hlg || space == .pq { return matrix(x,from2020) }
         return space == .displayP3 ? x : matrix(x,from709)
     }
 

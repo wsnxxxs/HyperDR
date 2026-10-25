@@ -246,7 +246,7 @@ float logEncode(float v,uint space) {
 float logDecode(float v,uint space) {
     if(space==12) return v < 0.100537775223865f ? (v-0.092864f)/8.735631f : (pow(10.f,(v-0.790453f)/0.344676f)-0.009468f)/0.555556f;
     if(space==14) return v >= 47.28711236f*pow(0.06641088f,2.f) ? exp2((v-0.69336945f)/0.08550479f)-0.00964052f : sqrt(max(0.f,v)/47.28711236f)-0.05641088f;
-    if(space==15) return v*1023.f < 452.f ? pow(v*1023.f/650.f,3.f)-0.0075f : exp((v*1023.f-619.f)/150.f);
+    if(space==15) return v*1023.f < 452.f ? ((v*1023.f/650.f)*(v*1023.f/650.f)*(v*1023.f/650.f))-0.0075f : exp((v*1023.f-619.f)/150.f);
     if(space==16) return v <= 0.14f ? (v-0.0929f)/6.025f : (pow(10.f,(v-0.584555f)/0.256663f)-0.0108f)/0.9892f;
     if(space==17) return (v < 0.092864125f ? -1.f : 1.f)*(pow(10.f,abs(v-0.092864125f)/0.24136077f)-1.f)/87.099375f*0.9f;
     if(space==18) return v <= 0.02740668f ? v/10.44426855f : exp2(v/0.07329248f-7.f)-0.0075f;
@@ -268,7 +268,8 @@ float logDecode(float v,uint space) {
 }
 float3 lutEncode(float3 x,uint space) {
     if (space >= 5 && space != 20) x=toLogPrimaries(x,space);
-    else if (space == 3 || space == 4 || space == 20) x=p3to2020(x);
+    else if (space == 20) x=p3toFGamut(x);
+    else if (space == 3 || space == 4) x=p3to2020(x);
     else if (space != 1) {
         // Fit the 709 cube at constant luminance before applying its matrix.
         float3 n=rawY(x), r=p3to709(x); float amount=1;
@@ -306,7 +307,8 @@ float3 lutDecode(float3 x,uint space) {
         else x[c]=v<=.04045f ? v/12.92f : pow((v+.055f)/1.055f,2.4f);
     }
     if(space>=5 && space!=20) return fromLogPrimaries(x,space);
-    if(space==3 || space==4 || space==20) return toP3from2020(x);
+    if(space==20) return fgamutToP3(x);
+    if(space==3 || space==4) return toP3from2020(x);
     if(space!=1) return toP3from709(x);
     return x;
 }

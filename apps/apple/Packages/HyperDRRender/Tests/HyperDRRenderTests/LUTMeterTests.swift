@@ -7,6 +7,47 @@ import Testing
 @testable import HyperDRRender
 
 @Suite(.serialized) struct LUTMeterTests {
+    @Test func automaticMatchesDisplayAndStrengthReusesTheMeter() async throws {
+        let engine = try RenderEngine()
+        let image = CIImage(color:CIColor(red:0.18,green:0.18,blue:0.18,
+            colorSpace:RenderEngine.workingColorSpace)!).cropped(to:CGRect(x:0,y:0,width:16,height:16))
+        let source = try await engine.source(image:image,domain:.rawEDR)
+        let lut = try ColorLUT(cube:"LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        var recipe = Recipe(inputDomain:.rawEDR,look:LUTReference(contentHash:lut.contentHash,name:"Log"),
+            values:["look.input":.string("flog2-fgamut"),"look.output":.string("rec709")])
+        let pixels = RenderEngine.readPixels(try await engine.render(source,recipe:recipe,lut:lut))
+        #expect(abs(log2(Double(pixels.baseRGBA[0])/0.18))<0.02)
+        let first = try await engine.resolvedAutomatic(source,recipe:recipe,lut:lut)["look.exposure"]
+        #expect(first != nil && first! > 0)
+        recipe.setValue(.number(40),for:"look.strength")
+        let second = try await engine.resolvedAutomatic(source,recipe:recipe,lut:lut)["look.exposure"]
+        #expect(first == second)
+        #expect(await engine.lutMeterEntryCount() == 1)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_LUT_REVIEW"] != nil))
+    func localSpaceComparison() async throws {
+        let root = URL(fileURLWithPath:ProcessInfo.processInfo.environment["HYPERDR_LUT_REVIEW"]!).deletingLastPathComponent()
+        let output = root.appendingPathComponent("spaces")
+        let engine = try RenderEngine()
+        var options = SourceOptions(resolution:.preview(maximumSize:PixelSize(width:768,height:768)))
+        options.sceneLinear = true
+        let source = try await engine.load(URL(fileURLWithPath:"/Users/nxxxs/Desktop/HyperDR/测试照片/DSC01468.ARW"),options:options)
+        let groups: [(String,String,LUTSpace)] = [("F-Log","FLog",.flogFGamut),
+            ("F-Log2","FLog2",.flog2FGamut),("F-Log2C","FLog2C",.flog2cFGamutC)]
+        for (folder,prefix,space) in groups {
+            let path = "vendor/gfx-eterna-55-3d-lut-v110/33Grid/"+folder+"/"+prefix+"_to_ETERNA_33grid_V.1.00.cube"
+            let lut = try ColorLUT(data:Data(contentsOf:output.appendingPathComponent(path)))
+            for (name,input) in [("old",LUTSpace.flog2FGamut),("new",space)] {
+                var edit = RenderAdjustments()
+                edit.look.lut = lut; edit.look.input = input; edit.look.output = .rec709
+                edit.look.exposure = try await engine.lutMeter(source,lut:lut,input:input,output:.rec709)
+                try writeReview(RenderEngine.readPixels(try await engine.render(source,adjustments:edit)),
+                    to:output.appendingPathComponent("DSC01468.ARW-"+prefix+"-"+name+".png"))
+            }
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_LUT_REVIEW"] != nil))
     func localSampleComparison() async throws {
         let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_LUT_REVIEW"]!)
@@ -59,4 +100,8 @@ import Testing
         }
         try results.write(to: output.appendingPathComponent("brightness.csv"), atomically: true, encoding: .utf8)
     }
+}
+
+private extension RenderEngine {
+    func lutMeterEntryCount() -> Int { lutMeterCache.count }
 }

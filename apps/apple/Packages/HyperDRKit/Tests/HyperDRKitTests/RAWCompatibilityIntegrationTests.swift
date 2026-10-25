@@ -2,8 +2,8 @@ import CoreImage
 import Foundation
 import HyperDREngine
 import HyperDRRecipe
-import HyperDRRender
 import XCTest
+@testable import HyperDRRender
 @testable import HyperDRKit
 
 /// Real LibRaw + CIRAWFilter integration. Kept in XCTest so the process-wide
@@ -37,10 +37,10 @@ final class RAWCompatibilityIntegrationTests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["HYPERDR_RAW_COMPAT_SAMPLE"] else {
             throw XCTSkip("Set HYPERDR_RAW_COMPAT_SAMPLE to the A7 V RAW")
         }
-        try await exercise(URL(fileURLWithPath: path))
+        try await exercise(URL(fileURLWithPath: path), requiresModel2Capture: true)
     }
 
-    private func exercise(_ url: URL) async throws {
+    private func exercise(_ url: URL, requiresModel2Capture: Bool = false) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("raw-compat-integration-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
@@ -76,6 +76,12 @@ final class RAWCompatibilityIntegrationTests: XCTestCase {
         let cached = try await converter.convertDNG(from: url)
         XCTAssertTrue(cached.usedCache)
         XCTAssertEqual(cached.converterID, Engine.rawConverterID)
+        if requiresModel2Capture {
+            let dngSource = try XCTUnwrap(CGImageSourceCreateWithURL(cached.url as CFURL, nil))
+            let dngProperties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(dngSource, 0, nil) as? [String: Any])
+            XCTAssertTrue(ModelGainCapture(properties: dngProperties).isUsable)
+            XCTAssertTrue(reopened.modelCapture.isUsable)
+        }
 
         var exportRecipe = recipe
         exportRecipe.setValue(.bool(false), for: "hdr.enabled")

@@ -87,7 +87,7 @@ extension RenderAdjustments {
                 color.mixer[i][c] = try values.number("hsl.\(band.rawValue).\(component.rawValue)")
             }
         }
-        for (i, zone) in GradingZone.allCases.enumerated() {
+        for (i, zone) in ColorGradingZone.allCases.enumerated() {
             for (c, component) in HSLComponent.allCases.enumerated() {
                 color.grading[i][c] = try values.number("grade.\(zone.rawValue).\(component.rawValue)")
             }

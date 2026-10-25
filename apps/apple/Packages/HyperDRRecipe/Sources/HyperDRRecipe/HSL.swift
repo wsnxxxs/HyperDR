@@ -9,6 +9,6 @@ public enum HSLComponent: String, CaseIterable, Sendable {
 }
 
 /// Colour wheel order used by ColorAdjustments.grading.
-public enum GradingZone: String, CaseIterable, Sendable {
+public enum ColorGradingZone: String, CaseIterable, Sendable {
     case shadows, midtones, highlights, global
 }

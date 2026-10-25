@@ -16,6 +16,11 @@ struct ColorToolsUniform {
         grade1 = SIMD4(color.grading[1],0)
         grade2 = SIMD4(color.grading[2],0)
         grade3 = SIMD4(color.grading[3],0)
+        // Shader hue is the OKLCH angle; recipe/UI hue is the sRGB wheel.
+        grade0.x = Float(DoubleReference.gradingHue(Double(color.grading[0].x))*180/Double.pi)
+        grade1.x = Float(DoubleReference.gradingHue(Double(color.grading[1].x))*180/Double.pi)
+        grade2.x = Float(DoubleReference.gradingHue(Double(color.grading[2].x))*180/Double.pi)
+        grade3.x = Float(DoubleReference.gradingHue(Double(color.grading[3].x))*180/Double.pi)
         gradeOptions = SIMD4(color.gradingBlending,color.gradingBalance,0,0)
     }
 }

@@ -3,6 +3,38 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## 0.6.0 - 2026-10-26 (Apple pre-release)
+
+- The Mac runs on macOS 15 or later (it needed macOS 27). Code that needs a
+  newer system keeps its original path there; the older path builds but has
+  not yet been run on a macOS 15 machine.
+- New adjustments: Whites, which moves SDR white while keeping the light
+  beyond it; a stronger Contrast in perceptual lightness; a tone curve on the
+  Mac and iPad (monotone, with VoiceOver support); and a white balance
+  eyedropper on the Mac and iPad that samples the unadjusted photo through
+  any crop. RAW white balance covers a wider range and its kelvin scale is
+  spread evenly in mired.
+- Film: fifteen more spektrafilm stocks (Portra 160/800 and pushed variants,
+  Ektar 100, UltraMax 400, Pro 400H, C200, X-TRA 400, Provia 100F,
+  Ektachrome 100, Vision3 50D/250D/200T, Verita 200D), grouped as negatives,
+  slides and motion-picture negatives in every picker. The film exposure sits
+  under the stock tiles with a note under Light's exposure, and automatic film
+  exposure keeps the photo's displayed brightness.
+- RAW from cameras the system cannot develop yet: HyperDR converts the file
+  to a DNG with LibRaw (CDDL) and develops that with the system's RAW engine;
+  the conversion is recorded in the edit, shown in the inspector and export
+  panel, and an embedded JPEG serves as an SDR fallback. A RAW whose size the
+  system reports as empty fails to open instead of crashing.
+- RAW photos open progressively: an editable reduced preview first, then the
+  full development swapped in without losing edits or undo.
+- AI gain (in builds that include the private model) picks the EXIF-assisted
+  model automatically when the capture data allows it.
+- Frames: caption typefaces, including imported fonts; every photo starts
+  without a frame.
+- Export: AVIF shows progress and verifies alongside encoding with four codec
+  threads; HDR rows are no longer rendered twice when packaging; free disk
+  space is checked for the whole export before it starts.
+
 ## 0.5.3 - 2026-10-25 (Apple pre-release)
 
 - The trained AI model is no longer distributed: its weights were removed from

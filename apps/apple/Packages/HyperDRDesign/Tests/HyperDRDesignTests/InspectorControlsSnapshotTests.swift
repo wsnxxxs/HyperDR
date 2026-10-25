@@ -36,3 +36,13 @@ import Testing
         try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("inspector-controls-\(name).png"))
     }
 }
+
+/// Writes the curve editors in light and dark to $HDR_SNAPSHOT_DIR.
+@MainActor @Test func curveEditorsSnapshots() throws {
+    guard let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"] else { return }
+    for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+        let bitmap = try snapshot(CurveEditorsGallery(), width: 340, scheme: scheme)
+        let data = try #require(bitmap.representation(using: .png, properties: [:]))
+        try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("curve-editors-\(name).png"))
+    }
+}

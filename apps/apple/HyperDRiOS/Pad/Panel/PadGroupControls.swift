@@ -30,7 +30,8 @@ struct PadGroupControls: View {
         let off = actual?.isSwitchedOff ?? false
         if let state = off ? switchedOn() ?? actual : actual {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
-            let rows = state.controls.filter { $0.id != lead?.id }
+            let rows = state.controls.filter { $0.id != lead?.id && $0.kind != .curve }
+            let curves = state.controls.filter { $0.kind == .curve }
             VStack(alignment: .leading, spacing: 12) {
                 if let lead {
                     VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
@@ -48,6 +49,12 @@ struct PadGroupControls: View {
                     }
                 }
                 .disabled(off)
+                // The tone curve's plot takes the panel's width, below the rows.
+                ForEach(curves) { control in
+                    ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch,
+                                     onEditingChanged: onEditingChanged)
+                        .disabled(off)
+                }
             }
             .saturation(off ? 0 : 1)
             .animation(.smooth(duration: 0.2), value: off)

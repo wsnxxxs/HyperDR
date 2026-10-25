@@ -216,7 +216,12 @@ public struct AdjustmentRow: View {
                                 selection: Binding(get: { control.selectedOption ?? "" },
                                                    set: { panel.set(control.id, option: $0, in: &recipe) }))
         case .curve:
-            EmptyView()
+            // The Mac's inspector draws the curve editor; the iPad's Studio draws its own,
+            // and the iPhone's dock has none.
+            if style == .pointer {
+                ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: style,
+                                 onEditingChanged: onEditingChanged)
+            }
         case .reference:
             let selection = Binding(get: { control.reference ?? "" },
                                     set: { panel.set(control.id, reference: $0.isEmpty ? nil : $0, in: &recipe) })

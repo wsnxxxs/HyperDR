@@ -351,6 +351,15 @@ public struct AdjustmentPanel: Sendable {
         }
     }
 
+    /// A curve's points as `[x0, y0, x1, y1, …]`. The two end points alone are
+    /// the default and not stored, so the control reads as unchanged (points
+    /// that happen to lie on the diagonal are kept: they are the user's);
+    /// coordinates `ToneCurve` rejects are ignored.
+    public func set(_ id: String, curve coordinates: [Double], in recipe: inout Recipe) {
+        guard Adjustments.declaration(id)?.kind == .curve, let curve = try? ToneCurve(coordinates) else { return }
+        recipe.setValue(curve.coordinates == ToneCurve().coordinates ? nil : curve.parameterValue, for: id)
+    }
+
     /// The slider binding's write: the Auto sentinel returns to Auto.
     public func set(_ id: String, sliderValue: Double, in recipe: inout Recipe) {
         guard let control = control(id, in: recipe), let spec = control.spec else { return }

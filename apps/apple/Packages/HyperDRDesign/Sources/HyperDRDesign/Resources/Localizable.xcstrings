@@ -1099,6 +1099,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在风格中显示胶片曝光设置" } }
       }
     },
+    "design.curve.reset" : {
+      "comment" : "Button beside the tone curve's title: puts the curve back to a straight line.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置曲线" } }
+      }
+    },
+    "design.curve.hint.pointer" : {
+      "comment" : "Caption under the tone curve plot on the Mac.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to add a point · drag to move it · double-click a point to remove it" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点按空白处加点 · 拖动移动 · 双击点删除" } }
+      }
+    },
+    "design.curve.hint.touch" : {
+      "comment" : "Caption under the tone curve plot on the iPad.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tap to add a point · drag to move it · double-tap a point to remove it" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "轻点空白处加点 · 拖动移动 · 双击点删除" } }
+      }
+    },
+    "design.curve.point %@" : {
+      "comment" : "VoiceOver name of a tone curve point (its number along the curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve point %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线点 %@" } }
+      }
+    },
+    "design.curve.pointValue %@ %@" : {
+      "comment" : "VoiceOver value of a tone curve point: input and output in percent.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Input %@%%, output %@%%" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入 %@%%，输出 %@%%" } }
+      }
+    },
+    "design.curve.removePoint" : {
+      "comment" : "VoiceOver action: delete the tone curve point.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove Point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除点" } }
+      }
+    },
     "design.wb.clamped" : {
       "comment" : "Under the temperature row: the neutral the pick needs lies beyond the slider's end, so the end was set.",
       "localizations" : {

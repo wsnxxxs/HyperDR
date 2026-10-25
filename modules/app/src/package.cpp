@@ -767,13 +767,16 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   if(request.exif&&request.exif_size)photo=read_exif(request.exif,request.exif_size).metadata;
   photo.orientation=1;
   StagingFile staged(reserve_staging_beside(request.output));
+  std::optional<AvifCellDigests> avif_cells;
   switch(request.encoding) {
     case OutputEncoding::SdrJpeg:write_sdr_jpeg_rows(base_rows,photo,request.quality,resolved_gamut(request),staged.path);break;
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
     case OutputEncoding::AvifPq:
     case OutputEncoding::AvifHlg:
-      write_avif_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,staged.path);break;
+      // Cells are decoded as they are coded; the file check then matches them.
+      avif_cells=write_avif_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,
+          request.quality,staged.path,request.verify&&!request.frame_photo);break;
     default: {
       write_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame,staged.path);break;
     }
@@ -781,7 +784,8 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   // Release input row planes before native row/tile verification.
   base.clear();base.shrink_to_fit();grid.clear();grid.shrink_to_fit();
   check_cancelled();
-  if(request.verify && !request.frame_photo) (void)verify_encoded_file(staged.path,request.encoding);
+  if(request.verify && !request.frame_photo)
+    (void)(avif_cells?verify_avif_file(staged.path,*avif_cells):verify_encoded_file(staged.path,request.encoding));
   if(request.frame_photo)verify_framed_mat(request,staged.path);
   const auto size=std::filesystem::file_size(staged.path);
   const auto report=package_report(request,gain,size);

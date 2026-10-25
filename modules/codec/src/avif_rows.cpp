@@ -5,6 +5,7 @@
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/foundation/cancel.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/image/transfer.hpp"
 
@@ -17,9 +18,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <system_error>
 #include <thread>
 #include <unistd.h>
@@ -199,15 +205,100 @@ void verify_cell(std::span<const std::uint8_t> sample, unsigned w, unsigned h, H
           (int(image->cp) == 9 && int(image->tc) == transfer && int(image->mc) == 9), "AVIF codec color differs from colr");
   require(!aom_codec_get_frame(&decoder, &iterator), "AVIF cell contains multiple frames");
 }
+// Identifies a cell sample the writer has already decoded, so the check of the
+// finished file can match its bytes instead of decoding them a second time.
+// Not a security digest: it notices a wrong offset or a torn write.
+std::uint64_t sample_digest(std::span<const std::uint8_t> bytes) {
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (const auto byte : bytes) { hash ^= byte; hash *= 1099511628211ULL; }
+  return hash;
+}
+
+// Decodes each coded cell on one worker thread while the next cell encodes, so
+// checking every sample costs little beyond the encode. At most two samples
+// wait (one decoder of the cell's size is resident); a failure surfaces at the
+// writer's next cell. The worker runs no engine entry point and never reads the
+// caller's cancel token: the package thread checks it between cells.
+class CellVerifier {
+ public:
+  CellVerifier(unsigned width, unsigned height, HdrEncoding encoding)
+      : width_(width), height_(height), encoding_(encoding), worker_([this] { run(); }) {}
+  ~CellVerifier() {
+    { std::lock_guard lock(mutex_); closing_ = true; jobs_.clear(); }
+    work_.notify_all();
+    worker_.join();
+  }
+  CellVerifier(const CellVerifier&) = delete;
+  CellVerifier& operator=(const CellVerifier&) = delete;
+
+  void submit(Bytes sample) {
+    std::unique_lock lock(mutex_);
+    changed_.wait(lock, [&] { return jobs_.size() < 2 || failure_; });
+    if (failure_) std::rethrow_exception(failure_);
+    jobs_.push_back(std::move(sample));
+    work_.notify_all();
+  }
+  [[nodiscard]] std::uint32_t verified() {
+    std::lock_guard lock(mutex_);
+    if (failure_) std::rethrow_exception(failure_);
+    return done_;
+  }
+  // Waits for every submitted sample, reporting each one as it is checked.
+  void drain(std::uint32_t total, std::uint32_t reported) {
+    std::unique_lock lock(mutex_);
+    for (;;) {
+      changed_.wait(lock, [&] { return failure_ || done_ != reported || (jobs_.empty() && !busy_); });
+      if (failure_) std::rethrow_exception(failure_);
+      if (done_ != reported) {
+        reported = done_;
+        lock.unlock();
+        check_cancelled();
+        report_package_progress(PackagePhase::VerifyCells, reported, total);
+        check_cancelled();
+        lock.lock();
+      }
+      if (jobs_.empty() && !busy_ && done_ == reported) return;
+    }
+  }
+
+ private:
+  void run() {
+    std::unique_lock lock(mutex_);
+    for (;;) {
+      work_.wait(lock, [&] { return closing_ || !jobs_.empty(); });
+      if (closing_) return;
+      auto sample = std::move(jobs_.front());
+      jobs_.pop_front(); busy_ = true;
+      lock.unlock();
+      std::exception_ptr error;
+      try { verify_cell(sample, width_, height_, encoding_); } catch (...) { error = std::current_exception(); }
+      lock.lock(); busy_ = false;
+      if (error) failure_ = error; else ++done_;
+      changed_.notify_all();
+      if (failure_) return;
+    }
+  }
+
+  const unsigned width_, height_;
+  const HdrEncoding encoding_;
+  std::mutex mutex_;
+  std::condition_variable work_, changed_;
+  std::deque<Bytes> jobs_;
+  bool closing_ = false, busy_ = false;
+  std::uint32_t done_ = 0;
+  std::exception_ptr failure_;
+  std::thread worker_;  // Last: it starts once every member above exists.
+};
+
 unsigned be32(std::span<const std::uint8_t> b, std::size_t p) {
   require(p <= b.size() && b.size() - p >= 4, "truncated AVIF dimensions");
   return (unsigned(b[p]) << 24) | (unsigned(b[p + 1]) << 16) | (unsigned(b[p + 2]) << 8) | b[p + 3];
 }
 } // namespace
 
-void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
+AvifCellDigests write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
     const GainMapMetadata& metadata, float headroom, const PhotoMetadata& photo,
-    HdrEncoding encoding, int quality, const std::filesystem::path& path) {
+    HdrEncoding encoding, int quality, const std::filesystem::path& path, bool verify_cells) {
   if (!is_avif_encoding(encoding) || !base.width || !base.height || base.channels != 3 ||
       codes.width != base.width || codes.height != base.height || (codes.channels != 1 && codes.channels != 3) || !base.read || !codes.read)
     throw std::invalid_argument("invalid AVIF row input");
@@ -242,6 +333,15 @@ void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
   samples.write(grid);
   std::uint64_t media_size = grid.size();
   Bytes config;
+  const auto cells = layout.rows * layout.columns;
+  AvifCellDigests decoded;
+  std::optional<CellVerifier> verifier;
+  if (verify_cells) {
+    verifier.emplace(layout.cell_width, layout.cell_height, encoding);
+    decoded.samples.reserve(cells);
+    decoded.width = layout.cell_width; decoded.height = layout.cell_height; decoded.encoding = encoding;
+  }
+  std::uint32_t encoded = 0, reported_verified = 0;
   for (unsigned cy = 0; cy < layout.rows; ++cy) for (unsigned cx = 0; cx < layout.columns; ++cx) {
     check_cancelled();
     std::unique_ptr<avifImage, decltype(&avifImageDestroy)> image(avifImageCreate(layout.cell_width, layout.cell_height, 10, AVIF_PIXEL_FORMAT_YUV444), &avifImageDestroy);
@@ -281,7 +381,21 @@ void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
     references.front().to.push_back(unsigned(items.size() + 1));
     items.push_back({"av01", std::uint32_t(media_size), std::uint32_t(sample.size()), true, {5, 2, 3, 6}});
     samples.write(sample); media_size += sample.size();
+    if (verifier) {
+      decoded.samples.push_back(sample_digest(sample));
+      verifier->submit(Bytes(sample.begin(), sample.end()));
+    }
+    check_cancelled();
+    report_package_progress(PackagePhase::EncodeCells, ++encoded, cells);
+    check_cancelled();
+    if (verifier) {
+      reported_verified = verifier->verified();
+      check_cancelled();
+      report_package_progress(PackagePhase::VerifyCells, reported_verified, cells);
+      check_cancelled();
+    }
   }
+  if (verifier) { verifier->drain(cells, reported_verified); verifier.reset(); }
   auto add_metadata = [&](const char* type, const Bytes& bytes) {
     require(media_size + bytes.size() <= UINT32_MAX, "AVIF metadata too large");
     items.push_back({type, std::uint32_t(media_size), std::uint32_t(bytes.size()), false, {}});
@@ -300,9 +414,10 @@ void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
     require(fwrite(chunk.data(), 1, count, destination.get()) == count, "write AVIF samples failed"); left -= count;
   }
   require(fclose(destination.release()) == 0, "close AVIF destination failed");
+  return decoded;
 }
 
-VerificationResult verify_avif_pixels(std::span<const std::uint8_t> bytes) {
+VerificationResult verify_avif_pixels(std::span<const std::uint8_t> bytes, const AvifCellDigests* decoded) {
   const auto file = read_heif(bytes);
   const auto& primary = file.item(file.primary_item_id);
   VerificationResult result;
@@ -329,7 +444,13 @@ VerificationResult verify_avif_pixels(std::span<const std::uint8_t> bytes) {
   const auto encoding = color[7] == 16 ? HdrEncoding::AvifPq : HdrEncoding::AvifHlg;
   (void)property(file, primary, "pixi");
   parse_original(file); // Reject unknown essential properties on grid AND cells.
+  // A writer that decoded its cells as it coded them hands over their digests:
+  // a sample whose bytes and decode parameters match was decoded already;
+  // any other is decoded here against the finished file's metadata.
+  require(!decoded || decoded->samples.empty() || decoded->samples.size() == cells.size(),
+          "AVIF decoded cell count differs");
   unsigned cell_width = 0, cell_height = 0;
+  std::size_t index = 0;
   for (auto id : cells) {
     check_cancelled(); const auto& item = file.item(id);
     require(item.type == "av01", "AVIF grid cell is not AV1");
@@ -342,7 +463,10 @@ VerificationResult verify_avif_pixels(std::span<const std::uint8_t> bytes) {
     const auto cell_color = property(file, item, "colr");
     require(std::equal(cell_color.begin(), cell_color.end(), color.begin(), color.end()), "AVIF cell/grid color differs");
     const auto sample = file.item_bytes(id);
-    verify_cell(sample, w, h, encoding);
+    const bool seen = decoded && decoded->width == w && decoded->height == h && decoded->encoding == encoding &&
+        index < decoded->samples.size() && decoded->samples[index] == sample_digest(sample);
+    if (!seen) verify_cell(sample, w, h, encoding);
+    ++index;
   }
   require(std::uint64_t(cell_width) * (columns - 1) < result.width && std::uint64_t(cell_width) * columns >= result.width &&
           std::uint64_t(cell_height) * (rows - 1) < result.height && std::uint64_t(cell_height) * rows >= result.height, "AVIF grid does not cover canvas");

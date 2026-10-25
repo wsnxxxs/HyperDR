@@ -29,8 +29,10 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
 }
 
 
-std::string Engine::package_rows(const PackageRequest& request,std::uint32_t rows,const PackageRows& read,const CancelToken* cancel) const {
+std::string Engine::package_rows(const PackageRequest& request,std::uint32_t rows,const PackageRows& read,const CancelToken* cancel,
+    const PackageProgress* progress) const {
   CancelScope cancellation(cancel);
+  PackageProgressScope reporting(progress);
   ExecutionScope execution({config_.heic_tile_workers,config_.memory_budget_bytes});
   return package_image_rows(request,rows,read);
 }

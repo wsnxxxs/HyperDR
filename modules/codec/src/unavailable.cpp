@@ -144,11 +144,14 @@ void verify_gain_map_jpeg(const std::filesystem::path&) {
 void verify_avif_decodable(std::span<const std::uint8_t>) {
   fail_without_codecs("AVIF decode verification");
 }
-VerificationResult verify_avif_pixels(std::span<const std::uint8_t>) {
+VerificationResult verify_avif_pixels(std::span<const std::uint8_t>, const AvifCellDigests*) {
   fail_without_codecs("AVIF decode verification");
 }
-void write_avif_rows(const EncodingRows&, const EncodingRows&, const GainMapMetadata&,
-    float, const PhotoMetadata&, HdrEncoding, int, const std::filesystem::path&) {
+VerificationResult verify_avif_file(const std::filesystem::path&, const AvifCellDigests&) {
+  fail_without_codecs("AVIF decode verification");
+}
+AvifCellDigests write_avif_rows(const EncodingRows&, const EncodingRows&, const GainMapMetadata&,
+    float, const PhotoMetadata&, HdrEncoding, int, const std::filesystem::path&, bool) {
   fail_without_codecs("AVIF row encoding");
 }
 

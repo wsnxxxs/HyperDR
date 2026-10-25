@@ -109,6 +109,9 @@ struct VerificationResult {
 };
 [[nodiscard]] VerificationResult verify_encoded_file(const std::filesystem::path&,HdrEncoding,
                                                      std::optional<VerificationFrame> = {});
+struct AvifCellDigests;
+// verify_encoded_file for a row-written AVIF whose cells the writer decoded.
+[[nodiscard]] VerificationResult verify_avif_file(const std::filesystem::path&, const AvifCellDigests&);
 
 // Reconstructs a gain-map HEIC into a 16-bit linear TIFF, so the HDR rendition
 // a display would show can be examined outside this tool.
@@ -164,12 +167,26 @@ void write_heic_rows(const EncodingRows& base,
     const EncodingRows& codes, const GainMapMetadata&, float headroom,
     const PhotoMetadata&, OutputEncoding, int quality, int depth, bool frame, const std::filesystem::path&);
 
+// The cell samples write_avif_rows decoded while it coded them: one digest
+// per cell, in grid order, with the dimensions and color encoding checked by
+// the decoder. Empty when it was not asked to verify cells.
+struct AvifCellDigests {
+  std::vector<std::uint64_t> samples;
+  std::uint32_t width{}, height{};
+  HdrEncoding encoding = HdrEncoding::AvifPq;
+};
+
 // Disk-staged 10-bit 4:4:4 AVIF grid: one small coded cell/context resident.
-// Rows are replayable, as for HEIC. No full-canvas pixel allocation.
-void write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
+// Rows are replayable, as for HEIC. No full-canvas pixel allocation. With
+// verify_cells each coded sample is decoded on a second thread while the next
+// cell encodes. Reports PackagePhase progress per cell.
+AvifCellDigests write_avif_rows(const EncodingRows& base, const EncodingRows& codes,
     const GainMapMetadata&, float headroom, const PhotoMetadata&, HdrEncoding,
-    int quality, const std::filesystem::path&);
-[[nodiscard]] VerificationResult verify_avif_pixels(std::span<const std::uint8_t>);
+    int quality, const std::filesystem::path&, bool verify_cells = false);
+// `decoded` names cells already decoded by the writer: those whose bytes in the
+// file match are not decoded again. The container is always checked in full.
+[[nodiscard]] VerificationResult verify_avif_pixels(std::span<const std::uint8_t>,
+                                                    const AvifCellDigests* decoded = nullptr);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

@@ -354,8 +354,9 @@ struct ExportMemoryPlanTests {
         let canvas = ExportPixelSize(width: 12000, height: 8000)
         let framed = request(.custom(CustomExportFormat(encoding: .avifPq, gamut: .p3, quality: 90)),
                              frame: ExportFrameFacts(canvas: canvas))
+        // Smaller rows trim the encode peak a little; half the budget fits no row height.
         let whole = plan(framed).memory.estimate.peak
-        let result = plan(framed, available: whole - 1)
+        let result = plan(framed, available: whole / 2)
         #expect(result.memory.degradation == .refused)
         #expect(!result.memory.fits)
         #expect(!result.isExecutable)
@@ -446,9 +447,10 @@ struct ExportMemoryPlanTests {
         let whole = plan(old)
         #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
         #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
-        #expect(streamed.memory.estimate.systemVerify - streamed.memory.estimate.decode < 32 << 20)
-        #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
-        #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
+        // The system reader starts after the export source's development ends.
+        #expect(streamed.memory.estimate.systemVerify < streamed.memory.estimate.decode)
+        #expect(streamed.memory.estimate.systemVerify < streamed.memory.estimate.nativeVerify)
+        #expect(streamed.memory.estimate.verify == streamed.memory.estimate.nativeVerify)
         #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
         #expect(!ExportWriter.imageIO.supportsRowInput(encoding: .adaptive))
         #expect(ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
@@ -468,7 +470,7 @@ struct ExportMemoryPlanTests {
             // Source/analysis cache belongs to decode; the verification workspace
             // remains one row set or tile pair at the same width.
             #expect(tall.nativeVerify - tall.decode == short.nativeVerify - short.decode)
-            #expect(tall.systemVerify - tall.decode == short.systemVerify - short.decode)
+            #expect(tall.systemVerify == short.systemVerify)
             #expect(tall.verify == max(tall.nativeVerify, tall.systemVerify))
         }
         for encoding in [ExportEncoding.avifPq, .adaptive] {

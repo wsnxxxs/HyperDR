@@ -166,6 +166,8 @@ nonisolated struct ExportStack: Sendable {
     @ObservationIgnored private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var run = 0
+    /// The running export's footprint by stage, for the diagnostic log.
+    @ObservationIgnored private var footprint: ExportFootprint?
     /// The run is waiting for the session, before the service has it.
     @ObservationIgnored private var waitingForSource = false
 
@@ -205,6 +207,16 @@ nonisolated struct ExportStack: Sendable {
     var isChoosing: Bool {
         if case .choosing = phase { return true }
         return false
+    }
+
+    /// Which page of the sheet the phase shows, for its transitions.
+    var phaseKind: Int {
+        switch phase {
+        case .choosing: 0
+        case .running: 1
+        case .finished: 2
+        case .failed: 3
+        }
     }
 
     /// The plan for the current choice, from the editor as it is, with the
@@ -453,7 +465,11 @@ nonisolated struct ExportStack: Sendable {
         phase = .running(RecipeExportProgress(stage: .preparing))
         fraction = nil
         waitingForSource = true
-        DiagnosticLog.notice("Export", "Started \(choice); available to the app \(DeviceFacts.availableMemory)")
+        let estimate = ExportPlanner.plan(request).memory.estimate
+        DiagnosticLog.notice("Export", "Started \(choice); available to the app \(DeviceFacts.availableMemory); "
+            + "estimate decode \(estimate.decode >> 20), render \(estimate.render >> 20), "
+            + "encode \(estimate.encode >> 20), verify \(estimate.nativeVerify >> 20)/\(estimate.systemVerify >> 20) MiB")
+        footprint = ExportFootprint()
         task = Task { [weak self] in
             // The export develops the photo again at full size: the editor
             // keeps what the canvas shows and gives up the rest meanwhile.
@@ -480,6 +496,7 @@ nonisolated struct ExportStack: Sendable {
                 let file = try await stack.sessions.stageExportForTransfer(
                     opened.session, export: result.record.id,
                     fileName: Self.transferName(photo: capture.source.url.lastPathComponent, file: result.record.name))
+                await self?.fillRing(run: run)
                 self?.finished(Finished(result: result, file: file), run: run)
             } catch {
                 // A memory refusal: which check, with the service's numbers.
@@ -553,7 +570,21 @@ nonisolated struct ExportStack: Sendable {
     private func progressed(_ progress: RecipeExportProgress, run: Int) {
         guard run == self.run, case .running = phase else { return }
         phase = .running(progress)
+        footprint?.enter(progress)
         if let next = progress.fraction { fraction = max(fraction ?? 0, next) }
+    }
+
+    /// The file is saved: the ring closes before the result takes its place.
+    private func fillRing(run: Int) async {
+        guard run == self.run, case .running = phase else { return }
+        fraction = 1
+        try? await Task.sleep(for: .milliseconds(450))
+    }
+
+    private func logFootprint() {
+        guard let footprint else { return }
+        self.footprint = nil
+        DiagnosticLog.notice("Export", "Footprint peaks: \(footprint.finish())")
     }
 
     private func finished(_ finished: Finished, run: Int) {
@@ -561,6 +592,7 @@ nonisolated struct ExportStack: Sendable {
         task = nil
         endBackgroundTask()
         DiagnosticLog.notice("Export", "Finished, \(finished.result.record.byteCount) bytes")
+        logFootprint()
         phase = .finished(finished)
         // The web destination is "Save to Files…": the save sheet follows;
         // the Photos destination goes into the library.
@@ -576,6 +608,7 @@ nonisolated struct ExportStack: Sendable {
         task = nil
         waitingForSource = false
         endBackgroundTask()
+        logFootprint()
         if Self.isCancellation(error) {
             DiagnosticLog.notice("Export", leftRun == run ? "Stopped on leaving the app" : "Cancelled")
             phase = leftRun == run ? .failed(Self.stopped) : .choosing

@@ -235,7 +235,17 @@ int hyperdr_package_rows_supported(const char* format) {
 }
 int hyperdr_package_rows(hyperdr_engine* engine,const hyperdr_package_request* configuration,
     uint32_t rows,hyperdr_package_row_callback callback,void* user,char** out,hyperdr_error** error) {
+  return hyperdr_package_rows_progress(engine,configuration,rows,callback,nullptr,user,out,error);
+}
+static_assert(static_cast<uint32_t>(hyperdr::PackagePhase::EncodeCells)==HYPERDR_PACKAGE_PHASE_ENCODE&&
+              static_cast<uint32_t>(hyperdr::PackagePhase::VerifyCells)==HYPERDR_PACKAGE_PHASE_VERIFY);
+int hyperdr_package_rows_progress(hyperdr_engine* engine,const hyperdr_package_request* configuration,
+    uint32_t rows,hyperdr_package_row_callback callback,hyperdr_package_progress_callback progress,void* user,
+    char** out,hyperdr_error** error) {
   return json_result(out,error,[&] {
+    const hyperdr::PackageProgress report=progress?hyperdr::PackageProgress([&](auto phase,auto done,auto total) {
+      progress(user,static_cast<uint32_t>(phase),done,total);
+    }):hyperdr::PackageProgress();
     if(!callback)throw std::invalid_argument("package row callback is required");
     hyperdr::PackagePlane sdr;hyperdr::PackageGain gain;
     const auto request=package_request(configuration,sdr,gain,true);
@@ -244,7 +254,7 @@ int hyperdr_package_rows(hyperdr_engine* engine,const hyperdr_package_request* c
         if(const auto cancel=token(configuration->cancel))cancel->check();
         throw hyperdr::PackageCallbackFailed();
       }
-    },token(configuration->cancel));
+    },token(configuration->cancel),&report);
   });
 }
 

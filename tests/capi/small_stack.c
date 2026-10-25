@@ -11,6 +11,7 @@ static int rows(void* user,uint32_t y,uint32_t count,float* base,float* gain) {
  if(gain)for(size_t i=0;i<(size_t)count*16;++i)gain[i]=1;
  return 0;
 }
+static void progress(void* user,uint32_t phase,uint32_t done,uint32_t total){(void)user;(void)phase;(void)done;(void)total;}
 static void* work(void* unused) {
  (void)unused;hyperdr_engine* engine=NULL;hyperdr_error* error=NULL;char* text=NULL;
  REQUIRE(hyperdr_abi_version()==5);
@@ -27,7 +28,8 @@ static void* work(void* unused) {
   hyperdr_package_request request={0};request.output_path=path;request.format=formats[f];request.parameters_json="{\"overwrite\":true}";request.sdr=&plane;request.gain=&auxiliary;
   REQUIRE(!hyperdr_package(engine,&request,&text,&error));hyperdr_string_free(text);
   REQUIRE(!hyperdr_probe(engine,path,&text,&error));hyperdr_string_free(text);
-  if(hyperdr_package_rows_supported(formats[f])){REQUIRE(!hyperdr_package_rows(engine,&request,8,rows,NULL,&text,&error));hyperdr_string_free(text);}
+  if(hyperdr_package_rows_supported(formats[f])){REQUIRE(!hyperdr_package_rows(engine,&request,8,rows,NULL,&text,&error));hyperdr_string_free(text);
+   REQUIRE(!hyperdr_package_rows_progress(engine,&request,8,rows,progress,NULL,&text,&error));hyperdr_string_free(text);}
   unlink(path);
  }
  hyperdr_cancel* cancel=hyperdr_cancel_create();REQUIRE(cancel);hyperdr_cancel_request(cancel);hyperdr_cancel_destroy(cancel);

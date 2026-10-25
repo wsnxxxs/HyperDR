@@ -17,6 +17,9 @@ final class PackageRowBridge: @unchecked Sendable {
     /// The writer's sequential passes for this encoding; nil when unknown.
     private var passes: Int?
     private let encoding: ExportEncoding?
+    /// AVIF encodes its cells after the rows; see `cell(_:done:total:)`.
+    private let cellsFollow: Bool
+    private var cells = RecipeExportProgress.Cells(encoded: 0, verified: 0, total: 0)
     private var gainIsZero = true
     private var nextThumbnailRow = 0
     private var sums: [SIMD3<Double>]
@@ -27,14 +30,15 @@ final class PackageRowBridge: @unchecked Sendable {
         self.progress = progress; self.encoding = encoding
         // `package_image_rows`: gain encodings scan the gain for its extrema
         // first; gain maps then write the base and the gain as two pictures,
-        // PQ/HLG reconstruct both in one; SDR writes the base once.
+        // PQ/HLG (HEIC and AVIF) reconstruct both in one; SDR writes the base once.
         passes = encoding.map { encoding in
             switch encoding {
             case .adaptive, .isoGainMapJPEG: 3
-            case .pq, .hlg: 2
-            case .sdrJPEG, .sdrTIFF, .avifPq, .avifHlg: 1
+            case .pq, .hlg, .avifPq, .avifHlg: 2
+            case .sdrJPEG, .sdrTIFF: 1
             }
         }
+        cellsFollow = encoding?.isAVIF == true
         self.source = source; self.frame = frame
         width = source.report.canvasSize.width; height = source.report.canvasSize.height
         let scale = min(1, 256 / Double(max(width, height)))
@@ -45,7 +49,17 @@ final class PackageRowBridge: @unchecked Sendable {
 
     /// Where encoding starts, before the writer's first row.
     var started: RecipeExportProgress {
-        .init(stage: .encoding, completedRows: 0, totalRows: height, includesRendering: true, rowPass: 1, rowPasses: passes)
+        .init(stage: .encoding, completedRows: 0, totalRows: height, includesRendering: true, rowPass: 1, rowPasses: passes,
+              cellsFollow: cellsFollow)
+    }
+
+    /// The writer's cell progress, on the same serial package thread as `read`.
+    func cell(_ phase: PackagePhase, done: Int, total: Int) {
+        cells = phase == .encode
+            ? .init(encoded: done, verified: cells.verified, total: total)
+            : .init(encoded: cells.encoded, verified: done, total: total)
+        progress(.init(stage: .encoding, completedRows: height, totalRows: height, includesRendering: true,
+                       rowPass: passes, rowPasses: passes, cellsFollow: cellsFollow, cells: cells))
     }
 
     func read(y: Int, count: Int, base: UnsafeMutableBufferPointer<Float>,
@@ -105,7 +119,7 @@ final class PackageRowBridge: @unchecked Sendable {
                 passes = passes.map { $0 - 1 }
             }
             progress(.init(stage: .encoding, completedRows: progressEnd, totalRows: height,
-                           includesRendering: true, rowPass: progressPass, rowPasses: passes))
+                           includesRendering: true, rowPass: progressPass, rowPasses: passes, cellsFollow: cellsFollow))
         }
     }
 

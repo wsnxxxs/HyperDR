@@ -2,6 +2,7 @@
 #include "hyperdr/app/package.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/json.hpp"
+#include "hyperdr/foundation/progress.hpp"
 namespace hyperdr {
 struct EngineConfig {
   std::filesystem::path cache_directory;
@@ -15,7 +16,8 @@ class Engine {
   [[nodiscard]] std::string capabilities() const;
   [[nodiscard]] std::string probe(const std::filesystem::path& source) const;
   [[nodiscard]] std::string package_rows(const PackageRequest&, std::uint32_t rows,
-      const PackageRows&, const CancelToken* cancel = nullptr) const;
+      const PackageRows&, const CancelToken* cancel = nullptr,
+      const PackageProgress* progress = nullptr) const;
   [[nodiscard]] std::string package(const PackageRequest&, const CancelToken* cancel = nullptr) const;
  private:
   EngineConfig config_;

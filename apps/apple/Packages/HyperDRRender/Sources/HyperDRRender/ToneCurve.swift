@@ -17,16 +17,10 @@ extension DoubleReference {
 extension ToneAdjustments {
     /// Four overlapping smooth, monotone local lifts in encoded lightness.
     public func parametricValue(at input: Double) -> Double {
-        var x = input
-        let b = [0.0, Double(parametricSplit1), Double(parametricSplit2), Double(parametricSplit3), 1.0]
-        let amounts = [parametricShadows, parametricDarks, parametricLights, parametricHighlights]
-        for i in 0..<4 where amounts[i] != 0 {
-            let lo = b[max(0,i-1)], hi = b[min(4,i+2)]
-            guard hi > lo, x > lo, x < hi else { continue }
-            let t = (x-lo)/(hi-lo)
-            x += 4*Double(amounts[i])*(hi-lo)*t*t*(1-t)*(1-t)
-        }
-        return x
+        ParametricCurve.value(at: input, highlights: Double(parametricHighlights)*100,
+            lights: Double(parametricLights)*100, darks: Double(parametricDarks)*100,
+            shadows: Double(parametricShadows)*100,
+            splits: [Double(parametricSplit1)*100,Double(parametricSplit2)*100,Double(parametricSplit3)*100])
     }
 
     /// Eight 1024-entry tables. Slots are stable and shared with Adjustments.metal.

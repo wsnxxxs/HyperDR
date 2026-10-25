@@ -32,6 +32,12 @@ public struct ColorAdjustments: Hashable, Sendable {
     public var tint: Float = RenderParameter.defaultNumber("color.tint")
     public var vibrance: Float = RenderParameter.defaultNumber("color.vibrance")
     public var saturation: Float = RenderParameter.defaultNumber("color.saturation")
+    /// Eight bands in HSLBand order, hue/saturation/luminance in engine units.
+    public var mixer: [SIMD3<Float>] = Array(repeating: .zero, count: 8)
+    /// Shadows, midtones, highlights, global: hue degrees, saturation, luminance.
+    public var grading: [SIMD3<Float>] = Array(repeating: .zero, count: 4)
+    public var gradingBlending: Float = 0.5
+    public var gradingBalance: Float = 0
     public init() {}
     public var isIdentity: Bool { self == Self() }
 }
@@ -67,6 +73,8 @@ public struct LookAdjustments: Hashable, Sendable {
     public var strength: Float = RenderParameter.defaultNumber("look.strength")
     public var input: LUTSpace = .sRGB
     public var output: LUTSpace = .sRGB
+    /// Absolute scene exposure before Log encoding; nil uses the LUT meter.
+    public var exposure: Float? = 0
     public init() {}
     public var isIdentity: Bool { !enabled || lut == nil || strength == 0 }
 }
@@ -105,7 +113,22 @@ public struct RenderAdjustments: Hashable, Sendable {
             ("hdr.sdrRolloff",hdr.sdrRolloff),("look.strength",look.strength),("look.filmStrength",film.strength),("effect.grain",effects.grain),("effect.halation",effects.halation)] {
             try RenderParameter.check(value,id:id)
         }
+        guard color.mixer.count == 8 else { throw RenderError.invalidAdjustment }
+        for (i, band) in HSLBand.allCases.enumerated() {
+            for (c, component) in HSLComponent.allCases.enumerated() {
+                try RenderParameter.check(color.mixer[i][c],id:"hsl.\(band.rawValue).\(component.rawValue)")
+            }
+        }
+        guard color.grading.count == 4 else { throw RenderError.invalidAdjustment }
+        for (i, zone) in ColorGradingZone.allCases.enumerated() {
+            for (c, component) in HSLComponent.allCases.enumerated() {
+                try RenderParameter.check(color.grading[i][c],id:"grade.\(zone.rawValue).\(component.rawValue)")
+            }
+        }
+        try RenderParameter.check(color.gradingBlending,id:"grade.blending")
+        try RenderParameter.check(color.gradingBalance,id:"grade.balance")
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
+        if let exposure = look.exposure { try RenderParameter.check(exposure,id:"look.exposure") }
         if let exposure = film.exposure { try RenderParameter.check(exposure,id:"look.filmExposure") }
         if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
         guard look.isIdentity || !usesFilmProcessing else { throw RenderError.invalidAdjustment }

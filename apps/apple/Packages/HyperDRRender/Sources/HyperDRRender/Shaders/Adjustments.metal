@@ -17,6 +17,29 @@ float contrastY(float y, float c) {
     }
     return pow(target, 2.4f);
 }
+float3 colorLab(float3 rgb) {
+    float l=cb(dot(rgb,float3(.4813272912f,.4620679117f,.0564956029f)));
+    float m=cb(dot(rgb,float3(.2288381013f,.6532343999f,.1179544132f)));
+    float s=cb(dot(rgb,float3(.0839860178f,.2242727893f,.6922208389f)));
+    return float3(.2104542553f*l+.7936177850f*m-.0040720468f*s,
+                  1.9779984951f*l-2.4285922050f*m+.4505937099f*s,
+                  .0259040371f*l+.7827717662f*m-.8086757660f*s);
+}
+float3 colorPreserveY(float3 rgb,float target) {
+    float y=lum(rgb); return y>1e-8f ? rgb*(target/y) : float3(target);
+}
+float3 colorVibrance(float3 rgb,float amount) {
+    if(amount==0) return rgb;
+    float y=lum(rgb),scale=max(1.f,y);
+    float3 lab=colorLab(rgb/scale);
+    float relative=length(lab.yz)/max(.001f,lab.x),hue=atan2(lab.z,lab.y)*180.f/M_PI_F;
+    if(hue<0) hue+=360.f;
+    float skin=sm(20.f,30.f,hue)*(1-sm(75.f,90.f,hue))*(1-sm(.3f,.5f,relative));
+    float weight=(amount>0 ? 1-sm(.08f,.45f,relative) : .25f+.75f*sm(.08f,.45f,relative))*(1-2*skin/3);
+    lab.yz*=1+amount*weight*(amount>0 ? 1.2f : .65f);
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y);
+}
+
 float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 1 ? amount == 1 : amount == 0) return rgb;
     float y = lum(rgb), target = y, a = amount;
@@ -42,10 +65,10 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         // Linear matrix M = D + 1*(w' - w'D), so w'M = w' exactly.
         return changed + (rawY(rgb) - rawY(changed));
     }
-    if (op == 7 || op == 8) {
+    if (op == 7) return colorVibrance(rgb,amount);
+    if (op == 8) {
         float3 chroma = rgb - y;
-        float saturation = maximum(abs(chroma)) / max(y,1e-6f);
-        float factor = op == 7 ? 1 + a*(1-sm(.15f,1.f,saturation)) : 1+a;
+        float factor = 1+a;
         return y + chroma * factor;
     }
     if (op == 1) target = contrastY(y,amount);
@@ -84,6 +107,7 @@ kernel void adjustPoint(texture2d<float,access::read> src [[texture(0)]],
     dst.write(float4(pointOp(x.rgb,p.op,p.value,p.sdr),x.a),pos);
 }
 
+struct ColorToolsUniform { float4 band0, band1, band2, band3, band4, band5, band6, band7; float4 grade0,grade1,grade2,grade3,gradeOptions; };
 struct GraphUniform {
     float4 tone0, tone1, color, hdr;
     uint4 flags, lutInfo;
@@ -97,9 +121,53 @@ struct GraphUniform {
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
     float4 light; // whites, curve table offset, curve table size
     float4 curveHDRTails;
+    float4 lutExposure; // scene multiplier before Log encoding
+    ColorToolsUniform colorTools;
     uint4 toneSpatialInfo;
     float4 toneSpatialSettings,toneAtmosphere;
 };
+// Smooth neighbouring memberships in OKLCH; equal weights to the Swift reference.
+void hslWeights(float3 rgb, thread float* weights) {
+    float3 lab=colorLab(rgb/max(1.f,lum(rgb)));
+    float fade=sm(.015f,.06f,length(lab.yz)/max(.001f,lab.x));
+    float hue=atan2(lab.z,lab.y)*180.f/M_PI_F;
+    if(hue<25) hue+=360.f;
+    const float centers[9]={25,55,95,145,195,265,305,335,385};
+    for(uint i=0;i<8;i++) weights[i]=0;
+    for(uint i=0;i<8;i++) if(hue>=centers[i] && hue<centers[i+1]) {
+        float t=sm(centers[i],centers[i+1],hue);
+        weights[i]=(1-t)*fade;weights[(i+1)%8]=t*fade;
+    }
+}
+float3 colorMixer(float3 rgb,constant ColorToolsUniform& p) {
+    const float3 bands[8]={p.band0.xyz,p.band1.xyz,p.band2.xyz,p.band3.xyz,p.band4.xyz,p.band5.xyz,p.band6.xyz,p.band7.xyz};
+    bool active=false;for(uint i=0;i<8;i++) active=active || any(bands[i]!=0.f);
+    if(!active) return rgb;
+    float weights[8];hslWeights(rgb,weights);
+    float3 delta=0;for(uint i=0;i<8;i++) delta+=bands[i]*weights[i];
+    if(all(delta==0.f)) return rgb;
+    float y=lum(rgb);float3 lab=colorLab(rgb/max(1.f,y));
+    float hue=atan2(lab.z,lab.y)+delta.x*M_PI_F/6.f;
+    float chroma=length(lab.yz)*max(0.f,1+delta.y);
+    lab.yz=chroma*float2(cos(hue),sin(hue));
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y*exp2(delta.z));
+}
+float3 colorGrade(float3 rgb,constant ColorToolsUniform& p) {
+    const float3 wheels[4]={p.grade0.xyz,p.grade1.xyz,p.grade2.xyz,p.grade3.xyz};
+    bool active=false;for(uint i=0;i<4;i++) active=active || wheels[i].y!=0 || wheels[i].z!=0;
+    if(!active) return rgb;
+    float y=lum(rgb);float3 lab=colorLab(rgb/max(1.f,y));
+    float position=clamp(min(1.f,cb(y))+p.gradeOptions.y*.2f,0.f,1.f),width=.08f+.22f*p.gradeOptions.x;
+    float shadows=1-sm(.35f-width,.35f+width,position),highlights=sm(.75f-width,.75f+width,position);
+    const float weights[4]={shadows,1-shadows-highlights,highlights,1};
+    float2 offset=0;float light=0;
+    for(uint i=0;i<4;i++) {
+        float hue=wheels[i].x*M_PI_F/180.f,chroma=.18f*wheels[i].y*weights[i]*lab.x;
+        offset+=chroma*float2(cos(hue),sin(hue));light+=wheels[i].z*weights[i];
+    }
+    lab.yz+=offset;
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y*exp2(light));
+}
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
 float3 p3to2020(float3 x) { return float3(dot(x,float3(.753833f,.198597f,.047570f)),dot(x,float3(.045744f,.941777f,.012479f)),dot(x,float3(-.001210f,.017602f,.983608f))); }
@@ -120,7 +188,23 @@ float3 p3toAWG4(float3 x) { return float3(dot(x,float3(.67695999f,.21998630f,.10
 float3 awg4ToP3(float3 x) { return float3(dot(x,float3(1.52050240f,-.40429866f,-.11620373f)),dot(x,float3(-.13603158f,1.26984798f,-.13381640f)),dot(x,float3(.00587852f,-.05487566f,1.04899714f))); }
 float3 p3toCinema(float3 x) { return float3(dot(x,float3(.66516377f,.20889950f,.12593674f)),dot(x,float3(.06595013f,.75819764f,.17585223f)),dot(x,float3(.01650097f,.16958652f,.81391252f))); }
 float3 cinemaToP3(float3 x) { return float3(dot(x,float3(1.54602980f,-.39137139f,-.15465841f)),dot(x,float3(-.13366788f,1.41972914f,-.28606126f)),dot(x,float3(-.00349265f,-.28787973f,1.29137238f))); }
+
+// Manufacturer xy NPMs; AP1 D60 -> D65 uses Bradford.
+float3 toFGamutC(float3 x) { return float3(dot(x,float3(0.61463729f,0.30848762f,0.07687509f)),dot(x,float3(0.07251020f,0.81533444f,0.11215536f)),dot(x,float3(-0.00000000f,0.04142423f,0.95857577f))); }
+float3 fromFGamutC(float3 x) { return float3(dot(x,float3(1.70260384f,-0.64106582f,-0.06153802f)),dot(x,float3(-0.15232327f,1.29117787f,-0.13885460f)),dot(x,float3(0.00658255f,-0.05579742f,1.04921487f))); }
+float3 toDGamut(float3 x) { return float3(dot(x,float3(0.74092272f,0.15138586f,0.10769142f)),dot(x,float3(0.02527437f,0.80940408f,0.16532156f)),dot(x,float3(0.01312916f,0.09676215f,0.89010869f))); }
+float3 fromDGamut(float3 x) { return float3(dot(x,float3(1.35998174f,-0.24002153f,-0.11996021f)),dot(x,float3(-0.03924070f,1.27045756f,-0.23121686f)),dot(x,float3(-0.01579403f,-0.13456887f,1.15036290f))); }
+float3 toDWG(float3 x) { return float3(dot(x,float3(0.67351724f,0.20159153f,0.12489123f)),dot(x,float3(0.06032906f,0.75003422f,0.18963673f)),dot(x,float3(0.05654380f,0.12707417f,0.81638203f))); }
+float3 fromDWG(float3 x) { return float3(dot(x,float3(1.53154371f,-0.38718496f,-0.14435875f)),dot(x,float3(-0.10031767f,1.41325474f,-0.31293708f)),dot(x,float3(-0.09046195f,-0.19316357f,1.28362552f))); }
+float3 toAP1(float3 x) { return float3(dot(x,float3(0.73579791f,0.21216649f,0.05203560f)),dot(x,float3(0.04717988f,0.93804570f,0.01477441f)),dot(x,float3(0.00356366f,0.04114189f,0.95529445f))); }
+float3 fromAP1(float3 x) { return float3(dot(x,float3(1.37921413f,-0.30886414f,-0.07034998f)),dot(x,float3(-0.06933486f,1.08229675f,-0.01296189f)),dot(x,float3(-0.00215901f,-0.04545932f,1.04761833f))); }
+
 float3 toLogPrimaries(float3 x,uint space) {
+    if(space==12 || space==14 || space==15) return p3toFGamut(x);
+    if(space==13) return toFGamutC(x);
+    if(space==16) return toDGamut(x);
+    if(space==18) return toDWG(x);
+    if(space==19) return toAP1(x);
     if(space==5) return p3toCine(x);
     if(space==6) return p3toSG3(x);
     if(space==7) return p3toVG(x);
@@ -130,6 +214,11 @@ float3 toLogPrimaries(float3 x,uint space) {
     return p3toCinema(x);
 }
 float3 fromLogPrimaries(float3 x,uint space) {
+    if(space==12 || space==14 || space==15) return fgamutToP3(x);
+    if(space==13) return fromFGamutC(x);
+    if(space==16) return fromDGamut(x);
+    if(space==18) return fromDWG(x);
+    if(space==19) return fromAP1(x);
     if(space==5) return cineToP3(x);
     if(space==6) return sg3ToP3(x);
     if(space==7) return vgToP3(x);
@@ -142,9 +231,17 @@ float pqEncode(float x) { float z=pow(clamp(x*.0203f,0.f,1.f),2610.f/16384); ret
 float pqDecode(float x) { float z=pow(clamp(x,0.f,1.f),32.f/2523); return pow(max(z-3424.f/4096,0.f)/max(2413.f/128-2392.f/128*z,1e-6f),16384.f/2610)/.0203f; }
 // Below each knee, including negatives, the white-paper linear segment is used.
 float logEncode(float v,uint space) {
+    if(space==12) return v < 0.00089f ? 8.735631f*v+0.092864f : 0.344676f*log10(0.555556f*v+0.009468f)+0.790453f;
+    if(space==14) return v >= 0.01f ? 0.08550479f*log2(v+0.00964052f)+0.69336945f : 47.28711236f*pow(max(0.f,v+0.05641088f),2.f);
+    if(space==15) return v < 0.328f ? 650.f*(sign(v+0.0075f)*pow(abs(v+0.0075f),1.f/3.f))/1023.f : (150.f*log(v)+619.f)/1023.f;
+    if(space==16) return v <= 0.0078f ? 6.025f*v+0.0929f : 0.256663f*log10(0.9892f*v+0.0108f)+0.584555f;
+    if(space==17) return 0.092864125f + (v < 0.f ? -1.f : 1.f)*0.24136077f*log10(1.f+87.099375f*abs(v)/0.9f);
+    if(space==18) return v <= 0.00262409f ? v*10.44426855f : (log2(v+0.0075f)+7.f)*0.07329248f;
+    if(space==19) return v <= 0.0078125f ? 10.5402377416545f*v+0.0729055341958355f : (log2(v)+9.72f)/17.52f;
+
     if(space<=6) return v>=.01125f ? (420+261.5f*log10((v+.01f)/.19f))/1023 : (v*(171.2102946929f-95)/.01125f+95)/1023;
     if(space==7) return v<.01f ? 5.6f*v+.125f : .241514f*log10(v+.00873f)+.598206f;
-    if(space==8) return v<.000889f ? 8.799461f*v+.092864f : .245281f*log10(5.555556f*v+.064829f)+.384316f;
+    if(space==8 || space==13) return v<.000889f ? 8.799461f*v+.092864f : .245281f*log10(5.555556f*v+.064829f)+.384316f;
     if(space==9) return v>.010591f ? .247190f*log10(5.555556f*v+.052272f)+.385537f : 5.367655f*v+.092809f;
     if(space==10) {
         float a=2231.826309067688f,b=.9071358748778103f,c=.09286412512218964f,s=.1135972086105891f,t=-.01805699611991131f;
@@ -156,9 +253,17 @@ float logEncode(float v,uint space) {
     return .36726845f*log10(x*14.98325f+1.f)+.12240537f;
 }
 float logDecode(float v,uint space) {
+    if(space==12) return v < 0.100537775223865f ? (v-0.092864f)/8.735631f : (pow(10.f,(v-0.790453f)/0.344676f)-0.009468f)/0.555556f;
+    if(space==14) return v >= 47.28711236f*pow(0.06641088f,2.f) ? exp2((v-0.69336945f)/0.08550479f)-0.00964052f : sqrt(max(0.f,v)/47.28711236f)-0.05641088f;
+    if(space==15) return v*1023.f < 452.f ? ((v*1023.f/650.f)*(v*1023.f/650.f)*(v*1023.f/650.f))-0.0075f : exp((v*1023.f-619.f)/150.f);
+    if(space==16) return v <= 0.14f ? (v-0.0929f)/6.025f : (pow(10.f,(v-0.584555f)/0.256663f)-0.0108f)/0.9892f;
+    if(space==17) return (v < 0.092864125f ? -1.f : 1.f)*(pow(10.f,abs(v-0.092864125f)/0.24136077f)-1.f)/87.099375f*0.9f;
+    if(space==18) return v <= 0.02740668f ? v/10.44426855f : exp2(v/0.07329248f-7.f)-0.0075f;
+    if(space==19) return v <= 0.155251141552511f ? (v-0.0729055341958355f)/10.5402377416545f : exp2(v*17.52f-9.72f);
+
     if(space<=6) return v>=171.2102946929f/1023 ? pow(10.f,(v*1023-420)/261.5f)*.19f-.01f : (v*1023-95)*.01125f/(171.2102946929f-95);
     if(space==7) return v<.181f ? (v-.125f)/5.6f : pow(10.f,(v-.598206f)/.241514f)-.00873f;
-    if(space==8) return v<.100686685370811f ? (v-.092864f)/8.799461f : (pow(10.f,(v-.384316f)/.245281f)-.064829f)/5.555556f;
+    if(space==8 || space==13) return v<.100686685370811f ? (v-.092864f)/8.799461f : (pow(10.f,(v-.384316f)/.245281f)-.064829f)/5.555556f;
     if(space==9) { float knee=5.367655f*.010591f+.092809f; return v>knee ? (pow(10.f,(v-.385537f)/.247190f)-.052272f)/5.555556f : (v-.092809f)/5.367655f; }
     if(space==10) {
         float a=2231.826309067688f,b=.9071358748778103f,c=.09286412512218964f,s=.1135972086105891f,t=-.01805699611991131f;
@@ -171,7 +276,8 @@ float logDecode(float v,uint space) {
     return x*.9f;
 }
 float3 lutEncode(float3 x,uint space) {
-    if (space >= 5) x=toLogPrimaries(x,space);
+    if (space >= 5 && space != 20) x=toLogPrimaries(x,space);
+    else if (space == 20) x=p3toFGamut(x);
     else if (space == 3 || space == 4) x=p3to2020(x);
     else if (space != 1) {
         // Fit the 709 cube at constant luminance before applying its matrix.
@@ -191,9 +297,9 @@ float3 lutEncode(float3 x,uint space) {
     }
     for(uint c=0;c<3;c++) {
         float v=x[c];
-        if(space>=5) x[c]=logEncode(v,space);
+        if(space>=5 && space!=20) x[c]=logEncode(v,space);
         else if(space==4) x[c]=pqEncode(v);
-        else if(space==2) x[c]=pow(max(v,0.f),1.f/2.4f);
+        else if(space==2 || space==20) x[c]=pow(max(v,0.f),1.f/2.4f);
         else x[c]=v<=.0031308f ? 12.92f*v : 1.055f*pow(v,1.f/2.4f)-.055f;
     }
     return x;
@@ -204,12 +310,13 @@ float3 lutDecode(float3 x,uint space) {
         x*=pow(abs(dot(x,float3(.2627f,.6780f,.0593f))),.2f)/.203f;
     } else for(uint c=0;c<3;c++) {
         float v=x[c];
-        if(space>=5) x[c]=logDecode(v,space);
+        if(space>=5 && space!=20) x[c]=logDecode(v,space);
         else if(space==4) x[c]=pqDecode(v);
-        else if(space==2) x[c]=pow(max(v,0.f),2.4f);
+        else if(space==2 || space==20) x[c]=pow(max(v,0.f),2.4f);
         else x[c]=v<=.04045f ? v/12.92f : pow((v+.055f)/1.055f,2.4f);
     }
-    if(space>=5) return fromLogPrimaries(x,space);
+    if(space>=5 && space!=20) return fromLogPrimaries(x,space);
+    if(space==20) return fgamutToP3(x);
     if(space==3 || space==4) return toP3from2020(x);
     if(space!=1) return toP3from709(x);
     return x;
@@ -224,8 +331,8 @@ float3 lutSample(float3 rgb,constant GraphUniform& p, texture3d<float,access::re
 }
 float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
     if(p.color.y==0) return rgb;
-    float3 changed=lutDecode(lutSample(lutEncode(rgb,p.lutInfo.z),p,cube,table),p.lutInfo.w);
-    changed=fit(changed,p.flags.y && p.lutInfo.w<=2 ? 1.f : max(1.f,maximum(changed)));
+    float3 changed=lutDecode(lutSample(lutEncode(rgb*p.lutExposure.x,p.lutInfo.z),p,cube,table),p.lutInfo.w);
+    changed=fit(changed,p.flags.y && (p.lutInfo.w<=2 || p.lutInfo.w==20) ? 1.f : max(1.f,maximum(changed)));
     return changed;
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
@@ -276,7 +383,7 @@ float3 spatialClarity(float3 rgb,float low,float amount) {
     return rgb*exp2(.8f*amount*weight*(log2(y+1e-4f)-low));
 }
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,float2 uv=float2(.5f),bool spatialEnabled=true) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,float2 uv=float2(.5f),bool spatialEnabled=true,bool beforeMixer=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);
@@ -292,9 +399,12 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     }
     rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
+    if(beforeMixer) return rgb;
+    rgb=colorMixer(rgb,p.colorTools);
+    rgb=colorGrade(rgb,p.colorTools);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
-    bool logLook=p.flags.z && p.lutInfo.z>=5;
+    bool logLook=p.flags.z && p.lutInfo.z>=5 && p.lutInfo.z!=20;
     if(!logLook && p.effects.w==0) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
     return rgb;
 }
@@ -335,7 +445,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     }
     if(p.flags.y) {
         base=applyLUT(base,p,cube,table);
-        if(p.lutInfo.w>2) {
+        if(p.lutInfo.w>2 && p.lutInfo.w!=20) {
             float3 hdr=base*exp2(g);
             g=log2(max(1.f,maximum(hdr)));
             base=fit(hdr*exp2(-g),1.f);
@@ -354,7 +464,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         if(p.flags.y) {
             base=applyLUT(neutralBase,p,cube,table);
             styledHDR=max(float3(0),(base+offset)*(neutralHDR+offset)/(neutralBase+offset)-offset);
-            if(p.lutInfo.w>2) base=fit(base/ max(1.f,maximum(base)),1.f);
+            if(p.lutInfo.w>2 && p.lutInfo.w!=20) base=fit(base/ max(1.f,maximum(base)),1.f);
         }
         float3 hdr=weight>0 ? mix(neutralHDR,styledHDR,weight) : neutralHDR;
         base=weight>0 ? mix(neutralBase,base,weight) : neutralBase;
@@ -803,4 +913,18 @@ kernel void toneFinishMap(texture2d<float,access::read> logs [[texture(0)]],
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
     float4 c=coefficients.read(pos),l=logs.read(pos);
     output.write(float4(transmission.read(pos).x,c.x*l.x+c.y,c.z*l.z+c.w,0),pos);
+}
+// One small patch, before the mixer; no readback of the full preview is needed.
+kernel void graphMixerSample(texture2d<float,access::read> src [[texture(0)]],
+                             texture3d<float,access::read> cube [[texture(1)]],
+                             constant GraphUniform& p [[buffer(0)]],device const float4* table [[buffer(1)]],
+                             device float4* result [[buffer(2)]],uint2 pos [[thread_position_in_grid]]) {
+    if(any(pos!=uint2(0))) return;
+    float3 rgb=0;
+    int2 high=int2(src.get_width()-1,src.get_height()-1);
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+        uint2 site=uint2(clamp(int2(p.region.zw)+int2(x,y),int2(0),high));
+        rgb+=graphScene(src.read(site),p,cube,table,false,true,(float2(site)+.5f)/float2(src.get_width(),src.get_height()),true,true);
+    }
+    result[0]=float4(rgb/9.f,1);
 }

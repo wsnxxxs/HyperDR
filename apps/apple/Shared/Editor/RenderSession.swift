@@ -77,6 +77,14 @@ actor RenderSession: EditorRendering {
         try await mapped { try await openSource(url, previewSize: previewSize, restoring: restoring) }
     }
 
+    func pickHSL(_ request: EditorRenderRequest, at point: CGPoint) async throws -> HSLColorSample {
+        let prepared = try await prepare(request)
+        let sample = try await engine.pickHSL(prepared.source,recipe:request.recipe,at:point,
+                                              lut:prepared.lut,options:prepared.options)
+        try checkCurrent(prepared.generation)
+        return sample
+    }
+
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample {
         guard let opened else { throw EditorRenderingError.noSource }
         guard opened.editor.id == request.sourceID else { throw EditorRenderingError.staleSource }

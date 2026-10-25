@@ -46,3 +46,32 @@ import Testing
         try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("curve-editors-\(name).png"))
     }
 }
+
+/// Writes the colour grading section in light and dark, Mac and touch style.
+@MainActor @Test func colorGradingSnapshots() throws {
+    guard let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"] else { return }
+    for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+        for (style, label) in [(AdjustmentControlStyle.pointer, "mac"), (.touch, "touch")] {
+            let bitmap = try snapshot(ColorSectionsGallery(style: style, showsGrading: true),
+                                      width: style == .touch ? 360 : 342, scheme: scheme)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("color-grading-\(label)-\(name).png"))
+        }
+    }
+}
+
+/// Writes the colour mixer sections in light and dark, Mac and touch style.
+@MainActor @Test func colorSectionsSnapshots() throws {
+    guard let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"] else { return }
+    for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+        for (style, label) in [(AdjustmentControlStyle.pointer, "mac"), (.touch, "touch")] {
+            for arrangement in 0...1 {
+                let bitmap = try snapshot(ColorSectionsGallery(style: style, arrangement: arrangement),
+                                          width: style == .touch ? 360 : 342, scheme: scheme)
+                let data = try #require(bitmap.representation(using: .png, properties: [:]))
+                try data.write(to: URL(fileURLWithPath: directory)
+                    .appendingPathComponent("color-sections-\(label)-\(arrangement == 0 ? "attribute" : "band")-\(name).png"))
+            }
+        }
+    }
+}

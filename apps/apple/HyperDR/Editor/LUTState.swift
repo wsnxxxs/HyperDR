@@ -8,24 +8,32 @@ import HyperDRKit
 typealias LUTColorSpace = LUTSpace
 
 extension LUTSpace {
-    /// The spaces as the library's menus list them: display, HDR, then the
-    /// cameras' Log encodings, which only a RAW photo's look can take as input.
+    /// The spaces as the library's menus list them: display, HDR, the
+    /// cameras' Log encodings and the grading spaces (DaVinci, ACES), which
+    /// only a RAW photo's look can take as input. By raw value (the ids of
+    /// `look.input` / `look.output`), so a space added to the engine lands in
+    /// Log until it is listed here.
     var family: LUTSpaceFamily {
-        switch self {
-        case .srgb, .p3, .rec709: .display
-        case .hlg, .pq: .hdr
+        switch rawValue {
+        case "srgb", "p3", "rec709", "rec2020": .display
+        case "hlg", "pq": .hdr
+        case "davinci-dwg", "acescct-ap1": .grading
         default: .log
         }
     }
+
+    /// A camera Log or grading space: scene data, so only a RAW photo's look takes it as input.
+    var isSceneReferred: Bool { family == .log || family == .grading }
 }
 
 nonisolated enum LUTSpaceFamily: CaseIterable, Sendable {
-    case display, hdr, log
+    case display, hdr, log, grading
     var titleKey: String {
         switch self {
         case .display: "lut.space.family.display"
         case .hdr: "lut.space.family.hdr"
         case .log: "lut.space.family.log"
+        case .grading: "lut.space.family.grading"
         }
     }
 }

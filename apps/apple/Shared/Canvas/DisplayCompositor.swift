@@ -29,6 +29,9 @@ nonisolated struct DisplayComposition: @unchecked Sendable {
     /// The crop pane: the edited photo drawn through a geometry instead of the
     /// canvas transform, with no detail tiles or comparison.
     var geometry: GeometryDisplay? = nil
+    /// Dead black and clipping marks (Render's diagnostic masks) for the
+    /// edited photo, painted while present.
+    var clipping: ClippingMasks? = nil
 }
 
 /// The photo seen through the crop pane's geometry: where each point of the
@@ -42,6 +45,15 @@ nonisolated struct GeometryDisplay: Equatable, Sendable {
     var clipsToCrop = false
     /// The photo outside the crop dimmed, while the crop is edited.
     var dimsOutsideCrop = false
+}
+
+/// Render's clipping masks (RG32Float, red dead black, green clipping,
+/// top-down), one for the whole edited photo and one for its detail layer.
+nonisolated struct ClippingMasks: @unchecked Sendable {
+    var whole: (any MTLTexture)?
+    var detail: (any MTLTexture)?
+
+    var isEmpty: Bool { whole == nil && detail == nil }
 }
 
 nonisolated struct CanvasOverlays: Equatable, Sendable {
@@ -61,7 +73,8 @@ nonisolated struct CompositionParams {
     var padding0: Float = 0
     var hdrRange: Float = 0
     var backingScale: Float = 1
-    var padding1: Float = 0
+    /// Bit 7 of `flags`: how far the clipping marks cover the photo.
+    var clippingOpacity: Float = CanvasOverlayStyle.clippingOpacity
     var padding2: Float = 0
     var padding: Float = 0
     var maskColor = SIMD4(CanvasOverlayStyle.mask, CanvasOverlayStyle.maskOpacity)
@@ -120,6 +133,8 @@ nonisolated final class DisplayCompositor {
         let texture: any MTLTexture
         var weight: Float
     }
+    /// Bound where a draw has no clipping mask, so the slot is never empty.
+    private let emptyMask: any MTLTexture
     private var original: Entry?
     private var edited: Entry?
     private var detailOriginal: DisplayPair?
@@ -142,6 +157,14 @@ nonisolated final class DisplayCompositor {
         descriptor.fragmentFunction = library.makeFunction(name: "compositionFragment")
         descriptor.colorAttachments[0].pixelFormat = .rgba16Float
         display = try device.makeRenderPipelineState(descriptor: descriptor)
+        let empty = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rg32Float, width: 1, height: 1, mipmapped: false)
+        empty.usage = .shaderRead
+        guard let emptyMask = device.makeTexture(descriptor: empty) else {
+            throw PreviewError.unavailable("Unable to allocate composition texture")
+        }
+        emptyMask.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0,
+                          withBytes: [Float](repeating: 0, count: 2), bytesPerRow: 8)
+        self.emptyMask = emptyMask
         guard MemoryLayout<CompositionParams>.stride == 192, MemoryLayout<DisplayLayerParams>.stride == 160 else {
             throw PreviewError.unavailable("Composition parameter layout changed")
         }
@@ -312,7 +335,7 @@ nonisolated final class DisplayCompositor {
             encoder.setScissorRect(MTLScissorRect(x: lower, y: 0, width: upper - lower, height: target.height))
             var params = parameters(content, original: isOriginal, transform: transform)
             params.rect = EDRDisplayPass.normalisedRect(transform, drawableSize: size)
-            draw(encoder, texture: entry.texture, params: params)
+            draw(encoder, texture: entry.texture, params: params, mask: isOriginal ? nil : content.clipping?.whole)
             if let atlas = detailTexture, let pair = isOriginal ? detailOriginal : detailEdited,
                let region = pair.region {
                 let normalized = CGRect(x: region.minX / transform.imageSize.width,
@@ -321,7 +344,7 @@ nonisolated final class DisplayCompositor {
                 params.rect = Self.tileRect(normalized, transform: transform)
                 params.uvScale = SIMD2(Float(pair.width) / Float(atlas.width), Float(pair.height) / Float(atlas.height))
                 params.slice = isOriginal ? 0 : 3
-                draw(encoder, texture: atlas, params: params)
+                draw(encoder, texture: atlas, params: params, mask: isOriginal ? nil : content.clipping?.detail)
             }
         }
         if content.mode != .edited, let original { side(original, original: true) }
@@ -352,12 +375,16 @@ nonisolated final class DisplayCompositor {
             if content.overlays.highlights { params.flags |= 2 }
             if content.overlays.shadows { params.flags |= 4 }
             if content.overlays.mask { params.flags |= 8 }
+            if let clipping = content.clipping, !clipping.isEmpty { params.flags |= 128 }
         }
         return params
     }
 
-    func draw(_ encoder: any MTLRenderCommandEncoder, texture: any MTLTexture, params: CompositionParams) {
+    func draw(_ encoder: any MTLRenderCommandEncoder, texture: any MTLTexture, params: CompositionParams,
+              mask: (any MTLTexture)? = nil) {
         var params = params
+        if mask == nil { params.flags &= ~128 }
+        encoder.setFragmentTexture(mask ?? emptyMask, index: 1)
         params.stripe.x *= params.backingScale
         params.stripe.y *= params.backingScale
         encoder.setRenderPipelineState(display)

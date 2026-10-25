@@ -61,6 +61,7 @@ public actor RenderEngine {
     /// entry would develop the RAW twice for every strength step.
     var lookBaselineCache: (id: UUID, texture: any MTLTexture)?
     var analysisLookBaselineCache: (id: UUID, texture: any MTLTexture)?
+    var lutMeterCache: [LUTMeterKey: Float] = [:]
     var filmMeterCache: [FilmMeterKey: Float] = [:]
     var filmMeterInputCache: (id: UUID, scene: RenderSource, target: Double)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
@@ -143,6 +144,7 @@ public actor RenderEngine {
         lutCache = nil
         filmCache = nil
         filmMeterCache.removeAll()
+        lutMeterCache.removeAll()
         filmMeterInputCache = nil
         lookBaselineCache = nil
         analysisLookBaselineCache = nil

@@ -51,6 +51,16 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
             let guess = try #require(LUTSpace.guess(fileName: name), "\(name)")
             #expect(guess.input == input && guess.output == output, "\(name)")
         }
+        for (name, input) in [("FLog_to_ETERNA_33grid_V.1.00", LUTSpace.flogFGamut),
+                              ("FLog2_to_PROVIA_33grid_V.1.00", .flog2FGamut),
+                              ("FLog2C_to_ETERNA_33grid_V.1.00", .flog2cFGamutC)] {
+            #expect(LUTSpace.guess(fileName: name)?.input == input)
+            #expect(LUTSpace.guess(fileName: name)?.output == .rec709)
+        }
+        #expect(LUTSpace.guess(fileName: "AppleLog_to_Rec2020")?.output == .rec2020)
+        #expect(LUTSpace.guess(fileName: "AppleLog_Rec2020_to_Rec709")?.output == .rec709)
+        #expect(LUTSpace.guess(fileName: "Rec2020_to_Rec709")?.input == .rec2020)
+        #expect(LUTSpace.guess(fileName: "Rec2020_to_Rec709")?.output == .rec709)
         #expect(LUTSpace.guess(fileName: "Warm") == nil)
         let env = try LUTEnvironment()
         let entry = try await env.luts.importLUT(env.source("VLog_to_V709.cube"))
@@ -94,7 +104,7 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
             #expect(throws: HyperDRError.self) { _ = try LUTID(rawValue: raw) }
             #expect(throws: HyperDRError.self) { _ = try JSONDecoder().decode(LUTID.self, from: JSONEncoder().encode(raw)) }
         }
-        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"].sorted())
+        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut", "flog-fgamut", "flog2c-fgamutc", "applelog-rec2020", "nlog-rec2020", "dlog-dgamut", "clog2-cinemagamut", "davinci-dwg", "acescct-ap1", "rec2020"].sorted())
         #expect(LUTSpace(rawValue: "linear") == nil)
     }
     @Test func calibrationInvalidUTF8AndWrongExtensionsAreRejected() async throws {

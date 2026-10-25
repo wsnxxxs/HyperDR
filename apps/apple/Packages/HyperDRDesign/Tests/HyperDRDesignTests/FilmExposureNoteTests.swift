@@ -50,3 +50,16 @@ private func panel(automatic: Double? = 0.59) -> AdjustmentPanel {
     #expect(LookSection.kind(revealing: "tone.exposure", current: .imported) == .imported)
     #expect(LookSection.kind(revealing: nil, current: .imported) == .imported)
 }
+
+@Test func lookSpacesAreGroupedAsDisplayHDRLogAndGrading() {
+    #expect(AdjustmentText.LookSpaceFamily("rec2020") == .display)
+    #expect(AdjustmentText.LookSpaceFamily("pq") == .hdr)
+    #expect(AdjustmentText.LookSpaceFamily("slog3-sgamut3cine") == .log)
+    #expect(AdjustmentText.LookSpaceFamily("davinci-dwg") == .grading)
+    #expect(AdjustmentText.LookSpaceFamily("acescct-ap1") == .grading)
+    #expect(AdjustmentText.LookSpaceFamily.allCases == [.display, .hdr, .log, .grading])
+}
+
+@Test func revealingTheLUTExposureKeepsTheImportedTab() {
+    #expect(LookSection.kind(revealing: FilmExposureNote.lutRowID, current: .builtIn) == .imported)
+}

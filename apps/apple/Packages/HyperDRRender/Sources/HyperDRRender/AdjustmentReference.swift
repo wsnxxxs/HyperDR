@@ -67,10 +67,10 @@ extension DoubleReference {
             let changed = rgb*diagonal
             func rawY(_ x: RGB) -> Double { 0.2289746*x.x+0.6917385*x.y+0.0792869*x.z }
             return changed + RGB(repeating: rawY(rgb)-rawY(changed))
-        case .vibrance, .saturation:
+        case .vibrance: return vibrance(rgb,amount:a)
+        case .saturation:
             let chroma = rgb-RGB(repeating:y)
-            let saturation = max(abs(chroma.x),abs(chroma.y),abs(chroma.z))/max(y,1e-6)
-            let amount = operation == .vibrance ? 1+a*(1-smoothStep(0.15,1,saturation)) : 1+a
+            let amount = 1+a
             return RGB(repeating:y)+chroma*amount
         }
     }
@@ -107,15 +107,31 @@ extension DoubleReference {
     static let toCinema = [RGB(0.66516377,0.20889950,0.12593674),RGB(0.06595013,0.75819764,0.17585223),RGB(0.01650097,0.16958652,0.81391252)]
     static let fromCinema = [RGB(1.54602980,-0.39137139,-0.15465841),RGB(-0.13366788,1.41972914,-0.28606126),RGB(-0.00349265,-0.28787973,1.29137238)]
 
+
+    // Manufacturer xy primaries; AP1 D60 is Bradford-adapted to D65.
+    static let toFGamutC = [RGB(0.61463729,0.30848762,0.07687509),RGB(0.07251020,0.81533444,0.11215536),RGB(-0.00000000,0.04142423,0.95857577)]
+    static let fromFGamutC = [RGB(1.70260384,-0.64106582,-0.06153802),RGB(-0.15232327,1.29117787,-0.13885460),RGB(0.00658255,-0.05579742,1.04921487)]
+    static let toDGamut = [RGB(0.74092272,0.15138586,0.10769142),RGB(0.02527437,0.80940408,0.16532156),RGB(0.01312916,0.09676215,0.89010869)]
+    static let fromDGamut = [RGB(1.35998174,-0.24002153,-0.11996021),RGB(-0.03924070,1.27045756,-0.23121686),RGB(-0.01579403,-0.13456887,1.15036290)]
+    static let toDWG = [RGB(0.67351724,0.20159153,0.12489123),RGB(0.06032906,0.75003422,0.18963673),RGB(0.05654380,0.12707417,0.81638203)]
+    static let fromDWG = [RGB(1.53154371,-0.38718496,-0.14435875),RGB(-0.10031767,1.41325474,-0.31293708),RGB(-0.09046195,-0.19316357,1.28362552)]
+    static let toAP1 = [RGB(0.73579791,0.21216649,0.05203560),RGB(0.04717988,0.93804570,0.01477441),RGB(0.00356366,0.04114189,0.95529445)]
+    static let fromAP1 = [RGB(1.37921413,-0.30886414,-0.07034998),RGB(-0.06933486,1.08229675,-0.01296189),RGB(-0.00215901,-0.04545932,1.04761833)]
+
     static func logMatrix(_ x: RGB, space: LUTSpace, inverse: Bool) -> RGB {
         switch space {
         case .sLog3: return matrix(x, inverse ? fromCine : toCine)
         case .slog3SGamut3: return matrix(x, inverse ? fromSG3 : toSG3)
         case .vlogVGamut: return matrix(x, inverse ? fromVG : toVG)
-        case .flog2FGamut: return matrix(x, inverse ? fromFGamut : toFGamut)
+        case .flogFGamut, .appleLogRec2020, .nlogRec2020, .flog2FGamut: return matrix(x, inverse ? fromFGamut : toFGamut)
         case .logC3AWG3: return matrix(x, inverse ? fromAWG3 : toAWG3)
         case .logC4AWG4: return matrix(x, inverse ? fromAWG4 : toAWG4)
         case .clog3CinemaGamut: return matrix(x, inverse ? fromCinema : toCinema)
+        case .flog2cFGamutC: return matrix(x, inverse ? fromFGamutC : toFGamutC)
+        case .dlogDGamut: return matrix(x, inverse ? fromDGamut : toDGamut)
+        case .davinciDWG: return matrix(x, inverse ? fromDWG : toDWG)
+        case .acescctAP1: return matrix(x, inverse ? fromAP1 : toAP1)
+        case .clog2CinemaGamut: return matrix(x, inverse ? fromCinema : toCinema)
         default: return x
         }
     }
@@ -125,13 +141,21 @@ extension DoubleReference {
     /// the log is never fed a non-positive argument.
     static func encodeLog(_ v: Double, space: LUTSpace) -> Double {
         switch space {
+        case .flogFGamut: return v < 0.00089 ? 8.735631*v+0.092864 : 0.344676*log10(0.555556*v+0.009468)+0.790453
+        case .appleLogRec2020: return v >= 0.01 ? 0.08550479*log2(v+0.00964052)+0.69336945 : 47.28711236*pow(max(0,v+0.05641088),2)
+        case .nlogRec2020: return v < 0.328 ? 650*cbrt(v+0.0075)/1023 : (150*log(v)+619)/1023
+        case .dlogDGamut: return v <= 0.0078 ? 6.025*v+0.0929 : 0.256663*log10(0.9892*v+0.0108)+0.584555
+        case .clog2CinemaGamut: return 0.092864125 + (v < 0 ? -1 : 1)*0.24136077*log10(1+87.099375*abs(v)/0.9)
+        case .davinciDWG: return v <= 0.00262409 ? v*10.44426855 : (log2(v+0.0075)+7)*0.07329248
+        case .acescctAP1: return v <= 0.0078125 ? 10.5402377416545*v+0.0729055341958355 : (log2(v)+9.72)/17.52
+
         case .sLog3, .slog3SGamut3:
             // Sony Technical Summary for S-Gamut3.Cine/S-Log3 and S-Gamut3/S-Log3. Same curve.
             return v >= 0.01125 ? (420+261.5*log10((v+0.01)/0.19))/1023 : (v*(171.2102946929-95)/0.01125+95)/1023
         case .vlogVGamut:
             // Panasonic VARICAM V-Log/V-Gamut: cut1 0.01, b 0.00873, c 0.241514, d 0.598206.
             return v < 0.01 ? 5.6*v+0.125 : 0.241514*log10(v+0.00873)+0.598206
-        case .flog2FGamut:
+        case .flog2FGamut, .flog2cFGamutC:
             // Fujifilm F-Log2 Data Sheet Ver.1.0. cut1 0.000889.
             return v < 0.000889 ? 8.799461*v+0.092864 : 0.245281*log10(5.555556*v+0.064829)+0.384316
         case .logC3AWG3:
@@ -159,12 +183,20 @@ extension DoubleReference {
 
     static func decodeLog(_ v: Double, space: LUTSpace) -> Double {
         switch space {
+        case .flogFGamut: return v < 0.100537775223865 ? (v-0.092864)/8.735631 : (pow(10,(v-0.790453)/0.344676)-0.009468)/0.555556
+        case .appleLogRec2020: return v >= 47.28711236*pow(0.06641088,2) ? exp2((v-0.69336945)/0.08550479)-0.00964052 : sqrt(max(0,v)/47.28711236)-0.05641088
+        case .nlogRec2020: return v*1023 < 452 ? pow(v*1023/650,3)-0.0075 : exp((v*1023-619)/150)
+        case .dlogDGamut: return v <= 0.14 ? (v-0.0929)/6.025 : (pow(10,(v-0.584555)/0.256663)-0.0108)/0.9892
+        case .clog2CinemaGamut: return (v < 0.092864125 ? -1 : 1)*(pow(10,abs(v-0.092864125)/0.24136077)-1)/87.099375*0.9
+        case .davinciDWG: return v <= 0.02740668 ? v/10.44426855 : exp2(v/0.07329248-7)-0.0075
+        case .acescctAP1: return v <= 0.155251141552511 ? (v-0.0729055341958355)/10.5402377416545 : exp2(v*17.52-9.72)
+
         case .sLog3, .slog3SGamut3:
             return v >= 171.2102946929/1023 ? pow(10,(v*1023-420)/261.5)*0.19-0.01 : (v*1023-95)*0.01125/(171.2102946929-95)
         case .vlogVGamut:
             // cut2 0.181 is the code at the knee.
             return v < 0.181 ? (v-0.125)/5.6 : pow(10,(v-0.598206)/0.241514)-0.00873
-        case .flog2FGamut:
+        case .flog2FGamut, .flog2cFGamutC:
             // Code at cut1, from the F-Log2 datasheet constants.
             return v < 0.100686685370811 ? (v-0.092864)/8.799461 : (pow(10,(v-0.384316)/0.245281)-0.064829)/5.555556
         case .logC3AWG3:
@@ -188,6 +220,7 @@ extension DoubleReference {
     public static func encodeLUT(_ source: RGB, space: LUTSpace) -> RGB {
         var x = source
         if space.isLog { x = logMatrix(x,space:space,inverse:false) }
+        else if space == .rec2020 { x = matrix(x,toFGamut) }
         else if space == .hlg || space == .pq { x = matrix(x,to2020) }
         else if space != .displayP3 {
             let native = matrix(x,to709), y = min(1,max(0,luma(x)))
@@ -218,7 +251,7 @@ extension DoubleReference {
             case .pq:
                 let p = pow(min(1,max(0,v*0.0203)),2610/16384)
                 x[c] = pow((3424/4096+(2413/128)*p)/(1+(2392/128)*p),2523/32)
-            case .rec709: x[c] = pow(max(0,v),1/2.4)
+            case .rec709, .rec2020: x[c] = pow(max(0,v),1/2.4)
             default: x[c] = v <= 0.0031308 ? 12.92*v : 1.055*pow(v,1/2.4)-0.055
             }
         }
@@ -241,12 +274,13 @@ extension DoubleReference {
                 case .pq:
                     let p = pow(min(1,max(0,v)),32/2523)
                     x[c] = pow(max(p-3424/4096,0)/max(2413/128-(2392/128)*p,1e-6),16384/2610)/0.0203
-                case .rec709: x[c] = pow(max(0,v),2.4)
+                case .rec709, .rec2020: x[c] = pow(max(0,v),2.4)
                 default: x[c] = v <= 0.04045 ? v/12.92 : pow((v+0.055)/1.055,2.4)
                 }
             }
         }
         if space.isLog { return logMatrix(x,space:space,inverse:true) }
+        if space == .rec2020 { return matrix(x,fromFGamut) }
         if space == .hlg || space == .pq { return matrix(x,from2020) }
         return space == .displayP3 ? x : matrix(x,from709)
     }
@@ -270,7 +304,7 @@ extension DoubleReference {
     }
     public static func look(_ rgb: RGB, settings: LookAdjustments) -> RGB {
         guard !settings.isIdentity, let lut = settings.lut else { return rgb }
-        let mapped = decodeLUT(sampleLUT(encodeLUT(rgb,space:settings.input),lut:lut),space:settings.output)
+        let mapped = decodeLUT(sampleLUT(encodeLUT(rgb * (settings.input.isLog ? exp2(Double(settings.exposure ?? 0)) : 1),space:settings.input),lut:lut),space:settings.output)
         let upper = settings.input.isSDR && settings.output.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z)
         let fitted = fitP3(mapped,upper:upper)
         return rgb+(fitted-rgb)*Double(settings.strength)
@@ -312,7 +346,9 @@ extension DoubleReference {
             }
             x = sceneCurves(x, tone: settings.tone)
             x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
-            return point(x, operation: .saturation, value: Double(settings.color.saturation))
+            x = point(x, operation: .saturation, value: Double(settings.color.saturation))
+            x = hslMixer(x,bands:settings.color.mixer)
+            return colorGrade(x,wheels:settings.color.grading,blending:Double(settings.color.gradingBlending),balance:Double(settings.color.gradingBalance))
         }
         var x = adjusted(settings.tone.whites)
         let active = !settings.look.isIdentity

@@ -8,6 +8,9 @@ public enum CanvasOverlayStyle {
     public static let shadowSRGB: UInt32 = 0x3B82F6
     public static let maskOpacity: Float = 0.47
     public static let zebraOpacity: Float = 0.92
+    /// The clipping display covers the photo solidly, not in stripes; a little
+    /// of the photo shows through so the shapes stay readable.
+    public static let clippingOpacity: Float = 0.82
     public static let stripePeriodPoints: Float = 8
     public static let stripeWidthPoints: Float = 3
     public static let stripeAngleDegrees: Float = 45

@@ -33,8 +33,9 @@ struct PadLookTool: View {
     /// A film's control is under Built-in, which a film that stays on while its
     /// LUT tab is browsed would otherwise hide.
     static func kind(revealing id: String?, current: LookKind) -> LookKind {
-        guard let id, id.hasPrefix(Recipe.filmID), Adjustments.declaration(id)?.group == .look else { return current }
-        return .builtIn
+        guard let id, Adjustments.declaration(id)?.group == .look else { return current }
+        if id == FilmExposureNote.lutRowID { return .imported }
+        return id.hasPrefix(Recipe.filmID) ? .builtIn : current
     }
 
     var body: some View {
@@ -42,7 +43,9 @@ struct PadLookTool: View {
             let film = state.controls.first { $0.id == Recipe.filmID }
             let lut = state.controls.first { $0.id == Recipe.lookID }
             let filmControls = state.controls.filter { $0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.filmID }
-            let lutControls = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+            // A Log LUT's exposure stands right under the LUT, before its strength and spaces.
+            let lutRest = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+            let lutControls = lutRest.filter { $0.id == FilmExposureNote.lutRowID } + lutRest.filter { $0.id != FilmExposureNote.lutRowID }
             VStack(alignment: .leading, spacing: 12) {
                 PadSegments(options: LookKind.allCases.map { PadSegments.Option(value: $0, label: Text($0.title)) },
                             selection: kind) { chosenKind = $0 }

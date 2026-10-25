@@ -4,7 +4,7 @@ import Testing
 
 @Test func parameterTableIsComplete() throws {
     let all = Adjustments.all
-    #expect(all.count == 50)
+    #expect(all.count == 89)
     #expect(Set(all.map(\.id)).count == all.count, "duplicate parameter ids")
     #expect(Adjustments.byID.count == all.count)
 
@@ -228,14 +228,15 @@ private extension ParameterDefault {
 }
 
 @Test func logLookSpacesAreAppendedAndRawOnly() throws {
-    let ids = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3",
-               "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
+    var ids = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3",
+               "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut", "flog-fgamut", "flog2c-fgamutc", "applelog-rec2020", "nlog-rec2020", "dlog-dgamut", "clog2-cinemagamut", "davinci-dwg", "acescct-ap1"]
+    ids += ["rec2020"]
     let input = try #require(Adjustments.declaration("look.input"))
     let output = try #require(Adjustments.declaration("look.output"))
     #expect(input.options.map(\.id) == ids)
     #expect(output.options.map(\.id) == ids)
     let logs: Set<String> = ["slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut",
-                             "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"]
+                             "logc3-awg3", "logc4-awg4", "clog3-cinemagamut", "flog-fgamut", "flog2c-fgamutc", "applelog-rec2020", "nlog-rec2020", "dlog-dgamut", "clog2-cinemagamut", "davinci-dwg", "acescct-ap1"]
     for option in input.options {
         #expect(option.domains == (logs.contains(option.id) ? [.rawEDR] : Set(InputDomain.allCases)))
     }

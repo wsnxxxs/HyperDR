@@ -61,14 +61,6 @@ enum ParametricCurveIDs {
     static var isDeclared: Bool { all.allSatisfy { Adjustments.declaration($0) != nil } }
 }
 
-extension ToneCurveSection {
-    /// The controls the curve section draws itself: the other curves and
-    /// the parametric curve. Light's generated rows leave them out.
-    public static var ownedIDs: Set<String> {
-        Set(CurveChannel.allCases.map(\.id)).subtracting([CurveChannel.luma.id]).union(ParametricCurveIDs.all)
-    }
-}
-
 /// How the host picks a point on the curves from the photograph (the curve
 /// eyedropper, adjust-tools §2.2): the user presses on the photo and drags up
 /// or down, and the host adds or moves a point at the picked pixel's input.
@@ -234,10 +226,12 @@ public struct ToneCurveSection: View {
             header
             if isExpanded {
                 if hasParameters {
-                    ParameterSegmented(Text("design.curve.mode", bundle: .module), selection: $mode,
-                                       choices: [SegmentedChoice(Text("design.curve.mode.parameters", bundle: .module), value: Mode.parameters),
-                                                 SegmentedChoice(Text("design.curve.mode.points", bundle: .module), value: Mode.points)])
-                        .frame(minHeight: style == .touch ? 44 : nil)
+                    SectionSegments(request: SectionSegmentsRequest(
+                        title: Text("design.curve.mode", bundle: .module),
+                        options: [.init(id: "parameters", title: Text("design.curve.mode.parameters", bundle: .module)),
+                                  .init(id: "points", title: Text("design.curve.mode.points", bundle: .module))],
+                        selection: Binding(get: { mode == .parameters ? "parameters" : "points" },
+                                           set: { mode = $0 == "parameters" ? .parameters : .points })), style: style)
                 }
                 switch effectiveMode {
                 case .points: pointsEditor
@@ -323,10 +317,7 @@ public struct ToneCurveSection: View {
         .frame(maxWidth: width(hdr: false))
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s4) {
             ForEach(ParametricCurveIDs.amounts, id: \.self) { id in
-                if let amount = panel.control(id, in: recipe) {
-                    AdjustmentRow(recipe: $recipe, control: amount, panel: panel, style: style,
-                                  onEditingChanged: onEditingChanged)
-                }
+                SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, onEditingChanged: onEditingChanged)
             }
         }
         Text("design.curve.parametricHint", bundle: .module)

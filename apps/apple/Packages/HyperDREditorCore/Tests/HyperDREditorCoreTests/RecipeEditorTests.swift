@@ -49,6 +49,24 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
 }
 
 @MainActor @Suite struct RecipeEditorUndoTests {
+    @Test func targetedMixerDragIsOneUndoStep() async throws {
+        let h = Harness(undo:true)
+        try await h.open()
+        let weights = [0.25,0.75,0,0,0,0,0,0]
+        h.step {
+            h.editor.editingHSL(.hue,true)
+            h.editor.adjustHSL(.hue,weights:weights,delta:20)
+            h.editor.adjustHSL(.hue,weights:weights,delta:20)
+            h.editor.editingHSL(.hue,false)
+        }
+        #expect(h.editor.recipe.value(for:"hsl.red.hue") == .number(10))
+        #expect(h.editor.recipe.value(for:"hsl.orange.hue") == .number(30))
+        h.undoManager.undo()
+        #expect(h.editor.recipe.isDefault("hsl.red.hue"))
+        #expect(h.editor.recipe.isDefault("hsl.orange.hue"))
+        #expect(!h.undoManager.canUndo)
+    }
+
     @Test func oneDragIsOneStep() async throws {
         let h = Harness(undo: true)
         try await h.open()
@@ -1113,5 +1131,33 @@ extension RecipeEditorAITests {
         #expect(h.editor.recipe.rawEmbeddedPreview == (compatibility == .embeddedPreview))
         await h.editor.close()
         #expect(h.editor.sourceCompatibility == nil)
+    }
+}
+
+@MainActor @Suite struct ClippingDisplayTests {
+    @Test func theWhiteAndBlackPointsShowItWhileTheyAreDragged() async throws {
+        let h = Harness()
+        try await h.open()
+        #expect(!h.editor.showsClipping)
+        for id in ["tone.whites", "tone.blacks"] {
+            h.editor.editingChanged(declaration(id), true)
+            #expect(h.editor.showsClipping, "dragging \(id)")
+            h.editor.editingChanged(declaration(id), false)
+            #expect(!h.editor.showsClipping)
+        }
+        let exposure = declaration("tone.exposure")
+        h.editor.editingChanged(exposure, true)
+        #expect(!h.editor.showsClipping, "other controls do not")
+        h.editor.editingChanged(exposure, false)
+    }
+
+    @Test func theHostsKeyShowsItWhileHeld() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.holdsClippingKey = true
+        #expect(h.editor.showsClipping)
+        h.editor.holdsClippingKey = false
+        #expect(!h.editor.showsClipping)
+        #expect(h.editor.clippingMask == nil && h.editor.detailClippingMask == nil)
     }
 }

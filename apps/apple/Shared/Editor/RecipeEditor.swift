@@ -52,7 +52,7 @@ import Observation
     private(set) var sourceCompatibility: SourceCompatibility?
     /// The newest edited render. The previous photo's frame stays until the
     /// new photo's first frame arrives.
-    private(set) var frame: EditorFrame?
+    private(set) var frame: EditorFrame? { didSet { refreshClipping() } }
     /// The photo `frame` shows: `source`, or the previous one until the new
     /// photo's first frame arrives.
     private(set) var frameSource: EditorSource?
@@ -88,12 +88,12 @@ import Observation
     /// The file changed on disk since it was opened: tell the user to open it again.
     private(set) var sourceChanged = false
     /// The parameter being dragged, if any.
-    private(set) var editingParameter: String?
+    private(set) var editingParameter: String? { didSet { if editingParameter != oldValue { refreshClipping() } } }
     /// The size previews are rendered at.
     private(set) var previewSize: HyperDRRender.PixelSize?
     /// Full-size renders of the visible part of `frame` and `originalFrame`;
     /// read them through `shownDetail` and `shownOriginalDetail`.
-    private(set) var detailFrame: EditorFrame?
+    private(set) var detailFrame: EditorFrame? { didSet { refreshClipping() } }
     private(set) var originalDetailFrame: EditorFrame?
 
     /// Groups switched off to see their effect: a render option, never in the
@@ -426,6 +426,7 @@ import Observation
         sourceChanged = false
         frame = nil
         frameSource = nil
+        resetClipping()
         originalFrame = nil
         originalFailure = nil
         failedOriginalRequest = nil
@@ -523,6 +524,39 @@ import Observation
             $0.setValue(.number(tint), for: tintID)
         }
         return temperature == sampled.temperature && tint == sampled.tint ? .applied : .clamped
+    }
+
+    /// Same normalized photo coordinates as pickWhiteBalance. The rendered
+    /// preview already has the current geometry, so its pick inverts that same
+    /// geometry through the source loader. Sampling never changes the recipe.
+    func pickHSL(at point: CGPoint) async throws -> HSLColorSample {
+        guard let source, let request = renderRequest(size: frame?.request.size ?? source.pixelSize) else {
+            throw EditorRenderingError.noSource
+        }
+        let sampled = try await renderer.pickHSL(request,at:point)
+        guard self.source?.id == source.id else { throw EditorRenderingError.staleSource }
+        return sampled
+    }
+
+    /// Bracket a targeted drag with true / false; all eight band writes form
+    /// one undo step, named for the selected component's leading band.
+    func editingHSL(_ component: HSLComponent, _ isEditing: Bool) {
+        editing("hsl.red."+component.rawValue,isEditing)
+    }
+
+    /// Incremental delta in recipe units (-100...100). Keep the sample's
+    /// weights fixed throughout a drag to avoid chasing the changing colour.
+    func adjustHSL(_ component: HSLComponent, weights: [Double], delta: Double) {
+        guard weights.count == HSLBand.allCases.count else { return }
+        let dragID = "hsl.red."+component.rawValue
+        guard abandonedID != dragID else { return }
+        var changed = recipe
+        for (i, band) in HSLBand.allCases.enumerated() {
+            let id = "hsl.\(band.rawValue).\(component.rawValue)"
+            let value = recipe.conditionValue(id)?.numberValue ?? 0
+            changed.setValue(.number(min(100,max(-100,value+delta*weights[i]))),for:id)
+        }
+        setRecipe(changed)
     }
 
     func resetGroup(_ group: ParameterGroup) {
@@ -973,6 +1007,79 @@ import Observation
     func clippingMask() async throws -> RenderMask {
         guard let frame else { throw EditorRenderingError.noSource }
         return try await renderer.clippingMask(frame)
+    }
+
+    // MARK: - Clipping display
+
+    /// Dragging one of these shows the clipping display on the canvas.
+    nonisolated static let clippingParameterIDs: Set<String> = ["tone.whites", "tone.blacks"]
+
+    /// Set by a host that has a key for it (⌥ on the Mac): the clipping
+    /// display stays up while it is held.
+    var holdsClippingKey = false { didSet { if holdsClippingKey != oldValue { refreshClipping() } } }
+
+    /// Whether the canvas marks dead black (blue) and clipping (red) now: while
+    /// the white or black point is dragged, or the host's key is held.
+    var showsClipping: Bool {
+        holdsClippingKey || editingParameter.map(Self.clippingParameterIDs.contains) == true
+    }
+
+    /// The diagnostic masks of the shown frame and its detail layer while
+    /// `showsClipping`, nil otherwise. A mask stays up until the next frame's
+    /// arrives, so the marks do not blink while the photo re-renders.
+    private(set) var clippingMask: RenderMask?
+    private(set) var detailClippingMask: RenderMask?
+
+    private struct ClippingRequest {
+        /// The frame (its base texture) the mask on show was made for.
+        var shown: ObjectIdentifier?
+        var task: Task<Void, Never>?
+    }
+    @ObservationIgnored private var wholeClipping = ClippingRequest()
+    @ObservationIgnored private var detailClipping = ClippingRequest()
+
+    private func resetClipping() {
+        wholeClipping.task?.cancel(); detailClipping.task?.cancel()
+        wholeClipping = ClippingRequest(); detailClipping = ClippingRequest()
+        if clippingMask != nil { clippingMask = nil }
+        if detailClippingMask != nil { detailClippingMask = nil }
+    }
+
+    /// Brings the masks in line with what is shown: asks for a mask of each
+    /// shown frame that has none, one request at a time per layer, and drops
+    /// them all once the display is off.
+    private func refreshClipping() {
+        guard showsClipping else {
+            if wholeClipping.task != nil || wholeClipping.shown != nil || detailClipping.task != nil
+                || detailClipping.shown != nil || clippingMask != nil || detailClippingMask != nil { resetClipping() }
+            return
+        }
+        requestClipping(for: frame, detail: false)
+        requestClipping(for: shownDetail, detail: true)
+    }
+
+    private func requestClipping(for frame: EditorFrame?, detail: Bool) {
+        guard let frame else {
+            if detail, detailClipping.task != nil || detailClipping.shown != nil || detailClippingMask != nil {
+                detailClipping.task?.cancel(); detailClipping = ClippingRequest(); detailClippingMask = nil
+            }
+            return
+        }
+        let key = ObjectIdentifier(frame.display.base)
+        let state = detail ? detailClipping : wholeClipping
+        guard state.task == nil, state.shown != key else { return }
+        let task = Task { [weak self] in
+            let mask = try? await self?.renderer.clippingMask(frame)
+            guard !Task.isCancelled, let self else { return }
+            self.finishClipping(mask, key: key, detail: detail)
+        }
+        if detail { detailClipping.task = task } else { wholeClipping.task = task }
+    }
+
+    private func finishClipping(_ mask: RenderMask?, key: ObjectIdentifier, detail: Bool) {
+        if detail { detailClipping = ClippingRequest(shown: key); detailClippingMask = mask }
+        else { wholeClipping = ClippingRequest(shown: key); clippingMask = mask }
+        refreshClipping()
     }
 
     // MARK: - LUTs and export

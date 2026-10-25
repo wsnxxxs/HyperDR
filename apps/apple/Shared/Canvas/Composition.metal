@@ -77,7 +77,7 @@ struct CompositionParams {
     float4 rect;
     float2 uvScale;
     uint slice, flags;
-    float padding0, hdrRange, backingScale, padding1, padding2, padding;
+    float padding0, hdrRange, backingScale, clippingOpacity, padding2, padding;
     float4 maskColor, highlightColor, shadowColor, stripe;
     float3x3 geometry;  // flags bit 4: canvas fractions to photo fractions
     float4 cropRect;    // flags bit 5 clips to it, in canvas fractions
@@ -95,7 +95,8 @@ vertex CompositionVertex compositionVertex(uint index [[vertex_id]],
 
 fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
                                       constant CompositionParams& p [[buffer(0)]],
-                                      texture2d_array<float> image [[texture(0)]]) {
+                                      texture2d_array<float> image [[texture(0)]],
+                                      texture2d<float> clipping [[texture(1)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
     float2 texel = 0.5 / float2(image.get_width(), image.get_height());
     float2 at = in.uv;
@@ -128,6 +129,14 @@ fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
         value = mix(value,p.highlightColor.rgb,p.highlightColor.a);
     if (stripe && (p.flags & 4) && max(base.r,max(base.g,base.b)) < 0.5/255.0/12.92)
         value = mix(value,p.shadowColor.rgb,p.shadowColor.a);
+    if (p.flags & 128) {
+        // Render's diagnostic mask: red is dead black (painted with the
+        // shadow colour, blue), green is clipping (the highlight colour, red).
+        constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
+        float2 marks = clipping.sample(nearest, uv / p.uvScale).rg;
+        if (marks.x > 0.5) value = mix(value, p.shadowColor.rgb, p.clippingOpacity);
+        if (marks.y > 0.5) value = mix(value, p.highlightColor.rgb, p.clippingOpacity);
+    }
     if (outsideCrop && (p.flags & 64)) value = min(value, float3(1)) * 0.3;
     return float4(value,1);
 }

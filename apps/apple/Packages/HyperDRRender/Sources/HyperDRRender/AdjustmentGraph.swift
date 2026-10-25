@@ -23,6 +23,7 @@ struct GraphUniform {
     var toneSpatialInfo: SIMD4<UInt32> = .zero
     var toneSpatialSettings: SIMD4<Float> = .zero
     var toneAtmosphere: SIMD4<Float> = .zero
+    var toneBaselineAtmosphere: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -252,7 +253,8 @@ extension RenderEngine {
             lutExposure: SIMD4(lut != nil && l.input.isLog ? exp2(l.exposure ?? ((try? lutMeter(source, lut: lut!, input: l.input, output: l.output)) ?? 0)) : 1, 0, 0, 0), colorTools: ColorToolsUniform(c),
             toneSpatialInfo: SIMD4(UInt32(spatial?.size.width ?? 0),UInt32(spatial?.size.height ?? 0),
                 UInt32((lut?.is3D == false ? lut!.values.count : 1)+(t.hasCurves ? 8192 : 0)),spatial == nil ? 0 : 1),
-            toneSpatialSettings: SIMD4(t.dehaze,t.clarity,0,0),toneAtmosphere: SIMD4(spatial?.air ?? .zero,0))
+            toneSpatialSettings: SIMD4(t.dehaze,t.clarity,0,0),toneAtmosphere: SIMD4(spatial?.air ?? .zero,0),
+            toneBaselineAtmosphere: SIMD4(spatial?.baselineAir ?? .zero,0))
 
     }
 

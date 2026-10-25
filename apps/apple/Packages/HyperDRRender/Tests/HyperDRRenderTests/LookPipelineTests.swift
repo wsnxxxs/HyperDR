@@ -142,6 +142,30 @@ import Testing
         #expect(zip(without.baseRGBA, original.baseRGBA).allSatisfy { abs($0-$1) < 1e-6 })
     }
 
+    @Test func clarityIsContinuousAtPartialRAWLogStrength() async throws {
+        let url = try rawCopy()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try RenderEngine()
+        let lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        var recipe = Recipe(inputDomain: .rawEDR,look: LUTReference(contentHash: lut.contentHash,name: "Log"),values: [
+            "look.input": .string("slog3-sgamut3cine"), "look.output": .string("rec709"),
+            "look.exposure": .number(0), "hdr.range": .number(4),
+            "tone.clarity": .number(80), "tone.dehaze": .number(50)])
+        let resolution = SourceResolution.preview(maximumSize: PixelSize(width: 96,height: 96))
+        var zero = recipe; zero.setValue(.number(0),for: "look.strength")
+        let apple = try await engine.load(url,options: SourceOptions(recipe: zero,resolution: resolution))
+        let original = RenderEngine.readPixels(try await engine.render(apple,recipe: zero,lut: lut))
+        let scene = try await engine.load(url,options: SourceOptions(recipe: recipe,resolution: resolution))
+        // Prime the spatial cache at 100%, where no Apple baseline is selected.
+        let styled = RenderEngine.readPixels(try await engine.render(scene,recipe: recipe,lut: lut))
+        recipe.setValue(.number(1),for: "look.strength")
+        let partial = RenderEngine.readPixels(try await engine.render(scene,recipe: recipe,lut: lut))
+        let worst = partial.baseRGBA.indices.reduce(Float(0)) { error,i in
+            max(error,abs(partial.baseRGBA[i]-(original.baseRGBA[i]*0.99+styled.baseRGBA[i]*0.01)))
+        }
+        #expect(worst < 0.0001,"Partial Log clarity must blend its own baseline: \(worst)")
+    }
+
     /// The companion Apple development must use the same global sampling window
     /// as the scene source, including a lazy export tile rather than a whole frame.
     @Test func partialRAWLookTilesMatchWholeSource() async throws {

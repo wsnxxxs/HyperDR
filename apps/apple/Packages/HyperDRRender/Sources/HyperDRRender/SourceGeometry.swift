@@ -30,7 +30,7 @@ extension OpenedSource {
                                   raw: raw?.withGeometry(nativeSize: PixelSize(width: output.width, height: output.height),
                                                          developedExtent: base.extent.size),
                                   nativeSize: nativeSize.map { _ in PixelSize(width: output.width, height: output.height) },
-                                  rawPreviewSize: rawPreviewSize)
+                                  rawPreviewSize: rawPreviewSize, draftRAWPreview: draftRAWPreview)
         result.uncroppedSize = full
         return result
     }

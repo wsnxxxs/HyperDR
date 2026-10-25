@@ -1,6 +1,7 @@
 import CoreImage
 import Foundation
 import ImageIO
+import Metal
 import XCTest
 import HyperDRRecipe
 @testable import HyperDRRender
@@ -180,26 +181,47 @@ final class RAWDecoderTests: XCTestCase {
             let expected = try await reference.fixedAnalysisSource(before)
             let after = try await shared.load(url, options: options, preparingAnalysis: true)
             let actual = try await shared.fixedAnalysisSource(after)
-            XCTAssertEqual(RenderEngine.readTexture(before.texture), RenderEngine.readTexture(after.texture))
-            XCTAssertEqual(RenderEngine.readTexture(expected.texture), RenderEngine.readTexture(actual.texture))
+            assertPixelsClose(before.texture, after.texture)
+            assertPixelsClose(expected.texture, actual.texture)
             XCTAssertEqual(expected.size, actual.size)
             XCTAssertEqual(expected.rawSettings?.scaleFactor, actual.rawSettings?.scaleFactor)
             XCTAssertEqual(before.id, after.id)
             let export = try await reference.openExportSource(url, options: options)
-            XCTAssertEqual(RenderEngine.readTexture(export.analysisSource.texture), RenderEngine.readTexture(actual.texture))
+            assertPixelsClose(export.analysisSource.texture, actual.texture)
             let a = try await reference.analysis(export.analysisSource), b = try await shared.analysis(after)
-            XCTAssertEqual(RenderEngine.readTexture(a.cells), RenderEngine.readTexture(b.cells))
-            XCTAssertEqual(RenderEngine.readTexture(a.masks), RenderEngine.readTexture(b.masks))
-            XCTAssertEqual(RenderEngine.readTexture(a.expansion), RenderEngine.readTexture(b.expansion))
+            assertPixelsClose(a.cells, b.cells)
+            assertPixelsClose(a.masks, b.masks)
+            assertPixelsClose(a.expansion, b.expansion)
             XCTAssertEqual(a.peaks, b.peaks)
             XCTAssertEqual(a.sourceHeadroom, b.sourceHeadroom)
             var recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: decoder)
             recipe.setValue(.number(0.3), for: "tone.exposure")
             let oldPlanes = try await reference.render(before, recipe: recipe)
             let newPlanes = try await shared.render(after, recipe: recipe)
-            XCTAssertEqual(RenderEngine.readTexture(oldPlanes.base), RenderEngine.readTexture(newPlanes.base))
-            XCTAssertEqual(RenderEngine.readTexture(oldPlanes.gain), RenderEngine.readTexture(newPlanes.gain))
+            assertPixelsClose(oldPlanes.base, newPlanes.base, tolerance: 0.000002)
+            assertPixelsClose(oldPlanes.gain, newPlanes.gain)
+            // The existing one-code contract remains stricter than a generic
+            // float epsilon: check the SDR endpoint's actual P3 transfer at 16 bit.
+            let oldBase = RenderEngine.readTexture(oldPlanes.base), newBase = RenderEngine.readTexture(newPlanes.base)
+            func code(_ linear: Float) -> Int {
+                let value = min(1, max(0, Double(linear)))
+                let encoded = value <= 0.0031308 ? 12.92 * value : 1.055 * pow(value, 1 / 2.4) - 0.055
+                return Int((encoded * 65535).rounded())
+            }
+            let codeError = zip(oldBase, newBase).enumerated().filter { $0.offset % 4 != 3 }
+                .reduce(0) { max($0, abs(code($1.element.0) - code($1.element.1))) }
+            XCTAssertLessThanOrEqual(codeError, 1)
         }
+    }
+
+    /// Shared native cells change the area sum's grouping at cell boundaries,
+    /// without changing their decoded pixels. Compare the grids with a tolerance.
+    private func assertPixelsClose(_ a: any MTLTexture, _ b: any MTLTexture, tolerance: Float = 0.00001,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        let first = RenderEngine.readTexture(a), second = RenderEngine.readTexture(b)
+        XCTAssertEqual(first.count, second.count, file: file, line: line)
+        let worst = zip(first, second).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        XCTAssertLessThanOrEqual(worst, tolerance, file: file, line: line)
     }
 
     private func meansSRGB(_ source: RenderSource) throws -> [Double] {

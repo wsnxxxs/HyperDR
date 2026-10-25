@@ -2181,6 +2181,23 @@
         }
       }
     },
+    "mac.canvas.refining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refining the preview…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在提升预览画质…"
+          }
+        }
+      }
+    },
     "mac.diagnostics.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8228,13 +8245,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Preparing camera support…"
+            "value" : "Developing the RAW photo…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在准备相机支持…"
+            "value" : "正在显影 RAW 照片…"
           }
         }
       }
@@ -8245,30 +8262,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The first time you open a photo from this camera, macOS may need to download support for it. This usually takes a few seconds."
+            "value" : "A large RAW file can take several seconds to open. If this camera is new to this Mac, macOS may also download its support first."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "第一次打开这台相机拍的照片时，macOS 可能要先下载相机支持，通常几秒内完成。"
-          }
-        }
-      }
-    },
-    "raw.preparing.short" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS may need to download support for this camera. This usually takes a few seconds."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS 可能要先下载这台相机的支持，通常几秒内完成。"
+            "value" : "大尺寸 RAW 打开可能要几秒。如果这台 Mac 第一次处理这台相机的照片，macOS 可能还要先下载相机支持。"
           }
         }
       }
@@ -8279,13 +8279,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Preparing camera support"
+            "value" : "Developing the RAW photo"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在准备相机支持"
+            "value" : "正在显影 RAW 照片"
           }
         }
       }

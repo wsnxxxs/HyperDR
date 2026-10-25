@@ -37,6 +37,10 @@ struct EditorCanvas: View {
     @State private var headroom = HeadroomSnapshot()
     /// The crop pane's placement while its box is dragged.
     @State private var cropFreeze: CropLayout?
+    /// The opening stage and the refining mark wait a moment before they
+    /// show, so a quick open or refine passes without a flash.
+    @State private var showsStage = false
+    @State private var showsRefining = false
 
     /// Room around the crop in the crop pane, for its corners.
     static let cropMargin: CGFloat = 28
@@ -243,18 +247,26 @@ struct EditorCanvas: View {
                                  onNudge: { splitRatio = min(max(splitRatio + $0, SplitGeometry.ratioRange.lowerBound),
                                                              SplitGeometry.ratioRange.upperBound) })
                 }
-                if !visible.isNull, let badge {
-                    badge
-                        .padding(Space.s3)
-                        .frame(width: visible.width, height: visible.height, alignment: .topTrailing)
-                        .position(x: visible.midX, y: visible.midY)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                if !visible.isNull, badge != nil || refining {
+                    HStack(spacing: Space.s2) {
+                        if refining { RefiningMark() }
+                        if let badge { badge }
+                    }
+                    .padding(Space.s3)
+                    .frame(width: visible.width, height: visible.height, alignment: .topTrailing)
+                    .position(x: visible.midX, y: visible.midY)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
                 }
             }
             .animation(.smooth(duration: 0.2), value: mode)
+            .animation(.smooth(duration: 0.2), value: refining)
         }
     }
+
+    /// A draft is shown while the full-quality preview is made: a small
+    /// mark beside the badge, never over the controls, never blocking.
+    private var refining: Bool { showsRefining && editor.isRefiningPreview && !cropping && !framed }
 
     /// Follow the rendered photo, including zero strength and group bypass,
     /// rather than controls whose replacement frame may still be rendering.
@@ -305,7 +317,7 @@ struct EditorCanvas: View {
             if let notice = session.notice { capsule(Text(notice)) }
             // Over the previous photo or the new one's thumbnail: say the new
             // one is on its way.
-            if !showsOpeningCard, let stage = session.openingStage {
+            if !showsOpeningCard, let stage = session.openingStage, showsStage || stage == .failed {
                 stageCapsule(stage)
             }
         }
@@ -315,6 +327,16 @@ struct EditorCanvas: View {
         .animation(.smooth(duration: 0.25), value: editor.originalFailure != nil)
         .animation(.smooth(duration: 0.25), value: original == nil)
         .animation(.smooth(duration: 0.25), value: editor.aiStatus)
+        .task(id: session.openingStage != nil) {
+            guard session.openingStage != nil else { showsStage = false; return }
+            try? await Task.sleep(for: .milliseconds(400))
+            if !Task.isCancelled { showsStage = true }
+        }
+        .task(id: editor.isRefiningPreview) {
+            guard editor.isRefiningPreview else { showsRefining = false; return }
+            try? await Task.sleep(for: .milliseconds(500))
+            if !Task.isCancelled { showsRefining = true }
+        }
         .task(id: session.notice) {
             guard session.notice != nil else { return }
             try? await Task.sleep(for: .seconds(3))
@@ -341,6 +363,13 @@ struct EditorCanvas: View {
                 ProgressView().controlSize(.mini)
             }
             OpeningCard.swapping(stage)
+            // A download from iCloud reports how far it is: say so here too,
+            // when the card in the middle is not on screen.
+            if stage == .fetching, let fraction = session.fetchFraction, fraction > 0, fraction < 1 {
+                Text(fraction, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
         .font(.footnote.weight(.medium))
         .padding(.horizontal, Space.s4)
@@ -386,6 +415,21 @@ struct EditorCanvas: View {
 
     static func headroom(_ value: CGFloat) -> String {
         Double(value).formatted(.number.precision(.fractionLength(1))) + "×"
+    }
+}
+
+/// A small spinner in a glass circle at the photo's corner: the draft on
+/// screen is being refined. Touches go through to the canvas.
+struct RefiningMark: View {
+    var body: some View {
+        ProgressView()
+            .controlSize(.mini)
+            .frame(width: 24, height: 24)
+            .glassEffect(.regular, in: .circle)
+            .accessibilityElement()
+            .accessibilityLabel(Text("ios.preview.refining"))
+            .allowsHitTesting(false)
+            .transition(.opacity)
     }
 }
 

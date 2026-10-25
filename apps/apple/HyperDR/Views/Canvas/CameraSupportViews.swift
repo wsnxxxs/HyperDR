@@ -1,13 +1,16 @@
 import SwiftUI
 import HyperDRDesign
 
-/// "Preparing camera support…" while a RAW has waited 1.5 s for its first
-/// frame (raw-states.md §2): macOS may be downloading support for the camera.
+/// "Developing the RAW photo…" while a RAW has waited 1.5 s for its first
+/// frame (raw-states.md §2): a large file takes seconds to develop, and macOS
+/// may also be downloading support for the camera. `stage` names what the
+/// open is actually doing.
 /// Without a photo on the canvas it fills the middle of it; over an earlier
 /// photo it is a card at the bottom. Cancel goes back to what was there, with
 /// no alert.
 struct CameraSupportPanel: View {
     let fileName: String
+    let stage: LocalizedStringKey
     let canCancel: Bool
     let cancel: () -> Void
 
@@ -21,6 +24,9 @@ struct CameraSupportPanel: View {
                 .font(Font.hdr.readout)
                 .foregroundStyle(Color.hdr.overlayMuted)
                 .lineLimit(1).truncationMode(.middle)
+            Text(stage)
+                .font(Font.hdr.control)
+                .foregroundStyle(Color.hdr.overlayInk)
             Text("raw.preparing.firstTime")
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.overlayMuted)
@@ -44,6 +50,7 @@ struct CameraSupportPanel: View {
 
 struct CameraSupportCard: View {
     let fileName: String
+    let stage: LocalizedStringKey
     let canCancel: Bool
     let cancel: () -> Void
 
@@ -60,7 +67,7 @@ struct CameraSupportCard: View {
                         .foregroundStyle(Color.hdr.overlayMuted)
                         .lineLimit(1).truncationMode(.middle)
                 }
-                Text("raw.preparing.short")
+                Text(stage)
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.overlayMuted)
                     .fixedSize(horizontal: false, vertical: true)

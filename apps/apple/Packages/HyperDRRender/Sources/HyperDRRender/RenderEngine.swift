@@ -97,7 +97,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["displayHDR", "canonicalISOBase", "sourceHDRSplit", "sampleSource", "sampleSourceArea", "accumulateSourceArea", "countTransparent", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportPackedPair", "exportFrame",
                      "filmMeter", "graphFilmCells", "graphFilmExposure", "filmBlur"] {
@@ -160,14 +160,24 @@ public actor RenderEngine {
             }
             let opened = try Self.open(url, options: options, progress: progress)
             progress?(.developing)
-            let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
-            if preparingAnalysis, opened.domain == .rawEDR, analysisSource?.id != source.id {
+            let origin = (url: familyKey.url, options: familyKey.options, revision: revision)
+            let source: RenderSource
+            if preparingAnalysis, opened.domain == .rawEDR, !opened.draftRAWPreview,
+               let preview = opened.rawPreviewSize {
+                let fixed = try opened.rawVariant(resolution: Self.analysisResolution(native: opened.raw!.nativeSize))
+                let analysisSize = fixed.rawPreviewSize ?? PixelSize(width: Int(opened.image.extent.width),
+                                                                   height: Int(opened.image.extent.height))
+                let textures = try rasterizeRAWPreviews(opened.image, sizes: [preview, analysisSize], space: opened.baseSpace)
+                source = try materialize(opened, id: sourceFamily!.id, origin: origin, rasterized: textures[0])
                 progress?(.preparingAnalysis)
-                // Keep one temporary native decoder alive for both independent
-                // ROI grids. Neither texture is resampled from the other. The
-                // graph and its native caches are released before load returns.
-                let fixed = try opened.rawVariant(resolution: Self.analysisResolution(native: source.nativeSize))
-                analysisSource = try materialize(fixed, id: source.id, origin: source.origin)
+                analysisSource = try materialize(fixed, id: source.id, origin: origin, rasterized: textures[1])
+            } else {
+                source = try materialize(opened, id: sourceFamily!.id, origin: origin)
+                if preparingAnalysis, opened.domain == .rawEDR, analysisSource?.id != source.id {
+                    progress?(.preparingAnalysis)
+                    let fixed = try opened.rawVariant(resolution: Self.analysisResolution(native: source.nativeSize))
+                    analysisSource = try materialize(fixed, id: source.id, origin: source.origin)
+                }
             }
             try revision.validate(url)
             // Retain full and the latest preview together, while bounding variant residency.
@@ -175,6 +185,30 @@ public actor RenderEngine {
             sourceCache[key] = source
             return source
         }
+    }
+
+    /// A refinement may run on another engine so native RAW work never queues
+    /// ahead of edits to the draft. Transfer only bounded textures, no decoder graph.
+    public func previewAnalysis(_ source: RenderSource) throws -> RenderSource {
+        guard !source.isDraftRAWPreview else { throw RenderError.invalidAdjustment }
+        return try fixedAnalysisSource(source)
+    }
+
+    public func installRefinedPreview(_ source: RenderSource, analysis: RenderSource,
+                                      resolution: SourceResolution) throws {
+        guard case .preview = resolution else { throw RenderError.invalidAdjustment }
+        guard !source.isDraftRAWPreview, !analysis.isDraftRAWPreview,
+              source.id == analysis.id, let origin = source.origin else { throw RenderError.invalidAdjustment }
+        try origin.revision.validate(origin.url)
+        clearImageCaches()
+        var options = origin.options
+        options.resolution = resolution
+        let key = SourceKey(url: origin.url, revision: origin.revision, options: options)
+        var family = key
+        family.options.resolution = .full
+        sourceFamily = (family, source.id)
+        sourceCache[key] = source
+        analysisSource = analysis
     }
 
     /// Stable analysis development for this asset/settings family, independent of
@@ -227,10 +261,16 @@ public actor RenderEngine {
     }
 
     func materialize(_ opened: OpenedSource, id: UUID = UUID(),
-                             origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
+                             origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil,
+                     rasterized: (any MTLTexture)? = nil) throws -> RenderSource {
         let texture: any MTLTexture
-        if let preview = opened.rawPreviewSize {
-            texture = try rasterizeRAWPreview(opened.image, size: preview, space: opened.baseSpace)
+        if let rasterized { texture = rasterized }
+        else if let preview = opened.rawPreviewSize {
+            if opened.draftRAWPreview {
+                texture = try rasterizeDraftRAWPreview(opened.image, size: preview, space: opened.baseSpace)
+            } else {
+                texture = try rasterizeRAWPreview(opened.image, size: preview, space: opened.baseSpace)
+            }
         } else if opened.domain == .rawEDR {
             texture = try rasterizeNativeRAW(opened.image, space: opened.baseSpace)
         } else { texture = try rasterize(opened.image, space: opened.baseSpace) }
@@ -293,7 +333,10 @@ public actor RenderEngine {
         let opened = try Self.openRAW(origin.url, options: options)
         let texture: any MTLTexture
         if source.samplingRegion == CGRect(x: 0, y: 0, width: 1, height: 1) {
-            texture = try rasterizeRAWPreview(opened.image, size: PixelSize(width: source.texture.width, height: source.texture.height), space: Self.workingColorSpace)
+            let size = PixelSize(width: source.texture.width, height: source.texture.height)
+            texture = opened.draftRAWPreview
+                ? try rasterizeDraftRAWPreview(opened.image, size: size, space: Self.workingColorSpace)
+                : try rasterizeRAWPreview(opened.image, size: size, space: Self.workingColorSpace)
         } else {
             let n = source.samplingRegion, e = opened.image.extent.integral
             let rect = CGRect(x: e.minX + (n.minX * e.width).rounded(), y: e.minY + ((1-n.maxY) * e.height).rounded(),

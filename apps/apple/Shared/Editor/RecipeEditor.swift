@@ -61,6 +61,10 @@ import Observation
     private(set) var originalFailure: String?
     @ObservationIgnored private var failedOriginalRequest: EditorRenderRequest?
     private(set) var isOpening = false
+    /// An editable reduced RAW preview is shown while native-area pixels develop.
+    private(set) var isRefiningPreview = false
+    @ObservationIgnored private var refinementTask: Task<Void, Never>?
+    @ObservationIgnored private var refinementFailed = false
     /// MainActor/Observation state. Nil after the first frame, failure or close.
     /// May remain `.rendering` after `isOpening` becomes false.
     private(set) var openingPhase: EditorOpeningStage?
@@ -70,6 +74,8 @@ import Observation
     private(set) var placeholderPixelSize: HyperDRRender.PixelSize?
     private(set) var placeholderURL: URL?
     private(set) var placeholderID: UUID?
+    /// The restored recipe's geometry the placeholder is already laid out with.
+    @ObservationIgnored private var placeholderGeometry: Geometry?
     private(set) var aiStatus: AIStatus = .idle
     /// Whether this build includes the AI model. An open-source build does not:
     /// AI is unavailable from the start, and the views say why.
@@ -269,6 +275,10 @@ import Observation
         try Task.checkCancellation()
         cancelUpright(clearCache: true)
         openGeneration += 1
+        refinementTask?.cancel()
+        refinementTask = nil
+        isRefiningPreview = false
+        refinementFailed = false
         let generation = openGeneration
         isOpening = true
         updateModelGain()
@@ -293,8 +303,18 @@ import Observation
             let preview = await renderer.openingPreview(url)
             try Task.checkCancellation()
             if generation == self.openGeneration, let preview {
-                self.placeholder = preview.image
-                self.placeholderPixelSize = preview.pixelSize
+                // A restored recipe's crop and turns first, so the first frame does not jump.
+                let size = CGSize(width: preview.pixelSize.width, height: preview.pixelSize.height)
+                if let geometry = restoring?.geometry,
+                   let laid = PlaceholderGeometry.apply(geometry, to: preview.image, photo: size) {
+                    self.placeholder = laid.image
+                    self.placeholderPixelSize = HyperDRRender.PixelSize(width: Int(laid.size.width), height: Int(laid.size.height))
+                    self.placeholderGeometry = geometry
+                } else {
+                    self.placeholder = preview.image
+                    self.placeholderPixelSize = preview.pixelSize
+                    self.placeholderGeometry = nil
+                }
                 self.placeholderURL = url
                 self.placeholderID = UUID()
             }
@@ -328,6 +348,7 @@ import Observation
         previewSize = nil
         largestCanvasSide = nil
         source = opened
+        isRefiningPreview = opened.isDraftPreview
         sourceChanged = false
         if var restoring {
             restoring.setInputDomain(opened.domain)
@@ -349,7 +370,11 @@ import Observation
         originalFrame = nil
         originalFailure = nil
         failedOriginalRequest = nil
-        if placeholder != nil { placeholderPixelSize = opened.pixelSize }
+        if placeholder != nil {
+            let photo = GeometrySize(width: Double(opened.pixelSize.width), height: Double(opened.pixelSize.height))
+            let shown = placeholderGeometry?.outputSize(of: photo)
+            placeholderPixelSize = shown.map { HyperDRRender.PixelSize(width: $0.width, height: $0.height) } ?? opened.pixelSize
+        }
         openingPhase = .rendering
         succeeded = true
         updatePreviewSize(force: true)
@@ -360,6 +385,7 @@ import Observation
         placeholderPixelSize = nil
         placeholderURL = nil
         placeholderID = nil
+        placeholderGeometry = nil
     }
 
     /// No photo: the empty state.
@@ -367,6 +393,10 @@ import Observation
         cancelUpright(clearCache: true)
         openGeneration += 1
         isOpening = false
+        refinementTask?.cancel()
+        refinementTask = nil
+        isRefiningPreview = false
+        refinementFailed = false
         openingPhase = nil
         clearPlaceholder()
         abandoned = nil
@@ -601,6 +631,10 @@ import Observation
     private func register(_ step: RecipeStep) { undo.register(step) }
 
     private func recipeDidChange(from old: Recipe) {
+        // A new edit is an explicit opportunity to recover a failed native preview.
+        // Merely finishing another draft frame must never start a retry loop.
+        let retryRefinement = refinementFailed
+        if retryRefinement { refinementFailed = false }
         if old.geometry != recipe.geometry { cancelUpright() }
         // Geometry-only edits in the crop pane are display transforms. Do not
         // queue even an identical graph request: it still executes the graph
@@ -608,7 +642,10 @@ import Observation
         if isEditingCrop {
             var previous = old
             previous.geometry = recipe.geometry
-            if previous == recipe { return }
+            if previous == recipe {
+                if retryRefinement { startRefiningPreview() }
+                return
+            }
         }
         // A new crop or turn is a new picture size: the preview follows.
         if old.geometry != recipe.geometry, !isEditingCrop { updatePreviewSize() }
@@ -661,7 +698,9 @@ import Observation
     private func scheduleRender() {
         guard let size = previewSize,
               let request = request(for: recipe, size: size, interactive: drag != nil) else { return }
-        pending = request
+        var canvasRequest = request
+        canvasRequest.isCanvasPreview = true
+        pending = canvasRequest
         if let wanted = renderRequest(size: size, original: true) {
             // Source identity alone does not distinguish RAW developments.
             if let shown = originalFrame, !shown.request.rendersSame(as: wanted) {
@@ -721,11 +760,21 @@ import Observation
                 frameSource = source
                 if !isOpening { openingPhase = nil; clearPlaceholder() }
             }
-            renderFailure = nil
+            if !refinementFailed { renderFailure = nil }
+            if rendered.isDraftPreview {
+                startRefiningPreview()
+            } else if isRefiningPreview {
+                isRefiningPreview = false
+                updateModelGain()
+            }
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
             frameLacksModelGain(rendered)
         case .failure(let error):
             if !(error is CancellationError) {
+                refinementTask?.cancel()
+                refinementTask = nil
+                isRefiningPreview = false
+                refinementFailed = true
                 if renderFailure == nil { EditorLog.error("Render failed: \(EditorLog.describe(error))") }
                 renderFailure = String(describing: error)
                 if !isOpening { openingPhase = nil; clearPlaceholder() }
@@ -783,8 +832,41 @@ import Observation
     func retryRendering() {
         guard source != nil, !isOpening, !sourceChanged else { return }
         failedOriginalRequest = nil
+        refinementFailed = false
         scheduleRender()
         updateModelGain()
+    }
+
+    /// Starts only after the editable frame lands, so native development cannot
+    /// contend with the first frame. Swapping pixels adds no undo step.
+    private func startRefiningPreview() {
+        guard refinementTask == nil, !refinementFailed, !isYieldingToExport,
+              let source else { return }
+        isRefiningPreview = true
+        let generation = openGeneration, renderer = self.renderer
+        refinementTask = Task(priority: .utility) { [weak self] in
+            do {
+                let refined = try await renderer.refinePreview(sourceID: source.id)
+                try Task.checkCancellation()
+                guard let self, generation == self.openGeneration else { return }
+                self.refinementTask = nil
+                if let refined { self.source = refined }
+                self.cancelRenders()
+                self.originalFrame = nil
+                self.originalFailure = nil
+                self.failedOriginalRequest = nil
+                self.clearLayers()
+                self.scheduleRender()
+            } catch {
+                guard let self, generation == self.openGeneration, !Task.isCancelled else { return }
+                self.refinementTask = nil
+                self.isRefiningPreview = false
+                self.refinementFailed = true
+                self.renderFailure = String(describing: error)
+                self.noteFailure(error)
+                EditorLog.error("RAW preview refinement failed: \(EditorLog.describe(error))")
+            }
+        }
     }
 
     private func cancelRenders() {
@@ -868,7 +950,9 @@ import Observation
             guard let lut = luts[look.contentHash] else { throw EditorRenderingError.missingLUT(look.contentHash) }
             return lut
         }
-        let automatic = frame.flatMap { $0.request.recipe == recipe && $0.request.region == nil ? $0.automaticValues : nil }
+        let automatic = frame.flatMap {
+            !$0.isDraftPreview && $0.request.recipe == recipe && $0.request.region == nil ? $0.automaticValues : nil
+        }
         return EditorExportCapture(source: source, recipe: recipe,
                                    lut: lut, automaticValues: automatic ?? [:])
     }
@@ -888,6 +972,13 @@ import Observation
             exportYields += 1
             return
         }
+        refinementFailed = true
+        refinementTask?.cancel()
+        let refinement = refinementTask
+        refinementTask = nil
+        isRefiningPreview = false
+        // Wait for native work to release its temporary decoder before export.
+        await refinement?.value
         // The canvas shows the exported recipe: its frame lands first.
         while pending != nil || inFlight != nil || pacing != nil {
             if let pacing {
@@ -920,6 +1011,10 @@ import Observation
         guard exportYields == 0 else { return }
         if pending != nil, pacing == nil { submitPending() }
         if let size = previewSize, !isDragging { scheduleOriginalIfNeeded(size: size) }
+        if frame?.isDraftPreview == true {
+            refinementFailed = false
+            startRefiningPreview()
+        }
         updateModelGain()
         scheduleDetails()
     }
@@ -966,7 +1061,8 @@ import Observation
         detailTask = nil
         // A detail develops the full-size source: never beside another
         // development (the original's comes back from its flight to here).
-        guard !isYieldingToExport, let source, let viewport, !isDragging, pending == nil, pacing == nil,
+        guard !isYieldingToExport, !isRefiningPreview, frame?.isDraftPreview != true,
+              let source, let viewport, !isDragging, pending == nil, pacing == nil,
               inFlight == nil, originalFlight == nil, !viewport.visible.isEmpty else { return }
         // No detail while the crop is edited: the canvas draws the photo turned and tilted.
         guard !isEditingCrop else { return }
@@ -1051,7 +1147,7 @@ import Observation
     /// Render, so its prediction is a new one; preview and full size share it).
     /// Log look is not in `development`: AI stays on the Apple-boost photograph.
     private func modelKey(_ recipe: Recipe, bypassed: Set<ParameterGroup>) -> ModelKey? {
-        guard !isOpening, wantsModel(recipe), !bypassed.contains(.hdr), let source else { return nil }
+        guard !isOpening, !isRefiningPreview, frame?.isDraftPreview != true, wantsModel(recipe), !bypassed.contains(.hdr), let source else { return nil }
         return ModelKey(source: source.id, model: modelID(recipe), development: recipe.development, bypassed: bypassed)
     }
 
@@ -1172,6 +1268,7 @@ import Observation
     func settle() async {
         while true {
             if let uprightTask { await uprightTask.value; await Task.yield(); continue }
+            if let refinementTask { await refinementTask.value; await Task.yield(); continue }
             if let pacing { await pacing.value; continue }
             if let flight = inFlight { await flight.task.value; await Task.yield(); continue }
             if let flight = originalFlight { await flight.task.value; await Task.yield(); continue }

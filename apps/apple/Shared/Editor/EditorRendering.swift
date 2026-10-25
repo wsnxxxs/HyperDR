@@ -41,6 +41,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
               rawDecoderPreference: RAWDecoderPreference,
               progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image?
+    /// Replaces an editable RAW draft with native-area preview pixels, preserving source identity.
+    func refinePreview(sourceID: UUID) async throws -> EditorSource?
 
 
     /// Renders the open photo, with the display pair the canvas draws. The
@@ -122,6 +124,7 @@ nonisolated struct EditorSource: Equatable, Sendable {
     /// The file carries transparency, which an export fills (Kit's
     /// `ExportSource.hasAlpha`).
     var hasAlpha = false
+    var isDraftPreview = false
     var rawDecoderVersion: String? = nil
     var rawDecoderFallback: RAWDecoderFallback? = nil
 }
@@ -150,6 +153,9 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     /// recipe needs another development (a Log look on a RAW) throws
     /// `EditorRenderingError.needsDevelopment`. No automatic values.
     var keepsSource = false
+    /// The primary edited canvas sets its RAW development/refinement target.
+    /// Scopes, original comparisons and thumbnails only sample the current tier.
+    var isCanvasPreview = false
 
     /// Whether the two render the same picture of the same photo, whatever
     /// their size, region or pacing: a detail belongs to a frame
@@ -170,6 +176,7 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     /// The recipe asks for AI gain but this frame has none yet, because the
     /// prediction is not ready (`RenderPlanes.aiPending`).
     var modelGainPending = false
+    var isDraftPreview = false
     /// What `auto` parameters resolve to, by id, in the declared units
     /// (`AdjustmentContext.automaticValues`; `hdr.range` in stops), also for
     /// parameters the recipe sets: the ruler marks it as their default.
@@ -223,6 +230,8 @@ extension EditorRendering {
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
 
     func yieldMemory() async {}
+
+    func refinePreview(sourceID: UUID) async throws -> EditorSource? { nil }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
               rawDecoderPreference: RAWDecoderPreference,

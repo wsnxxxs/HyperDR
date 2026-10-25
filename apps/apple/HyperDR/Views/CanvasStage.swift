@@ -445,7 +445,7 @@ struct CanvasStatus: View {
                         .padding(Space.s3)
                     }
                     if document.isPreparingCameraSupport {
-                        CameraSupportCard(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                        CameraSupportCard(fileName: document.name, stage: busyLabel(document) ?? "stage.generating", canCancel: model.canCancelOpen, cancel: cancelOpen)
                             .reportsCanvasFoot(\.status, gap: Space.s4, name: "status")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                             .padding(Space.s4)
@@ -461,7 +461,7 @@ struct CanvasStatus: View {
                     case .opening, .rendering:
                         Group {
                             if document.isPreparingCameraSupport {
-                                CameraSupportPanel(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                                CameraSupportPanel(fileName: document.name, stage: busyLabel(document) ?? "stage.generating", canCancel: model.canCancelOpen, cancel: cancelOpen)
                                     .transition(.opacity)
                             } else {
                                 FirstFrameProgress(label: busyLabel(document) ?? "stage.generating",
@@ -539,7 +539,10 @@ struct CanvasStatus: View {
             case .rendering: "stage.generating"
             case nil: document.phase == .opening ? "stage.reading" : "stage.generating"
             }
-        case .ready, .failed: document.isRefreshing ? "mac.canvas.refreshing" : nil
+        case .ready, .failed:
+            // A draft is on the canvas while the full-quality preview is made:
+            // the same quiet corner chip, after the usual 300 ms.
+            document.isRefreshing ? "mac.canvas.refreshing" : (model.editor.isRefiningPreview ? "mac.canvas.refining" : nil)
         }
     }
 }

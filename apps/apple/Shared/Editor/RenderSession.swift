@@ -24,7 +24,7 @@ import HyperDRRender
 actor RenderSession: EditorRendering {
     private let engine: RenderEngine
     private struct Opened {
-        let editor: EditorSource
+        var editor: EditorSource
         /// The file as opened. `load` of a replaced file quietly opens the new
         /// one, so a reload checks this first (R23-001).
         let revision: FileRevision
@@ -33,6 +33,9 @@ actor RenderSession: EditorRendering {
         /// request loads `options` again.
         var source: RenderSource?
         var options: SourceOptions
+        /// The primary canvas's development and largest requested tier, independent
+        /// of the last scope/original variant that happened to render.
+        var previewOptions: SourceOptions
         var detail: ExportSource?
         var detailOptions: SourceOptions?
     }
@@ -104,6 +107,7 @@ actor RenderSession: EditorRendering {
                 options.rawDecoderVersion = await engine.preferredRAWDecoder(url)
             }
         }
+        options.draftRAWPreview = previewSize != nil
         let selected = clock.now
         let revision = try FileRevision(url)
         let loadProgress: @Sendable (SourceLoadPhase) -> Void = { phase in
@@ -121,7 +125,14 @@ actor RenderSession: EditorRendering {
         let source: RenderSource
         do {
             try await beforeOpenLoad?(options)
-            source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+            do {
+                source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+            } catch RenderError.cannotDecodeSource where options.draftRAWPreview {
+                // A camera may reject reduced development while native works.
+                // Keep its selected decoder before considering decoder fallback.
+                options.draftRAWPreview = false
+                source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+            }
         } catch {
             // A listed decoder can still fail in Apple's camera/system model.
             // Retry only a new photo's preferred 9 after a decode failure, once.
@@ -156,12 +167,52 @@ actor RenderSession: EditorRendering {
                                   sourceValues: report.sourceValues,
                                   capabilities: Self.capabilities(report.capabilities),
                                   hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url),
+                                  isDraftPreview: source.isDraftRAWPreview,
                                   rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback)
-        opened = Opened(editor: editor, revision: revision, source: source, options: options)
+        opened = Opened(editor: editor, revision: revision, source: source, options: options, previewOptions: options)
         EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") in \(began.duration(to: clock.now))")
         predictions = [:]
         predictionOrder = []
         return editor
+    }
+
+    func refinePreview(sourceID: UUID) async throws -> EditorSource? {
+        // Native RAW development is synchronous on its engine. A separate engine
+        // leaves the editor's engine free for draft renders while this runs.
+        let refiner = try await Task.detached(priority: .utility) { try RenderEngine() }.value
+        let generation = self.generation
+        while true {
+            try Task.checkCancellation()
+            try checkCurrent(generation)
+            guard let initial = opened, initial.editor.id == sourceID else { throw EditorRenderingError.staleSource }
+            guard initial.editor.domain == .rawEDR, initial.previewOptions.draftRAWPreview else { return initial.editor }
+            guard initial.source != nil else { return nil }
+            var options = initial.previewOptions
+            options.draftRAWPreview = false
+            guard try FileRevision(initial.editor.url) == initial.revision else { throw EditorRenderingError.sourceChanged }
+            let source = try await refiner.load(initial.editor.url, options: options, preparingAnalysis: true)
+            let analysis = try await refiner.previewAnalysis(source)
+            let report = try await refiner.sourceReport(source)
+            try Task.checkCancellation()
+            try checkCurrent(generation)
+            guard let current = opened else { throw EditorRenderingError.noSource }
+            // A development edit meanwhile needs its own native preview. Ordinary
+            // edits do not change these options and land on the finished source.
+            guard current.source != nil else { return nil } // yielded to export
+            guard current.previewOptions == initial.previewOptions else { continue }
+            try await engine.installRefinedPreview(source, analysis: analysis, resolution: options.resolution)
+            try Task.checkCancellation()
+            try checkCurrent(generation)
+            guard var latest = opened else { throw EditorRenderingError.noSource }
+            guard latest.previewOptions == initial.previewOptions else { continue }
+            latest.source = source // drops the draft immediately
+            latest.options = options
+            latest.previewOptions = options
+            latest.editor.sourceValues = report.sourceValues
+            latest.editor.isDraftPreview = false
+            opened = latest
+            return latest.editor
+        }
     }
 
     /// Whether the file's first image has an alpha channel, from its
@@ -196,8 +247,21 @@ actor RenderSession: EditorRendering {
             return lut
         }
         let full = request.region != nil || request.size == recipe.geometry.outputSize(of: opened.editor.pixelSize)
-        let sourceOptions = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size),
+        var sourceOptions = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size),
                                               options: options)
+        sourceOptions.draftRAWPreview = opened.previewOptions.draftRAWPreview && !full
+        if opened.editor.domain == .rawEDR, !full, !request.keepsSource {
+            let previousSide: Int = switch opened.previewOptions.resolution {
+            case .preview(let size): max(size.width, size.height)
+            case .full: max(opened.editor.pixelSize.width, opened.editor.pixelSize.height)
+            }
+            let side = max(previousSide, request.size.width, request.size.height)
+            let resolution = SourceResolution.preview(maximumSize: .init(width: side, height: side))
+            sourceOptions.resolution = resolution
+            opened.previewOptions.resolution = resolution
+            if request.isCanvasPreview { opened.previewOptions = sourceOptions }
+            self.opened = opened
+        }
         if let region = request.region {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
@@ -278,7 +342,7 @@ actor RenderSession: EditorRendering {
         try Task.checkCancellation()
         try checkCurrent(prepared.generation)
         return EditorFrame(request: request, planes: planes, display: display, modelGainPending: planes.aiPending,
-                           automaticValues: automatic)
+                           isDraftPreview: source.isDraftRAWPreview, automaticValues: automatic)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
@@ -292,6 +356,9 @@ actor RenderSession: EditorRendering {
     }
 
     private func predict(_ request: EditorRenderRequest) async throws {
+        if opened?.source?.isDraftRAWPreview == true {
+            _ = try await refinePreview(sourceID: request.sourceID)
+        }
         let prepared = try await prepare(request, needsLUT: false)
         let generation = prepared.generation
         // AI belongs to the photograph, not the log look. Both developments

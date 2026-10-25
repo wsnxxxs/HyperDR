@@ -48,6 +48,7 @@ extension RenderEngine {
         try Task.checkCancellation()
         let revision = try SourceRevision(url:url)
         var fullOptions = options; fullOptions.resolution = .full
+        fullOptions.draftRAWPreview = false
         clearImageCaches()
         let staged = stagingLookBaseline && fullOptions.sceneLinear
             ? try stageLookBaseline(url, options: fullOptions, revision: revision) : nil

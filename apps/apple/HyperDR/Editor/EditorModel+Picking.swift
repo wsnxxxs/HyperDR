@@ -5,9 +5,16 @@ extension EditorModel {
     /// editor; the white balance's twin.
     func wireTargetPickers() {
         curvePick.attach(editor)
-        curvePick.picker.photoPoint = { [weak self] in self?.pickablePhotoPoint($0) }
-        whiteBalance.onBegin = { [weak self] in self?.curvePick.picker.reset() }
-        curvePick.picker.onActivate = { [weak self] in self?.whiteBalance.reset() }
+        mixerPick.attach(editor)
+        for picker in [curvePick.picker, mixerPick.picker] {
+            picker.photoPoint = { [weak self] in self?.pickablePhotoPoint($0) }
+            picker.onActivate = { [weak self] in
+                guard let self else { return }
+                self.whiteBalance.reset()
+                for other in self.targetPickers where other !== picker { other.reset() }
+            }
+        }
+        whiteBalance.onBegin = { [weak self] in self?.resetTargetPickers() }
     }
 
     /// A point on the canvas as 0…1 on the photo, while an eyedropper can use it.
@@ -18,6 +25,8 @@ extension EditorModel {
 
     /// Ends every drag eyedropper: another photo, the crop pane, a locked editor.
     func resetTargetPickers() {
-        curvePick.picker.reset()
+        for picker in targetPickers { picker.reset() }
     }
+
+    var targetPickers: [TargetPicker] { [curvePick.picker, mixerPick.picker] }
 }

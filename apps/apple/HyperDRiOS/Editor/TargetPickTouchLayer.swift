@@ -5,10 +5,12 @@ import SwiftUI
 /// section's): pressing samples the pixel under the finger and dragging up or
 /// down edits what it points at, until the finger lifts. It lies over the
 /// canvas, so while it is up the photo does not pan or zoom.
-struct TargetPickTouchLayer: View {
+struct TargetPickTouchLayer<Hint: View>: View {
     let picker: TargetPicker
     /// The photo's rectangle on the canvas, for the point under the finger.
     let imageFrame: CGRect
+    /// What the drag does, the line over the canvas.
+    @ViewBuilder let hint: Hint
 
     var body: some View {
         ZStack {
@@ -20,7 +22,7 @@ struct TargetPickTouchLayer: View {
                         picker.move(to: value.location)
                     }
                     .onEnded { _ in picker.release() })
-            Text("ipad.curve.pickHint")
+            hint
                 .font(.footnote.weight(.medium))
                 .padding(.horizontal, Space.s4)
                 .padding(.vertical, Space.s2)

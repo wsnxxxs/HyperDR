@@ -4026,6 +4026,24 @@
         }
       }
     },
+    "ipad.mixer.pickHint" : {
+      "comment" : "Over the canvas while the colour mixer eyedropper is on: how to pick.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press a colour of the photo and drag up or down"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住照片上的颜色，上下拖动"
+          }
+        }
+      }
+    },
     "ipad.zoom" : {
       "comment" : "Canvas bar: the zoom button's accessibility name.",
       "extractionState" : "manual",

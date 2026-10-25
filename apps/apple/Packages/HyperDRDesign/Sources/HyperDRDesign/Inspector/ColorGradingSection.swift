@@ -4,7 +4,7 @@ import SwiftUI
 /// The tonal zones of the colour grading (adjust-tools §7): the three ranges
 /// of lightness and the whole photo. Ids are the declared
 /// `grade.<zone>.hue|saturation|luminance`.
-public enum GradingZone: String, CaseIterable, Identifiable, Sendable {
+public enum WheelZone: String, CaseIterable, Identifiable, Sendable {
     case shadows, midtones, highlights, global
 
     public var id: String { rawValue }
@@ -149,7 +149,7 @@ struct GradingWheel: View {
 /// The four zones as small discs to choose from, each with a dot where its
 /// tint is; a mark shows a zone with changes.
 private struct GradingZoneTab: View {
-    let zone: GradingZone
+    let zone: WheelZone
     let hue: Double
     let saturation: Double
     let isChanged: Bool
@@ -249,22 +249,22 @@ public struct ColorGradingSection: View {
 struct ColorGradingLayout<Slider: View>: View {
     let style: AdjustmentControlStyle
     let showsTitle: Bool
-    let colour: (GradingZone) -> (hue: Double, saturation: Double, luminance: Double)
+    let colour: (WheelZone) -> (hue: Double, saturation: Double, luminance: Double)
     let isChanged: (String) -> Bool
-    let writeWheel: (GradingZone, Double?, Double) -> Void
-    let resetWheel: (GradingZone) -> Void
-    let wheelEditing: (GradingZone, Bool) -> Void
+    let writeWheel: (WheelZone, Double?, Double) -> Void
+    let resetWheel: (WheelZone) -> Void
+    let wheelEditing: (WheelZone, Bool) -> Void
     let resetAll: () -> Void
     @ViewBuilder let slider: (_ id: String, _ title: Text?) -> Slider
 
-    @State private var zone = GradingZone.midtones
+    @State private var zone = WheelZone.midtones
     @State private var isExpanded: Bool
 
     init(style: AdjustmentControlStyle, showsTitle: Bool,
-         colour: @escaping (GradingZone) -> (hue: Double, saturation: Double, luminance: Double),
+         colour: @escaping (WheelZone) -> (hue: Double, saturation: Double, luminance: Double),
          isChanged: @escaping (String) -> Bool,
-         writeWheel: @escaping (GradingZone, Double?, Double) -> Void, resetWheel: @escaping (GradingZone) -> Void,
-         wheelEditing: @escaping (GradingZone, Bool) -> Void, resetAll: @escaping () -> Void,
+         writeWheel: @escaping (WheelZone, Double?, Double) -> Void, resetWheel: @escaping (WheelZone) -> Void,
+         wheelEditing: @escaping (WheelZone, Bool) -> Void, resetAll: @escaping () -> Void,
          @ViewBuilder slider: @escaping (_ id: String, _ title: Text?) -> Slider) {
         self.style = style
         self.showsTitle = showsTitle
@@ -279,11 +279,11 @@ struct ColorGradingLayout<Slider: View>: View {
     }
 
     static var ids: [String] {
-        GradingZone.allCases.flatMap { [$0.hueID, $0.saturationID, $0.luminanceID] }
-            + [GradingZone.blendingID, GradingZone.balanceID]
+        WheelZone.allCases.flatMap { [$0.hueID, $0.saturationID, $0.luminanceID] }
+            + [WheelZone.blendingID, WheelZone.balanceID]
     }
 
-    private func isChanged(zone: GradingZone) -> Bool {
+    private func isChanged(zone: WheelZone) -> Bool {
         [zone.hueID, zone.saturationID, zone.luminanceID].contains(where: isChanged)
     }
 
@@ -294,7 +294,7 @@ struct ColorGradingLayout<Slider: View>: View {
             if showsTitle { header }
             if isExpanded || !showsTitle {
                 HStack(spacing: 0) {
-                    ForEach(GradingZone.allCases) { option in
+                    ForEach(WheelZone.allCases) { option in
                         let value = colour(option)
                         GradingZoneTab(zone: option, hue: value.hue, saturation: value.saturation,
                                        isChanged: isChanged(zone: option), isSelected: zone == option, style: style) {
@@ -316,8 +316,8 @@ struct ColorGradingLayout<Slider: View>: View {
                 }
                 Divider().padding(.vertical, Space.s1)
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-                    slider(GradingZone.blendingID, nil)
-                    slider(GradingZone.balanceID, nil)
+                    slider(WheelZone.blendingID, nil)
+                    slider(WheelZone.balanceID, nil)
                 }
                 if !showsTitle, anyChanged { resetButton }
             }

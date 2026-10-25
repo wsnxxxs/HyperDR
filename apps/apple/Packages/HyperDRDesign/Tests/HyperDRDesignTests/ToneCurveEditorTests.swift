@@ -234,7 +234,7 @@ private let identity = [0.0, 0, 1, 1]
     #expect(AdjustmentSections.kind(of: "grade.global.hue") == .grading)
     #expect(AdjustmentSections.kind(of: "grade.balance") == .grading)
     #expect(MixerBand.aqua.id(.luminance) == "hsl.aqua.luminance")
-    #expect(GradingZone.shadows.saturationID == "grade.shadows.saturation")
+    #expect(WheelZone.shadows.saturationID == "grade.shadows.saturation")
 }
 
 @Test func theCurveEyedropperAddsAPointAndMovesIt() throws {

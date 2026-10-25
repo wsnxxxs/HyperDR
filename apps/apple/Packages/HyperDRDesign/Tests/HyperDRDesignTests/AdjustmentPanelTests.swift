@@ -221,20 +221,21 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(raw.look == nil && raw.conditionValue("look.output") == .string("rec709"))
 }
 
-@Test func lutSpaceMenusGroupDisplayHDRAndLog() {
+@Test func lutSpaceMenusGroupDisplayHDRLogAndGrading() {
     var raw = Recipe(inputDomain: .rawEDR)
     panel.set("look.lut", reference: "sha256:01", in: &raw)
     let input = panel.control("look.input", in: raw)!
     let sections = AdjustmentText.optionSections(input)
-    #expect(sections.map(\.family) == [.display, .hdr, .log])
+    #expect(sections.map(\.family) == [.display, .hdr, .log, .grading])
     #expect(sections[0].options.map(\.id) == ["srgb", "p3", "rec709", "rec2020"])
     #expect(sections[1].options.map(\.id) == ["hlg", "pq"])
+    #expect(sections[3].options.map(\.id) == ["davinci-dwg", "acescct-ap1"])
     #expect(sections.flatMap(\.options).count == input.options.count)
-    // Outside RAW the input has no Log section; the output keeps all three.
+    // Outside RAW the input has no Log or grading section; the output keeps all four.
     var sdr = Recipe(inputDomain: .sdr)
     panel.set("look.lut", reference: "sha256:01", in: &sdr)
     #expect(AdjustmentText.optionSections(panel.control("look.input", in: sdr)!).map(\.family) == [.display, .hdr])
-    #expect(AdjustmentText.optionSections(panel.control("look.output", in: sdr)!).map(\.family) == [.display, .hdr, .log])
+    #expect(AdjustmentText.optionSections(panel.control("look.output", in: sdr)!).map(\.family) == [.display, .hdr, .log, .grading])
     #expect(AdjustmentText.optionSections(panel.control("hdr.source", in: sdr)!).map(\.family) == [nil])
 }
 

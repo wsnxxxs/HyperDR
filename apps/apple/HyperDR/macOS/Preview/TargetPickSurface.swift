@@ -64,22 +64,29 @@ struct TargetPickCanvasLayer: View {
     let model: EditorModel
 
     var body: some View {
-        let picker = model.curvePick.picker
+        let curve = model.curvePick.picker, mixer = model.mixerPick.picker
         ZStack {
-            if picker.isActive {
-                TargetPickSurface(picker: picker)
-                Text("mac.curve.pickHint")
-                    .font(Font.hdr.control)
-                    .hdrOverlayChip()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.top, Space.s3)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+            if curve.isActive {
+                TargetPickSurface(picker: curve)
+                hint { Text("mac.curve.pickHint") }
+            } else if mixer.isActive {
+                TargetPickSurface(picker: mixer)
+                hint { Text("mac.mixer.pickHint") }
             }
         }
-        .hdrAnimation(value: picker.isActive)
+        .hdrAnimation(value: curve.isActive || mixer.isActive)
         .onChange(of: model.photoSerial) { model.resetTargetPickers() }
         .onChange(of: model.isCropping) { if model.isCropping { model.resetTargetPickers() } }
         .onChange(of: model.isEditingLocked) { if model.isEditingLocked { model.resetTargetPickers() } }
+    }
+
+    private func hint(@ViewBuilder _ text: () -> some View) -> some View {
+        text()
+            .font(Font.hdr.control)
+            .hdrOverlayChip()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, Space.s3)
+            .allowsHitTesting(false)
+            .transition(.opacity)
     }
 }

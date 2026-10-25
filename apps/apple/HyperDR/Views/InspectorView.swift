@@ -185,6 +185,7 @@ private struct Adjustments: View {
         .environment(\.lookPickerShown, model.lookPreviews.shown)
         .environment(\.whiteBalancePicking, model.whiteBalance.picking)
         .environment(\.curvePicking, model.curvePick.picking)
+        .environment(\.mixerPicking, model.mixerPick.picking)
     }
 }
 

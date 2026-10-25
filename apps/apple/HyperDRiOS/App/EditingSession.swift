@@ -61,6 +61,8 @@ import SwiftUI
     let whiteBalance = WhiteBalancePicker()
     /// The curve eyedropper: a press on the photo and a drag up or down.
     let curvePick = CurvePickModel()
+    /// The colour mixer's eyedropper.
+    let mixerPick = MixerPickModel()
 
     /// Only newly opened RAWs use this preference. The photo already open and
     /// its export keep the decoder recorded in the recipe.
@@ -126,8 +128,15 @@ import SwiftUI
         }
         if let editor {
             curvePick.attach(editor)
-            curvePick.picker.onActivate = { [whiteBalance] in whiteBalance.reset() }
-            whiteBalance.onBegin = { [curvePick] in curvePick.picker.reset() }
+            mixerPick.attach(editor)
+            let pickers = [curvePick.picker, mixerPick.picker]
+            for picker in pickers {
+                picker.onActivate = { [whiteBalance] in
+                    whiteBalance.reset()
+                    for other in pickers where other !== picker { other.reset() }
+                }
+            }
+            whiteBalance.onBegin = { for picker in pickers { picker.reset() } }
         }
         editor?.onLookSpacesChanged = { [weak luts = exports.luts] old, new in
             luts?.record(from: old, to: new)
@@ -136,6 +145,12 @@ import SwiftUI
             if let editor { await exports.luts.refresh(into: editor) }
         }
         exports.framing = framing
+    }
+
+    /// Ends every drag eyedropper (another photo, another tool, a locked editor).
+    func resetTargetPickers() {
+        curvePick.picker.reset()
+        mixerPick.picker.reset()
     }
 
     var isAvailable: Bool { editor != nil }

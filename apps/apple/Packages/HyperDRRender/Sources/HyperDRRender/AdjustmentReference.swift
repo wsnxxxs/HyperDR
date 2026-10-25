@@ -292,14 +292,19 @@ extension DoubleReference {
             }
             return Split(base: base, gains: gains)
         }
-        var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
             (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks)]
-        for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
-        x = toneCurve(x, curve: settings.tone.curve)
-        x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
-        x = point(x, operation: .saturation, value: Double(settings.color.saturation))
+        func adjusted(_ whites: Float) -> RGB {
+            var x = source
+            for (op,value) in operations {
+                x = point(x,operation:op,value:Double(op == .whites ? whites : value),sdr:sdr && op == .exposure)
+            }
+            x = toneCurve(x, curve: settings.tone.curve)
+            x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
+            return point(x, operation: .saturation, value: Double(settings.color.saturation))
+        }
+        var x = adjusted(settings.tone.whites)
         let active = !settings.look.isIdentity
         // A log look keeps linear-P3 negatives through the primary matrix. Fit after
         // the strength mix so the gain split never sees a negative component.
@@ -309,7 +314,12 @@ extension DoubleReference {
         if logLook { x = fitP3(x,upper:max(1,x.x,x.y,x.z)) }
         let filmScene = x
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
-        var g = !sdr || settings.tone.whites > 0 || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
+        var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
+        if sdr, !(active && !settings.look.input.isSDR), settings.tone.whites > 0 {
+            var original = adjusted(0)
+            original = fitP3(original,upper:max(1,original.x,original.y,original.z))
+            g = max(0,log2(max(1,x.x,x.y,x.z)/max(1,original.x,original.y,original.z)))
+        }
         var base = fitP3(x*exp2(-g))
         if !settings.film.isIdentity, let stock = settings.film.stock, let film = try? FilmStock.named(stock) {
             let exposed = filmScene*exp2(Double(settings.film.exposure ?? 0))

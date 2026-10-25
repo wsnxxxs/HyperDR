@@ -231,11 +231,11 @@ float3 applyToneCurve(float3 rgb, constant GraphUniform& p, device const float4*
     return rgb*(target/y);
 }
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
-    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
     rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
@@ -243,6 +243,15 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     bool logLook=p.flags.z && p.lutInfo.z>=5;
     if(!logLook && p.effects.w==0) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
     return rgb;
+}
+// Keep pre-existing SDR colour overflow in the SDR fit. Only the increase
+// relative to the same edit without Whites becomes newly generated gain.
+float sdrWhitesGain(float3 rgb,float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,
+                    device const float4* table) {
+    if(p.light.x<=0) return 0;
+    float3 original=graphScene(pixel,p,cube,table,false,false);
+    original=fit(original,max(1.f,maximum(original)));
+    return max(0.f,log2(max(1.f,maximum(rgb))/max(1.f,maximum(original))));
 }
 // `exposed`, when w is set, is the film exposure after the in-emulsion scatter.
 WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,
@@ -255,7 +264,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float3 filmScene=rgb;
     rgb=fit(rgb,max(1.f,maximum(rgb)));
-    float g=(p.flags.x!=0 || p.flags.z || p.light.x>0) ? log2(max(1.f,maximum(rgb))) : 0;
+    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : sdrWhitesGain(rgb,pixel,p,cube,table);
     float3 base=fit(rgb*exp2(-g),1.f);
     float3 stockDelta=0;
     bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
@@ -306,7 +315,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
         float3 original=graphScene(baseline,p,cube,table);
         original=fit(original,max(1.f,maximum(original)));
-        float oldGain=(p.flags.x!=0 || p.light.x>0) ? log2(max(1.f,maximum(original))) : 0;
+        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table);
         float3 oldBase=fit(original*exp2(-oldGain),1.f);
         float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
         renderedHDR=hdr;

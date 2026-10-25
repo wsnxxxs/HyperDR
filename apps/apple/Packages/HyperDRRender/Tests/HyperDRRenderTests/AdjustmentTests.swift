@@ -289,6 +289,30 @@ private func wideHalf() -> String {
         }
     }
 
+    @Test func whitesStartsContinuouslyWithExistingSDRColourOverflow() async throws {
+        let rgb = SIMD3<Double>(0.95,0.70,0.65), engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap([rgb], width: 1, height: 1), domain: .sdr)
+        let lut = try ColorLUT(cube: cube())
+        for strength in [0.0, 0.5] {
+            var previous: PlanePixels?
+            for whites: Float in [0, 0.0001, -0.0001] {
+                var edit = RenderAdjustments()
+                edit.color.warmth = 1; edit.tone.whites = whites
+                edit.hdr.coverage = 0; edit.hdr.range = 4
+                if strength > 0 { edit.look.lut = lut; edit.look.strength = Float(strength) }
+                let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                compare(pixels, [DoubleReference.prepare(rgb, settings: edit, sdr: true)])
+                if let zero = previous {
+                    for c in 0..<3 { #expect(abs(pixels.baseRGBA[c]-zero.baseRGBA[c]) < 0.001) }
+                    #expect(abs(pixels.gain[0]-zero.gain[0]) < 0.001)
+                } else {
+                    #expect(pixels.gain[0] == 0)
+                    previous = pixels
+                }
+            }
+        }
+    }
+
     @Test func sdrCurveShapesMidtonesAndKeepsHDR() async throws {
         let curve = try ToneCurve([0,0, 0.25,0.16, 0.5,0.5, 0.75,0.84, 1,1])
         let xs = [0.0, 0.05, 0.18, 0.5, 0.9, 1, 1.5]

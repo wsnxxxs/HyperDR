@@ -27,6 +27,22 @@ import UniformTypeIdentifiers
         return url
     }
 
+    @Test func detailClippingKeepsTheGlobalAutomaticRange() async throws {
+        let url = try Self.tinyPhoto()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let session = try RenderSession()
+        let size = PixelSize(width: 96, height: 64)
+        let source = try await session.open(url, previewSize: size)
+        var request = EditorRenderRequest(sourceID: source.id, recipe: Recipe(inputDomain: source.domain), size: size)
+        let whole = try await session.render(request)
+        request.region = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let detail = try await session.render(request)
+        #expect(detail.automaticValues.isEmpty)
+        #expect(detail.renderedRange == whole.renderedRange)
+        #expect(detail.renderedRange > 0)
+        _ = try await session.clippingMask(detail)
+    }
+
     @Test(arguments: [UTType.jpeg, .heic, .png])
     func nonRAWRendersReuseTheInitiallyOpenedSource(type: UTType) async throws {
         let url = try Self.tinyPhoto(type: type)

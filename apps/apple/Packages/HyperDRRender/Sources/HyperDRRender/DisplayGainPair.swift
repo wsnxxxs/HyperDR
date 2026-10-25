@@ -169,7 +169,7 @@ extension RenderEngine {
         return (target, hdr)
     }
 
-    private func encodeDisplayHDR(_ pair: DisplayGainPair, into command: any MTLCommandBuffer) throws -> any MTLTexture {
+    func encodeDisplayHDR(_ pair: DisplayGainPair, into command: any MTLCommandBuffer) throws -> any MTLTexture {
         let node = nodeContext(domain: .dual, buffer: command)
         let output = try node.texture(width: pair.base.width, height: pair.base.height)
         var p = DisplayHDRUniform(p3ToGain: pair.p3ToGain, gainToP3: pair.gainToP3,

@@ -959,6 +959,17 @@ import Observation
     /// The shown frame's diagnostic mask. Red channel is dead black (paint blue),
     /// green is clipping (paint red). Request only while dragging whites/blacks
     /// or holding Option; discard it when the shown frame changes.
+    /// Curve input at a normalized top-left point on the displayed photo.
+    /// parameterID is tone.curve / curveSDR / curveHDR / curveRed / curveGreen / curveBlue.
+    func pickCurve(at point: CGPoint, parameterID: String = "tone.curve") async throws -> CurveSample {
+        guard let source, let request = renderRequest(size: frame?.size ?? source.pixelSize) else {
+            throw EditorRenderingError.noSource
+        }
+        let sample = try await renderer.pickCurve(request,parameterID: parameterID,at: point)
+        guard self.source?.id == source.id else { throw EditorRenderingError.staleSource }
+        return sample
+    }
+
     func clippingMask() async throws -> RenderMask {
         guard let frame else { throw EditorRenderingError.noSource }
         return try await renderer.clippingMask(frame)

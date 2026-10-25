@@ -41,7 +41,7 @@ public enum ModelGain {
     public static let exifModelName = "research-exif-v1"
     /// Both frozen research manifests reconstruct HDR with equal base/alternate offsets.
     public static let reconstructionOffset: Float = 1 / 100000
-    public static let reconstructionRevision = "reconstruction-offset-1e-5"
+    public static let reconstructionRevision = "reconstruction-offset-1e-5-strength-v1"
     /// Model version recorded by the conversion script; also embedded in the
     /// compiled model's metadata, which is what `ModelGainModel.version` reads.
     public static let modelVersion = "research-demo-fold0-seed908/v1"

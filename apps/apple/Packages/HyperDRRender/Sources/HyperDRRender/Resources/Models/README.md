@@ -10,7 +10,8 @@ A missing EXIF tree or spatial package also falls back to model 1. Compiled
 `.mlmodelc` directories are accepted in place of `.mlpackage`.
 
 Both models use five linear Display-P3 feature planes and a stride-16 output.
-Both reconstruct with `HDR = (base + 1e-5) * 2^stops - 1e-5`. Predictions carry
+Both reconstruct with `HDR = (base + 1e-5) * 2^(stops * strength) - 1e-5`.
+Strength scales model stops before reconstructing and combining HDR. Predictions carry
 this offset; the graph converts the reconstructed HDR into its destination
 pair before combining AI and captured gain, including black channels.
 Model 2 removes the spatial grid's mean in double precision and restores the

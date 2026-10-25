@@ -441,6 +441,11 @@ kernel void graphFilmExposure(texture2d<float,access::sample> src [[texture(0)]]
 // Reconstruct each gain source using its own offset, then encode that HDR
 // endpoint in the destination pair before combining it with captured gain.
 float3 expansionGain(float3 base,float stops,float offset,float reconstructionOffset) {
+    // Keep the original zero-offset expression for analytic/non-research gains.
+    if(reconstructionOffset==0) {
+        if(offset==0) return float3(stops);
+        return log2((base*exp2(stops)+offset)/(base+offset));
+    }
     if(offset==reconstructionOffset) return float3(stops);
     float3 hdr=(base+reconstructionOffset)*exp2(stops)-reconstructionOffset;
     return log2((max(hdr,0.f)+offset)/(base+offset));
@@ -476,8 +481,16 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     float3 g=pair.gain;
     float offset=p.pair.x;
     if(p.mode.x)g=max(g,expansionGain(pair.base,expansion.sample(s,uv).x*p.color.z/3,offset,0));
-    if(p.mode.y)g=max(g,expansionGain(pair.base,model.sample(s,uv).x,offset,p.pair.y));
-    g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
+    if(p.mode.y && p.pair.y>0) {
+        // Research strength scales predicted stops, before reconstruction with
+        // the model's own offset. Scaling the encoded HDR/base ratio instead
+        // makes near-black pixels discontinuous with the exactly black channel.
+        g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
+        g=max(g,expansionGain(pair.base,model.sample(s,uv).x*p.color.w,offset,p.pair.y));
+    } else {
+        if(p.mode.y)g=max(g,expansionGain(pair.base,model.sample(s,uv).x,offset,0));
+        g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
+    }
     float3 hdr=(pair.base+offset)*exp2(g)-offset;
     float limit=exp2(p.color.z);
     float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0);

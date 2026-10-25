@@ -89,16 +89,16 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         catch RenderError.invalidAdjustment {}
     }
 
-    @Test(arguments: [false, true])
-    func researchOffsetSurvivesPreviewDetailAndExport(largerPairOffset: Bool) async throws {
+    @Test(arguments: [false, true], [Float(0.5), 1])
+    func researchOffsetSurvivesPreviewDetailAndExport(largerPairOffset: Bool, strength: Float) async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let engine = try RenderEngine(device: device)
         let source = try await engine.source(image: aiImage([
-            SIMD3(repeating: 0), SIMD3(repeating: 1e-5), SIMD3(repeating: 1e-3)
+            SIMD3(repeating: 0), SIMD3(repeating: 1e-8), SIMD3(repeating: 1e-5), SIMD3(repeating: 1e-3)
         ]), domain: .sdr)
-        let grid = try aiPrediction(source, [3, 3, 3], device: device)
+        let grid = try aiPrediction(source, [3, 3, 3, 3], device: device)
         var edit = RenderAdjustments()
-        edit.hdr.source = .ai; edit.hdr.range = 4
+        edit.hdr.source = .ai; edit.hdr.range = 4; edit.hdr.strength = strength
         edit.hdr.modelGain = ModelGainPrediction(sourceID: source.id, modelID: grid.modelID,
             gain: grid.gain, reconstructionOffset: ModelGain.reconstructionOffset)
         // Independent effects use a different target-pair offset (1/64).
@@ -116,7 +116,7 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
                     let base = pixels.baseRGBA[pixel * 4 + channel]
                     let gain = pixels.gain[pixel * 3 + channel]
                     let actual = (base + offset) * exp2(gain) - offset
-                    let expected = (base + Float(1e-5)) * 8 - Float(1e-5)
+                    let expected = (base + Float(1e-5)) * exp2(3 * strength) - Float(1e-5)
                     #expect(abs(actual - expected) < 2e-8)
                 }
             }

@@ -77,6 +77,15 @@ actor RenderSession: EditorRendering {
         try await mapped { try await openSource(url, previewSize: previewSize, restoring: restoring) }
     }
 
+    func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample {
+        guard let opened else { throw EditorRenderingError.noSource }
+        guard opened.editor.id == request.sourceID else { throw EditorRenderingError.staleSource }
+        guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
+        let options = try SourceOptions(recipe: request.recipe, resolution: .full)
+        return try await engine.pickWhiteBalance(opened.editor.url, options: options, point: point,
+                                                photoSize: opened.editor.pixelSize, raw: opened.editor.domain == .rawEDR)
+    }
+
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
         await EmbeddedPreview.read(url)
     }

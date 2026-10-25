@@ -50,6 +50,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
+    func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample
+
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
 
@@ -230,6 +232,10 @@ extension EditorRendering {
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
 
     func yieldMemory() async {}
+
+    func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample {
+        throw EditorRenderingError.unsupported("White balance sampling")
+    }
 
     func refinePreview(sourceID: UUID) async throws -> EditorSource? { nil }
 

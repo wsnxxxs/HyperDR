@@ -498,6 +498,27 @@ import Observation
         recipeDidChange(from: old)
     }
 
+    /// Normalized photo coordinates, top-left. While cropping, the point is
+    /// on the whole photo; otherwise it is on the geometry-applied photo.
+    /// Temperature and tint are written together as one undo step.
+    func pickWhiteBalance(at point: CGPoint) async throws -> WhiteBalancePick {
+        guard let source, let request = renderRequest(size: source.pixelSize) else {
+            throw EditorRenderingError.noSource
+        }
+        let sampled = try await renderer.pickWhiteBalance(request, at: point)
+        guard self.source?.id == source.id else { throw EditorRenderingError.staleSource }
+        let raw = source.domain == .rawEDR
+        let temperatureID = raw ? "develop.temperature" : "color.warmth"
+        let tintID = raw ? "develop.tint" : "color.tint"
+        let temperature = min(raw ? 50000 : 100, max(raw ? 1000 : -100, sampled.temperature))
+        let tint = min(raw ? 200 : 100, max(raw ? -200 : -100, sampled.tint))
+        apply(.parameter(temperatureID)) {
+            $0.setValue(.number(temperature), for: temperatureID)
+            $0.setValue(.number(tint), for: tintID)
+        }
+        return temperature == sampled.temperature && tint == sampled.tint ? .applied : .clamped
+    }
+
     func resetGroup(_ group: ParameterGroup) {
         apply(.resetGroup(group)) { $0 = $0.resetting(group) }
     }
@@ -1292,3 +1313,5 @@ nonisolated struct CanvasViewport: Equatable, Sendable {
     var showsEdited = true
     var showsOriginal = false
 }
+
+nonisolated enum WhiteBalancePick: Equatable, Sendable { case applied, clamped }

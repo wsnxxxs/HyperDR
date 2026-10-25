@@ -110,7 +110,10 @@ struct PadGroupControls: View {
 
     /// The panel's own bars and segments for the sections that arrange their
     /// own controls (the curves' parameters, the colour mixer, the grading).
-    private var padSectionControls: SectionControls {
+    private var padSectionControls: SectionControls { Self.sectionControls(tint: tint) }
+
+    /// Also the iPhone's curve page's: the same bars and segments.
+    static func sectionControls(tint: Color) -> SectionControls {
         SectionControls(slider: { request in
             AnyView(PadSlider(request.title, value: request.value, spec: request.spec, tint: request.tint ?? tint, gradient: request.gradient,
                               mark: request.mark,

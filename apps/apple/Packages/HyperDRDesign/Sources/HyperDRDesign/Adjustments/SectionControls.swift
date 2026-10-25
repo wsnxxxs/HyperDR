@@ -52,6 +52,9 @@ extension EnvironmentValues {
     @Entry public var sectionControls: SectionControls?
     /// How a section arranges itself in the room its host gives it.
     @Entry public var sectionLayout: SectionLayout = .stacked
+    /// The largest side a section's plot takes, for a host short of height
+    /// (the iPhone's dock); nil lets the plot take the width.
+    @Entry public var sectionPlotSide: CGFloat?
 }
 
 /// How the curves, the colour mixer and the grading arrange themselves

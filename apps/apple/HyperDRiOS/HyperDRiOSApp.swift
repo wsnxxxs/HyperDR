@@ -116,6 +116,12 @@ enum DebugLaunch {
         }
     }
 
+    /// The iPhone's: the section page `-HyperDRSection` names.
+    static var section: AdjustmentSections.Kind? {
+        if case .section(let kind)? = pages.values.first { return kind }
+        return nil
+    }
+
     static var tool: PadTool? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-HyperDRTool"), index + 1 < arguments.count else { return nil }

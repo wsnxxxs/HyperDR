@@ -113,18 +113,37 @@ extension EnvironmentValues {
 
 /// A picking button: the white balance one's twin, for the curves and the
 /// colour mixer, named by what it picks.
-struct PickToolButton: View {
+public struct PickToolButton: View {
     let isActive: Bool
     let title: Text
     let size: CGFloat
     let action: () -> Void
+
+    init(isActive: Bool, title: Text, size: CGFloat, action: @escaping () -> Void) {
+        self.isActive = isActive
+        self.title = title
+        self.size = size
+        self.action = action
+    }
+
+    /// The curve eyedropper, for a host that draws the curve's page itself.
+    public static func curve(isActive: Bool, size: CGFloat, action: @escaping () -> Void) -> PickToolButton {
+        PickToolButton(isActive: isActive, title: Text(isActive ? "design.curve.pick.stop" : "design.curve.pick", bundle: .module),
+                       size: size, action: action)
+    }
+
+    /// The colour mixer's eyedropper.
+    public static func mixer(isActive: Bool, size: CGFloat, action: @escaping () -> Void) -> PickToolButton {
+        PickToolButton(isActive: isActive, title: Text(isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
+                       size: size, action: action)
+    }
     @State private var hovered = false
     @Environment(\.isEnabled) private var isEnabled
 
     private var touch: Bool { size >= 40 }
     private var radius: CGFloat { touch ? 10 : Radius.xs }
 
-    var body: some View {
+    public var body: some View {
         Button(action: action) {
             Image(systemName: "eyedropper")
                 .font(.system(size: touch ? 17 : 12, weight: .medium))
@@ -181,6 +200,7 @@ public struct ToneCurveSection: View {
     @State private var activeZone: Int?
     @Environment(\.curvePicking) private var picking
     @Environment(\.sectionLayout) private var layout
+    @Environment(\.sectionPlotSide) private var plotSide
 
     enum Mode: Hashable { case parameters, points }
 
@@ -366,7 +386,7 @@ public struct ToneCurveSection: View {
                             liftsOnly: channel == .lumaHDR, isPicking: picking?.isActive == true,
                             write: { panel.set(channel.id, curve: $0, in: &recipe) },
                             onEditingChanged: { onEditingChanged(declaration, $0) })
-                .frame(maxWidth: style == .touch ? 400 : .infinity)
+                .frame(maxWidth: plotSide ?? (style == .touch ? 400 : .infinity), maxHeight: plotSide)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -447,7 +467,7 @@ public struct ToneCurveSection: View {
                 onEditingChanged(declaration, editing)
             }
         })
-        .frame(maxWidth: style == .touch ? 400 : .infinity)
+        .frame(maxWidth: plotSide ?? (style == .touch ? 400 : .infinity), maxHeight: plotSide)
         .frame(maxWidth: .infinity)
     }
 

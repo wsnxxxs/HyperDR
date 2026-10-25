@@ -28,9 +28,10 @@ struct DockGroup: Identifiable {
     var id: AdjustmentGroupID { states[0].group }
     var isMerged: Bool { states.count > 1 }
 
-    /// Controls the iPhone leaves to the Mac and the iPad Studio (adjust-tools, this
-    /// round): the colour mixer's and the grading's sliders, the parametric
-    /// curve's boundaries, and the curves themselves.
+    /// Controls that are not rings: the colour mixer's and the grading's, the
+    /// parametric curve's boundaries and the curves themselves live on their
+    /// sections' pages (`DockSectionPane`), opened from the tiles after their
+    /// group's rings (controls-polish §8).
     static func omitted(_ control: AdjustmentControl) -> Bool {
         control.kind == .curve || control.id.hasPrefix("hsl.") || control.id.hasPrefix("grade.")
             || ["tone.parametricSplit1", "tone.parametricSplit2", "tone.parametricSplit3"].contains(control.id)
@@ -189,6 +190,9 @@ struct AdjustmentControls: View {
     var onLUTLibrary: () -> Void = {}
     /// Why AI cannot be chosen, when it cannot: an ⓘ beside the HDR source.
     var aiUnavailable: Text?
+    /// Opens a section's page (the curve, the mixer, the grading), from its
+    /// tile after its group's rings; nil shows no tiles.
+    var onOpenSection: ((AdjustmentSections.Kind) -> Void)?
 
     /// The chosen control of each group, kept while switching groups.
     @State private var selected: [AdjustmentGroupID: String] = [:]
@@ -314,6 +318,10 @@ struct AdjustmentControls: View {
                                 .padding(axis == .horizontal ? .bottom : .trailing, axis == .horizontal ? 16 : 0)
                         }
                         ring(control, isCurrent: control.id == current?.id)
+                        // A group's sections follow its last ring, each a tile that opens its page.
+                        if index == layout.rings.count - 1 || layout.rings[index + 1].group != control.group {
+                            sectionTiles(after: control.group)
+                        }
                     }
                 }
                 // Switches read as switches, after the numbers; anything
@@ -365,6 +373,14 @@ struct AdjustmentControls: View {
                             onLibrary: onLUTLibrary) {
                     if let reference = $0 { panel.set(lut.id, reference: reference, in: &recipe) } else { removeLook() }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private func sectionTiles(after group: AdjustmentGroupID) -> some View {
+        if let onOpenSection, let state = self.group.states.first(where: { $0.group == group }) {
+            ForEach(SectionTile.sections(in: state), id: \.self) { kind in
+                SectionTile(kind: kind, marked: SectionTile.isModified(kind, in: state)) { onOpenSection(kind) }
             }
         }
     }
@@ -686,6 +702,10 @@ struct AdjustmentRing: View {
     let control: AdjustmentControl
     let isCurrent: Bool
     let tint: Color
+    /// A name other than the declaration's (a mixer band's).
+    var title: Text? = nil
+    /// A dot of this colour in place of the symbol (a mixer band's).
+    var swatch: Color? = nil
 
     var body: some View {
         let deviation = control.deviation
@@ -700,13 +720,17 @@ struct AdjustmentRing: View {
                     .rotationEffect(.degrees(-90))
                     .scaleEffect(x: deviation < 0 ? -1 : 1)
                     .animation(.smooth(duration: 0.15), value: deviation)
-                Image(systemName: AdjustmentSymbols.control(control.declaration))
-                    .font(.system(size: 16, weight: isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                if let swatch {
+                    Circle().fill(swatch).frame(width: isCurrent ? 14 : 12, height: isCurrent ? 14 : 12)
+                } else {
+                    Image(systemName: AdjustmentSymbols.control(control.declaration))
+                        .font(.system(size: 16, weight: isCurrent ? .semibold : .regular))
+                        .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                }
             }
             .frame(width: 44, height: 44)
             .background(Circle().fill(isCurrent ? Color.white.opacity(0.12) : .clear))
-            AdjustmentText.label(control.declaration)
+            (title ?? AdjustmentText.label(control.declaration))
                 .font(.system(size: 10, weight: isCurrent ? .semibold : .regular))
                 .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
                 .lineLimit(1)
@@ -715,7 +739,7 @@ struct AdjustmentRing: View {
         .opacity(control.isAvailable ? 1 : 0.4)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(AdjustmentText.label(control.declaration))
+        .accessibilityLabel(title ?? AdjustmentText.label(control.declaration))
         .accessibilityValue(Text(verbatim: control.readout()))
         .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
     }

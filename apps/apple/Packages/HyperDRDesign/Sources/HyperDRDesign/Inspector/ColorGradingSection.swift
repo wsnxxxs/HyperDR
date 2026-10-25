@@ -22,8 +22,8 @@ public enum WheelZone: String, CaseIterable, Identifiable, Sendable {
     public var saturationID: String { "grade.\(rawValue).saturation" }
     public var luminanceID: String { "grade.\(rawValue).luminance" }
 
-    static let blendingID = "grade.blending"
-    static let balanceID = "grade.balance"
+    public static let blendingID = "grade.blending"
+    public static let balanceID = "grade.balance"
 }
 
 /// The wheel's geometry, apart from any view: where a hue and a saturation
@@ -384,5 +384,52 @@ struct ColorGradingLayout<Slider: View>: View {
             slider(WheelZone.blendingID, nil, nil)
             slider(WheelZone.balanceID, nil, nil)
         }
+    }
+}
+
+/// One zone's wheel on the recipe, for a host that lays the grading out
+/// itself (the iPhone's grading page): the same wheel, writes and undo
+/// steps as the section's.
+public struct GradingZoneWheel: View {
+    @Binding private var recipe: Recipe
+    private let panel: AdjustmentPanel
+    private let zone: WheelZone
+    private let style: AdjustmentControlStyle
+    private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
+
+    public init(recipe: Binding<Recipe>, panel: AdjustmentPanel, zone: WheelZone, style: AdjustmentControlStyle,
+                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in }) {
+        _recipe = recipe
+        self.panel = panel
+        self.zone = zone
+        self.style = style
+        self.onEditingChanged = onEditingChanged
+    }
+
+    private func number(_ id: String) -> Double {
+        if case .number(let value)? = panel.control(id, in: recipe)?.value { return value }
+        return 0
+    }
+
+    public var body: some View {
+        GradingWheel(hue: number(zone.hueID), saturation: number(zone.saturationID), style: style, label: zone.title,
+                     write: { hue, saturation in
+            var edited = recipe
+            if let hue { panel.set(zone.hueID, number: hue, in: &edited) }
+            panel.set(zone.saturationID, number: saturation, in: &edited)
+            recipe = edited
+        }, reset: {
+            var edited = recipe
+            panel.reset(zone.hueID, in: &edited)
+            panel.reset(zone.saturationID, in: &edited)
+            recipe = edited
+        }, onEditingChanged: { editing in
+            if let declaration = Adjustments.declaration(zone.saturationID) { onEditingChanged(declaration, editing) }
+        })
+    }
+
+    /// The colour a zone gives the photo, for a host's readout or mark.
+    public static func colour(hue: Double, saturation: Double) -> Color {
+        GradingWheelMath.colour(hue: hue, saturation: saturation)
     }
 }

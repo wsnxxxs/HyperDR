@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "ios.section.resetGrading" : {"comment": "iPhone grading page: VoiceOver name of the reset button.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reset Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重置分级"}}}},
+    "ios.section.resetMixer" : {"comment": "iPhone mixer page: VoiceOver name of the reset button.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reset Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重置混色器"}}}},
+    "ios.section.openHint" : {"comment": "iPhone dock: VoiceOver hint on a section tile (curve, mixer, grading).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Opens its page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "打开它的专页"}}}},
+    "ios.section.back" : {"comment": "iPhone dock: VoiceOver name of the button that leaves a section's page for the rings.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Back"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "返回"}}}},
+    "ios.section.grading" : {"comment": "iPhone dock: the colour grading's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "分级"}}}},
+    "ios.section.mixer" : {"comment": "iPhone dock: the colour mixer's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "混色器"}}}},
+    "ios.section.curve" : {"comment": "iPhone dock: the tone curve's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Curve"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "曲线"}}}},
     "ipad.page.next" : {"comment": "iPad Studio: keyboard command (⌘]) for the tool's next page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Next Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "下一页"}}}},
     "ipad.page.previous" : {"comment": "iPad Studio: keyboard command (⌘[) for the tool's previous page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Previous Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上一页"}}}},
     "ipad.page.changed" : {"comment": "VoiceOver value of a tool page that holds changes.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "已更改"}}}},

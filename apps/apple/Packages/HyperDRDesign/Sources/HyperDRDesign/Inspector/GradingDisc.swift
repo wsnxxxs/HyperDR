@@ -16,7 +16,7 @@ enum GradingDisc {
 
     /// The disc's lightness: light on a light panel, lower on a dark one, so
     /// it sits in the panel rather than glowing out of it.
-    static func lightness(_ scheme: ColorScheme) -> Double { scheme == .dark ? 0.68 : 0.82 }
+    static func lightness(_ scheme: ColorScheme) -> Double { scheme == .dark ? 0.68 : 0.80 }
 
     /// Linear sRGB of an OKLab colour.
     static func linearSRGB(l: Double, a: Double, b: Double) -> SIMD3<Double> {

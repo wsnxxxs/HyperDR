@@ -92,12 +92,17 @@ struct GradingWheel: View {
     let hue: Double
     let saturation: Double
     let style: AdjustmentControlStyle
+    /// The zone's name, for VoiceOver.
+    var label: Text = Text(verbatim: "")
     let write: (_ hue: Double?, _ saturation: Double) -> Void
     let reset: () -> Void
     let onEditingChanged: (Bool) -> Void
 
     @State private var grab: CGSize?
     @State private var bracket = EditingBracket()
+    /// A held arrow key is one step, as on the sliders.
+    @State private var keys = ArrowKeyEditing()
+    @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -128,10 +133,11 @@ struct GradingWheel: View {
                         .stroke(Color.white.opacity(0.8), lineWidth: 1)
                         .shadow(color: .black.opacity(0.25), radius: 0.5)
                 }
+                // The puck is the colour the photo's middle grey takes: grey with no tint.
                 Circle()
-                    .fill(saturation > 0 ? Self.tint(hue: hue, saturation: saturation) : Color.hdr.surfaceCard)
+                    .fill(Self.tint(hue: hue, saturation: saturation))
                     .overlay { Circle().strokeBorder(Color.white, lineWidth: 2) }
-                    .overlay { Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 0.5).padding(-1) }
+                    .overlay { Circle().strokeBorder(Color.black.opacity(0.45), lineWidth: 0.75).padding(-0.75) }
                     .frame(width: puckSize, height: puckSize)
                     .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
                     .position(puck)
@@ -159,57 +165,48 @@ struct GradingWheel: View {
             .onDisappear { finish() }
         }
         .aspectRatio(1, contentMode: .fit)
-        .accessibilityHidden(true)
+        .overlay {
+            if focused { Circle().stroke(Color.hdr.focus, lineWidth: 2).padding(-2) }
+        }
+        #if os(macOS)
+        // With keyboard navigation on: ← → turn the hue, ↑ ↓ change the saturation (⇧ ten at a time).
+        .focusable(interactions: .activate)
+        .focused($focused)
+        .focusEffectDisabled()
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
+            let turns = press.key == .leftArrow || press.key == .rightArrow
+            keys.perform(ArrowKeyInput(press), verticalOnly: false, notify: onEditingChanged) { steps in
+                if turns {
+                    write(Self.turned(hue, by: Double(steps)), saturation)
+                } else {
+                    write(hue, min(max(saturation + Double(steps), 0), 100))
+                }
+            }
+            return .handled
+        }
+        .onChange(of: focused) { if !focused { keys.finish(onEditingChanged) } }
+        #endif
+        .accessibilityElement()
+        .accessibilityLabel(Text("design.grade.wheel \(label)", bundle: .module))
+        .accessibilityValue(Text("design.grade.wheelValue \(String(Int(hue.rounded()))) \(String(Int(saturation.rounded())))",
+                                 bundle: .module))
+        .accessibilityAdjustableAction { direction in
+            write(hue, min(max(saturation + (direction == .increment ? 5 : -5), 0), 100))
+        }
+        .accessibilityAction(named: Text("design.grade.hueUp", bundle: .module)) { write(Self.turned(hue, by: 10), saturation) }
+        .accessibilityAction(named: Text("design.grade.hueDown", bundle: .module)) { write(Self.turned(hue, by: -10), saturation) }
+        .accessibilityAction(named: Text("design.grade.neutral", bundle: .module)) { reset() }
+    }
+
+    /// A hue turned by `degrees`, kept in 0…360.
+    static func turned(_ hue: Double, by degrees: Double) -> Double {
+        let turned = (hue + degrees).truncatingRemainder(dividingBy: 360)
+        return turned < 0 ? turned + 360 : turned
     }
 
     private func finish() {
         grab = nil
         bracket.finish(onEditingChanged)
-    }
-}
-
-/// The four zones as small discs to choose from, each with a dot where its
-/// tint is; a mark shows a zone with changes.
-private struct GradingZoneTab: View {
-    let zone: WheelZone
-    let hue: Double
-    let saturation: Double
-    let isChanged: Bool
-    let isSelected: Bool
-    let style: AdjustmentControlStyle
-    let choose: () -> Void
-
-    var body: some View {
-        let side: CGFloat = style == .touch ? 52 : 40
-        Button(action: choose) {
-            VStack(spacing: 4) {
-                ZStack {
-                    GradingDiscImage(travel: side / 2 - 6)
-                        .opacity(isSelected ? 1 : 0.55)
-                    Circle()
-                        .fill(saturation > 0 ? GradingWheel.tint(hue: hue, saturation: saturation) : Color.hdr.surfaceCard)
-                        .overlay { Circle().strokeBorder(Color.white, lineWidth: 1.5) }
-                        .frame(width: 9, height: 9)
-                        .offset(x: CGFloat(cos(hue * .pi / 180) * saturation / 100) * (side / 2 - 6),
-                                y: CGFloat(sin(hue * .pi / 180) * saturation / 100) * (side / 2 - 6))
-                }
-                .frame(width: side, height: side)
-                .overlay { Circle().strokeBorder(isSelected ? Color.hdr.accent : Color.hdr.line, lineWidth: isSelected ? 2 : 1).padding(-2) }
-                HStack(spacing: 3) {
-                    zone.title
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Color.hdr.inkStrong : Color.hdr.inkMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if isChanged { Circle().fill(Color.hdr.accent).frame(width: 4, height: 4) }
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: style == .touch ? 44 : 30)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(zone.title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -309,6 +306,16 @@ struct ColorGradingLayout<Slider: View>: View {
 
     private var anyChanged: Bool { Self.ids.contains(where: isChanged) }
 
+    /// A zone's name, after a dot of the colour it gives the photo when it is changed.
+    private func zoneTitle(_ zone: WheelZone) -> Text {
+        guard isChanged(zone: zone) else { return zone.title }
+        let value = colour(zone)
+        let dot = Text(Image(systemName: "circle.fill"))
+            .font(.system(size: 6))
+            .foregroundStyle(GradingWheelMath.colour(hue: value.hue, saturation: value.saturation))
+        return dot + Text(verbatim: "\u{2009}") + zone.title
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             SubsectionHeader(title: Text("design.grade.title", bundle: .module), style: style, showsTitle: showsTitle,
@@ -316,30 +323,26 @@ struct ColorGradingLayout<Slider: View>: View {
                           isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
                           resetLabel: Text("design.grade.reset", bundle: .module), reset: resetAll) { EmptyView() }
             if isExpanded || !showsTitle {
-                HStack(spacing: 0) {
-                    ForEach(WheelZone.allCases) { option in
-                        let value = colour(option)
-                        GradingZoneTab(zone: option, hue: value.hue, saturation: value.saturation,
-                                       isChanged: isChanged(zone: option), isSelected: zone == option, style: style) {
-                            zone = option
-                        }
-                    }
-                }
+                SectionSegments(request: SectionSegmentsRequest(
+                    title: Text("design.grade.zone", bundle: .module),
+                    options: WheelZone.allCases.map { option in .init(id: option.rawValue, title: zoneTitle(option)) },
+                    selection: Binding(get: { zone.rawValue }, set: { zone = WheelZone(rawValue: $0) ?? .midtones })),
+                                style: style)
                 let current = colour(zone)
-                GradingWheel(hue: current.hue, saturation: current.saturation, style: style,
+                GradingWheel(hue: current.hue, saturation: current.saturation, style: style, label: zone.title,
                              write: { writeWheel(zone, $0, $1) }, reset: { resetWheel(zone) },
                              onEditingChanged: { wheelEditing(zone, $0) })
-                    .frame(maxWidth: style == .touch ? 260 : 200)
+                    .frame(maxWidth: style == .touch ? 220 : 168)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Space.s1)
-                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
+                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
                     slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring(scheme))
                     slider(zone.saturationID, MixerAttribute.saturation.title,
                            GradingWheelMath.saturationTrack(hue: current.hue, scheme))
                     slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
                 }
                 Divider().padding(.vertical, Space.s1)
-                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
+                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
                     slider(WheelZone.blendingID, nil, nil)
                     slider(WheelZone.balanceID, nil, nil)
                 }

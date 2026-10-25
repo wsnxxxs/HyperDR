@@ -82,6 +82,11 @@ extension RenderAdjustments {
         color.tint = try values.number("color.tint")
         color.vibrance = try values.number("color.vibrance")
         color.saturation = try values.number("color.saturation")
+        for (i, band) in HSLBand.allCases.enumerated() {
+            for (c, component) in HSLComponent.allCases.enumerated() {
+                color.mixer[i][c] = try values.number("hsl.\(band.rawValue).\(component.rawValue)")
+            }
+        }
         hdr.enabled = try values.bool("hdr.enabled")
         if options.bypassedGroups.contains(.hdr) { hdr.enabled = false }
         hdr.source = options.bypassedGroups.contains(.hdr) ? nil : recipe.hdrSource

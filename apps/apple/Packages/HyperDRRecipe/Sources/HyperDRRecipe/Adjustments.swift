@@ -65,7 +65,7 @@ public enum Adjustments {
     /// Physical effects share the adjustment group but are independent of colour looks.
     public static let effectIDs = ["effect.grain", "effect.halation"]
 
-    public static let all: [ParameterDeclaration] = hdr + light + color + look + detail
+    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + look + detail
 
     public static let byID: [String: ParameterDeclaration] =
         Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -174,6 +174,58 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "effect.halation", group: .color, kind: .float, range: 0...200, step: 1,
             default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
+    ]
+
+    // HSL is a subsection of the colour group; custom hosts use its id prefix.
+    private static let mixer: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "hsl.red.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.red.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.red.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.orange.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.orange.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.orange.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.yellow.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.yellow.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.yellow.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.green.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.green.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.green.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.aqua.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.aqua.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.aqua.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.blue.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.blue.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.blue.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.purple.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.purple.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.purple.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.magenta.hue", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.magenta.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "hsl.magenta.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
     ]
 
     // MARK: - Look

@@ -32,4 +32,32 @@ extension DoubleReference {
         lab.y *= factor; lab.z *= factor
         return preserveLuminance(oklabRGB(lab),target:y)
     }
+    /// Cyclic adjacent-band membership; chroma fades it to zero on neutrals.
+    public static func hslWeights(_ rgb: RGB) -> [Double] {
+        let lab = oklab(rgb/max(1,luma(rgb)))
+        let fade = smoothStep(0.015,0.06,hypot(lab.y,lab.z)/max(0.001,lab.x))
+        var hue = atan2(lab.z,lab.y)*180/Double.pi
+        if hue < 25 { hue += 360 }
+        let centers = [25.0,55,95,145,195,265,305,335,385]
+        var weights = [Double](repeating:0,count:8)
+        for i in 0..<8 where hue >= centers[i] && hue < centers[i+1] {
+            let t = smoothStep(centers[i],centers[i+1],hue)
+            weights[i] = (1-t)*fade; weights[(i+1)%8] = t*fade
+        }
+        return weights
+    }
+    public static func hslMixer(_ rgb: RGB, bands: [SIMD3<Float>]) -> RGB {
+        guard bands.contains(where: { $0 != .zero }) else { return rgb }
+        let weights = hslWeights(rgb)
+        var delta = RGB.zero
+        for i in 0..<8 { delta += RGB(Double(bands[i].x),Double(bands[i].y),Double(bands[i].z))*weights[i] }
+        if delta == .zero { return rgb }
+        let y = luma(rgb)
+        var lab = oklab(rgb/max(1,y))
+        let hue = atan2(lab.z,lab.y)+delta.x*Double.pi/6
+        let chroma = hypot(lab.y,lab.z)*max(0,1+delta.y)
+        lab.y = chroma*cos(hue); lab.z = chroma*sin(hue)
+        return preserveLuminance(oklabRGB(lab),target:y*exp2(delta.z))
+    }
+
 }

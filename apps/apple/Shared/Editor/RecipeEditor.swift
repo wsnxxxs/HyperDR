@@ -525,6 +525,39 @@ import Observation
         return temperature == sampled.temperature && tint == sampled.tint ? .applied : .clamped
     }
 
+    /// Same normalized photo coordinates as pickWhiteBalance. The rendered
+    /// preview already has the current geometry, so its pick inverts that same
+    /// geometry through the source loader. Sampling never changes the recipe.
+    func pickHSL(at point: CGPoint) async throws -> HSLColorSample {
+        guard let source, let request = renderRequest(size: frame?.request.size ?? source.pixelSize) else {
+            throw EditorRenderingError.noSource
+        }
+        let sampled = try await renderer.pickHSL(request,at:point)
+        guard self.source?.id == source.id else { throw EditorRenderingError.staleSource }
+        return sampled
+    }
+
+    /// Bracket a targeted drag with true / false; all eight band writes form
+    /// one undo step, named for the selected component's leading band.
+    func editingHSL(_ component: HSLComponent, _ isEditing: Bool) {
+        editing("hsl.red."+component.rawValue,isEditing)
+    }
+
+    /// Incremental delta in recipe units (-100...100). Keep the sample's
+    /// weights fixed throughout a drag to avoid chasing the changing colour.
+    func adjustHSL(_ component: HSLComponent, weights: [Double], delta: Double) {
+        guard weights.count == HSLBand.allCases.count else { return }
+        let dragID = "hsl.red."+component.rawValue
+        guard abandonedID != dragID else { return }
+        var changed = recipe
+        for (i, band) in HSLBand.allCases.enumerated() {
+            let id = "hsl.\(band.rawValue).\(component.rawValue)"
+            let value = recipe.conditionValue(id)?.numberValue ?? 0
+            changed.setValue(.number(min(100,max(-100,value+delta*weights[i]))),for:id)
+        }
+        setRecipe(changed)
+    }
+
     func resetGroup(_ group: ParameterGroup) {
         apply(.resetGroup(group)) { $0 = $0.resetting(group) }
     }

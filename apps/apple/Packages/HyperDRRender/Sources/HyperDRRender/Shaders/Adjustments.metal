@@ -101,6 +101,7 @@ kernel void adjustPoint(texture2d<float,access::read> src [[texture(0)]],
     dst.write(float4(pointOp(x.rgb,p.op,p.value,p.sdr),x.a),pos);
 }
 
+struct ColorToolsUniform { float4 band0, band1, band2, band3, band4, band5, band6, band7; };
 struct GraphUniform {
     float4 tone0, tone1, color, hdr;
     uint4 flags, lutInfo;
@@ -114,7 +115,34 @@ struct GraphUniform {
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
     float4 light; // whites, curve table offset, curve table size
     float4 lutExposure; // scene multiplier before Log encoding
+    ColorToolsUniform colorTools;
 };
+// Smooth neighbouring memberships in OKLCH; equal weights to the Swift reference.
+void hslWeights(float3 rgb, thread float* weights) {
+    float3 lab=colorLab(rgb/max(1.f,lum(rgb)));
+    float fade=sm(.015f,.06f,length(lab.yz)/max(.001f,lab.x));
+    float hue=atan2(lab.z,lab.y)*180.f/M_PI_F;
+    if(hue<25) hue+=360.f;
+    const float centers[9]={25,55,95,145,195,265,305,335,385};
+    for(uint i=0;i<8;i++) weights[i]=0;
+    for(uint i=0;i<8;i++) if(hue>=centers[i] && hue<centers[i+1]) {
+        float t=sm(centers[i],centers[i+1],hue);
+        weights[i]=(1-t)*fade;weights[(i+1)%8]=t*fade;
+    }
+}
+float3 colorMixer(float3 rgb,constant ColorToolsUniform& p) {
+    const float3 bands[8]={p.band0.xyz,p.band1.xyz,p.band2.xyz,p.band3.xyz,p.band4.xyz,p.band5.xyz,p.band6.xyz,p.band7.xyz};
+    bool active=false;for(uint i=0;i<8;i++) active=active || any(bands[i]!=0.f);
+    if(!active) return rgb;
+    float weights[8];hslWeights(rgb,weights);
+    float3 delta=0;for(uint i=0;i<8;i++) delta+=bands[i]*weights[i];
+    if(all(delta==0.f)) return rgb;
+    float y=lum(rgb);float3 lab=colorLab(rgb/max(1.f,y));
+    float hue=atan2(lab.z,lab.y)+delta.x*M_PI_F/6.f;
+    float chroma=length(lab.yz)*max(0.f,1+delta.y);
+    lab.yz=chroma*float2(cos(hue),sin(hue));
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y*exp2(delta.z));
+}
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
 float3 p3to2020(float3 x) { return float3(dot(x,float3(.753833f,.198597f,.047570f)),dot(x,float3(.045744f,.941777f,.012479f)),dot(x,float3(-.001210f,.017602f,.983608f))); }
@@ -292,13 +320,15 @@ float3 applyToneCurve(float3 rgb, constant GraphUniform& p, device const float4*
     return rgb*(target/y);
 }
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,bool beforeMixer=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
     rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
+    if(beforeMixer) return rgb;
+    rgb=colorMixer(rgb,p.colorTools);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
     bool logLook=p.flags.z && p.lutInfo.z>=5 && p.lutInfo.z!=20;
@@ -696,4 +726,19 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
         weight=p.mode.x==5 ? clamp(amount/p.color.z,0.f,1.f) : (amount>1e-6f ? 1.f : 0.f);
     }
     output.write(float4(weight,0,0,0),pos);
+}
+
+// One small patch, before the mixer; no readback of the full preview is needed.
+kernel void graphMixerSample(texture2d<float,access::read> src [[texture(0)]],
+                             texture3d<float,access::read> cube [[texture(1)]],
+                             constant GraphUniform& p [[buffer(0)]],device const float4* table [[buffer(1)]],
+                             device float4* result [[buffer(2)]],uint2 pos [[thread_position_in_grid]]) {
+    if(any(pos!=uint2(0))) return;
+    float3 rgb=0;
+    int2 high=int2(src.get_width()-1,src.get_height()-1);
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+        uint2 site=uint2(clamp(int2(p.region.zw)+int2(x,y),int2(0),high));
+        rgb+=graphScene(src.read(site),p,cube,table,false,true,true);
+    }
+    result[0]=float4(rgb/9.f,1);
 }

@@ -334,7 +334,8 @@ extension DoubleReference {
             }
             x = toneCurve(x, curve: settings.tone.curve)
             x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
-            return point(x, operation: .saturation, value: Double(settings.color.saturation))
+            x = point(x, operation: .saturation, value: Double(settings.color.saturation))
+            return hslMixer(x,bands:settings.color.mixer)
         }
         var x = adjusted(settings.tone.whites)
         let active = !settings.look.isIdentity

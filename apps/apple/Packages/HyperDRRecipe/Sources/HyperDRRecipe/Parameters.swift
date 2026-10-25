@@ -398,7 +398,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
 /// unit:
 ///
 /// - `.direct`: unchanged. EV, stops, kelvin, `develop.temperature`,
-///   `develop.tint` (−150…150 is CIRAWFilter's `neutralTint`).
+///   `develop.tint` (CIRAWFilter's `neutralTint`, which takes at least ±500).
 /// - `.hundredth`: divided by 100. Percent controls, and signed level controls such as
 ///   `tone.shadows` or `color.saturation` (`−100…+100` → `−1…+1`).
 /// - `.contrast`: `2^(value/100 · log2 1.6)`, i.e. `1.6^(value/100)`; 0 → 1 (C1 calls

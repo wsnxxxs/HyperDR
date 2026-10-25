@@ -400,10 +400,40 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
     let temperature = try #require(panel.control("develop.temperature", in: Recipe(inputDomain: .rawEDR)))
     let kelvin = try #require(RulerScale(temperature, width: 400))
-    #expect(kelvin.range == 2000...12000)
-    #expect(kelvin.pointsPerUnit == 0.03, "the declared range, not the as-shot default, sets the scale")
-    #expect(kelvin.majorTick == 1000 && kelvin.minorTick * kelvin.pointsPerUnit >= 7)
-    #expect(kelvin.offset(of: 60_000, needle: 12_000) == 0, "a source value past the range sits at its end")
+    #expect(kelvin.range == 1000...50000 && kelvin.spacing == .reciprocal)
+    #expect(kelvin.pointsPerUnit == 0.6, "500 mired over a reach of 300 pt, whatever the as-shot default")
+    #expect(kelvin.offset(of: 60_000, needle: 50_000) == 0, "a source value past the range sits at its end")
+    // Mired, not kelvin: 2000 → 4000 K and 4000 K → the cool end are the same reach.
+    #expect(abs(kelvin.offset(of: 4000, needle: 2000) - 150) < 1e-9)
+    #expect(abs(kelvin.offset(of: 2000, needle: 1000) - 300) < 1e-9)
+    #expect(abs(kelvin.value(from: 5000, translation: -60) - 1e6 / 100) < 1e-6, "200 → 100 mired")
+    let ticks = kelvin.ticks
+    #expect(ticks.first?.value == 1000 && ticks.last?.value == 50000)
+    #expect(zip(ticks, ticks.dropFirst()).allSatisfy { kelvin.offset(of: $1.value, needle: $0.value) >= 3 })
+    #expect(ticks.filter(\.isMajor).map(\.value).starts(with: [1000, 2000, 3000, 4000, 5000]))
+    #expect(!kelvin.crossing(from: 30_100, to: 30_900).majorTick, "no tick every 1000 K at the cool end")
+    #expect(kelvin.crossing(from: 5900, to: 6100).majorTick)
+}
+
+/// The kelvin slider spreads its 1000…50000 K in mired: 6500 K sits near the
+/// middle, and a step looks the same warm or cool.
+@Test func kelvinSlidersSpreadInMired() throws {
+    var recipe = Recipe(inputDomain: .rawEDR)
+    panel.set("develop.temperature", number: 5000, in: &recipe)
+    let control = try #require(panel.control("develop.temperature", in: recipe))
+    let spec = try #require(control.spec)
+    #expect(spec.spacing == .reciprocal && spec.range == 1000...50000)
+    #expect(spec.fraction(of: 1000) == 0 && spec.fraction(of: 50000) == 1)
+    let mid = spec.value(atFraction: 0.5)
+    #expect(abs(mid - 1e6 / 510) < 50, "half way is 510 mired, about 1950 K")
+    #expect(abs(spec.fraction(of: 2000) - 500.0 / 980) < 1e-9)
+    #expect(spec.value(atFraction: spec.fraction(of: 6500)) == 6500)
+    // A relative drag moves in mired and holds at the default.
+    let cooler = spec.dragged(from: 5000, by: 49, length: 490)
+    #expect(abs(1e6 / cooler - (200 - 98)) < 1, "a tenth of the track is 98 mired")
+    let tint = try #require(panel.control("develop.tint", in: recipe)?.spec)
+    #expect(tint.range == -200...200 && tint.spacing == .linear)
+    #expect(tint.dragged(from: 0, by: 49, length: 490) == 40, "linear tracks keep their feel")
 }
 
 /// 0…100 from 0, ±100 from 0 and 0…100 from 100 follow one rule: the tape

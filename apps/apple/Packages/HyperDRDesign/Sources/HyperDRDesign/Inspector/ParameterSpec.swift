@@ -19,18 +19,22 @@ public struct ParameterSpec: Sendable {
     /// Set for a parameter that can also be "Auto": a value below the range
     /// that the control shows as a state of its own instead of a number.
     public var automatic: ParameterAutomatic?
+    /// How values spread along the track.
+    public var spacing: TrackSpacing
 
     public init(range: ClosedRange<Double>, step: Double, defaultValue: Double,
                 origin: Double? = nil, format: ParameterFormat = .number(fractionDigits: 2),
-                automatic: ParameterAutomatic? = nil) {
+                automatic: ParameterAutomatic? = nil, spacing: TrackSpacing = .linear) {
         precondition(step > 0 && range.upperBound > range.lowerBound, "empty range or step")
         precondition(automatic.map { $0.value < range.lowerBound } ?? true, "the automatic value is inside the range")
+        precondition(spacing == .linear || range.lowerBound > 0, "a reciprocal spacing needs a positive range")
         self.range = range
         self.step = step
         self.defaultValue = defaultValue
         self.origin = min(max(origin ?? range.lowerBound, range.lowerBound), range.upperBound)
         self.format = format
         self.automatic = automatic
+        self.spacing = spacing
     }
 
     /// A signed parameter filled from zero, as exposure or tint.
@@ -76,12 +80,27 @@ public struct ParameterSpec: Sendable {
 
     /// Position of `value` along the track, 0…1.
     public func fraction(of value: Double) -> Double {
-        min(max((value - range.lowerBound) / (range.upperBound - range.lowerBound), 0), 1)
+        let lower = spacing.position(range.lowerBound), upper = spacing.position(range.upperBound)
+        let clamped = min(max(value, range.lowerBound), range.upperBound)
+        return min(max((spacing.position(clamped) - lower) / (upper - lower), 0), 1)
     }
 
     /// The snapped value at a position along the track, 0…1.
     public func value(atFraction fraction: Double) -> Double {
-        snapped(range.lowerBound + min(max(fraction, 0), 1) * (range.upperBound - range.lowerBound))
+        let lower = spacing.position(range.lowerBound), upper = spacing.position(range.upperBound)
+        return snapped(spacing.value(atPosition: lower + min(max(fraction, 0), 1) * (upper - lower)))
+    }
+
+    /// Where a relative drag lands: `start` moved `points` along a track
+    /// `length` points long (times the fine-tune `speed`), snapped, and held
+    /// at the default within `DefaultDetent.points` of it on the track.
+    /// From Auto pass the value the drag starts from.
+    public func dragged(from start: Double, by points: Double, length: Double, speed: Double = 1) -> Double {
+        let length = max(length, 1)
+        let new = value(atFraction: fraction(of: start) + points / length * speed)
+        guard !isAutomatic(defaultValue) else { return new }
+        let distance = abs(fraction(of: new) - fraction(of: defaultValue)) * length / max(speed, 1e-3)
+        return distance <= Double(DefaultDetent.points) ? defaultValue : new
     }
 
     /// The filled part of the track for `value`: from the origin to the value,
@@ -141,6 +160,31 @@ public struct ParameterSpec: Sendable {
         guard let match = cleaned.firstMatch(of: /[-+]?(?:\d+\.?\d*|\.\d+)/),
               let typed = Double(match.output), typed.isFinite else { return nil }
         return snapped(typed / format.scale)
+    }
+}
+
+/// How a slider spreads values along its track.
+public enum TrackSpacing: Sendable, Equatable {
+    /// Evenly.
+    case linear
+    /// Evenly in the reciprocal, larger values still to the right: kelvin in
+    /// mired, so a step looks the same warm or cool and 2000–8000 K keeps
+    /// room on a 1000–50000 K track (p7-adjustments §2.5).
+    case reciprocal
+
+    /// The value in the track's own units, increasing with the value.
+    public func position(_ value: Double) -> Double {
+        switch self {
+        case .linear: return value
+        case .reciprocal: return -1e6 / value
+        }
+    }
+
+    public func value(atPosition position: Double) -> Double {
+        switch self {
+        case .linear: return position
+        case .reciprocal: return -1e6 / min(position, -1e-9)
+        }
     }
 }
 

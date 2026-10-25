@@ -150,9 +150,11 @@ public enum Adjustments {
 
     private static let color: [ParameterDeclaration] = [
         // RAW white balance is a development parameter, not a matrix (p7-adjustments §2.5).
-        ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 2000...12000, step: 50,
+        // 1000…50000 K (user, 2026-10-25): underwater and deep-shade light need
+        // both ends; the controls spread it in mired (`TrackSpacing.reciprocal`).
+        ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 1000...50000, step: 50,
             default: .fromSource, format: .kelvin, scale: .direct, domains: [.rawEDR], cost: .redevelop),
-        ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -150...150, step: 1,
+        ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -200...200, step: 1,
             default: .fromSource, format: .signed, scale: .direct, origin: .zero, domains: [.rawEDR], cost: .redevelop),
         ParameterDeclaration(id: "color.warmth", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, domains: [.sdr, .hdr, .dual]),

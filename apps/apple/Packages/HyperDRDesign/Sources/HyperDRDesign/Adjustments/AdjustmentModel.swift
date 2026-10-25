@@ -160,8 +160,12 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
         let origin: Double? = declaration.origin == .zero ? min(max(0, range.lowerBound), range.upperBound) : nil
         let defaultValue = defaultNumber ?? automatic?.value ?? origin ?? range.lowerBound
         return ParameterSpec(range: range, step: step, defaultValue: defaultValue, origin: origin,
-                             format: AdjustmentFormat.format(declaration.format, step: step), automatic: automatic)
+                             format: AdjustmentFormat.format(declaration.format, step: step), automatic: automatic,
+                             spacing: spacing)
     }
+
+    /// Kelvin spreads in mired; everything else evenly.
+    public var spacing: TrackSpacing { declaration.format == .kelvin ? .reciprocal : .linear }
 
     /// The value a `ParameterSpec`-based slider binds to: the number, or the
     /// Auto sentinel below the range.
@@ -182,9 +186,10 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
     public var deviation: Double {
         guard let range = declaration.range, case .number(let number) = value else { return 0 }
         let base = defaultNumber ?? (declaration.origin == .zero ? 0 : range.lowerBound)
-        let span = number >= base ? range.upperBound - base : base - range.lowerBound
+        let at = { (value: Double) in spacing.position(min(max(value, range.lowerBound), range.upperBound)) }
+        let span = number >= base ? at(range.upperBound) - at(base) : at(base) - at(range.lowerBound)
         guard span > 0 else { return 0 }
-        return min(max((number - base) / span, -1), 1)
+        return min(max((at(number) - at(base)) / span, -1), 1)
     }
 
     /// The readout: "+0.30", "60%", "Auto · 2.4", "5500".

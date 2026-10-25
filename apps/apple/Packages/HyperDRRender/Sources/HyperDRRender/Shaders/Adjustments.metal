@@ -50,7 +50,12 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     }
     if (op == 1) target = contrastY(y,amount);
     if (op == 2) {
-        if (y > 1) target = 1+(y-1)*exp2(2*a);
+        if (y > 1) {
+            float left=exp2(-3*a), right=exp2(2*a), x=y-1, t=min(x,1.f);
+            // Integrate a smoothstep of the slope over the first stop above white.
+            // Beyond it the old HDR slope resumes with a constant offset.
+            target=1+right*x+(left-right)*(t-t*t*t+.5f*t*t*t*t);
+        }
         else if (y > .15f) {
             float t = (y-.15f)/.85f;
             target = .15f + .85f*t/(t+(1-t)*exp2(-3*a*t));

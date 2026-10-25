@@ -234,6 +234,26 @@ private func wideHalf() -> String {
         #expect(log2(highlight/0.6) > 0.4 && log2(highlight/0.6) < 0.5)
     }
 
+    @Test func highlightsJoinSmoothlyAcrossSDRWhite() async throws {
+        let epsilon = 1e-6
+        let xs = [1-epsilon, 1, 1+epsilon, 2-epsilon, 2, 2+epsilon, 3]
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        for amount in [-1.0, 1.0] {
+            let ys = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: .highlights, value: amount).x }
+            let left = (ys[1]-ys[0])/epsilon, right = (ys[2]-ys[1])/epsilon
+            #expect(abs(left-right) < 0.0002)
+            #expect(abs(right-exp2(-3*amount)) < 0.0002)
+            #expect(abs((ys[5]-ys[4])/epsilon-exp2(2*amount)) < 0.0002)
+            #expect(zip(ys, ys.dropFirst()).allSatisfy { $0 <= $1 })
+            let pixels = RenderEngine.readPixels(try await engine.render(source, nodes: [AdjustmentNode(.highlights, value: Float(amount))]))
+            for i in xs.indices {
+                let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                #expect(abs(actual-ys[i]) < 0.00002)
+            }
+        }
+    }
+
     @Test func whitesCrossesWhiteWithoutClipping() async throws {
         let xs = (0...64).map { Double($0)/32 }
         let engine = try RenderEngine()

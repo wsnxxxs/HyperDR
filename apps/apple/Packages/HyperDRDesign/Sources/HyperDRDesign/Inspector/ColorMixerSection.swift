@@ -10,7 +10,7 @@ public enum MixerBand: String, CaseIterable, Identifiable, Sendable {
 
     /// Where the zone sits on the colour circle, in turns: only for the
     /// swatch that stands for it.
-    private var hue: Double {
+    var turns: Double {
         switch self {
         case .red: 0.0
         case .orange: 0.075
@@ -25,7 +25,7 @@ public enum MixerBand: String, CaseIterable, Identifiable, Sendable {
 
     /// The swatch colour. These stand for data (which colour a slider moves),
     /// not for the interface, as the histogram's channel colours do.
-    public var swatch: Color { Color(hue: hue, saturation: 0.72, brightness: 0.95) }
+    public var swatch: Color { Color(hue: turns, saturation: 0.72, brightness: 0.95) }
 
     public var title: Text {
         switch self {
@@ -46,6 +46,16 @@ public enum MixerBand: String, CaseIterable, Identifiable, Sendable {
     }
 
     public func id(_ attribute: MixerAttribute) -> String { "hsl.\(rawValue).\(attribute.rawValue)" }
+
+    /// What the track of an attribute shows: the hue runs between the
+    /// neighbouring colours, the saturation from grey to the zone's colour.
+    func gradient(_ attribute: MixerAttribute) -> [Color]? {
+        switch attribute {
+        case .hue: TrackGradient.shift(of: self)
+        case .saturation: TrackGradient.saturation(toward: swatch)
+        case .luminance: nil
+        }
+    }
 }
 
 /// What the mixer moves in a zone.
@@ -115,8 +125,8 @@ public struct ColorMixerSection: View {
             var edited = recipe
             for id in ColorMixerLayout<EmptyView>.ids { panel.reset(id, in: &edited) }
             recipe = edited
-        }, slider: { id, title, tint in
-            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint,
+        }, slider: { id, title, tint, gradient in
+            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint, gradient: gradient,
                           onEditingChanged: onEditingChanged)
         })
     }
@@ -132,7 +142,7 @@ struct ColorMixerLayout<Slider: View>: View {
     let showsTitle: Bool
     let isChanged: (String) -> Bool
     let resetAll: () -> Void
-    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color) -> Slider
+    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider
 
     @State private var isExpanded: Bool
     @State private var arrangement: Arrangement
@@ -144,7 +154,7 @@ struct ColorMixerLayout<Slider: View>: View {
 
     init(style: AdjustmentControlStyle, showsTitle: Bool, isChanged: @escaping (String) -> Bool,
          resetAll: @escaping () -> Void, initialArrangement: Arrangement = .attribute,
-         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color) -> Slider) {
+         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider) {
         self.style = style
         self.showsTitle = showsTitle
         self.isChanged = isChanged
@@ -213,7 +223,7 @@ struct ColorMixerLayout<Slider: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(MixerBand.allCases) { band in
-                slider(band.id(attribute), band.swatchedTitle, band.swatch)
+                slider(band.id(attribute), band.swatchedTitle, band.swatch, band.gradient(attribute))
             }
         }
     }
@@ -222,7 +232,7 @@ struct ColorMixerLayout<Slider: View>: View {
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
             swatches
             ForEach(MixerAttribute.allCases) { attribute in
-                slider(band.id(attribute), attribute.title, band.swatch)
+                slider(band.id(attribute), attribute.title, band.swatch, band.gradient(attribute))
             }
         }
     }

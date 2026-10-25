@@ -31,6 +31,7 @@ public struct TouchParameterSlider: View {
     @FocusState private var fieldFocused: Bool
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.locale) private var locale
+    @Environment(\.sliderTrackGradient) private var gradient
 
     static let thumb: CGFloat = 22
     /// The title row; with the track below it the row is well over 44 pt.
@@ -122,15 +123,24 @@ public struct TouchParameterSlider: View {
             let fill = spec.fill(for: value)
             let mid = Self.thumb / 2
             ZStack(alignment: .topLeading) {
-                Capsule()
-                    .fill(Color.hdr.controlTrack)
-                    .frame(width: width, height: 4)
-                    .offset(y: mid - 2)
+                if let gradient, !isAuto {
+                    GradientTrack(stops: gradient, height: 6)
+                        .frame(width: width)
+                        .offset(y: mid - 3)
+                        .opacity(isEnabled ? 1 : 0.4)
+                } else {
+                    Capsule()
+                        .fill(Color.hdr.controlTrack)
+                        .frame(width: width, height: 4)
+                        .offset(y: mid - 2)
+                }
                 if !isAuto {
-                    Rectangle()
-                        .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
-                        .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 4)
-                        .offset(x: x(fill.lowerBound), y: mid - 2)
+                    if gradient == nil {
+                        Rectangle()
+                            .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
+                            .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 4)
+                            .offset(x: x(fill.lowerBound), y: mid - 2)
+                    }
                     if let defaultFraction = defaultFraction {
                         Rectangle()
                             .fill(Color.hdr.lineStrong)

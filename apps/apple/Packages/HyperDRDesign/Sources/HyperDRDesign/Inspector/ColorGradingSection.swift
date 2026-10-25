@@ -240,8 +240,9 @@ public struct ColorGradingSection: View {
             var edited = recipe
             for id in ColorGradingLayout<EmptyView>.ids { panel.reset(id, in: &edited) }
             recipe = edited
-        }, slider: { id, title in
-            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, onEditingChanged: onEditingChanged)
+        }, slider: { id, title, gradient in
+            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, gradient: gradient,
+                          onEditingChanged: onEditingChanged)
         })
     }
 }
@@ -255,7 +256,7 @@ struct ColorGradingLayout<Slider: View>: View {
     let resetWheel: (WheelZone) -> Void
     let wheelEditing: (WheelZone, Bool) -> Void
     let resetAll: () -> Void
-    @ViewBuilder let slider: (_ id: String, _ title: Text?) -> Slider
+    @ViewBuilder let slider: (_ id: String, _ title: Text?, _ gradient: [Color]?) -> Slider
 
     @State private var zone = WheelZone.midtones
     @State private var isExpanded: Bool
@@ -265,7 +266,7 @@ struct ColorGradingLayout<Slider: View>: View {
          isChanged: @escaping (String) -> Bool,
          writeWheel: @escaping (WheelZone, Double?, Double) -> Void, resetWheel: @escaping (WheelZone) -> Void,
          wheelEditing: @escaping (WheelZone, Bool) -> Void, resetAll: @escaping () -> Void,
-         @ViewBuilder slider: @escaping (_ id: String, _ title: Text?) -> Slider) {
+         @ViewBuilder slider: @escaping (_ id: String, _ title: Text?, _ gradient: [Color]?) -> Slider) {
         self.style = style
         self.showsTitle = showsTitle
         self.colour = colour
@@ -310,14 +311,15 @@ struct ColorGradingLayout<Slider: View>: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Space.s1)
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-                    slider(zone.hueID, MixerAttribute.hue.title)
-                    slider(zone.saturationID, MixerAttribute.saturation.title)
-                    slider(zone.luminanceID, MixerAttribute.luminance.title)
+                    slider(zone.hueID, MixerAttribute.hue.title, TrackGradient.ring())
+                    slider(zone.saturationID, MixerAttribute.saturation.title,
+                           TrackGradient.saturation(toward: GradingWheel.tint(hue: current.hue, saturation: 100)))
+                    slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
                 }
                 Divider().padding(.vertical, Space.s1)
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-                    slider(WheelZone.blendingID, nil)
-                    slider(WheelZone.balanceID, nil)
+                    slider(WheelZone.blendingID, nil, nil)
+                    slider(WheelZone.balanceID, nil, nil)
                 }
                 if !showsTitle, anyChanged { resetButton }
             }

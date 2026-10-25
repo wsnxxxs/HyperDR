@@ -12,6 +12,9 @@ public struct SectionSliderRequest {
     /// A colour the section would like the slider's fill to take, when the
     /// slider stands for a colour (a mixer band).
     public var tint: Color?
+    /// Colours the track would show instead of a plain line: a hue control
+    /// along the colour circle, a saturation control from grey to the colour.
+    public var gradient: [Color]?
     public var onEditingChanged: (Bool) -> Void
     public var onResetGroup: (() -> Void)?
 }
@@ -55,6 +58,7 @@ struct SectionSlider: View {
     let style: AdjustmentControlStyle
     var title: Text?
     var tint: Color?
+    var gradient: [Color]?
     let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     @Environment(\.sectionControls) private var controls
 
@@ -64,7 +68,7 @@ struct SectionSlider: View {
             let request = SectionSliderRequest(
                 title: title ?? AdjustmentText.label(declaration),
                 value: Binding(get: { control.sliderValue }, set: { panel.set(id, sliderValue: $0, in: &recipe) }),
-                spec: spec, help: title == nil ? AdjustmentText.help(declaration) : nil, tint: tint,
+                spec: spec, help: title == nil ? AdjustmentText.help(declaration) : nil, tint: tint, gradient: gradient,
                 onEditingChanged: { onEditingChanged(declaration, $0) },
                 onResetGroup: nil)
             if let controls {
@@ -72,9 +76,11 @@ struct SectionSlider: View {
             } else if style == .touch {
                 TouchParameterSlider(request.title, value: request.value, spec: spec, help: request.help,
                                      onEditingChanged: request.onEditingChanged)
+                    .environment(\.sliderTrackGradient, gradient)
             } else {
                 ParameterSlider(request.title, value: request.value, spec: spec, help: request.help,
                                 onEditingChanged: request.onEditingChanged)
+                    .environment(\.sliderTrackGradient, gradient)
             }
         }
     }

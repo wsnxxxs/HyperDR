@@ -38,6 +38,7 @@ struct PadEditor: View {
     @State private var picked: PhotosPickerItem?
     @State private var confirmingReset = false
     @State private var confirmingClose = false
+    @State private var showingCompatibility = false
     @Environment(\.undoManager) private var undoManager
     @Environment(\.displayScale) private var displayScale
 
@@ -117,6 +118,7 @@ struct PadEditor: View {
         } message: {
             Text("ios.close.message")
         }
+        .rawCompatibilityAlert(editor: editor, isPresented: $showingCompatibility)
         .sheet(isPresented: $showingExport, onDismiss: { editor.isEditingCrop = tool == .crop }) {
             ExportSheet(model: session.exports, editor: editor, frame: Binding(get: { session.frame }, set: { session.frame = $0 }),
                         preview: AnyView(PadExportPreview(session: session, editor: editor)))
@@ -210,7 +212,8 @@ struct PadEditor: View {
         } footer: {
             if editor.source != nil {
                 PadPhotoInfo(facts: session.facts, name: session.photoName, domain: editor.source?.domain,
-                             size: editor.photoSize.map { ($0.width, $0.height) })
+                             size: editor.photoSize.map { ($0.width, $0.height) },
+                             compatibility: editor.sourceCompatibility)
             }
         }
     }
@@ -395,6 +398,7 @@ struct PadEditor: View {
 
     private var moreMenu: some View {
         Menu {
+            RAWCompatibilityMenuItem(editor: editor, showing: $showingCompatibility)
             Section {
                 Button("ios.menu.choosePhoto", systemImage: "photo.on.rectangle") { pickingPhoto = true }
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }

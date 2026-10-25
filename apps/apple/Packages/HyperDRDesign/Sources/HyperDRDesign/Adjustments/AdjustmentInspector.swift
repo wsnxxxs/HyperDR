@@ -111,7 +111,7 @@ public struct AdjustmentInspector: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.hdr.amber)
             }
-            ForEach(state.controls) { control in
+            ForEach(state.controls.filter { !ToneCurveSection.ownedIDs.contains($0.id) }) { control in
                 AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                               onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
             }

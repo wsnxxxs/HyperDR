@@ -30,8 +30,11 @@ struct PadGroupControls: View {
         let off = actual?.isSwitchedOff ?? false
         if let state = off ? switchedOn() ?? actual : actual {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
-            let rows = state.controls.filter { $0.id != lead?.id && $0.kind != .curve }
-            let curves = state.controls.filter { $0.kind == .curve }
+            let rows = state.controls.filter {
+                $0.id != lead?.id && $0.kind != .curve && !ToneCurveSection.ownedIDs.contains($0.id)
+            }
+            // The curves share one section; the others it draws itself are its channels.
+            let curves = state.controls.filter { $0.kind == .curve && !ToneCurveSection.ownedIDs.contains($0.id) }
             VStack(alignment: .leading, spacing: 12) {
                 if let lead {
                     VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {

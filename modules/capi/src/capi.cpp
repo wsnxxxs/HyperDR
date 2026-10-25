@@ -2,6 +2,7 @@
 
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/codec/raw_compat.hpp"
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <unistd.h>
@@ -50,7 +51,8 @@ int boundary(hyperdr_error** error, Function function) noexcept {
     set_error(error, "cancelled", exception.what());
   } catch (const hyperdr::PackageCallbackFailed& exception) {
     set_error(error, "callback_failed", exception.what());
-
+  } catch (const hyperdr::RawNoPreview& exception) {
+    set_error(error, "no_preview", exception.what());
   } catch (const hyperdr::RawUnsupported& exception) {
     try {
       const auto detail = exception.detail_json();
@@ -156,6 +158,26 @@ int hyperdr_probe(hyperdr_engine* engine, const char* path, char** out, hyperdr_
     return required(engine).value.probe(hyperdr::path_from_utf8(path));
   });
 }
+const char* hyperdr_raw_converter_id(void) { return hyperdr::raw_converter_id(); }
+int hyperdr_raw_convert_dng(hyperdr_engine* engine, const char* raw_path, const char* dng_path,
+                            hyperdr_cancel* cancel, char** report, hyperdr_error** error) {
+  return json_result(report, error, [&] {
+    if (!raw_path) throw std::invalid_argument("RAW path is required");
+    if (!dng_path) throw std::invalid_argument("DNG path is required");
+    return required(engine).value.raw_convert_dng(hyperdr::path_from_utf8(raw_path),
+        hyperdr::path_from_utf8(dng_path), token(cancel));
+  });
+}
+int hyperdr_raw_extract_preview(hyperdr_engine* engine, const char* raw_path, const char* jpeg_path,
+                                hyperdr_cancel* cancel, char** report, hyperdr_error** error) {
+  return json_result(report, error, [&] {
+    if (!raw_path) throw std::invalid_argument("RAW path is required");
+    if (!jpeg_path) throw std::invalid_argument("preview path is required");
+    return required(engine).value.raw_extract_preview(hyperdr::path_from_utf8(raw_path),
+        hyperdr::path_from_utf8(jpeg_path), token(cancel));
+  });
+}
+
 namespace {
 
 hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const char* what, bool streaming = false) {

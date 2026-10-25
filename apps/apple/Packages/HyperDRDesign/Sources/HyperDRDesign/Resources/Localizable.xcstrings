@@ -1036,6 +1036,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "悬停可在画面上查看作用区域" } }
       }
     },
+    "design.slider.readoutHelp" : {
+      "comment" : "Tooltip of a slider's value box: it is where an exact value is typed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to type a value" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点按后可输入数值" } }
+      }
+    },
     "design.slider.reset" : {
       "comment" : "Context menu item and VoiceOver action: return a slider to its default.",
       "localizations" : {
@@ -1062,6 +1069,34 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Comparison divider" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比分界线" } }
+      }
+    },
+    "design.wb.clamped" : {
+      "comment" : "Under the temperature row: the neutral the pick needs lies beyond the slider's end, so the end was set.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Beyond the slider's range; set to the nearest value." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "超出滑杆范围，已取最接近的值。" } }
+      }
+    },
+    "design.wb.failed" : {
+      "comment" : "Under the temperature row: the picked point could not be sampled.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not sample that point. Try another." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一点无法取样，请换一处。" } }
+      }
+    },
+    "design.wb.pick" : {
+      "comment" : "Tooltip and VoiceOver name of the white balance eyedropper: pick a neutral grey on the photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set white balance from a neutral grey in the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在照片上点一处中性灰来设白平衡" } }
+      }
+    },
+    "design.wb.stop" : {
+      "comment" : "Tooltip and VoiceOver name of the white balance eyedropper while it is picking.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop picking (Esc)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止取样（Esc）" } }
       }
     },
     "design.zebra.highlights" : {

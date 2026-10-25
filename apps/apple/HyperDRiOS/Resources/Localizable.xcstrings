@@ -3820,6 +3820,24 @@
         }
       }
     },
+    "ipad.wb.hint" : {
+      "comment" : "Over the canvas while the white balance eyedropper is on: how to pick.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch a neutral grey area and lift to pick"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住中性灰处，松手即取值"
+          }
+        }
+      }
+    },
     "ipad.zoom" : {
       "comment" : "Canvas bar: the zoom button's accessibility name.",
       "extractionState" : "manual",

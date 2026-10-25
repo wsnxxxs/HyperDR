@@ -30,6 +30,9 @@ struct EditorCanvas: View {
 
     /// The canvas is held to show the original.
     @Binding var holdingOriginal: Bool
+    /// The white balance eyedropper, where the host offers one (the iPad's
+    /// Studio): while it is active a layer over the photo takes the touch.
+    var whiteBalance: WhiteBalancePicker? = nil
     /// A fit or actual-pixels request (the iPad's canvas bar).
     var zoomRequest: CanvasZoomRequest? = nil
     /// The screen's headroom as it changes (the iPad's canvas bar).
@@ -164,6 +167,13 @@ struct EditorCanvas: View {
                                 onCancel: { editor.endCropInteraction() })
                 } else if !cropping {
                     adornments
+                }
+            }
+            .overlay {
+                if let whiteBalance, whiteBalance.isActive, !cropping, !framed {
+                    WhiteBalanceTouchLayer(picker: whiteBalance, transform: transform) {
+                        (mode == .original ? original ?? editor.frame : editor.frame).map { DisplayPair($0.display).base }
+                    }
                 }
             }
     }

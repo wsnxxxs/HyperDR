@@ -175,6 +175,7 @@ private struct Adjustments: View {
             },
             onLUTLibrary: { window.showsLUTLibrary = true })
         .environment(\.lookPickerShown, model.lookPreviews.shown)
+        .environment(\.whiteBalancePicking, model.whiteBalance.picking)
     }
 }
 

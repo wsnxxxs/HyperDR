@@ -56,6 +56,9 @@ import SwiftUI
     /// Nil when this device cannot render (no Metal).
     let editor: RecipeEditor?
     let exports = IOSExportModel()
+    /// The white balance eyedropper (the iPad's Studio): its sampling is the
+    /// editor's, the canvas wires the rest while a pick is on.
+    let whiteBalance = WhiteBalancePicker()
 
     /// Only newly opened RAWs use this preference. The photo already open and
     /// its export keep the decoder recorded in the recipe.
@@ -112,6 +115,10 @@ import SwiftUI
         rawDecoderPreference = .load(from: defaults)
         editor = (try? RenderSession()).map { RecipeEditor(renderer: $0) }
         editor?.undo.actionName = Self.undoName
+        whiteBalance.pick = { [editor] point in
+            guard let editor else { throw CancellationError() }
+            return try await editor.pickWhiteBalance(at: point)
+        }
         editor?.onLookSpacesChanged = { [weak luts = exports.luts] old, new in
             luts?.record(from: old, to: new)
         }

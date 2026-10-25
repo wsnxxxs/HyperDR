@@ -153,6 +153,7 @@ public struct AdjustmentRow: View {
     private let style: AdjustmentControlStyle
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     private let onLUTLibrary: (() -> Void)?
+    @Environment(\.whiteBalancePicking) private var whiteBalance
 
     public init(recipe: Binding<Recipe>, control: AdjustmentControl, panel: AdjustmentPanel,
                 style: AdjustmentControlStyle,
@@ -173,11 +174,13 @@ public struct AdjustmentRow: View {
             if let spec = control.spec {
                 let value = Binding(get: { control.sliderValue },
                                     set: { panel.set(control.id, sliderValue: $0, in: &recipe) })
-                Group {
+                let picking = WhiteBalancePicking.offers(control.id) ? whiteBalance : nil
+                VStack(alignment: .leading, spacing: Space.s1) {
                     switch style {
                     case .pointer:
                         ParameterSlider(AdjustmentText.label(declaration), value: value, spec: spec,
                                         help: AdjustmentText.help(declaration),
+                                        accessory: picking.map { AnyView(WhiteBalancePickButton($0)) },
                                         onEditingChanged: { onEditingChanged(declaration, $0) })
                     case .touch:
                         TouchParameterSlider(AdjustmentText.label(declaration), value: value, spec: spec,
@@ -185,6 +188,7 @@ public struct AdjustmentRow: View {
                                              onEditingChanged: { onEditingChanged(declaration, $0) },
                                              onResetGroup: { panel.reset(group: declaration.group, in: &recipe) })
                     }
+                    if let notice = picking?.notice { WhiteBalanceNoticeLine(notice) }
                 }
                 .disabled(!control.isAvailable)
             }

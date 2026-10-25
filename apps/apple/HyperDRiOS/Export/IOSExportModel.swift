@@ -21,6 +21,8 @@ nonisolated struct ExportStack: Sendable {
         let configuration = KitConfiguration()
         let sessions = SessionStore(configuration: configuration, formats: InputFormats())
         let engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
+        RenderEngine.registerRAWCompatibilityConverter(
+            RAWCompatibilityConverter(engine: engine, configuration: configuration))
         let render = try RenderEngine()
         let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
                                           target: ExportTarget(configuration: configuration, sessions: sessions))
@@ -435,6 +437,13 @@ nonisolated struct ExportStack: Sendable {
     }
 
     private func exportStack() -> Task<ExportStack, any Error> { stack }
+
+    /// The launch stack owns the engine-backed RAW converter. Wait for its
+    /// registration before the first editor open; a native open does no
+    /// conversion work after this cheap, one-time wait.
+    func prepareRAWCompatibility() async {
+        _ = try? await stack.value
+    }
 
     // MARK: - Running
 

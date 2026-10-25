@@ -84,6 +84,8 @@ extension UserFacingError {
         case .sourceChanged: self.init(code: "source_changed")
         case .cannotOpenSource: self.init(code: "source_unreadable")
         case .unsupportedRAWDecoder(let version): self.init(code: "raw_decoder_unavailable", detail: version)
+        case .unsupportedRAWCompatibility(let converter): self.init(code: "raw_decoder_unavailable", detail: converter)
+        case .rawUnsupported(let camera): self.init(code: "raw_unsupported", detail: camera, variant: "camera")
         case .cannotDecodeSource, .missingGainMap, .unsupportedGainColorSpace:
             self.init(code: "decode_failed", detail: String(describing: error))
         case .allocationFailed: self.init(code: "out_of_memory")

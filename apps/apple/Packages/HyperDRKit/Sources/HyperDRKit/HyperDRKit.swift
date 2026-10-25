@@ -8,6 +8,7 @@ public final class HyperDRKit: Sendable {
     public let capabilities: Capabilities
     public let formats: InputFormats
     public let sessions: SessionStore
+    public let rawCompatibility: RAWCompatibilityConverter
     public let exportTarget: ExportTarget
     public let luts: LUTLibrary
 
@@ -39,6 +40,7 @@ public final class HyperDRKit: Sendable {
         self.formats = formats
         let sessions = SessionStore(configuration: configuration, formats: formats)
         self.sessions = sessions
+        self.rawCompatibility = RAWCompatibilityConverter(engine: engine, configuration: configuration)
         self.luts = LUTLibrary(configuration: configuration, sessions: sessions)
         self.cleanup = cleanup ?? { await sessions.cleanupExpired() }
         self.exportTarget = ExportTarget(configuration: configuration, sessions: sessions)

@@ -1,9 +1,15 @@
+import HyperDRRender
 import SwiftUI
 
 /// HyperDR on iPhone and iPad: pick a photo, edit it in HDR, frame it, export it.
 @main
 struct HyperDRiOSApp: App {
     init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-HyperDRForceRAWCompatibility") {
+            RenderEngine.forcesRAWCompatibility = true
+        }
+        #endif
         DiagnosticLog.shared.start()
         MetricsCollector.shared.start()
         // No scene is open yet: copies from an earlier run are nobody's.

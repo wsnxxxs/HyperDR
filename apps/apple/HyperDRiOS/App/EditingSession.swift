@@ -229,6 +229,8 @@ import SwiftUI
             fetchFraction = nil
             // The export session hashes the copy while the editor decodes it.
             exports.photoOpening(imported.url)
+            await exports.prepareRAWCompatibility()
+            try Task.checkCancellation()
             try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference)
             photo?.discard()
             photo = imported
@@ -244,6 +246,8 @@ import SwiftUI
             DiagnosticLog.error("Session", "\(imported == nil ? "Import" : "Open") failed: \(EditorLog.describe(error))")
             if case RenderError.unsupportedRAWDecoder(let version) = error {
                 openFailureMessage = "ios.error.rawDecoderUnavailable \(version)"
+            } else if case RenderError.unsupportedRAWCompatibility(let converter) = error {
+                openFailureMessage = "ios.error.rawDecoderUnavailable \(converter)"
             }
             if editor.source == nil {
                 openFailed = true
@@ -282,7 +286,11 @@ import SwiftUI
         factsTask?.cancel()
         facts = CaptureFacts()
         factsTask = Task {
-            let read = await Task.detached(priority: .utility) { CaptureFacts.read(url) }.value
+            let read = await Task.detached(priority: .utility) {
+                let original = CaptureFacts.read(url)
+                guard let converted = RenderEngine.rawCompatibilitySourceURL(for: url), converted != url else { return original }
+                return original.merging(CaptureFacts.read(converted))
+            }.value
             if !Task.isCancelled { facts = read }
         }
     }

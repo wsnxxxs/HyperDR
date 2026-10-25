@@ -1,4 +1,5 @@
 import AppKit
+import HyperDRRender
 import SwiftUI
 
 @main struct HyperDRApp: App {
@@ -11,6 +12,11 @@ import SwiftUI
         || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
 
     init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-HyperDRForceRAWCompatibility") {
+            RenderEngine.forcesRAWCompatibility = true
+        }
+        #endif
         let isTesting = Self.isTesting
         if isTesting { NSApplication.shared.setActivationPolicy(.prohibited) } else { UndoMenuState.shared.install() }
         let editor = EditorModel(services: isTesting ? FakeEditorServices() : LiveEditorServices())

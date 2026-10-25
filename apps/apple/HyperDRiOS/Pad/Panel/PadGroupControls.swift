@@ -104,6 +104,12 @@ struct PadGroupControls: View {
                             WhiteBalanceNoticeLine(notice).padding(.horizontal, 4)
                         }
                     }
+                } else if control.id == "tone.exposure" {
+                    // A film on takes its own exposure; the note says which, and leads to it.
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        slider
+                        FilmExposureNote(recipe: recipe, panel: panel).padding(.horizontal, 4)
+                    }
                 } else {
                     slider
                 }

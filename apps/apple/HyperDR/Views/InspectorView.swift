@@ -14,8 +14,15 @@ struct InspectorView: View {
     var window = EditorWindowState()
 
     var body: some View {
-        ScrollView {
-            InspectorContent(model: model, window: window)
+        ScrollViewReader { proxy in
+            ScrollView {
+                InspectorContent(model: model, window: window)
+            }
+            // A note in the inspector (the film exposure under Light's exposure)
+            // can bring a row into view.
+            .environment(\.revealControl) { id in
+                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
+            }
         }
         .background(Color.hdr.surfacePanel)
         // Pinned above the scrolling inspector: the export's status card.

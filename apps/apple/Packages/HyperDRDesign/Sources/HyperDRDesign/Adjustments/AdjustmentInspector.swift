@@ -36,6 +36,7 @@ public struct AdjustmentInspector: View {
 
     @State private var expanded: Set<AdjustmentGroupID>
     @Environment(\.locale) private var locale
+    @Environment(\.revealControl) private var reveal
 
     /// `only` shows just those groups, all open: the iPad sidebar shows one
     /// tab's groups at a time, as the iPhone's dock does, and keeps Reset All
@@ -69,6 +70,17 @@ public struct AdjustmentInspector: View {
             ForEach(groups) { state in
                 groupView(state)
             }
+        }
+        .environment(\.revealControl, reveal.map { host in { id in revealControl(id, host: host) } })
+    }
+
+    /// Opens the group the control sits in, then lets the host scroll to it
+    /// once the group has laid out.
+    private func revealControl(_ id: String, host: @escaping (String) -> Void) {
+        if let group = Adjustments.declaration(id)?.group { expanded.insert(group) }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            host(id)
         }
     }
 
@@ -189,6 +201,7 @@ public struct AdjustmentRow: View {
                                              onResetGroup: { panel.reset(group: declaration.group, in: &recipe) })
                     }
                     if let notice = picking?.notice { WhiteBalanceNoticeLine(notice) }
+                    if control.id == "tone.exposure" { FilmExposureNote(recipe: recipe, panel: panel) }
                 }
                 .disabled(!control.isAvailable)
             }
@@ -450,6 +463,7 @@ struct LookSection: View {
         ForEach(controls) { control in
             AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                           onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
+                .id(control.id)
         }
     }
 }

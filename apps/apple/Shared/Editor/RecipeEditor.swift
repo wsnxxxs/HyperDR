@@ -357,7 +357,9 @@ import Observation
             restoring.setInputDomain(opened.domain)
             recipe = restoring
         } else {
-            recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion)
+            recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion,
+                            rawCompatibility: opened.rawCompatibility,
+                            rawEmbeddedPreview: opened.sourceCompatibility == .embeddedPreview)
         }
         if restoring == nil || historyURL != url { undo.clear() }
         historyURL = url

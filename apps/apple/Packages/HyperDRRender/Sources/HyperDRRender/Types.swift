@@ -9,6 +9,10 @@ public enum RenderError: Error, Sendable {
     case cannotOpenSource, cannotDecodeSource, missingGainMap, unsupportedGainColorSpace
     case sourceChanged
     case unsupportedRAWDecoder(String)
+    /// A saved conversion must use the converter version it was made with.
+    case unsupportedRAWCompatibility(String)
+    /// Neither LibRaw nor the embedded preview could supply this camera RAW.
+    case rawUnsupported(camera: String?)
     case gpu(String)
     case invalidAdjustment, invalidLUT(String), aiNotAvailable, duplicateHDRSplit
     /// An export's staged development needs more free storage than the volume has.
@@ -214,10 +218,17 @@ public struct RenderSource: @unchecked Sendable {
     var stagedLookBaseline: StagedLookBaseline? = nil
     /// Full size before the geometry: the photo as the file holds it, oriented.
     public var uncroppedSize: PixelSize { geometryUncroppedSize ?? nativeSize }
+    /// Nil when Apple's decoder opened the original file directly.
+    public var sourceCompatibility: SourceCompatibility? = nil
+    /// LibRaw/DNG converter version recorded in the recipe, when converted.
+    public var rawCompatibility: String? = nil
 }
 
 extension RenderSource {
     public var isDraftRAWPreview: Bool { domain == .rawEDR && origin?.options.draftRAWPreview == true }
+    /// Effective reopen options, including a compatibility conversion chosen
+    /// while this source was opened.
+    public var sourceOptions: SourceOptions? { origin?.options }
 
     /// RAW stays native through CIRAWFilter; only the final area-downsample size
     /// changes with a preview bound. Reuse pixels when a different bound rounds
@@ -304,13 +315,21 @@ public enum SourceResolution: Hashable, Sendable {
 public typealias RAWResolution = SourceResolution
 
 /// RAW graph setup can load a system model; developing begins at pixel materialization.
-public enum SourceLoadPhase: Sendable { case loadingDecoder, developing, preparingAnalysis }
+public enum SourceLoadPhase: Sendable {
+    case loadingDecoder, developing, preparingAnalysis
+    /// Conversion/extraction finished; the time includes a cache lookup.
+    case rawCompatibility(SourceCompatibility, TimeInterval, Bool)
+}
 
 public struct SourceOptions: Hashable, Sendable {
     public static let parameters = Adjustments.all.filter { $0.cost == .redevelop }
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     /// Nil leaves CIRAWFilter on its legacy system default. Recorded versions must be supported.
     public var rawDecoderVersion: String? = nil
+    /// Recorded LibRaw converter id. It is also the source-cache key.
+    public var rawCompatibility: String? = nil
+    /// An embedded JPEG replaces the RAW as an SDR photo.
+    public var rawEmbeddedPreview = false
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()

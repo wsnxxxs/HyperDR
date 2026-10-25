@@ -1096,3 +1096,22 @@ extension RecipeEditorAITests {
         await h.editor.settle()
     }
 }
+
+@MainActor @Suite struct RecipeEditorSourceCompatibilityTests {
+    @Test(arguments: [SourceCompatibility.convertedDNG, .embeddedPreview])
+    func openedCompatibilityIsObservableAndRecorded(_ compatibility: SourceCompatibility) async throws {
+        let h = Harness()
+        let url = URL(fileURLWithPath: "/tmp/compat.ARW")
+        let converter = compatibility == .convertedDNG ? "test-libraw/dng-1" : nil
+        await h.fake.configure {
+            $0.photos[url] = .init(domain: compatibility == .convertedDNG ? .rawEDR : .sdr,
+                sourceCompatibility: compatibility, rawCompatibility: converter)
+        }
+        try await h.editor.open(url)
+        #expect(h.editor.sourceCompatibility == compatibility)
+        #expect(h.editor.recipe.rawCompatibility == converter)
+        #expect(h.editor.recipe.rawEmbeddedPreview == (compatibility == .embeddedPreview))
+        await h.editor.close()
+        #expect(h.editor.sourceCompatibility == nil)
+    }
+}

@@ -309,3 +309,21 @@ private extension ParameterDefault {
         #expect(Recipe(adjustmentData: try recipe.adjustmentData())?.rawDecoderVersion == version)
     }
 }
+
+@Test func rawCompatibilityIsAdditiveSourceMetadata() throws {
+    let legacy = try Recipe.decode(Data("{\"version\":1,\"inputDomain\":\"rawEDR\"}".utf8))
+    #expect(legacy.rawCompatibility == nil)
+    #expect(!legacy.rawEmbeddedPreview)
+    let legacyJSON = String(decoding: try legacy.encoded(), as: UTF8.self)
+    #expect(!legacyJSON.contains("rawCompatibility"))
+    #expect(!legacyJSON.contains("rawEmbeddedPreview"))
+
+    let converted = Recipe(inputDomain: .rawEDR, rawDecoderVersion: "9.dng",
+                           rawCompatibility: "libraw-0.22.0/dng-1")
+    #expect(try Recipe.decode(converted.encoded()) == converted)
+    #expect(Recipe(adjustmentData: try converted.adjustmentData())?.rawCompatibility == "libraw-0.22.0/dng-1")
+
+    let preview = Recipe(inputDomain: .sdr, rawEmbeddedPreview: true)
+    #expect(try Recipe.decode(preview.encoded()) == preview)
+    #expect(String(decoding: try preview.encoded(), as: UTF8.self).contains("rawEmbeddedPreview"))
+}

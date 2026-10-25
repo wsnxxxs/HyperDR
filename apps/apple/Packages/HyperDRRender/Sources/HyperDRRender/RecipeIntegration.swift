@@ -110,6 +110,8 @@ extension SourceOptions {
         self.init(rawResolution:rawResolution, resolution:resolution,
                   sceneLinear:Self.sceneLinearDevelopment(recipe:recipe,options:options))
         rawDecoderVersion = recipe.rawDecoderVersion
+        rawCompatibility = recipe.rawCompatibility
+        rawEmbeddedPreview = recipe.rawEmbeddedPreview
         geometry = recipe.geometry
         let values = RecipeValues(recipe:recipe,options:options)
         lensCorrection = try values.bool("develop.lensCorrection")

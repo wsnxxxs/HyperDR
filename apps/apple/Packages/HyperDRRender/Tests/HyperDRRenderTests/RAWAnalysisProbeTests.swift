@@ -25,7 +25,7 @@ final class RAWAnalysisProbeTests: XCTestCase {
 }
 
 extension RenderEngine {
-    fileprivate func probeFixedRAWAnalysis(_ url: URL, decoder: String) throws {
+    fileprivate func probeFixedRAWAnalysis(_ url: URL, decoder: String) async throws {
         let clock = ContinuousClock()
         func timed<T>(_ name: String, _ body: () throws -> T) rethrows -> T {
             let start = clock.now
@@ -34,12 +34,19 @@ extension RenderEngine {
             print("RAW_ANALYSIS \(decoder) \(name)=\(Double(d.seconds) + Double(d.attoseconds) / 1e18)")
             return value
         }
+        func timedAsync<T>(_ name: String, _ body: () async throws -> T) async rethrows -> T {
+            let start = clock.now
+            let value = try await body()
+            let d = start.duration(to: clock.now).components
+            print("RAW_ANALYSIS \(decoder) \(name)=\(Double(d.seconds) + Double(d.attoseconds) / 1e18)")
+            return value
+        }
         let options = try SourceOptions(recipe: Recipe(inputDomain: .rawEDR, rawDecoderVersion: decoder),
             resolution: .preview(maximumSize: PixelSize(width: 1280, height: 1280)))
         if let mode = ProcessInfo.processInfo.environment["HYPERDR_RAW_ANALYSIS_MODE"] {
             let began = clock.now
-            let source = try timed("mode_\(mode)_load") {
-                try load(url, options: options, preparingAnalysis: mode == "shared") { phase in
+            let source = try await timedAsync("mode_\(mode)_load") {
+                try await load(url, options: options, preparingAnalysis: mode == "shared") { phase in
                     print("RAW_ANALYSIS_PHASE \(phase) elapsed=\(began.duration(to: clock.now))")
                 }
             }
@@ -57,14 +64,14 @@ extension RenderEngine {
             }
             return
         }
-        let preview = try timed("preview_load") { try load(url, options: options) }
+        let preview = try await timedAsync("preview_load") { try await load(url, options: options) }
         let fixed = try timed("fixed_reopen_and_materialize") { try fixedAnalysisSource(preview) }
         let spatial = try timed("analysis_GPU_after_fixed") { try analysis(preview) }
         _ = try timed("source_report_cached") { try sourceReport(preview) }
         print("RAW_ANALYSIS sizes native=\(preview.nativeSize) preview=\(preview.size) fixed=\(fixed.size) cells=\(spatial.size)")
 
         // Control: same canonical analysis obtained by the export entry point.
-        let export = try timed("export_open_with_fixed") { try openExportSource(url, options: options) }
+        let export = try await timedAsync("export_open_with_fixed") { try await openExportSource(url, options: options) }
         XCTAssertEqual(Self.readTexture(fixed.texture), Self.readTexture(export.analysisSource.texture))
         let exportSpatial = try analysis(export.analysisSource)
         XCTAssertEqual(Self.readTexture(spatial.cells), Self.readTexture(exportSpatial.cells))

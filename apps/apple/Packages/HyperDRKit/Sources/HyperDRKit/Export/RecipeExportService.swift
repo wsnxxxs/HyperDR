@@ -154,7 +154,8 @@ public actor RecipeExportService: RecipeExportServicing {
                 do {
                     lazy = try await renderEngine.openExportSource(photo.sourceURL,
                         options: SourceOptions(recipe: snapshot.recipe, resolution: .full),
-                        stagingLookBaseline: snapshot.recipe.needsLookBaseline)
+                        stagingLookBaseline: snapshot.recipe.needsLookBaseline,
+                        allowsRAWCompatibilityFallback: false)
                 } catch RenderError.insufficientStorage(let required, let available) {
                     throw RecipeExportError.insufficientStorage(requiredBytes: required, availableBytes: available)
                 }
@@ -162,7 +163,8 @@ public actor RecipeExportService: RecipeExportServicing {
             } else {
                 lazySource = nil
                 source = try await renderEngine.load(photo.sourceURL,
-                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full),
+                    allowsRAWCompatibilityFallback: false)
             }
             guard source.domain == snapshot.recipe.inputDomain,
                   source.nativeSize.width == request.source.pixelSize.width,
@@ -231,7 +233,8 @@ public actor RecipeExportService: RecipeExportServicing {
             }
             if !plan.memory.usesRowInput && lazySource != nil {
                 source = try await renderEngine.load(photo.sourceURL,
-                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full),
+                    allowsRAWCompatibilityFallback: false)
                 lazySource = nil
                 resident = retainedCPUBytes + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                     + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)

@@ -17,6 +17,8 @@ struct OpenedSource {
     var draftRAWPreview = false
     /// The full size before `applying(_:)`, once a geometry is applied.
     var uncroppedSize: PixelSize? = nil
+    var sourceCompatibility: SourceCompatibility? = nil
+    var rawCompatibility: String? = nil
 
     /// Resolution never changes the native CIRAWFilter graph. Both ordinary
     /// opening and shared-graph analysis use this exact sizing/metadata policy.
@@ -35,7 +37,8 @@ struct OpenedSource {
             rawPreviewSize: scale < 1 ? PixelSize(
                 width: max(1, Int((image.extent.width * scale).rounded())),
                 height: max(1, Int((image.extent.height * scale).rounded()))) : nil,
-            draftRAWPreview: draftRAWPreview, uncroppedSize: uncroppedSize)
+            draftRAWPreview: draftRAWPreview, uncroppedSize: uncroppedSize,
+            sourceCompatibility: sourceCompatibility, rawCompatibility: rawCompatibility)
     }
 
 }
@@ -90,7 +93,8 @@ private struct RasterPreviewPlan {
             baseSpace: opened.baseSpace, gain: opened.gain, raw: opened.raw,
             modelCapture: opened.modelCapture,
             nativeSize: opened.nativeSize, rawPreviewSize: opened.rawPreviewSize,
-            uncroppedSize: opened.uncroppedSize)
+            uncroppedSize: opened.uncroppedSize, sourceCompatibility: opened.sourceCompatibility,
+            rawCompatibility: opened.rawCompatibility)
     }
 }
 
@@ -104,8 +108,30 @@ extension RenderEngine {
         let type = CGImageSourceGetType(source).flatMap { UTType($0 as String) }
         if options.kind == .raw || (options.kind == .automatic && type?.conforms(to: .rawImage) == true) {
             progress?(.loadingDecoder)
+            if options.rawEmbeddedPreview {
+                let revision = try SourceRevision(url: url)
+                guard let previewURL = Self.resolvedCompatibility(url, revision: revision,
+                    kind: .embeddedPreview) else { throw RenderError.rawUnsupported(camera: nil) }
+                var rasterOptions = options
+                rasterOptions.kind = .imageIO
+                rasterOptions.rawEmbeddedPreview = false
+                var opened = try open(previewURL, options: rasterOptions, deferred: deferred, progress: progress)
+                opened.sourceCompatibility = .embeddedPreview
+                opened.modelCapture = capture.merging(opened.modelCapture)
+                return opened
+            }
             var opened = try openRAW(url, options: options)
-            opened.modelCapture = capture
+            if let id = options.rawCompatibility,
+               let convertedURL = Self.resolvedCompatibility(url, revision: try SourceRevision(url: url),
+                   kind: .convertedDNG, converterID: id),
+               let source = CGImageSourceCreateWithURL(convertedURL as CFURL, nil),
+               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
+                opened.modelCapture = capture.merging(ModelGainCapture(properties: properties))
+            } else {
+                opened.modelCapture = capture
+            }
+            opened.sourceCompatibility = options.rawCompatibility == nil ? nil : .convertedDNG
+            opened.rawCompatibility = options.rawCompatibility
             return opened
         }
         let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value ?? 1
@@ -229,11 +255,13 @@ extension RenderEngine {
 
     /// Resolve an explicit generation for a newly opened photo. Raster inputs
     /// have no RAW decoder; an unsupported RAW generation must never fall back.
-    public func rawDecoder(_ url: URL, generation: Int) throws -> String? {
+    public func rawDecoder(_ url: URL, generation: Int) async throws -> String? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let identifier = CGImageSourceGetType(source),
               UTType(identifier as String)?.conforms(to: .rawImage) == true else { return nil }
-        guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
+        let selection = try await Self.decoderSelectionURL(url, forceConversion: false)
+        guard let selection else { return nil }
+        guard let filter = CIRAWFilter(imageURL: selection) else { throw RenderError.cannotDecodeSource }
         let version = String(generation)
         guard let supported = filter.supportedDecoderVersions.first(where: {
             $0.rawValue == version || $0.rawValue == version + ".dng"
@@ -243,15 +271,17 @@ extension RenderEngine {
 
     /// New photos prefer generation 9, then 8 (including their DNG variants).
     /// Older cameras without either retain their supported system default.
-    public func preferredRAWDecoder(_ url: URL) -> String? {
-        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+    public func preferredRAWDecoder(_ url: URL) async -> String? {
+        guard let selection = try? await Self.decoderSelectionURL(url, forceConversion: false),
+              let filter = Self.usableSelectionFilter(selection) ?? CIRAWFilter(imageURL: selection) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue)
     }
 
     /// Retry generation 8 explicitly: the system default may itself be 9.
-    public func fallbackRAWDecoder(_ url: URL) -> String? {
-        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+    public func fallbackRAWDecoder(_ url: URL) async -> String? {
+        guard let selection = try? await Self.decoderSelectionURL(url, forceConversion: false),
+              let filter = Self.usableSelectionFilter(selection) ?? CIRAWFilter(imageURL: selection) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue, allowing9: false)
     }
@@ -293,7 +323,18 @@ extension RenderEngine {
     }
 
     static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
-        guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
+        let decodeURL: URL
+        if let id = options.rawCompatibility {
+            let revision = try SourceRevision(url: url)
+            guard let resolved = resolvedCompatibility(url, revision: revision,
+                kind: .convertedDNG, converterID: id) else {
+                throw RenderError.unsupportedRAWCompatibility(id)
+            }
+            decodeURL = resolved
+        } else {
+            decodeURL = url
+        }
+        guard let filter = CIRAWFilter(imageURL: decodeURL) else { throw RenderError.cannotDecodeSource }
         // An unavailable recorded decoder must fail rather than silently change a saved edit.
         if let version = options.rawDecoderVersion {
             guard let supported = filter.supportedDecoderVersions.first(where: { $0.rawValue == version }) else {
@@ -384,7 +425,9 @@ extension RenderEngine {
         // CIRAWFilter already applies the file's orientation. The geometry goes
         // before the preview scale, which is then measured on the cropped photo.
         return try OpenedSource(domain: .rawEDR, image: output, hdr: output,
-                            baseSpace: workingColorSpace, gain: nil, raw: development, draftRAWPreview: draft)
+                            baseSpace: workingColorSpace, gain: nil, raw: development, draftRAWPreview: draft,
+                            sourceCompatibility: options.rawCompatibility == nil ? nil : .convertedDNG,
+                            rawCompatibility: options.rawCompatibility)
             .applying(options.geometry).rawVariant(resolution: options.resolution)
     }
 }

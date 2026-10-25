@@ -46,12 +46,17 @@ extension RenderEngine {
     /// with Apple's development) into a staged file, one canonical cell at a
     /// time. The file's space is reserved before the first cell develops; the
     /// RAW graph and its decoder caches are released before this returns.
-    func stageLookBaseline(_ url: URL, options: SourceOptions, revision: SourceRevision) throws -> StagedLookBaseline {
+    func stageLookBaseline(_ url: URL, options: SourceOptions, revision: SourceRevision,
+                           allowsFallback: Bool) async throws -> (staged: StagedLookBaseline?, options: SourceOptions) {
         var options = options
         options.sceneLinear = false
         options.resolution = .full
+        let result = try await Self.openWithCompatibility(url, options: options, deferred: true,
+            allowsFallback: allowsFallback, retryNativeDecoder: false, revision: revision)
+        options = result.options
+        guard result.opened.domain == .rawEDR else { return (nil, options) }
         let staged = try autoreleasepool { () throws -> StagedLookBaseline in
-            let opened = try Self.openRAW(url, options: options)
+            let opened = result.opened
             let bounds = opened.image.extent.integral
             let size = PixelSize(width: Int(bounds.width), height: Int(bounds.height))
             try validate(size)
@@ -83,6 +88,6 @@ extension RenderEngine {
         }
         clearImageCaches()
         try revision.validate(url)
-        return staged
+        return (staged, options)
     }
 }

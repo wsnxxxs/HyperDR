@@ -60,6 +60,12 @@ public struct Recipe: Equatable, Sendable {
 
     /// Exact CIRAWFilter version (including `.dng`). Nil preserves legacy system defaults.
     public var rawDecoderVersion: String?
+    /// LibRaw/DNG converter id for a source Apple could not develop. Once
+    /// recorded, reopening requires this exact converter, like the RAW decoder.
+    public var rawCompatibility: String?
+    /// The source is an embedded JPEG, edited and exported as SDR rather than
+    /// presented as a RAW development. Encoded only when true.
+    public var rawEmbeddedPreview: Bool
 
     public let version: Int
     public private(set) var inputDomain: InputDomain
@@ -80,8 +86,11 @@ public struct Recipe: Equatable, Sendable {
     public init(version: Int = Recipe.currentVersion, inputDomain: InputDomain = .sdr,
                 hdrSource: HDRSource? = nil, look: LUTReference? = nil,
                 values: [String: ParameterValue] = [:], rawDecoderVersion: String? = nil,
+                rawCompatibility: String? = nil, rawEmbeddedPreview: Bool = false,
                 geometry: Geometry = .identity) {
         self.rawDecoderVersion = rawDecoderVersion
+        self.rawCompatibility = rawCompatibility
+        self.rawEmbeddedPreview = rawEmbeddedPreview
         self.geometry = geometry
         self.version = version
         self.inputDomain = inputDomain
@@ -196,7 +205,7 @@ public struct Recipe: Equatable, Sendable {
 
 extension Recipe: Codable {
     private enum CodingKeys: String, CodingKey {
-        case version, inputDomain, hdrSource, look, values, rawDecoderVersion, geometry
+        case version, inputDomain, hdrSource, look, values, rawDecoderVersion, rawCompatibility, rawEmbeddedPreview, geometry
     }
 
     public init(from decoder: any Decoder) throws {
@@ -208,12 +217,16 @@ extension Recipe: Codable {
         let values = try container.decodeIfPresent([String: ParameterValue].self, forKey: .values) ?? [:]
         self.init(version: version, inputDomain: domain, hdrSource: source, look: look, values: values,
                   rawDecoderVersion: try container.decodeIfPresent(String.self, forKey: .rawDecoderVersion),
+                  rawCompatibility: try container.decodeIfPresent(String.self, forKey: .rawCompatibility),
+                  rawEmbeddedPreview: try container.decodeIfPresent(Bool.self, forKey: .rawEmbeddedPreview) ?? false,
                   geometry: try container.decodeIfPresent(Geometry.self, forKey: .geometry) ?? .identity)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(rawDecoderVersion, forKey: .rawDecoderVersion)
+        try container.encodeIfPresent(rawCompatibility, forKey: .rawCompatibility)
+        if rawEmbeddedPreview { try container.encode(true, forKey: .rawEmbeddedPreview) }
         try container.encode(version, forKey: .version)
         try container.encode(inputDomain, forKey: .inputDomain)
         try container.encode(hdrSource, forKey: .hdrSource)

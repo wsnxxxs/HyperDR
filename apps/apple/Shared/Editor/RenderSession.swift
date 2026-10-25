@@ -114,10 +114,15 @@ actor RenderSession: EditorRendering {
             if ProcessInfo.processInfo.environment["HYPERDR_OPEN_TIMINGS"] == "1" {
                 print("OPEN_PHASE phase=\(phase) elapsed=\(began.duration(to: clock.now))")
             }
+            if case .rawCompatibility(let kind, let seconds, let cached) = phase {
+                EditorLog.notice("RAW compatibility \(kind.rawValue) \(cached ? "cache hit" : "completed") in \(String(format: "%.3f", seconds))s")
+                return
+            }
             let stage: EditorOpeningStage = switch phase {
             case .loadingDecoder: .loadingDecoder
             case .developing: .developing
             case .preparingAnalysis: .preparingPreview
+            case .rawCompatibility: .loadingDecoder
             }
             Task { await progress(stage) }
         }
@@ -126,12 +131,18 @@ actor RenderSession: EditorRendering {
         do {
             try await beforeOpenLoad?(options)
             do {
-                source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+                source = try await engine.load(url, options: options, preparingAnalysis: true,
+                    allowsRAWCompatibilityFallback: restoring == nil,
+                    retryNativeRAWDecoder: restoring == nil && rawDecoderPreference == .automatic,
+                    progress: loadProgress)
             } catch RenderError.cannotDecodeSource where options.draftRAWPreview {
                 // A camera may reject reduced development while native works.
                 // Keep its selected decoder before considering decoder fallback.
                 options.draftRAWPreview = false
-                source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+                source = try await engine.load(url, options: options, preparingAnalysis: true,
+                    allowsRAWCompatibilityFallback: restoring == nil,
+                    retryNativeRAWDecoder: restoring == nil && rawDecoderPreference == .automatic,
+                    progress: loadProgress)
             }
         } catch {
             // A listed decoder can still fail in Apple's camera/system model.
@@ -150,7 +161,9 @@ actor RenderSession: EditorRendering {
                 print("OPEN_RAW_DECODER_FALLBACK requested=\(requested) used=\(version)")
             }
             try await beforeOpenLoad?(options)
-            source = try await engine.load(url, options: options, preparingAnalysis: true, progress: loadProgress)
+            source = try await engine.load(url, options: options, preparingAnalysis: true,
+                allowsRAWCompatibilityFallback: restoring == nil, retryNativeRAWDecoder: false,
+                progress: loadProgress)
             fallback = RAWDecoderFallback(requested: requested, used: version)
             EditorLog.notice("RAW decoder \(requested) could not decode; reopened with \(version)")
         }
@@ -168,9 +181,13 @@ actor RenderSession: EditorRendering {
                                   capabilities: Self.capabilities(report.capabilities),
                                   hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url),
                                   isDraftPreview: source.isDraftRAWPreview,
-                                  rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback)
-        opened = Opened(editor: editor, revision: revision, source: source, options: options, previewOptions: options)
-        EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") in \(began.duration(to: clock.now))")
+                                  rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback,
+                                  sourceCompatibility: source.sourceCompatibility,
+                                  rawCompatibility: source.rawCompatibility)
+        let effectiveOptions = source.sourceOptions ?? options
+        opened = Opened(editor: editor, revision: revision, source: source,
+                        options: effectiveOptions, previewOptions: effectiveOptions)
+        EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") compatibility=\(source.sourceCompatibility?.rawValue ?? "native") in \(began.duration(to: clock.now))")
         predictions = [:]
         predictionOrder = []
         return editor
@@ -190,7 +207,8 @@ actor RenderSession: EditorRendering {
             var options = initial.previewOptions
             options.draftRAWPreview = false
             guard try FileRevision(initial.editor.url) == initial.revision else { throw EditorRenderingError.sourceChanged }
-            let source = try await refiner.load(initial.editor.url, options: options, preparingAnalysis: true)
+            let source = try await refiner.load(initial.editor.url, options: options, preparingAnalysis: true,
+                                                allowsRAWCompatibilityFallback: false)
             let analysis = try await refiner.previewAnalysis(source)
             let report = try await refiner.sourceReport(source)
             try Task.checkCancellation()
@@ -272,7 +290,8 @@ actor RenderSession: EditorRendering {
                 opened.detail = nil
                 opened.detailOptions = nil
                 self.opened = opened
-                opened.detail = try await engine.openExportSource(opened.editor.url, options: sourceOptions)
+                opened.detail = try await engine.openExportSource(opened.editor.url, options: sourceOptions,
+                                                                  allowsRAWCompatibilityFallback: false)
                 opened.detailOptions = sourceOptions
             }
             // The film's scatter reads a few pixels beyond the region.
@@ -305,7 +324,8 @@ actor RenderSession: EditorRendering {
         if let reload {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
-            let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true)
+            let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true,
+                                               allowsRAWCompatibilityFallback: false)
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
             try Task.checkCancellation()

@@ -129,6 +129,8 @@ nonisolated struct EditorSource: Equatable, Sendable {
     var rawDecoderFallback: RAWDecoderFallback? = nil
     /// Nil when Apple's native decoder developed the source directly.
     var sourceCompatibility: SourceCompatibility? = nil
+    /// Exact converter id persisted by RecipeEditor for converted DNGs.
+    var rawCompatibility: String? = nil
 }
 
 /// One render of the open photo.
@@ -197,7 +199,9 @@ extension Recipe {
     /// development. An SDR original must not acquire the default HDR expansion.
     nonisolated var original: Recipe {
         // The same crop, so the two line up.
-        var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion, geometry: geometry)
+        var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion,
+                              rawCompatibility: rawCompatibility, rawEmbeddedPreview: rawEmbeddedPreview,
+                              geometry: geometry)
         if inputDomain == .sdr { original.setValue(.bool(false), for: "hdr.enabled") }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             original.setValue(value(for: declaration.id), for: declaration.id)
@@ -218,6 +222,8 @@ extension Recipe {
     nonisolated var development: [String: ParameterValue] {
         var values: [String: ParameterValue] = [:]
         values["raw.decoderVersion"] = rawDecoderVersion.map(ParameterValue.string)
+        values["raw.compatibility"] = rawCompatibility.map(ParameterValue.string)
+        if rawEmbeddedPreview { values["raw.embeddedPreview"] = .bool(true) }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
             values[declaration.id] = value(for: declaration.id)
         }

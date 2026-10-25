@@ -28,6 +28,12 @@ public struct ModelGainCapture: Sendable, Equatable {
     }
 
     init(features: [Double?]) { self.features = features }
+
+    /// Original camera metadata wins; converted DNGs fill fields ImageIO
+    /// could not read from an unsupported container.
+    func merging(_ fallback: ModelGainCapture) -> ModelGainCapture {
+        ModelGainCapture(features: zip(features, fallback.features).map { $0 ?? $1 })
+    }
 }
 
 /// Private fitted data, never compiled into the public source or test fixtures.

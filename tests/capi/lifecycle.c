@@ -5,7 +5,7 @@
 int main(void) {
  char* output=NULL;hyperdr_error* error=NULL;hyperdr_engine* engine=NULL;
  REQUIRE(hyperdr_abi_version()==6 && strlen(hyperdr_version())>0);
- REQUIRE(hyperdr_raw_converter_id() && strstr(hyperdr_raw_converter_id(), "/dng-1"));
+ REQUIRE(hyperdr_raw_converter_id() && strstr(hyperdr_raw_converter_id(), "/dng-2"));
  REQUIRE(!hyperdr_frame_layout("{\"margins\":0.05,\"caption\":0.1}",3000,2000,&output,&error));
  REQUIRE(strstr(output,"photo"));hyperdr_string_free(output);
  REQUIRE(hyperdr_frame_layout("{\"margin\":0.05}",3000,2000,&output,&error));

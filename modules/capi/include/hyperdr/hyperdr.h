@@ -60,7 +60,7 @@ HYPERDR_API void hyperdr_cancel_destroy(hyperdr_cancel*);
  * unpacks sensor data and metadata (Bayer data is not demosaiced); the result
  * is a DNG the system develops like any other DNG. Output files are created
  * exclusively and published atomically.
- * Static stable id of this converter, e.g. "libraw-0.22.0/dng-1". It changes
+ * Static stable id of this converter, e.g. "libraw-0.22.0/dng-2". It changes
  * whenever the DNG written for the same input could change. */
 HYPERDR_API const char* hyperdr_raw_converter_id(void);
 /* report JSON: {"converter":id,"layout":"cfa"|"linear","make":s,"model":s,

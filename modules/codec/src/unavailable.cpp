@@ -32,7 +32,7 @@ void fail_without_codecs(const char* capability) {
 }
 
 #if !HYPERDR_WITH_CODECS
-const char* raw_converter_id() noexcept { return "libraw-unavailable/dng-1"; }
+const char* raw_converter_id() noexcept { return "libraw-unavailable/dng-2"; }
 std::string raw_convert_dng(const std::filesystem::path&, const std::filesystem::path&) {
   fail_without_codecs("LibRaw DNG compatibility");
 }

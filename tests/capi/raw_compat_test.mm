@@ -114,7 +114,7 @@ void suite() {
   const std::filesystem::path root = HYPERDR_SOURCE_DIR;
   TempDirectory temporary;
   Engine engine;
-  require(std::string(hyperdr_raw_converter_id()).find("/dng-1") != std::string::npos,
+  require(std::string(hyperdr_raw_converter_id()).find("/dng-2") != std::string::npos,
           "unexpected RAW converter id");
   struct Fixture {
     const char* file;

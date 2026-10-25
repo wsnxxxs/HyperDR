@@ -1,5 +1,7 @@
 #include "hyperdr/codec/raw_compat.hpp"
 
+#include "internal/raw_compat_internal.hpp"
+
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
@@ -33,9 +35,9 @@ namespace hyperdr {
 namespace {
 
 // The upstream 0.22.2 release does not contain the ILCE-7M5 colour table.
-// This snapshot also includes the current Sony ARW6 decoder. Bump dng-1 when
+// This snapshot also includes the current Sony ARW6 decoder. Bump dng-2 when
 // the serialization (not merely the LibRaw snapshot) changes.
-constexpr char kConverterId[] = "libraw-0.22.0+2caab57e/dng-1";
+constexpr char kConverterId[] = "libraw-0.22.0+2caab57e/dng-2";
 constexpr std::uint16_t kPhotometricLinearRaw = 34892;
 
 std::string bounded_text(const char* value, std::size_t capacity) {
@@ -227,36 +229,13 @@ ColorMatrix color_matrix(const RawFile& raw) {
     }
   }
 
+  if (!has_cam_xyz) unsupported(raw);
   ColorMatrix matrix{};
-  if (has_cam_xyz) {
-    // LibRaw stores camera-channel rows by XYZ columns; DNG stores the same
-    // XYZ D65 -> camera transform as three XYZ rows by camera columns.
+  // cam_xyz_coeff already produces DNG's XYZ D65 -> camera matrix: camera
+  // channel rows by XYZ columns. In particular, do not transpose or invert it.
+  for (unsigned channel = 0; channel < 3; ++channel) {
     for (unsigned xyz = 0; xyz < 3; ++xyz) {
-      for (unsigned channel = 0; channel < 3; ++channel) {
-        matrix[xyz * 3 + channel] = color.cam_xyz[channel][xyz];
-      }
-    }
-  } else {
-    // Embedded camera profiles can leave cam_xyz zero. rgb_cam is the selected
-    // camera -> sRGB D65 matrix, so prefix sRGB -> XYZ D65. rawdata preserves
-    // the pre-output_color=0 raw_color flag and distinguishes this case from
-    // LibRaw's identity initializer for an unknown camera.
-    const bool embedded = raw.imgdata.rawdata.ioparams.raw_color == 0 ||
-                          color.cmatrix[0][0] > 0.125F;
-    if (!embedded) unsupported(raw);
-    constexpr double srgb_to_xyz[3][3] = {
-        {0.4124564, 0.3575761, 0.1804375},
-        {0.2126729, 0.7151522, 0.0721750},
-        {0.0193339, 0.1191920, 0.9503041},
-    };
-    for (unsigned xyz = 0; xyz < 3; ++xyz) {
-      for (unsigned channel = 0; channel < 3; ++channel) {
-        double value = 0.0;
-        for (unsigned rgb = 0; rgb < 3; ++rgb) {
-          value += srgb_to_xyz[xyz][rgb] * color.rgb_cam[rgb][channel];
-        }
-        matrix[xyz * 3 + channel] = static_cast<float>(value);
-      }
+      matrix[channel * 3 + xyz] = color.cam_xyz[channel][xyz];
     }
   }
   for (const float value : matrix) if (!std::isfinite(value)) unsupported(raw);
@@ -456,7 +435,11 @@ void common_metadata(TIFF* tiff, const RawFile& raw, const Crop& crop,
       linear_raw ? 0U : sensor.left_margin,
       linear_raw ? sensor.iheight : static_cast<std::uint32_t>(sensor.top_margin + sensor.height),
       linear_raw ? sensor.iwidth : static_cast<std::uint32_t>(sensor.left_margin + sensor.width)};
-  const float origin[2] = {static_cast<float>(crop.left), static_cast<float>(crop.top)};
+  // DNG DefaultCropOrigin is relative to ActiveArea. LinearRaw's crop was
+  // already rebased to its visible output; CFA still uses sensor coordinates.
+  const float origin[2] = {
+      static_cast<float>(crop.left - (linear_raw ? 0U : sensor.left_margin)),
+      static_cast<float>(crop.top - (linear_raw ? 0U : sensor.top_margin))};
   const float size[2] = {static_cast<float>(crop.width), static_cast<float>(crop.height)};
   require_tiff(TIFFSetField(tiff, TIFFTAG_ACTIVEAREA, active));
   require_tiff(TIFFSetField(tiff, TIFFTAG_DEFAULTCROPORIGIN, origin));
@@ -474,11 +457,11 @@ void common_metadata(TIFF* tiff, const RawFile& raw, const Crop& crop,
   }
 }
 
-bool bayer_pattern(const RawFile& raw, std::array<std::uint8_t, 4>* output = nullptr) {
-  if (raw.imgdata.idata.filters <= 1000 || const_cast<RawFile&>(raw).is_fuji_rotated() ||
+bool bayer_pattern_impl(const LibRaw& raw, std::array<std::uint8_t, 4>* output = nullptr) {
+  if (raw.imgdata.idata.filters <= 1000 || const_cast<LibRaw&>(raw).is_fuji_rotated() ||
       raw.imgdata.sizes.raw_width < 8 || raw.imgdata.sizes.raw_height < 8) return false;
   const auto role = [&](unsigned x, unsigned y) -> char {
-    const int index = const_cast<RawFile&>(raw).COLOR(static_cast<int>(x), static_cast<int>(y));
+    const int index = const_cast<LibRaw&>(raw).COLOR(static_cast<int>(y), static_cast<int>(x));
     return index >= 0 && index < 5 ? raw.imgdata.idata.cdesc[index] : '\0';
   };
   std::array<char, 4> pattern{{role(0, 0), role(1, 0), role(0, 1), role(1, 1)}};
@@ -508,7 +491,7 @@ void write_cfa(TIFF* tiff, RawFile& raw, const Crop& crop,
   if (pitch < std::size_t(sizes.raw_width) * 2 || (pitch & 1U)) unsupported(raw);
   const auto* pixels = reinterpret_cast<const std::uint16_t*>(data.raw_image);
   std::array<std::uint8_t, 4> cfa{};
-  if (!bayer_pattern(raw, &cfa)) unsupported(raw);
+  if (!raw_compat_internal::bayer_pattern(raw, &cfa)) unsupported(raw);
 
   require_tiff(TIFFSetField(tiff, TIFFTAG_IMAGEWIDTH, sizes.raw_width));
   require_tiff(TIFFSetField(tiff, TIFFTAG_IMAGELENGTH, sizes.raw_height));
@@ -540,7 +523,7 @@ void write_cfa(TIFF* tiff, RawFile& raw, const Crop& crop,
   std::vector<float> black(static_cast<std::size_t>(repeat_count));
   for (unsigned y = 0; y < repeat_rows; ++y) {
     for (unsigned x = 0; x < repeat_columns; ++x) {
-      const int channel = raw.COLOR(static_cast<int>(x), static_cast<int>(y));
+      const int channel = raw.COLOR(static_cast<int>(y), static_cast<int>(x));
       if (channel < 0 || channel > 3) unsupported(raw);
       std::uint64_t value = color.black + color.cblack[channel];
       if (tiled) value += color.cblack[6 + (y % source_rows) * source_columns + (x % source_columns)];
@@ -640,6 +623,12 @@ std::optional<std::pair<std::uint32_t, std::uint32_t>> jpeg_dimensions(
 
 }  // namespace
 
+namespace raw_compat_internal {
+bool bayer_pattern(const LibRaw& raw, std::array<std::uint8_t, 4>* output) {
+  return bayer_pattern_impl(raw, output);
+}
+}  // namespace raw_compat_internal
+
 const char* raw_converter_id() noexcept { return kConverterId; }
 
 std::string raw_convert_dng(const std::filesystem::path& raw_path,
@@ -649,7 +638,7 @@ std::string raw_convert_dng(const std::filesystem::path& raw_path,
   check_raw(raw->unpack(), *raw, "LibRaw unpack");
   const auto matrix = color_matrix(*raw);
   auto crop = default_crop(*raw);
-  const bool cfa = bayer_pattern(*raw) && raw->imgdata.rawdata.raw_image;
+  const bool cfa = raw_compat_internal::bayer_pattern(*raw) && raw->imgdata.rawdata.raw_image;
   std::array<std::uint32_t, 3> linear_white{};
   if (!cfa) {
     const auto& color = raw->imgdata.color;

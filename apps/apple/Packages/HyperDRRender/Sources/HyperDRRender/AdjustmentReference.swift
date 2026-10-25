@@ -58,6 +58,8 @@ extension DoubleReference {
                 ? max(0, encoded - 0.1*a*(1-smoothStep(0.1,0.5,encoded)))
                 : encoded - 0.12*a*(1-smoothStep(0,0.5,encoded))
             let target = (changed <= 0.04045 ? changed/12.92 : pow((changed+0.055)/1.055,2.4))
+            // Lift the floor with neutral light; scaling would amplify shadow chroma/noise.
+            if a < 0 { return rgb + RGB(repeating: target-y) }
             return y > 1e-8 ? scale(target) : rgb + RGB(repeating: target)
         case .warmth, .tint:
             let diagonal = operation == .warmth ? RGB(exp2(0.4*a),1,exp2(-0.4*a))

@@ -11,6 +11,9 @@ struct ToneToolsTests {
         #expect(DoubleReference.point(neutral, operation: .blacks, value: 0) == neutral)
         #expect(DoubleReference.point(neutral, operation: .blacks, value: 1).x == 0)
         #expect(abs(DoubleReference.point(.zero, operation: .blacks, value: -1).x - 0.01341175) < 1e-7)
+        let shadow = DoubleReference.RGB(0.001,0.002,0.006)
+        let lifted = DoubleReference.point(shadow, operation: .blacks, value: -1)
+        #expect(abs((lifted.z-lifted.x)-(shadow.z-shadow.x)) < 1e-12)
         let rgba: [Float] = [0,0,0,1, 0.009,0.009,0.009,1, 1,1,1,1]
         let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: 48,
                             size: CGSize(width: 3, height: 1), format: .RGBAf,

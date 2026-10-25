@@ -71,6 +71,7 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         float changed = a > 0 ? max(0.f,encoded-.1f*a*(1-sm(.1f,.5f,encoded)))
                               : encoded-.12f*a*(1-sm(0.f,.5f,encoded));
         target = (changed<=.04045f ? changed/12.92f : pow((changed+.055f)/1.055f,2.4f));
+        if(a<0) return rgb+(target-y);
     }
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
 }

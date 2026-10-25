@@ -37,12 +37,13 @@ extension DoubleReference {
             return scale(pow(target, 2.4))
         case .highlights:
             if y > 1 {
-                let left = exp2(-3*a), right = exp2(2*a), x = y-1, t = min(x, 1)
+                let left = a < 0 ? 1.0 : exp2(-3*a), right = exp2(2*a), x = y-1, t = min(x, 1)
                 return scale(1+right*x+(left-right)*(t-t*t*t+0.5*t*t*t*t))
             }
             guard y > 0.15 else { return rgb }
             let t = (y-0.15)/0.85
-            return scale(0.15+0.85*t/(t+(1-t)*exp2(-3*a*t)))
+            let target = 0.15+0.85*t/(t+(1-t)*exp2(-3*a*t))
+            return scale(a < 0 ? target+(y-target)*smoothStep(0.8,1,y) : target)
         case .shadows:
             guard y < 0.5 else { return rgb }
             let t = y/0.5

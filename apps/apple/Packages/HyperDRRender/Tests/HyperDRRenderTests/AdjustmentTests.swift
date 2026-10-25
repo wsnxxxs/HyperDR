@@ -243,9 +243,14 @@ private func wideHalf() -> String {
             let ys = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: .highlights, value: amount).x }
             let left = (ys[1]-ys[0])/epsilon, right = (ys[2]-ys[1])/epsilon
             #expect(abs(left-right) < 0.0002)
-            #expect(abs(right-exp2(-3*amount)) < 0.0002)
+            #expect(abs(right-(amount < 0 ? 1 : exp2(-3*amount))) < 0.0002)
             #expect(abs((ys[5]-ys[4])/epsilon-exp2(2*amount)) < 0.0002)
             #expect(zip(ys, ys.dropFirst()).allSatisfy { $0 <= $1 })
+            if amount < 0 {
+                for value in stride(from: 0.0, through: 4.0, by: 0.01) {
+                    #expect(DoubleReference.point(SIMD3(repeating: value), operation: .highlights, value: amount).x <= value+1e-12)
+                }
+            }
             let pixels = RenderEngine.readPixels(try await engine.render(source, nodes: [AdjustmentNode(.highlights, value: Float(amount))]))
             for i in xs.indices {
                 let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))

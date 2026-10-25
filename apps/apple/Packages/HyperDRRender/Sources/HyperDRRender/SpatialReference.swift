@@ -35,9 +35,9 @@ extension DoubleReference {
                 grid[y*w+x] = sum/(sx*sy)
             }}
             spatial = toneSpatialAnalysis(grid,base: grid,size: PixelSize(width: w,height: h),
-                tone: settings.tone,color: settings.color,sdr: sdr)
+                tone: settings.tone,color: settings.color,sdr: sdr,baseIsSDR: sdr)
         }
-        let toneMaps = (0..<3).map { channel in spatial?.samples.map { $0[channel] } ?? [] }
+        let toneMaps = (0..<4).map { channel in spatial?.samples.map { $0[channel] } ?? [] }
         var cells = [SIMD4<Double>](repeating:.zero,count:w*h)
         var peaks = SIMD4<Double>.zero
         var originalPeak = 1.0
@@ -52,9 +52,10 @@ extension DoubleReference {
                 let sample: SIMD4<Double>? = spatial.map { map in
                     SIMD4(sampleGrid(toneMaps[0],grid: map.size,output: size,x: x,y: y),
                           sampleGrid(toneMaps[1],grid: map.size,output: size,x: x,y: y),
-                          sampleGrid(toneMaps[2],grid: map.size,output: size,x: x,y: y),0)
+                          sampleGrid(toneMaps[2],grid: map.size,output: size,x: x,y: y),
+                          sampleGrid(toneMaps[3],grid: map.size,output: size,x: x,y: y))
                 }
-                let pair = prepare(original,settings:settings,sdr:sdr,spatial: sample,air: spatial?.air ?? RGB(repeating: 1))
+                let pair = prepare(original,settings:settings,sdr:sdr,spatial: sample,air: spatial?.air ?? RGB(repeating: 1),baselineAir: spatial?.baselineAir)
                 let brightness = luma(pair.base), logValue = min(8,max(-8,log2(brightness+1e-6)))
                 sum += SIMD4(brightness,smoothStep(start,1,brightness),logValue,logValue*logValue)
                 let basePeak = max(pair.base.x,pair.base.y,pair.base.z)

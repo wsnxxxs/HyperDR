@@ -4,6 +4,8 @@ import HyperDRRecipe
 
 struct ToneSpatialKey: Equatable {
     var source: UUID
+    // The Apple baseline replaces the scene texture only at partial RAW strength.
+    var baseline: ObjectIdentifier
     var tone: ToneAdjustments
     var color: ColorAdjustments
 }
@@ -11,6 +13,7 @@ struct ToneSpatialMap {
     let id = UUID()
     let size: PixelSize
     let air: SIMD3<Float>
+    let baselineAir: SIMD3<Float>
     let values: [SIMD4<Float>]
 }
 private struct ToneAreaSampling { var output, source, options: SIMD4<UInt32> }
@@ -27,10 +30,20 @@ extension RenderEngine {
         keyTone.dehaze = edit.tone.dehaze == 0 ? 0 : (edit.tone.clarity == 0 ? 1 : edit.tone.dehaze)
         keyTone.clarity = edit.tone.clarity == 0 ? 0 : 1
         var keyColor = ColorAdjustments(); keyColor.warmth = edit.color.warmth; keyColor.tint = edit.color.tint
-        let key = ToneSpatialKey(source: source.id,tone: keyTone,color: keyColor)
-        if let cache = toneSpatialCache,cache.key == key { return cache.map }
         let fixed = try fixedAnalysisSource(source)
         let input = try workingInput(fixed), baseline = try lookBaseline(fixed,edit: edit)
+        let key = ToneSpatialKey(source: source.id,baseline: ObjectIdentifier(baseline),tone: keyTone,color: keyColor)
+        if let cache = toneSpatialCache,cache.key == key { return cache.map }
+        let scene = try makeToneSpatialMap(fixed,input: input,edit: edit,tone: keyTone,color: keyColor,sdr: fixed.domain == .sdr)
+        let base = input === baseline ? scene : try makeToneSpatialMap(fixed,input: baseline,edit: edit,tone: keyTone,color: keyColor,sdr: fixed.domain == .dual || fixed.domain == .sdr)
+        let values = zip(scene.values,base.values).map { SIMD4($0.x,$0.y,$1.y,$1.x) }
+        let map = ToneSpatialMap(size: scene.size,air: scene.air,baselineAir: base.air,values: values)
+        toneSpatialCache = (key,map)
+        return map
+    }
+
+    private func makeToneSpatialMap(_ fixed: RenderSource,input: any MTLTexture,edit: RenderAdjustments,
+                                    tone keyTone: ToneAdjustments,color keyColor: ColorAdjustments,sdr: Bool) throws -> ToneSpatialMap {
         let ratio = min(1,768/Double(max(fixed.size.width,fixed.size.height)))
         let size = PixelSize(width: max(1,Int((Double(fixed.size.width)*ratio).rounded())),
                              height: max(1,Int((Double(fixed.size.height)*ratio).rounded())))
@@ -44,7 +57,7 @@ extension RenderEngine {
                               textures: [texture,target,target],value: &p)
             return target
         }
-        let sceneGrid = try sample(input), baseGrid = try sample(baseline)
+        let sceneGrid = try sample(input), baseGrid = sceneGrid
         let exposed = try node.texture(width: size.width,height: size.height)
         let exposedBase = try node.texture(width: size.width,height: size.height)
         let temp = try node.texture(width: size.width,height: size.height)
@@ -52,6 +65,7 @@ extension RenderEngine {
         let dark = try node.texture(width: size.width,height: size.height)
         var estimate = edit; estimate.tone = keyTone; estimate.color = keyColor
         var p = graphUniform(fixed,estimate,size: size,region: CGRect(x: 0,y: 0,width: size.width,height: size.height))
+        p.flags.x = sdr ? 0 : 1
         try node.dispatch("toneSpatialExpose",width: size.width,height: size.height,
             textures: [sceneGrid,baseGrid,exposed,exposedBase],value: &p)
         func minimum(_ input: any MTLTexture, _ output: any MTLTexture, context: RenderNodeContext) throws {
@@ -121,8 +135,7 @@ extension RenderEngine {
         // region reads the same grid without extra per-region textures or halos.
         let rgba = Self.readTexture(output)
         let values = stride(from: 0,to: rgba.count,by: 4).map { SIMD4(rgba[$0],rgba[$0+1],rgba[$0+2],Float(0)) }
-        let map = ToneSpatialMap(size: size,air: SIMD3(air.x,air.y,air.z),values: values)
-        toneSpatialCache = (key,map)
+        let map = ToneSpatialMap(size: size,air: SIMD3(air.x,air.y,air.z),baselineAir: SIMD3(air.x,air.y,air.z),values: values)
         return map
     }
 }

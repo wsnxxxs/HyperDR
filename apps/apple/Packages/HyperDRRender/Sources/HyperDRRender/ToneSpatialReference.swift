@@ -3,7 +3,8 @@ import Foundation
 public struct ReferenceToneSpatial: Sendable {
     public let size: PixelSize
     public let air: DoubleReference.RGB
-    /// Transmission, HDR log low frequency, SDR log low frequency, reserved.
+    public let baselineAir: DoubleReference.RGB
+    /// Transmission, HDR log low frequency, baseline log low frequency, baseline transmission.
     public let samples: [SIMD4<Double>]
 }
 
@@ -52,14 +53,15 @@ extension DoubleReference {
 
     /// Fixed-scale double reference estimator. Linear dark-channel prior and
     /// self-guided log-luminance low frequencies; no render-region dependencies.
+    /// RAW Apple baselines remain HDR. Set baseIsSDR for an authored SDR endpoint.
     public static func toneSpatialAnalysis(_ pixels: [RGB], base: [RGB], size: PixelSize,
                                            tone: ToneAdjustments, color: ColorAdjustments,
-                                           sdr: Bool) -> ReferenceToneSpatial {
+                                           sdr: Bool, baseIsSDR: Bool = false) -> ReferenceToneSpatial {
         let w = size.width, h = size.height, count = w*h
         func exposed(_ input: RGB, base: Bool) -> RGB {
             var x = point(input,operation: .warmth,value: Double(color.warmth))
             x = point(x,operation: .tint,value: Double(color.tint))
-            return point(x,operation: .exposure,value: Double(tone.exposure),sdr: sdr || base)
+            return point(x,operation: .exposure,value: Double(tone.exposure),sdr: sdr || (base && baseIsSDR))
         }
         let scene = pixels.map { exposed($0,base: false) }
         func minimum(_ input: [Double], radius: Int) -> [Double] {
@@ -108,19 +110,25 @@ extension DoubleReference {
             a = box(a,radius: radius); b = box(b,radius: radius)
             return (0..<count).map { a[$0]*guide[$0]+b[$0] }
         }
-        var air = RGB(repeating: 1), transmission = [Double](repeating: 1,count: count)
-        if tone.dehaze != 0 {
-            let dark = minimum(scene.map { max(0,min(1,$0.x,$0.y,$0.z)) },radius: 7)
-            air = toneAtmosphere(scene,dark: dark)
-            let normalized = minimum(scene.map { max(0,min($0.x/air.x,$0.y/air.y,$0.z/air.z)) },radius: 7)
-            let raw = normalized.map { max(0.2,1-0.95*$0) }
-            let guide = scene.map { min(1,luma($0)) }
-            transmission = guided(guide,raw,epsilon: 0.001,radius: 8).map { min(1,max(0.2,$0)) }
+        func estimate(_ image: [RGB]) -> (RGB,[Double]) {
+            var air = RGB(repeating: 1), transmission = [Double](repeating: 1,count: count)
+            if tone.dehaze != 0 {
+                let dark = minimum(image.map { max(0,min(1,$0.x,$0.y,$0.z)) },radius: 7)
+                air = toneAtmosphere(image,dark: dark)
+                let normalized = minimum(image.map { max(0,min($0.x/air.x,$0.y/air.y,$0.z/air.z)) },radius: 7)
+                let raw = normalized.map { max(0.2,1-0.95*$0) }
+                let guide = image.map { min(1,luma($0)) }
+                transmission = guided(guide,raw,epsilon: 0.001,radius: 8).map { min(1,max(0.2,$0)) }
+            }
+            return (air,transmission)
         }
+        let (air,transmission) = estimate(scene)
+        let baseScene = base.map { exposed($0,base: true) }
+        let (baselineAir,baselineTransmission) = estimate(baseScene)
         func low(_ input: [RGB], base: Bool) -> [Double] {
-            let logs = input.enumerated().map { i, pixel -> Double in
-                var x = base ? exposed(pixel,base: true) : scene[i]
-                x = dehaze(x,air: air,transmission: transmission[i],amount: Double(tone.dehaze))
+            let logs = input.indices.map { i -> Double in
+                var x = base ? baseScene[i] : scene[i]
+                x = dehaze(x,air: base ? baselineAir : air,transmission: base ? baselineTransmission[i] : transmission[i],amount: Double(tone.dehaze))
                 for (operation,value) in [(AdjustmentOperation.contrast,tone.contrast),(.highlights,tone.highlights),
                     (.shadows,tone.shadows),(.whites,tone.whites),(.blacks,tone.blacks)] {
                     x = point(x,operation: operation,value: Double(value))
@@ -131,6 +139,6 @@ extension DoubleReference {
         }
         let hdrLow = tone.clarity == 0 ? [Double](repeating: 0,count: count) : low(pixels,base: false)
         let baseLow = tone.clarity == 0 ? hdrLow : low(base,base: true)
-        return ReferenceToneSpatial(size: size,air: air,samples: (0..<count).map { SIMD4(transmission[$0],hdrLow[$0],baseLow[$0],0) })
+        return ReferenceToneSpatial(size: size,air: air,baselineAir: baselineAir,samples: (0..<count).map { SIMD4(transmission[$0],hdrLow[$0],baseLow[$0],baselineTransmission[$0]) })
     }
 }

@@ -316,14 +316,15 @@ extension DoubleReference {
     /// film exposure reads as zero here: pass the metered value in `settings`.
     /// Spatial tools take their fixed-grid sample and atmospheric light from
     /// `toneSpatialAnalysis`, interpolated at this pixel's global coordinates.
-    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil, baseline: RGB? = nil, spatial: SIMD4<Double>? = nil, air: RGB = RGB(repeating: 1)) -> Split {
+    public static func prepare(_ source: RGB, settings: RenderAdjustments, sdr: Bool, grain: FilmGrainSite? = nil, baseline: RGB? = nil, spatial: SIMD4<Double>? = nil, air: RGB = RGB(repeating: 1), baselineAir: RGB? = nil) -> Split {
         let weight = !settings.look.isIdentity ? settings.look.strength : settings.film.isIdentity ? 0 : settings.film.strength
         if weight > 0 && weight < 1 {
             var full = settings
             if !full.look.isIdentity { full.look.strength = 1 } else { full.film.strength = 1 }
             let styled = prepare(source, settings: full, sdr: sdr, grain: grain,spatial: spatial,air: air)
             var plain = settings; plain.look.lut = nil; plain.film.stock = nil
-            let original = prepare(baseline ?? source, settings: plain, sdr: sdr,spatial: spatial,air: air)
+            let baselineSpatial = spatial.map { SIMD4($0.w,$0.z,$0.z,$0.w) }
+            let original = prepare(baseline ?? source, settings: plain, sdr: sdr,spatial: baselineSpatial,air: baselineAir ?? air)
             let w = Double(weight)
             let base = original.base + (styled.base-original.base)*w
             if styled.gains == original.gains { return Split(base: base, gains: original.gains) }

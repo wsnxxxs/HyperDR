@@ -125,6 +125,7 @@ struct GraphUniform {
     ColorToolsUniform colorTools;
     uint4 toneSpatialInfo;
     float4 toneSpatialSettings,toneAtmosphere;
+    float4 toneBaselineAtmosphere;
 };
 // Smooth neighbouring memberships in OKLCH; equal weights to the Swift reference.
 void hslWeights(float3 rgb, thread float* weights) {
@@ -392,15 +393,16 @@ float3 spatialClarity(float3 rgb,float low,float amount) {
     return rgb*exp2(.8f*amount*weight*(log2(y+1e-4f)-low));
 }
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,float2 uv=float2(.5f),bool spatialEnabled=true,bool beforeMixer=false) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,float2 uv=float2(.5f),bool spatialEnabled=true,bool beforeMixer=false,bool baselineGuide=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);
     float4 spatial=p.toneSpatialInfo.w ? toneSpatialSample(uv,p,table) : float4(1,0,0,0);
-    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialDehaze(rgb,p.toneAtmosphere.xyz,spatial.x,p.toneSpatialSettings.x);
+    bool baseGuide=authoredBase || baselineGuide;
+    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialDehaze(rgb,baseGuide ? p.toneBaselineAtmosphere.xyz : p.toneAtmosphere.xyz,baseGuide ? spatial.w : spatial.x,p.toneSpatialSettings.x);
     rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
-    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialClarity(rgb,authoredBase ? spatial.z : spatial.y,p.toneSpatialSettings.y);
+    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialClarity(rgb,baseGuide ? spatial.z : spatial.y,p.toneSpatialSettings.y);
     if(p.light.w==1)return rgb;
     if(p.light.w==2) {
         float y=lum(rgb);
@@ -486,7 +488,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     }
     float3 renderedHDR=base*exp2(g);
     if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
-        float3 original=graphScene(baseline,p,cube,table,false,true,uv);
+        float3 original=graphScene(baseline,p,cube,table,false,true,uv,true,false,true);
         original=fit(original,max(1.f,maximum(original)));
         float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table,uv);
         float3 oldBase=fit(original*exp2(-oldGain),1.f);

@@ -283,6 +283,7 @@ public struct ToneCurveSection: View {
         if let declaration = Adjustments.declaration(channel.id) {
             ToneCurveEditor(coordinates: coordinates(channel), style: style, hdrStops: stops,
                             marker: picking?.inputs[channel.id], tint: channel.tint,
+                            liftsOnly: channel == .lumaHDR,
                             write: { panel.set(channel.id, curve: $0, in: &recipe) },
                             onEditingChanged: { onEditingChanged(declaration, $0) })
                 .frame(maxWidth: width(hdr: stops != nil))

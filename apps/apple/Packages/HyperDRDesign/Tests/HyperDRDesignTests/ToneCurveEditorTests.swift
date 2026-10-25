@@ -264,3 +264,16 @@ private let identity = [0.0, 0, 1, 1]
     #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0).canEdit)
     #expect(!CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 9).canEdit)
 }
+
+@Test func theHDROnlyCurveNeverGoesBelowTheDiagonalInItsSDRSegment() throws {
+    let coordinates = [0, 0, 0.5, 0.6, 1, 1]
+    let moved = ToneCurvePoints.moved(coordinates, index: 1, to: CGPoint(x: 0.5, y: 0.1), liftsOnly: true)
+    #expect(moved[3] == 0.5, "held on the diagonal")
+    #expect(ToneCurvePoints.moved(coordinates, index: 1, to: CGPoint(x: 0.5, y: 0.1))[3] == 0.1, "other curves darken freely")
+    let added = try #require(ToneCurvePoints.inserted([0, 0, 1, 1], at: CGPoint(x: 0.4, y: 0.1), liftsOnly: true))
+    #expect(added.coordinates[3] == 0.4)
+    let hdr = ToneCurvePoints.moved([0, 0, 1, 1, 2, 2], index: 2, to: CGPoint(x: 2, y: 1), maxValue: 5, liftsOnly: true)
+    #expect(hdr[5] == 1, "the HDR segment may press highlights down to white")
+    let edit = CurveTargetedEdit(coordinates: [0, 0, 1, 1], input: 0.5, liftsOnly: true)
+    #expect(edit.coordinates(raisedByDrag: -240)[3] == 0.5)
+}

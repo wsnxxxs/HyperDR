@@ -11,6 +11,7 @@ public struct CurveTargetedEdit: Sendable {
     private let base: [Double]
     private let input: Double
     private let maxValue: Double
+    private let liftsOnly: Bool
 
     /// What one canvas point of drag does to the output: a full SDR range
     /// per `sdrReach` points, a stop per `hdrReach` points in the HDR segment.
@@ -19,7 +20,8 @@ public struct CurveTargetedEdit: Sendable {
 
     /// `coordinates` is the curve being edited and `input` the picked input
     /// on its axis (0…1 in the SDR segment, above 1 in the HDR one).
-    public init(coordinates: [Double], input: Double, maxValue: Double = 5) {
+    public init(coordinates: [Double], input: Double, maxValue: Double = 5, liftsOnly: Bool = false) {
+        self.liftsOnly = liftsOnly
         base = coordinates
         self.input = input
         self.maxValue = maxValue
@@ -40,7 +42,7 @@ public struct CurveTargetedEdit: Sendable {
             return ToneCurvePoints.isFixed(points[index]) ? nil : (base, index)
         }
         let y = CurveInterpolation(base).value(at: input)
-        return ToneCurvePoints.inserted(base, at: CGPoint(x: input, y: y), maxValue: maxValue)
+        return ToneCurvePoints.inserted(base, at: CGPoint(x: input, y: y), maxValue: maxValue, liftsOnly: liftsOnly)
     }
 
     /// The curve with the picked point raised by `points` canvas points of
@@ -50,6 +52,7 @@ public struct CurveTargetedEdit: Sendable {
         let point = ToneCurvePoints.points(coordinates)[index]
         let reach = point.x > 1 ? Self.hdrReach : Self.sdrReach
         return ToneCurvePoints.moved(coordinates, index: index,
-                                     to: CGPoint(x: point.x, y: Double(point.y) + points / reach), maxValue: maxValue)
+                                     to: CGPoint(x: point.x, y: Double(point.y) + points / reach), maxValue: maxValue,
+                                     liftsOnly: liftsOnly)
     }
 }

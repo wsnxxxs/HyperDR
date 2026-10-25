@@ -38,7 +38,7 @@ import Observation
         var coordinates = ToneCurve().coordinates
         if case .curve(let values)? = panel.control(id, in: editor.recipe)?.value { coordinates = values }
         let edit = CurveTargetedEdit(coordinates: coordinates, input: sample.coordinate,
-                                     maxValue: Self.hdrCurves.contains(id) ? 5 : 1)
+                                     maxValue: Self.hdrCurves.contains(id) ? 5 : 1, liftsOnly: id == "tone.curveHDR")
         let marks = [id: sample.coordinate]
         guard edit.canEdit else { return TargetPicker.Drag(apply: { _ in }, finish: {}, marks: marks) }
         editor.editingChanged(declaration, true)

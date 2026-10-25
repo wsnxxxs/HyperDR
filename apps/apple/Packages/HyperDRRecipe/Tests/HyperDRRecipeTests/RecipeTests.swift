@@ -338,3 +338,12 @@ private extension ParameterDefault {
     #expect(try Recipe.decode(preview.encoded()) == preview)
     #expect(String(decoding: try preview.encoded(), as: UTF8.self).contains("rawEmbeddedPreview"))
 }
+
+@Test func sharedParametricCurveIsMonotoneAndKeepsItsEndpoints() {
+    #expect(ParametricCurve.value(at: 0.4) == 0.4)
+    let samples = (0...100).map { ParametricCurve.value(at: Double($0)/100, highlights: 60, lights: 80, darks: -50, shadows: -70) }
+    #expect(samples.first == 0 && samples.last == 1)
+    #expect(zip(samples,samples.dropFirst()).allSatisfy { $0 <= $1 })
+    #expect(ParametricCurve.value(at: 0.6,lights: 100) > 0.6)
+    #expect(ParametricCurve.value(at: 2,highlights: 100) == 2)
+}

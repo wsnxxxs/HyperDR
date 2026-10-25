@@ -378,9 +378,13 @@ float3 spatialDehaze(float3 rgb,float3 air,float transmission,float amount) {
     // Near-air white objects/sky have an unreliable dark-channel estimate.
     float t=max(max(.2f,transmission),min(1.f,.3f/max(.001f,abs(y-a))));
     float recovered=(y-a)/t+a;
-    // Luminance-only, bounded recovery prevents colour fringes and black holes.
-    float ratio=clamp(recovered/y,.75f,1.2f);
-    return rgb*(1+(ratio-1)*amount);
+    // Bound luminance and recover modest original chroma, without subtracting
+    // atmospheric RGB (which would introduce coloured edge fringes).
+    float ratio=clamp(recovered/y,.6f,1.3f);
+    float minimum=min(rgb.x,min(rgb.y,rgb.z));
+    float chromaLimit=y/max(1e-6f,y-minimum);
+    float chroma=min(max(1.f,chromaLimit),1+min(.3f,.3f*(1/t-1))*amount);
+    return (y+(rgb-y)*chroma)*(1+(ratio-1)*amount);
 }
 float3 spatialClarity(float3 rgb,float low,float amount) {
     float y=lum(rgb);if(amount==0 || y<=0)return rgb;

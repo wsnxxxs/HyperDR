@@ -26,4 +26,24 @@ struct ExportStorageTests {
         #expect(ExportStorage.isStorageFailure(POSIXError(.EDQUOT)))
         #expect(!ExportStorage.isStorageFailure(HyperDRError(code: "internal_error", message: "other")))
     }
+
+    @Test func streamedSDROnlyReservesOneOutputFile() throws {
+        let source = ExportSource(domain: .sdr, pixelSize: .init(width: 10000, height: 6000))
+        for encoding in [ExportEncoding.sdrTIFF, .sdrJPEG] {
+            let request = ExportPlanRequest(choice: .custom(.init(encoding: encoding, quality: 100)),
+                source: source, edit: .init(hdrEnabled: false, peakStops: 0))
+            let plan = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 8 << 30))
+            #expect(plan.memory.usesRowInput)
+            let required = ExportStorage.requiredBytes(plan: plan, source: source, needsLookBaseline: false)
+            // 60MP TIFF is about 630 MB including the 256 MiB reserve; a
+            // 700 MB volume must admit both SDR formats without a phantom copy.
+            try ExportStorage.check(required: required, available: 700_000_000)
+            if encoding == .sdrTIFF {
+                #expect(required == 360_000_000 + 360_000 + (1 << 20) + ExportStorage.reserve)
+            } else {
+                #expect(required < 450_000_000)
+            }
+        }
+    }
+
 }

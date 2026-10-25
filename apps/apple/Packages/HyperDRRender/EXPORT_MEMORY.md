@@ -629,3 +629,14 @@ not just its 2.64 GB replay. The native spool preallocation remains mandatory.
 `ENOSPC`/`EDQUOT` from replay allocation, AVIF sample/staging writes or final
 assembly now cross ABI 5 as additive `insufficient_storage`; Kit maps these
 and POSIX/Cocoa disk-full failures to its localized insufficient-storage error.
+
+
+Encoded disk estimates follow each writer's owners: SDR TIFF reserves one
+RGB16 output with 0.1% Deflate/strip overhead and 1 MiB metadata allowance;
+SDR JPEG reserves one 4:2:0 worst-case JPEG buffer (MCU-padded libjpeg-turbo
+formula) plus 1 MiB metadata. A 60MP SDR TIFF therefore needs 629,844,032 B
+including the 256 MiB reserve, not two encoded files. ISO JPEG row output
+counts base/auxiliary component files plus their assembled result; native HEIC
+counts its compressed sample picture(s) plus the final container. ImageIO
+Adaptive writes one destination from in-memory pictures. AVIF's row path keeps
+its sample spool plus result; whole-plane AVIF assembles in memory.

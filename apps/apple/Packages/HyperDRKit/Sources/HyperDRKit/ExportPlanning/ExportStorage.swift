@@ -16,11 +16,52 @@ struct ExportStorage {
         let gain = plan.gainMap.writesGainMap || plan.encoding.isBT2100
         let replay = plan.memory.usesRowInput && gain ? pixels * 4 * Int64(3 + gainChannels) : 0
         let staging = plan.memory.usesRowInput && plan.encoding.isAVIF ? pixels * 6 : 0
-        // Allow two encoded copies: the compressed samples and assembled result.
-        // Eight bytes/pixel per copy exceeds raw 10-bit 4:4:4 storage plus modest
-        // codec overhead; it is an estimate, not a promised compression ratio.
-        let output = pixels * 8 * 2
+        let output = encodedDiskBytes(plan: plan, gainChannels: gainChannels)
         return baseline + replay + staging + output + reserve
+    }
+
+    private static func encodedDiskBytes(plan: ExportPlan, gainChannels: Int) -> Int64 {
+        let pixels = Int64(plan.size.pixels)
+        let metadata: Int64 = 1 << 20
+        // libjpeg-turbo's worst-case baseline buffer formula: MCU padding,
+        // 2+chroma factor, and 2048 bytes. Base JPEG is 4:2:0; gain is full
+        // chroma or grayscale. Keep ICC/Exif/container allowance separately.
+        func jpeg(mcu: Int, bytesPerPixel: Int64) -> Int64 {
+            let width = Int64((plan.size.width + mcu - 1) / mcu * mcu)
+            let height = Int64((plan.size.height + mcu - 1) / mcu * mcu)
+            return width * height * bytesPerPixel + 2048
+        }
+        switch plan.encoding {
+        case .sdrTIFF:
+            // One RGB16/Deflate staged file, no component or sample spool.
+            // Allow 0.1% for Deflate/strip overhead, plus tags and metadata.
+            let raw = pixels * 6
+            return raw + (raw + 999) / 1000 + metadata
+        case .sdrJPEG:
+            // One streamed 4:2:0 JPEG, no second disk copy.
+            return jpeg(mcu: 16, bytesPerPixel: 3) + metadata
+        case .isoGainMapJPEG:
+            let components = jpeg(mcu: 16, bytesPerPixel: 3)
+                + jpeg(mcu: 8, bytesPerPixel: gainChannels == 1 ? 2 : 6) + metadata
+            // Row writing keeps base + auxiliary files beside the assembled
+            // result. Whole-plane components live in RAM; framed whole output
+            // can retain a verification staging copy beside the result.
+            let copies: Int64 = plan.memory.usesRowInput || plan.size != plan.photoSize ? 2 : 1
+            return components * copies
+        case .adaptive:
+            // The native adaptive writer requires a single-channel gain map.
+            let auxiliary: Int64 = plan.writer == .inHouse || gainChannels == 1 ? 2 : 6
+            let pair = pixels * (8 + auxiliary) + metadata
+            // Native HEIC retains both compressed pictures during assembly;
+            // ImageIO receives in-memory pictures and writes one destination.
+            return pair * (plan.writer == .imageIO ? 1 : 2)
+        case .pq, .hlg:
+            return (pixels * 8 + metadata) * 2 // Sample spool + final HEIC.
+        case .avifPq, .avifHlg:
+            // The whole-plane route assembles in RAM; row input retains its
+            // compressed sample spool beside the finished file.
+            return pixels * 8 * (plan.memory.usesRowInput ? 2 : 1)
+        }
     }
 
     static func availableBytes(at directory: URL) throws -> Int64 {

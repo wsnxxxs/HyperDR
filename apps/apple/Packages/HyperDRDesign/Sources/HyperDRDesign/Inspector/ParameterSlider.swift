@@ -178,9 +178,13 @@ private struct AutoButton: View {
 
 // MARK: - Readout
 
-/// The value field (CSS `.field-value`): 80 × 24, sunken, system face with
-/// tabular digits (`Font.hdr.readout`), right-aligned. In the Auto state it
-/// says "Auto" and, once focused, is empty with "Auto" as its placeholder.
+/// The value field (CSS `.field-value`): 80 × 24, system face with tabular
+/// digits (`Font.hdr.readout`), right-aligned. It is drawn as a text field
+/// (a card-coloured well with a visible border, the I-beam pointer and a
+/// tooltip that says to click and type), so it reads as somewhere to type an
+/// exact value, not as a label; hovering darkens the border to the accent and
+/// focusing adds the 2 pt focus ring. In the Auto state it says "Auto" and,
+/// once focused, is empty with "Auto" as its placeholder.
 private struct ParameterReadout: View {
     let title: Text
     @Binding var value: Double
@@ -212,17 +216,21 @@ private struct ParameterReadout: View {
             .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : isAuto && !focused ? Color.hdr.inkMuted : Color.hdr.inkStrong)
             .padding(.horizontal, 7)
             .frame(width: 80, height: 24)
-            .background(focused ? Color.hdr.surfaceCard : Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.xs))
+            .background(isEnabled ? Color.hdr.surfaceCard : Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.xs))
             .overlay {
-                // Focus: the accent border plus a 1 pt halo (CSS box-shadow 0 0 0 1px).
+                // Resting: a visible border, so the box reads as an input.
+                // Hover: the accent at half strength. Focus: the accent plus
+                // a 1 pt halo (CSS box-shadow 0 0 0 1px).
                 RoundedRectangle(cornerRadius: Radius.xs)
-                    .strokeBorder(focused ? Color.hdr.focus : hovered && isEnabled ? Color.hdr.lineStrong : Color.hdr.line,
-                                  lineWidth: focused ? 2 : 1)
+                    .strokeBorder(border, lineWidth: focused ? 2 : 1)
             }
+            .contentShape(.rect(cornerRadius: Radius.xs))
+            .pointerStyle(isEnabled ? .horizontalText : .default)
+            .hdrAnimation(Motion.fast, value: hovered)
             .focused($focused)
             .focusEffectDisabled()
             .onHover { hovered = $0 }
-            .modifier(OptionalHelp(text: help))
+            .help(help ?? Text("design.slider.readoutHelp", bundle: .module))
             .onChange(of: focused) { _, now in
                 now ? beginTyping() : commit()
                 if !now { keys.finish(onEditingChanged) }
@@ -254,6 +262,12 @@ private struct ParameterReadout: View {
             // labelsHidden() drops the label from accessibility too.
             .accessibilityLabel(title)
             .accessibilityHint(Text("design.slider.valueHint", bundle: .module))
+    }
+
+    private var border: Color {
+        if !isEnabled { return Color.hdr.line }
+        if focused { return Color.hdr.focus }
+        return hovered ? Color.hdr.focus.opacity(0.55) : Color.hdr.lineStrong
     }
 
     @ViewBuilder private func field(isAuto: Bool) -> some View {
@@ -291,15 +305,6 @@ private struct OptionalHint: ViewModifier {
 
     func body(content: Content) -> some View {
         if let text { content.accessibilityHint(text) } else { content }
-    }
-}
-
-/// `.help` for a tooltip that may not be there.
-private struct OptionalHelp: ViewModifier {
-    let text: Text?
-
-    func body(content: Content) -> some View {
-        if let text { content.help(text) } else { content }
     }
 }
 

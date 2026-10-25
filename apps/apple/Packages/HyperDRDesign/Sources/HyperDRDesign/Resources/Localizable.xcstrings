@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.section.changes %@" : {"comment": "Summary after a folded section's title (curves, mixer, grading): how many of its controls are changed.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ 处改动"}}}},
     "ctrl.tone.dehaze.label" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去朦胧"}}}},
     "ctrl.tone.dehaze.help" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Remove haze, or add a soft atmospheric veil."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去除雾霭，或添加柔和的雾气。"}}}},
     "undo.tone.dehaze" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整去朦胧"}}}},

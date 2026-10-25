@@ -39,19 +39,20 @@ enum GradingWheelMath {
         return Color(.sRGB, red: rgb.x, green: rgb.y, blue: rgb.z, opacity: 1)
     }
 
-    /// A hue at full saturation for the rim and the tracks: the shader's colour
-    /// scaled so its brightest component is `peak`, so the hue reads clearly
-    /// while the angle still stands for the recipe's hue.
-    static func vivid(hue: Double, peak: Double = 0.85) -> Color {
-        let rgb = GradingColor.displayRGB(hue: hue, saturation: 100)
-        let scale = peak / max(rgb.max(), 0.001)
-        return Color(.sRGB, red: min(rgb.x * scale, 1), green: min(rgb.y * scale, 1), blue: min(rgb.z * scale, 1), opacity: 1)
+    /// The colour circle at full saturation, from hue 0 round to 360: the
+    /// disc's rim (`GradingDisc`) at the lightness of the scheme.
+    static func ring(_ scheme: ColorScheme, steps: Int = 24) -> [Color] {
+        GradingDisc.ring(lightness: GradingDisc.lightness(scheme), steps: steps)
     }
 
-    /// The colour circle at full saturation, from hue 0 round to 360.
-    static func ring(steps: Int = 24) -> [Color] { (0...steps).map { vivid(hue: 360 * Double($0) / Double(steps)) } }
+    /// A saturation track: the disc from its neutral middle to the rim at `hue`.
+    static func saturationTrack(hue: Double, _ scheme: ColorScheme) -> [Color] {
+        let lightness = GradingDisc.lightness(scheme)
+        return [GradingDisc.colour(hue: hue, saturation: 0, lightness: lightness),
+                GradingDisc.colour(hue: hue, saturation: 100, lightness: lightness)]
+    }
 
-    /// Mid grey: the middle of the disc.
+    /// Mid grey: what no tint makes of the photo's middle grey.
     static var neutral: Color { colour(hue: 0, saturation: 0) }
 
     /// The point for `hue` (degrees) and `saturation` (0…100) on a disc of `radius` about `center`.
@@ -98,6 +99,7 @@ struct GradingWheel: View {
     @State private var grab: CGSize?
     @State private var bracket = EditingBracket()
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var puckSize: CGFloat { style == .touch ? 26 : 18 }
 
@@ -110,22 +112,22 @@ struct GradingWheel: View {
             let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
             let puck = GradingWheelMath.point(hue: hue, saturation: saturation, center: center, radius: radius)
             ZStack {
-                Circle()
-                    .fill(AngularGradient(colors: GradingWheelMath.ring(), center: .center))
-                    .overlay {
-                        Circle().fill(RadialGradient(colors: [GradingWheelMath.neutral, GradingWheelMath.neutral.opacity(0)],
-                                                     center: .center, startRadius: 0, endRadius: radius))
-                    }
-                    .overlay { Circle().strokeBorder(Color.hdr.line) }
+                GradingDiscImage(travel: radius)
+                    .overlay { Circle().strokeBorder(contrast == .increased ? Color.hdr.lineStrong : Color.hdr.line) }
                     .frame(width: radius * 2 + puckSize, height: radius * 2 + puckSize)
                     .position(center)
                     .opacity(isEnabled ? 1 : 0.4)
-                // The neutral cross.
+                // The neutral cross, and the tint's reach from the middle to the puck.
                 Path { path in
                     path.move(to: CGPoint(x: center.x - radius, y: center.y)); path.addLine(to: CGPoint(x: center.x + radius, y: center.y))
                     path.move(to: CGPoint(x: center.x, y: center.y - radius)); path.addLine(to: CGPoint(x: center.x, y: center.y + radius))
                 }
-                .stroke(Color.hdr.lineStrong.opacity(0.5), lineWidth: 0.5)
+                .stroke(Color.black.opacity(0.12), lineWidth: 0.5)
+                if saturation > 0 {
+                    Path { path in path.move(to: center); path.addLine(to: puck) }
+                        .stroke(Color.white.opacity(0.8), lineWidth: 1)
+                        .shadow(color: .black.opacity(0.25), radius: 0.5)
+                }
                 Circle()
                     .fill(saturation > 0 ? Self.tint(hue: hue, saturation: saturation) : Color.hdr.surfaceCard)
                     .overlay { Circle().strokeBorder(Color.white, lineWidth: 2) }
@@ -182,10 +184,7 @@ private struct GradingZoneTab: View {
         Button(action: choose) {
             VStack(spacing: 4) {
                 ZStack {
-                    Circle()
-                        .fill(AngularGradient(colors: GradingWheelMath.ring(), center: .center))
-                        .overlay { Circle().fill(RadialGradient(colors: [GradingWheelMath.neutral, GradingWheelMath.neutral.opacity(0)],
-                                                                 center: .center, startRadius: 0, endRadius: side / 2)) }
+                    GradingDiscImage(travel: side / 2 - 6)
                         .opacity(isSelected ? 1 : 0.55)
                     Circle()
                         .fill(saturation > 0 ? GradingWheel.tint(hue: hue, saturation: saturation) : Color.hdr.surfaceCard)
@@ -279,6 +278,7 @@ struct ColorGradingLayout<Slider: View>: View {
 
     @State private var zone = WheelZone.midtones
     @State private var isExpanded: Bool
+    @Environment(\.colorScheme) private var scheme
 
     init(style: AdjustmentControlStyle, showsTitle: Bool,
          colour: @escaping (WheelZone) -> (hue: Double, saturation: Double, luminance: Double),
@@ -311,7 +311,10 @@ struct ColorGradingLayout<Slider: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            if showsTitle { header }
+            SubsectionHeader(title: Text("design.grade.title", bundle: .module), style: style, showsTitle: showsTitle,
+                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
+                          isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                          resetLabel: Text("design.grade.reset", bundle: .module), reset: resetAll) { EmptyView() }
             if isExpanded || !showsTitle {
                 HStack(spacing: 0) {
                     ForEach(WheelZone.allCases) { option in
@@ -330,9 +333,9 @@ struct ColorGradingLayout<Slider: View>: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Space.s1)
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-                    slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring())
+                    slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring(scheme))
                     slider(zone.saturationID, MixerAttribute.saturation.title,
-                           [GradingWheelMath.neutral, GradingWheelMath.vivid(hue: current.hue)])
+                           GradingWheelMath.saturationTrack(hue: current.hue, scheme))
                     slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
                 }
                 Divider().padding(.vertical, Space.s1)
@@ -340,45 +343,7 @@ struct ColorGradingLayout<Slider: View>: View {
                     slider(WheelZone.blendingID, nil, nil)
                     slider(WheelZone.balanceID, nil, nil)
                 }
-                if !showsTitle, anyChanged { resetButton }
             }
-        }
-    }
-
-    private var resetButton: some View {
-        Button(action: resetAll) {
-            Text("design.grade.reset", bundle: .module)
-                .font(.system(size: TypeScale.Size.caption, weight: .medium))
-                .foregroundStyle(Color.hdr.accent)
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var header: some View {
-        HStack(spacing: Space.s2) {
-            Button {
-                withHDRAnimation { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: Space.s1) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .opacity(style == .touch ? 0 : 1)
-                        .frame(width: style == .touch ? 0 : 10)
-                    Text("design.grade.title", bundle: .module)
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkStrong)
-                }
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(style == .touch)
-            .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
-            Spacer(minLength: 0)
-            if anyChanged { resetButton }
         }
     }
 }

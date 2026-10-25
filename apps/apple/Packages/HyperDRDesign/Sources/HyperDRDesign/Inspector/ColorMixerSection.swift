@@ -40,11 +40,6 @@ public enum MixerBand: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The name with its swatch in front, for a slider's title.
-    var swatchedTitle: Text {
-        Text(Image(systemName: "circle.fill")).foregroundStyle(swatch) + Text(verbatim: "  ") + title
-    }
-
     public func id(_ attribute: MixerAttribute) -> String { "hsl.\(rawValue).\(attribute.rawValue)" }
 
     /// What the track of an attribute shows: the hue runs between the
@@ -125,9 +120,9 @@ public struct ColorMixerSection: View {
             var edited = recipe
             for id in ColorMixerLayout<EmptyView>.ids { panel.reset(id, in: &edited) }
             recipe = edited
-        }, slider: { id, title, tint, gradient in
-            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint, gradient: gradient,
-                          onEditingChanged: onEditingChanged)
+        }, slider: { id, title, tint, mark, gradient in
+            SectionSlider(recipe: $recipe, id: id, panel: panel, style: style, title: title, tint: tint, mark: mark,
+                          gradient: gradient, onEditingChanged: onEditingChanged)
         })
     }
 }
@@ -142,7 +137,8 @@ struct ColorMixerLayout<Slider: View>: View {
     let showsTitle: Bool
     let isChanged: (String) -> Bool
     let resetAll: () -> Void
-    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider
+    /// `mark` is the dot before a band's name in the by-attribute list.
+    @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ mark: Color?, _ gradient: [Color]?) -> Slider
 
     @State private var isExpanded: Bool
     @State private var arrangement: Arrangement
@@ -154,7 +150,7 @@ struct ColorMixerLayout<Slider: View>: View {
 
     init(style: AdjustmentControlStyle, showsTitle: Bool, isChanged: @escaping (String) -> Bool,
          resetAll: @escaping () -> Void, initialArrangement: Arrangement = .attribute,
-         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color, _ gradient: [Color]?) -> Slider) {
+         @ViewBuilder slider: @escaping (_ id: String, _ title: Text, _ tint: Color, _ mark: Color?, _ gradient: [Color]?) -> Slider) {
         self.style = style
         self.showsTitle = showsTitle
         self.isChanged = isChanged
@@ -172,7 +168,10 @@ struct ColorMixerLayout<Slider: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            if showsTitle { header }
+            SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
+                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
+                          isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) { EmptyView() }
             if isExpanded || !showsTitle {
                 SectionSegments(request: SectionSegmentsRequest(
                     title: Text("design.mixer.arrangement", bundle: .module),
@@ -184,7 +183,6 @@ struct ColorMixerLayout<Slider: View>: View {
                 case .attribute: byAttribute
                 case .band: byBand
                 }
-                if !showsTitle, anyChanged { resetButton }
             }
         }
         .onChange(of: attribute) { _, now in picking?.setAttribute(now) }
@@ -223,7 +221,7 @@ struct ColorMixerLayout<Slider: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(MixerBand.allCases) { band in
-                slider(band.id(attribute), band.swatchedTitle, band.swatch, band.gradient(attribute))
+                slider(band.id(attribute), band.title, band.swatch, band.swatch, band.gradient(attribute))
             }
         }
     }
@@ -232,7 +230,7 @@ struct ColorMixerLayout<Slider: View>: View {
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
             swatches
             ForEach(MixerAttribute.allCases) { attribute in
-                slider(band.id(attribute), attribute.title, band.swatch, band.gradient(attribute))
+                slider(band.id(attribute), attribute.title, band.swatch, nil, band.gradient(attribute))
             }
         }
     }
@@ -265,42 +263,4 @@ struct ColorMixerLayout<Slider: View>: View {
         }
     }
 
-    // MARK: Header
-
-    private var resetButton: some View {
-        Button(action: resetAll) {
-            Text("design.mixer.reset", bundle: .module)
-                .font(.system(size: TypeScale.Size.caption, weight: .medium))
-                .foregroundStyle(Color.hdr.accent)
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var header: some View {
-        HStack(spacing: Space.s2) {
-            Button {
-                withHDRAnimation { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: Space.s1) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .opacity(style == .touch ? 0 : 1)
-                        .frame(width: style == .touch ? 0 : 10)
-                    Text("design.mixer.title", bundle: .module)
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkStrong)
-                }
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(style == .touch)
-            .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
-            Spacer(minLength: 0)
-            if anyChanged { resetButton }
-        }
-    }
 }

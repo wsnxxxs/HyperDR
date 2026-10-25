@@ -70,6 +70,7 @@ struct PadGroupControls: View {
     private var padSectionControls: SectionControls {
         SectionControls(slider: { request in
             AnyView(PadSlider(request.title, value: request.value, spec: request.spec, tint: request.tint ?? tint, gradient: request.gradient,
+                              mark: request.mark,
                               help: request.help, onEditingChanged: request.onEditingChanged,
                               onResetGroup: request.onResetGroup))
         }, segments: { request in

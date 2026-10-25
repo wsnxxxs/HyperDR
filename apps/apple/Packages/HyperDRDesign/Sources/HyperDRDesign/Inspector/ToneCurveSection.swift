@@ -339,38 +339,15 @@ public struct ToneCurveSection: View {
 
     // MARK: Header
 
+    private var changedCount: Int {
+        availableChannels.filter { !isDefault($0.id) }.count
+            + (hasParameters && ParametricCurveIDs.amounts.contains { !isDefault($0) } ? 1 : 0)
+    }
+
     private var header: some View {
-        HStack(spacing: Space.s2) {
-            Button {
-                withHDRAnimation { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: Space.s1) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .opacity(style == .touch ? 0 : 1)
-                        .frame(width: style == .touch ? 0 : 10)
-                    AdjustmentText.label(control.declaration)
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkStrong)
-                }
-                .frame(minHeight: style == .touch ? 44 : 22)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(style == .touch)
-            .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
-            Spacer(minLength: 0)
-            if !currentIsDefault {
-                Button(action: reset) {
-                    Text("design.curve.reset", bundle: .module)
-                        .font(.system(size: TypeScale.Size.caption, weight: .medium))
-                        .foregroundStyle(Color.hdr.accent)
-                        .frame(minHeight: style == .touch ? 44 : 22)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-            }
-        }
+        SubsectionHeader(title: AdjustmentText.label(control.declaration), style: style, isChanged: changedCount > 0,
+                      canReset: !currentIsDefault, summary: SectionSummary.changes(changedCount),
+                      isExpanded: style == .pointer ? $isExpanded : nil,
+                      resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) { EmptyView() }
     }
 }

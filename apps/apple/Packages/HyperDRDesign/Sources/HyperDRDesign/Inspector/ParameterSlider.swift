@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// A request to show where a control acts on the photograph: the mask mark
 /// after its title, and the callback that asks the model for the mask.
@@ -93,7 +96,48 @@ public struct ParameterSlider: View {
         self.onEditingChanged = onEditingChanged
     }
 
+    @Environment(\.parameterSliderLayout) private var layout
+    @Environment(\.parameterSliderMark) private var mark
+
     public var body: some View {
+        switch layout {
+        case .stacked: stacked
+        case .inline(let titleWidth): inline(titleWidth: titleWidth)
+        }
+    }
+
+    /// One line, for the controls inside a section (the colour mixer, the
+    /// grading, the parametric curve): a dot when the control stands for a
+    /// colour, the title, the track and a narrow readout. The track and the
+    /// readout are the stacked row's own, so every way of editing stays.
+    private func inline(titleWidth: CGFloat) -> some View {
+        HStack(spacing: Space.s2) {
+            HStack(spacing: 6) {
+                if let mark {
+                    Circle().fill(mark).frame(width: 7, height: 7)
+                        .overlay { Circle().strokeBorder(Color.hdr.line, lineWidth: 0.5) }
+                }
+                FieldTitle(title: title, help: help, mask: mask)
+            }
+            .frame(width: titleWidth, alignment: .leading)
+            .accessibilityHidden(true)
+            ParameterTrack(title: title, value: $value, spec: spec, help: help, onReset: onReset) { editing in
+                hold(.drag, editing)
+                onEditingChanged(editing)
+            }
+            if let accessory { accessory }
+            ParameterReadout(title: title, value: $value, spec: spec, help: readoutHelp, width: ParameterReadout.narrow,
+                             onEditingChanged: onEditingChanged) { focused in
+                hold(.focus, focused)
+            }
+        }
+        .frame(minHeight: 24)
+        .onHover { hold(.hover, $0 && isEnabled) }
+        .onChange(of: isEnabled) { if !isEnabled { release() } }
+        .onDisappear { release() }
+    }
+
+    private var stacked: some View {
         VStack(alignment: .leading, spacing: Space.s1) {
             HStack(spacing: 10) {
                 FieldTitle(title: title, help: help, mask: mask)
@@ -195,8 +239,12 @@ private struct ParameterReadout: View {
     @Binding var value: Double
     let spec: ParameterSpec
     let help: Text?
+    var width: CGFloat = 80
     let onEditingChanged: (Bool) -> Void
     let onFocusChange: (Bool) -> Void
+
+    /// The readout of an inline row: room for "−100" or "+0.30".
+    static let narrow: CGFloat = 46
 
     @State private var keys = ArrowKeyEditing()
     @FocusState private var focused: Bool
@@ -219,8 +267,8 @@ private struct ParameterReadout: View {
             .font(.hdr.readout)
             .multilineTextAlignment(.trailing)
             .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : isAuto && !focused ? Color.hdr.inkMuted : Color.hdr.inkStrong)
-            .padding(.horizontal, 7)
-            .frame(width: 80, height: 24)
+            .padding(.horizontal, width < 80 ? 5 : 7)
+            .frame(width: width, height: width < 80 ? 20 : 24)
             .background(isEnabled ? Color.hdr.surfaceCard : Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.xs))
             .overlay {
                 // Resting: a visible border, so the box reads as an input.
@@ -333,6 +381,8 @@ private struct ParameterTrack: View {
 
     @State private var hovered = false
     @State private var grab: CGFloat?
+    /// While ⌥ is held in a drag: the thumb's place and the pointer's when it was pressed, as fractions.
+    @State private var fine: (fraction: Double, pointer: Double)?
     @State private var bracket = EditingBracket()
     /// Open from the first key-down of an arrow to its key-up.
     @State private var keys = ArrowKeyEditing()
@@ -346,6 +396,17 @@ private struct ParameterTrack: View {
 
     static let thumb: CGFloat = 13
     static let height: CGFloat = 16
+    /// How near the default, in points, a drag holds on it.
+    static let detent: CGFloat = 3
+
+    /// ⌥ is down: a drag moves at a quarter of the speed.
+    static var fineHeld: Bool {
+        #if os(macOS)
+        NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option)
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -471,8 +532,27 @@ private struct ParameterTrack: View {
                     grab = !isAuto && abs(offset) <= Self.thumb / 2 + 2 ? offset : 0
                     bracket.begin(onEditingChanged)
                 }
-                let fraction = (drag.location.x - (grab ?? 0) - Self.thumb / 2) / travel
-                let new = spec.value(atFraction: fraction)
+                let pointer = (drag.location.x - (grab ?? 0) - Self.thumb / 2) / travel
+                let fraction: Double
+                if Self.fineHeld {
+                    // ⌥ while dragging: a quarter of the speed from where the
+                    // thumb is when it is pressed.
+                    if fine == nil { fine = (spec.fraction(of: value), pointer) }
+                    fraction = fine.map { $0.fraction + (pointer - $0.pointer) / 4 } ?? pointer
+                } else {
+                    if let held = fine {
+                        // Let go of ⌥: carry on from here without a jump.
+                        grab = (grab ?? 0) + (pointer - held.fraction - (pointer - held.pointer) / 4) * travel
+                        fine = nil
+                    }
+                    fraction = (drag.location.x - (grab ?? 0) - Self.thumb / 2) / travel
+                }
+                var new = spec.value(atFraction: fraction)
+                // The default holds the thumb for a few points either side.
+                if !spec.isAutomatic(spec.defaultValue), spec.range.contains(spec.defaultValue),
+                   abs(CGFloat(fraction - spec.fraction(of: spec.defaultValue))) * travel <= Self.detent {
+                    new = spec.defaultValue
+                }
                 if new != value { value = new }
             }
             .updating($live) { _, state, _ in state = true }
@@ -483,6 +563,7 @@ private struct ParameterTrack: View {
     /// removed or disabled. Idempotent.
     private func finishDrag() {
         grab = nil
+        fine = nil
         bracket.finish(onEditingChanged)
     }
 
@@ -496,4 +577,20 @@ private struct ParameterTrack: View {
     private func set(_ new: Double) {
         if new != value { value = new }
     }
+}
+
+/// How a `ParameterSlider` lays out its title, readout and track.
+public enum ParameterSliderLayout: Hashable, Sendable {
+    /// The title and readout over the track: the inspector's own rows.
+    case stacked
+    /// Title, track and a narrow readout on one line, the title this wide.
+    case inline(titleWidth: CGFloat)
+}
+
+extension EnvironmentValues {
+    /// The layout of the sliders below; sections set `.inline`.
+    @Entry public var parameterSliderLayout: ParameterSliderLayout = .stacked
+    /// A colour the sliders below stand for (a mixer band), drawn as a dot
+    /// before an inline title.
+    @Entry public var parameterSliderMark: Color?
 }

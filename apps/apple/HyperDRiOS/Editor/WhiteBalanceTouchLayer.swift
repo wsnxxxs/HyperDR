@@ -1,5 +1,4 @@
 import HyperDRDesign
-import Metal
 import SwiftUI
 
 /// The white balance eyedropper over the canvas for a finger or the Pencil:
@@ -9,10 +8,10 @@ import SwiftUI
 /// is up the photo does not pan or zoom.
 struct WhiteBalanceTouchLayer: View {
     let picker: WhiteBalancePicker
-    /// The canvas's geometry: where the photo is, for the point under the finger.
-    let transform: CanvasTransform?
-    /// The frame whose pixels the loupe magnifies.
-    let texture: () -> (any MTLTexture)?
+    /// What the canvas draws and where: the photo's rectangle for the point
+    /// under the finger, and the frame under it (the split's two sides) for
+    /// the loupe.
+    let frames: WhiteBalanceFrames
 
     var body: some View {
         GeometryReader { proxy in
@@ -36,17 +35,14 @@ struct WhiteBalanceTouchLayer: View {
                     .allowsHitTesting(false)
             }
             .onAppear { wire() }
-            .onChange(of: transform) { wire() }
+            .onChange(of: frames) { wire() }
         }
     }
 
-    /// The photo's rectangle as the canvas draws it now.
+    /// The photo's rectangle and frames as the canvas draws them now.
     private func wire() {
-        let frame = transform?.imageFrame ?? .zero
-        picker.photoPoint = { point in
-            guard frame.width > 0, frame.height > 0, frame.contains(point) else { return nil }
-            return CGPoint(x: (point.x - frame.minX) / frame.width, y: (point.y - frame.minY) / frame.height)
-        }
-        picker.texture = texture
+        let frames = frames
+        picker.photoPoint = { WhiteBalanceFrames.photoPoint($0, in: frames.imageFrame, drawsThroughCrop: false) }
+        picker.texture = { frames.texture(at: $0) }
     }
 }

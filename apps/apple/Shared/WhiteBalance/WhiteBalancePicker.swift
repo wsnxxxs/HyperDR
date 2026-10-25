@@ -27,8 +27,8 @@ import Observation
 
     /// A canvas point on the photo as shown, 0…1 from the top left; nil outside it.
     @ObservationIgnored var photoPoint: (CGPoint) -> CGPoint? = { _ in nil }
-    /// The frame the canvas draws, whose pixels the loupe magnifies.
-    @ObservationIgnored var texture: () -> (any MTLTexture)? = { nil }
+    /// The frame the canvas draws under a canvas point, whose pixels the loupe magnifies.
+    @ObservationIgnored var texture: (CGPoint) -> (any MTLTexture)? = { _ in nil }
     /// The editor's sampling: writes the white balance as one undo step.
     @ObservationIgnored var pick: (CGPoint) async throws -> WhiteBalancePick = { _ in .applied }
 
@@ -37,6 +37,9 @@ import Observation
     @ObservationIgnored private var latest: CGPoint?
     @ObservationIgnored private var reading: Task<Void, Never>?
     @ObservationIgnored private var clearing: Task<Void, Never>?
+    /// Counts the modes ended by `reset`; a pick still being sampled from an
+    /// earlier one finds it changed and leaves the state alone.
+    @ObservationIgnored private var generation = 0
 
     var picking: WhiteBalancePicking {
         WhiteBalancePicking(isActive: isActive, notice: notice) { [weak self] in self?.toggle() }
@@ -60,8 +63,11 @@ import Observation
     }
 
     /// Another photo, the crop pane or a locked editor: ends the mode and drops
-    /// any notice, even while a pick is being sampled (its result is then lost).
+    /// any notice, even while a pick is being sampled. That pick may still reach
+    /// the recipe, but it no longer ends a later mode or writes its notice.
     func reset() {
+        generation += 1
+        isSampling = false
         end()
         clearNotice()
     }
@@ -94,12 +100,16 @@ import Observation
         guard isActive, !isSampling, let fraction = photoPoint(point) else { return }
         isSampling = true
         let pick = pick
+        let token = generation
         Task { @MainActor in
+            let result: WhiteBalancePicking.Notice?
             do {
-                notice = try await pick(fraction) == .clamped ? .clamped : nil
+                result = try await pick(fraction) == .clamped ? .clamped : nil
             } catch {
-                notice = .failed
+                result = .failed
             }
+            guard token == generation else { return }
+            notice = result
             isSampling = false
             end()
             if notice != nil { clearNotice(after: .seconds(8)) }
@@ -119,7 +129,7 @@ import Observation
     /// Reads the patch under the latest point, one read at a time: the loupe
     /// follows the pointer a read behind rather than queueing them.
     private func readLoupe() {
-        guard reading == nil, let fraction = latest, let texture = texture() else { return }
+        guard reading == nil, let fraction = latest, let point = hover, let texture = texture(point) else { return }
         let radius = Self.patch / 2
         let x = min(max(Int(fraction.x * Double(texture.width)), 0), texture.width - 1)
         let y = min(max(Int(fraction.y * Double(texture.height)), 0), texture.height - 1)

@@ -170,12 +170,20 @@ struct EditorCanvas: View {
                 }
             }
             .overlay {
-                if let whiteBalance, whiteBalance.isActive, !cropping, !framed {
-                    WhiteBalanceTouchLayer(picker: whiteBalance, transform: transform) {
-                        (mode == .original ? original ?? editor.frame : editor.frame).map { DisplayPair($0.display).base }
-                    }
+                // Not while the canvas draws the whole photo through the crop: the
+                // photo's rectangle is then not the cropped photo's.
+                if let whiteBalance, whiteBalance.isActive, !cropping, crop == nil, !framed {
+                    WhiteBalanceTouchLayer(picker: whiteBalance, frames: whiteBalanceFrames)
                 }
             }
+    }
+
+    /// What the eyedropper's loupe reads: the frames as the canvas composes them.
+    private var whiteBalanceFrames: WhiteBalanceFrames {
+        WhiteBalanceFrames(original: original.map { DisplayPair($0.display).base },
+                           edited: editor.frame.map { DisplayPair($0.display).base },
+                           shown: mode == .original ? .original : mode == .compare ? .compare : .edited,
+                           splitRatio: splitRatio, imageFrame: transform?.imageFrame ?? .zero)
     }
 
     /// The crop pane's placement of the photo, drawn from whatever frame is

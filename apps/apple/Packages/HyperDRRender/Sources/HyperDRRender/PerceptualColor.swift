@@ -60,28 +60,6 @@ extension DoubleReference {
         return preserveLuminance(oklabRGB(lab),target:y*exp2(delta.z))
     }
 
-    /// The UI wheel uses sRGB/HSV hue degrees. Resolve its OKLCH direction
-    /// once per wheel, so a red puck produces red rather than Oklab's 0° pink.
-    static func gradingHue(_ degrees: Double) -> Double {
-        let sector = degrees/60
-        let x = 1-abs(sector.truncatingRemainder(dividingBy:2)-1)
-        let encoded: RGB
-        switch Int(sector)%6 {
-        case 0: encoded = RGB(1,x,0)
-        case 1: encoded = RGB(x,1,0)
-        case 2: encoded = RGB(0,1,x)
-        case 3: encoded = RGB(0,x,1)
-        case 4: encoded = RGB(x,0,1)
-        default: encoded = RGB(1,0,x)
-        }
-        var linear = encoded
-        for c in 0..<3 {
-            linear[c] = encoded[c] <= 0.04045 ? encoded[c]/12.92 : pow((encoded[c]+0.055)/1.055,2.4)
-        }
-        let lab = oklab(matrix(linear,from709))
-        return atan2(lab.z,lab.y)
-    }
-
     public static func colorGrade(_ rgb: RGB, wheels: [SIMD3<Float>], blending: Double = 0.5, balance: Double = 0) -> RGB {
         guard wheels.contains(where: { $0.y != 0 || $0.z != 0 }) else { return rgb }
         let y = luma(rgb)
@@ -93,7 +71,7 @@ extension DoubleReference {
         let weights = [shadows,1-shadows-highlights,highlights,1]
         var a = 0.0, b = 0.0, light = 0.0
         for i in 0..<4 {
-            let hue = gradingHue(Double(wheels[i].x))
+            let hue = Double(wheels[i].x)*Double.pi/180
             let chroma = 0.18*Double(wheels[i].y)*weights[i]*lab.x
             a += chroma*cos(hue); b += chroma*sin(hue)
             light += Double(wheels[i].z)*weights[i]

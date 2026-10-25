@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "ctrl.tone.dehaze.label" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去朦胧"}}}},
+    "ctrl.tone.dehaze.help" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Remove haze, or add a soft atmospheric veil."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "去除雾霭，或添加柔和的雾气。"}}}},
+    "undo.tone.dehaze" : {"comment": "Adjustment tone.dehaze.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Dehaze"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整去朦胧"}}}},
+    "ctrl.tone.clarity.label" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Clarity"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "清晰度"}}}},
+    "ctrl.tone.clarity.help" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Strengthen or soften midtone detail while protecting strong edges."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "增强或柔化中间调细节，同时保护强烈边缘。"}}}},
+    "undo.tone.clarity" : {"comment": "Adjustment tone.clarity.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Change Clarity"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "调整清晰度"}}}},
     "adjust.noProfile" : {
       "comment" : "In place of the lens correction switch when the system has no lens profile for this camera. Do not claim the photo is corrected automatically.",
       "localizations" : {

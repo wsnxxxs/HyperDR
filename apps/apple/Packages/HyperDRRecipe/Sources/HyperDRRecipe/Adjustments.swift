@@ -132,6 +132,8 @@ public enum Adjustments {
     private static let light: [ParameterDeclaration] = [
         ParameterDeclaration(id: "tone.exposure", group: .light, kind: .float, range: -4...4, step: 0.01,
             default: .constant(.number(0)), format: .ev, scale: .direct, origin: .zero),
+        ParameterDeclaration(id: "tone.dehaze", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "tone.contrast", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .contrast, origin: .zero),
         ParameterDeclaration(id: "tone.highlights", group: .light, kind: .float, range: -100...100, step: 1,
@@ -142,6 +144,8 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "tone.blacks", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "blacks"),
+        ParameterDeclaration(id: "tone.clarity", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "tone.curve", group: .light, kind: .curve,
             default: .constant(ToneCurve().parameterValue)),
         ParameterDeclaration(id: "tone.curveSDR", group: .light, kind: .curve,

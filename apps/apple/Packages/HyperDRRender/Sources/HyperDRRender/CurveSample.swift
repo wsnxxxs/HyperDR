@@ -32,12 +32,12 @@ extension RenderEngine {
         }
         if parameterID == "tone.curveSDR" { return try endpointInput(3) }
         if parameterID == "tone.curveHDR" { return try endpointInput(4) }
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut,tone: edit.tone)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut,tone: edit.tone,spatial: try toneSpatialMap(source,edit: edit))
         let input = try workingInput(source)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain,buffer: command)
         let output = try context.texture(width: 1,height: 1)
-        var p = graphUniform(source,edit,size: size,region: region)
+        var p = graphUniform(source,edit,size: size,region: region,spatial: resources.spatial)
         p.light.w = channel == nil ? 1 : 2
         try context.dispatch("curveProbe",width: 1,height: 1,textures: [input,output,resources.texture],
                              buffers: [resources.buffer],value: &p)

@@ -35,15 +35,23 @@ struct ToneToolsTests {
         let root = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let engine = try RenderEngine()
-        for file in ["DSC01468.ARW", "IMG_3250.heic", "DSC01422.HIF"] {
+        let dehazeOnly = ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_DEHAZE"] != nil
+        for file in (dehazeOnly ? ["DSC01468.ARW", "IMG_3250.heic"] : ["DSC01468.ARW", "IMG_3250.heic", "DSC01422.HIF"]) {
             let source = try await engine.load(URL(fileURLWithPath: samples).appendingPathComponent(file),
                 options: SourceOptions(resolution: .preview(maximumSize: .init(width: 1280, height: 1280))))
             let curves = ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_CURVES"] != nil
-            let modes: [(String,Float,Float)] = curves
+            let spatial = dehazeOnly || ProcessInfo.processInfo.environment["HYPERDR_TONE_REVIEW_SPATIAL"] != nil
+            let modes: [(String,Float,Float)] = spatial
+                ? [("before",0,0),("dehaze-plus100",0,0),("dehaze-minus100",0,0),("clarity-plus100",0,0),("clarity-minus100",0,0)]
+                : curves
                 ? [("before",0,0),("curve-both",0,0),("curve-sdr",0,0),("curve-hdr",0,0),("curve-rgb",0,0),("curve-parametric",0,0)]
                 : [("before",0,0),("whites-plus100",1,0),("whites-minus100",-1,0),("blacks-plus100",0,1),("blacks-minus100",0,-1)]
-            for (label, whites, blacks) in modes {
+            for (label, whites, blacks) in modes where !dehazeOnly || !label.hasPrefix("clarity") {
                 var edit = RenderAdjustments(); edit.tone.whites = whites; edit.tone.blacks = blacks
+                if label == "dehaze-plus100" { edit.tone.dehaze = 1 }
+                if label == "dehaze-minus100" { edit.tone.dehaze = -1 }
+                if label == "clarity-plus100" { edit.tone.clarity = 1 }
+                if label == "clarity-minus100" { edit.tone.clarity = -1 }
                 if label == "curve-both" { edit.tone.curve = try ToneCurve([0,0,0.3,0.22,0.7,0.8,1,1,3,2.4]) }
                 if label == "curve-sdr" { edit.tone.curveSDR = try ToneCurve([0,0,0.5,0.4,1,1]) }
                 if label == "curve-hdr" { edit.tone.curveHDR = try ToneCurve([0,0,0.5,0.65,1,1,3,2.4]) }
@@ -55,7 +63,7 @@ struct ToneToolsTests {
                     "public.png" as CFString, 1, nil)!
                 CGImageDestinationAddImage(destination, image, nil)
                 #expect(CGImageDestinationFinalize(destination))
-                if curves {
+                if curves || spatial {
                     let pair = try await engine.displayPair(planes,source: source)
                     let hdr = try await engine.reviewHDRThumbnail(pair)
                     let file = root.appendingPathComponent("\(file)-\(label)-HDR-minus2EV.png")

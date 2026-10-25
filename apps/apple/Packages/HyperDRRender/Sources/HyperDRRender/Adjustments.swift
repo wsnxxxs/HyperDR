@@ -12,6 +12,7 @@ public struct ToneAdjustments: Hashable, Sendable {
     public var curve = ToneCurve()
     public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
     var curveProbeStage: UInt32 = 0
+    public var dehaze: Float = 0, clarity: Float = 0
     public var curveSDR = ToneCurve(), curveHDR = ToneCurve()
     public var curveRed = ToneCurve(), curveGreen = ToneCurve(), curveBlue = ToneCurve()
     public var parametricHighlights: Float = 0, parametricLights: Float = 0
@@ -33,7 +34,7 @@ public struct ColorAdjustments: Hashable, Sendable {
     public var saturation: Float = RenderParameter.defaultNumber("color.saturation")
     /// Eight bands in HSLBand order, hue/saturation/luminance in engine units.
     public var mixer: [SIMD3<Float>] = Array(repeating: .zero, count: 8)
-    /// Shadows, midtones, highlights, global: hue degrees, saturation, luminance.
+    /// Shadows, midtones, highlights, global: OKLCH hue degrees, saturation, luminance.
     public var grading: [SIMD3<Float>] = Array(repeating: .zero, count: 4)
     public var gradingBlending: Float = 0.5
     public var gradingBalance: Float = 0
@@ -105,6 +106,7 @@ public struct RenderAdjustments: Hashable, Sendable {
 
     func validate(domain: InputDomain) throws {
         for (id,value) in [("tone.exposure",tone.exposure),("tone.contrast",tone.contrast),
+            ("tone.dehaze",tone.dehaze),("tone.clarity",tone.clarity),
             ("tone.highlights",tone.highlights),("tone.shadows",tone.shadows),("tone.whites",tone.whites),("tone.blacks",tone.blacks),
             ("color.warmth",color.warmth),("color.tint",color.tint),("color.vibrance",color.vibrance),
             ("color.saturation",color.saturation),("hdr.strength",hdr.strength),("hdr.coverage",hdr.coverage),

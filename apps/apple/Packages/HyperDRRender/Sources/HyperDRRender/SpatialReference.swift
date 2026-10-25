@@ -18,6 +18,26 @@ extension DoubleReference {
         let scale = min(1,768/Double(max(size.width,size.height)))
         let w = max(1,Int((Double(size.width)*scale).rounded()))
         let h = max(1,Int((Double(size.height)*scale).rounded()))
+        var spatial: ReferenceToneSpatial?
+        if settings.tone.dehaze != 0 || settings.tone.clarity != 0 {
+            var grid = [RGB](repeating: .zero,count: w*h)
+            let sx = Double(size.width)/Double(w),sy = Double(size.height)/Double(h)
+            for y in 0..<h { for x in 0..<w {
+                let x0 = Double(x)*sx,x1 = Double(x+1)*sx,y0 = Double(y)*sy,y1 = Double(y+1)*sy
+                var sum = RGB.zero
+                for row in Int(floor(y0))..<min(size.height,Int(ceil(y1))) {
+                    let wy = min(y1,Double(row+1))-max(y0,Double(row))
+                    for column in Int(floor(x0))..<min(size.width,Int(ceil(x1))) {
+                        let wx = min(x1,Double(column+1))-max(x0,Double(column))
+                        sum += pixels[row*size.width+column]*(wx*wy)
+                    }
+                }
+                grid[y*w+x] = sum/(sx*sy)
+            }}
+            spatial = toneSpatialAnalysis(grid,base: grid,size: PixelSize(width: w,height: h),
+                tone: settings.tone,color: settings.color,sdr: sdr)
+        }
+        let toneMaps = (0..<3).map { channel in spatial?.samples.map { $0[channel] } ?? [] }
         var cells = [SIMD4<Double>](repeating:.zero,count:w*h)
         var peaks = SIMD4<Double>.zero
         var originalPeak = 1.0
@@ -29,7 +49,12 @@ extension DoubleReference {
             for y in y0..<y1 { for x in x0..<x1 {
                 let original = pixels[y*size.width+x]
                 originalPeak = max(originalPeak,original.x,original.y,original.z)
-                let pair = prepare(original,settings:settings,sdr:sdr)
+                let sample: SIMD4<Double>? = spatial.map { map in
+                    SIMD4(sampleGrid(toneMaps[0],grid: map.size,output: size,x: x,y: y),
+                          sampleGrid(toneMaps[1],grid: map.size,output: size,x: x,y: y),
+                          sampleGrid(toneMaps[2],grid: map.size,output: size,x: x,y: y),0)
+                }
+                let pair = prepare(original,settings:settings,sdr:sdr,spatial: sample,air: spatial?.air ?? RGB(repeating: 1))
                 let brightness = luma(pair.base), logValue = min(8,max(-8,log2(brightness+1e-6)))
                 sum += SIMD4(brightness,smoothStep(start,1,brightness),logValue,logValue*logValue)
                 let basePeak = max(pair.base.x,pair.base.y,pair.base.z)

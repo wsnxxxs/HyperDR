@@ -123,6 +123,8 @@ struct GraphUniform {
     float4 curveHDRTails;
     float4 lutExposure; // scene multiplier before Log encoding
     ColorToolsUniform colorTools;
+    uint4 toneSpatialInfo;
+    float4 toneSpatialSettings,toneAtmosphere;
 };
 // Smooth neighbouring memberships in OKLCH; equal weights to the Swift reference.
 void hslWeights(float3 rgb, thread float* weights) {
@@ -362,12 +364,39 @@ float3 endpointCurve(float3 rgb,uint slot,bool sdr,constant GraphUniform& p,devi
     } else mapped=curveDecode(max(x,curveLookup(x,slot,p,table)));
     return rgb*(mapped/y);
 }
+float4 toneSpatialSample(float2 uv,constant GraphUniform& p,device const float4* table) {
+    float2 position=clamp(uv*float2(p.toneSpatialInfo.xy)-.5f,0.f,float2(p.toneSpatialInfo.xy)-1);
+    uint2 a=uint2(position),b=min(a+1,p.toneSpatialInfo.xy-1);
+    float2 t=position-float2(a);uint w=p.toneSpatialInfo.x,o=p.toneSpatialInfo.z;
+    return mix(mix(table[o+a.y*w+a.x],table[o+a.y*w+b.x],t.x),
+               mix(table[o+b.y*w+a.x],table[o+b.y*w+b.x],t.x),t.y);
+}
+float3 spatialDehaze(float3 rgb,float3 air,float transmission,float amount) {
+    if(amount==0)return rgb;
+    if(amount<0)return mix(rgb,air,-amount*.45f);
+    float y=lum(rgb),a=lum(air);if(y<=0)return rgb;
+    // Near-air white objects/sky have an unreliable dark-channel estimate.
+    float t=max(max(.2f,transmission),min(1.f,.3f/max(.001f,abs(y-a))));
+    float recovered=(y-a)/t+a;
+    // Luminance-only, bounded recovery prevents colour fringes and black holes.
+    float ratio=clamp(recovered/y,.75f,1.2f);
+    return rgb*(1+(ratio-1)*amount);
+}
+float3 spatialClarity(float3 rgb,float low,float amount) {
+    float y=lum(rgb);if(amount==0 || y<=0)return rgb;
+    float weight=sm(.01f,.1f,y)*(1-sm(.8f,2.f,y));
+    return rgb*exp2(.8f*amount*weight*(log2(y+1e-4f)-low));
+}
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,bool beforeMixer=false) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true,float2 uv=float2(.5f),bool spatialEnabled=true,bool beforeMixer=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
-    rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
+    rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);
+    float4 spatial=p.toneSpatialInfo.w ? toneSpatialSample(uv,p,table) : float4(1,0,0,0);
+    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialDehaze(rgb,p.toneAtmosphere.xyz,spatial.x,p.toneSpatialSettings.x);
+    rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    if(p.toneSpatialInfo.w && spatialEnabled)rgb=spatialClarity(rgb,authoredBase ? spatial.z : spatial.y,p.toneSpatialSettings.y);
     if(p.light.w==1)return rgb;
     if(p.light.w==2) {
         float y=lum(rgb);
@@ -387,24 +416,24 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
 // Keep pre-existing SDR colour overflow in the SDR fit. Only the increase
 // relative to the same edit without Whites becomes newly generated gain.
 float sdrWhitesGain(float3 rgb,float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,
-                    device const float4* table) {
-    if(p.light.x<=0) return 0;
-    float3 original=graphScene(pixel,p,cube,table,false,false);
+                    device const float4* table,float2 uv) {
+    if(p.light.x<=0 && p.toneSpatialSettings.x==0 && p.toneSpatialSettings.y==0) return 0;
+    float3 original=graphScene(pixel,p,cube,table,false,false,uv,false);
     original=fit(original,max(1.f,maximum(original)));
     return max(0.f,log2(max(1.f,maximum(rgb))/max(1.f,maximum(original))));
 }
 // `exposed`, when w is set, is the film exposure after the in-emulsion scatter.
 WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,
                         const device FilmData& film,texture2d<float,access::read> filmLUT,int2 site,float3 glow=0,float4 exposed=0,
-                        constant float4* grainKernel=nullptr) {
-    float3 rgb=graphScene(pixel,p,cube,table);
+                        constant float4* grainKernel=nullptr,float2 uv=float2(.5f)) {
+    float3 rgb=graphScene(pixel,p,cube,table,false,true,uv);
     float3 neutralHDR=rgb;
     // Every look is evaluated at full strength, then mixed with a separately
     // rendered display-reference baseline. Never mix scene exposure with a print.
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float3 filmScene=rgb;
     rgb=fit(rgb,max(1.f,maximum(rgb)));
-    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : sdrWhitesGain(rgb,pixel,p,cube,table);
+    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : sdrWhitesGain(rgb,pixel,p,cube,table,uv);
     float3 base=fit(rgb*exp2(-g),1.f);
     float3 stockDelta=0;
     bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
@@ -434,7 +463,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         // its HDR maximum on the first nonzero edit destroys that rendition.
         // Edit both endpoints, then carry their RGB ratio (including blacks).
         float offset=p.pair.x;
-        float3 neutralBase=fit(graphScene(baseline,p,cube,table,true),1.f);
+        float3 neutralBase=fit(graphScene(baseline,p,cube,table,true,true,uv),1.f);
         neutralHDR=fit(neutralHDR,max(1.f,maximum(neutralHDR)));
         float3 styledHDR=base*exp2(g);
         if(p.flags.y) {
@@ -453,9 +482,9 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     }
     float3 renderedHDR=base*exp2(g);
     if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
-        float3 original=graphScene(baseline,p,cube,table);
+        float3 original=graphScene(baseline,p,cube,table,false,true,uv);
         original=fit(original,max(1.f,maximum(original)));
-        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table);
+        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table,uv);
         float3 oldBase=fit(original*exp2(-oldGain),1.f);
         float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
         renderedHDR=hdr;
@@ -528,7 +557,7 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
     float4 sum=0,peak=0;
     for(uint y=lo.y;y<hi.y;y++)for(uint x=lo.x;x<hi.x;x++) {
         float4 original=src.read(uint2(x,y));
-        auto v=preparePair(original,baseline.read(uint2(x,y)),p,cube,table,film,filmLUT,int2(x,y));
+        auto v=preparePair(original,baseline.read(uint2(x,y)),p,cube,table,film,filmLUT,int2(x,y),float3(0),float4(0),nullptr,(float2(x,y)+.5f)/float2(src.get_width(),src.get_height()));
         float l=lum(v.base), request=sm(p.hdr.x,1.f,l), z=clamp(log2(l+1e-6f),-8.f,8.f);
         sum+=float4(l,request,z,z*z);
         float offset=p.pair.x;
@@ -590,7 +619,7 @@ kernel void graphFilmCells(texture2d<float,access::read> src [[texture(0)]],text
         float wy=min(hi.y,float(y+1))-max(lo.y,float(y));
         for(int x=a.x;x<b.x;x++) {
             float wx=min(hi.x,float(x+1))-max(lo.x,float(x));
-            sum+=wx*wy*filmRaw(graphScene(src.read(uint2(x,y)),p,cube,table)*p.film.w,film,filmLUT);
+            sum+=wx*wy*filmRaw(graphScene(src.read(uint2(x,y)),p,cube,table,false,true,(float2(x,y)+.5f)/float2(src.get_width(),src.get_height()))*p.film.w,film,filmLUT);
         }
     }
     dst.write(float4(sum/(scale.x*scale.y),0),pos);
@@ -607,7 +636,7 @@ kernel void graphEffectCells(texture2d<float,access::read> src [[texture(0)]],te
     float value=0;
     for(int y=a.y;y<b.y;y++)for(int x=a.x;x<b.x;x++) {
         float weight=(min(hi.y,float(y+1))-max(lo.y,float(y)))*(min(hi.x,float(x+1))-max(lo.x,float(x)));
-        float highlight=max(0.f,lum(graphScene(src.read(uint2(x,y)),p,cube,table))-.7f);
+        float highlight=max(0.f,lum(graphScene(src.read(uint2(x,y)),p,cube,table,false,true,(float2(x,y)+.5f)/float2(src.get_width(),src.get_height())))-.7f);
         value+=weight*highlight;
     }
     dst.write(float4(float3(value/(scale.x*scale.y)),0),pos);
@@ -619,7 +648,7 @@ kernel void graphFilmExposure(texture2d<float,access::sample> src [[texture(0)]]
                               constant GraphUniform& p [[buffer(0)]],device const float4* table [[buffer(1)]],
                               const device FilmData& film [[buffer(2)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=dst.get_width() || pos.y>=dst.get_height())return;
-    float3 rgb=graphScene(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table);
+    float3 rgb=graphScene(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table,false,true,(float2(pos+p.region.zw)+.5f)/float2(p.region.xy));
     dst.write(float4(filmRaw(rgb*p.film.w,film,filmLUT),0),pos);
 }
 // Reconstruct each gain source using its own offset, then encode that HDR
@@ -660,7 +689,7 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     auto pair=preparePair(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),
                          sourceSample(baseline,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table,film,filmLUT,int2(pos+p.region.zw),
                          p.halation.w>0 ? filmSmooth(halation,uv) : float3(0),
-                         p.scatter.z ? float4(scattered.read(uint2(int2(pos)+p.scatter.xy)).rgb,1) : float4(0),grainKernel);
+                         p.scatter.z ? float4(scattered.read(uint2(int2(pos)+p.scatter.xy)).rgb,1) : float4(0),grainKernel,uv);
     pair=applyEffects(pair,p.effects.y>0 ? filmSmooth(halation,uv) : float3(0),int2(pos+p.region.zw),p,film,grainKernel);
     float3 g=pair.gain;
     float offset=p.pair.x;
@@ -691,7 +720,7 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
         g=isoLogRatio(max(hdr,0.f)+offset,pair.base+offset);
     }
     float limit=exp2(p.color.z);
-    float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0 || (p.light.z!=0 && peak>limit));
+    float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0 || ((p.light.z!=0 || p.toneSpatialInfo.w!=0) && peak>limit));
     bool physical=p.effects.x>0 || p.effects.y>0;
     // A newly enabled generic effect must not trigger the shoulder below its
     // legal ceiling. Cap only its actual overflow, continuously at that ceiling.
@@ -798,7 +827,97 @@ kernel void curveProbe(texture2d<float,access::sample> source [[texture(0)]],
                        uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
     float4 pixel=sourceSample(source,float2(p.region.zw)+.5f,float2(p.region.xy),p.inputRegion);
-    output.write(float4(graphScene(pixel,p,cube,table),1),pos);
+    output.write(float4(graphScene(pixel,p,cube,table,false,true,(float2(p.region.zw)+.5f)/float2(p.region.xy)),1),pos);
+}
+
+// Fixed-grid spatial estimates. Atmospheric light is chosen from this compact
+// grid; native-size renders only interpolate the guide and compose point ops.
+kernel void toneSpatialExpose(texture2d<float,access::read> scene [[texture(0)]],
+                              texture2d<float,access::read> base [[texture(1)]],
+                              texture2d<float,access::write> outScene [[texture(2)]],
+                              texture2d<float,access::write> outBase [[texture(3)]],
+                              constant GraphUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=outScene.get_width() || pos.y>=outScene.get_height())return;
+    float3 h=scene.read(pos).rgb,b=base.read(pos).rgb;
+    h=pointOp(pointOp(h,5,p.tone1.y,false),6,p.tone1.z,false);
+    b=pointOp(pointOp(b,5,p.tone1.y,false),6,p.tone1.z,false);
+    outScene.write(float4(pointOp(h,0,p.tone0.x,p.flags.x==0),1),pos);
+    outBase.write(float4(pointOp(b,0,p.tone0.x,true),1),pos);
+}
+kernel void toneDarkChannel(texture2d<float,access::read> scene [[texture(0)]],
+                            texture2d<float,access::write> output [[texture(1)]],
+                            constant float4& air [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float3 rgb=scene.read(pos).rgb;
+    float dark=air.w!=0 ? min(rgb.r/air.r,min(rgb.g/air.g,rgb.b/air.b)) : min(1.f,min(rgb.r,min(rgb.g,rgb.b)));
+    output.write(float4(max(0.f,dark),0,0,0),pos);
+}
+kernel void toneMinimum(texture2d<float,access::read> src [[texture(0)]],
+                        texture2d<float,access::write> output [[texture(1)]],
+                        constant BoxUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=p.width || pos.y>=p.height)return;
+    int center=p.vertical ? pos.y : pos.x,limit=p.vertical ? p.height : p.width;
+    float minimum=INFINITY;
+    for(int i=max(0,center-int(p.radius));i<=min(limit-1,center+int(p.radius));i++) {
+        minimum=min(minimum,src.read(p.vertical ? uint2(pos.x,i) : uint2(i,pos.y)).x);
+    }
+    output.write(float4(minimum,0,0,0),pos);
+}
+kernel void toneTransmissionMoments(texture2d<float,access::read> scene [[texture(0)]],
+                                    texture2d<float,access::read> dark [[texture(1)]],
+                                    texture2d<float,access::write> output [[texture(2)]],
+                                    constant uint& unused [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float guide=min(1.f,lum(scene.read(pos).rgb)),t=max(.2f,1-.95f*dark.read(pos).x);
+    output.write(float4(guide,t,guide*guide,guide*t),pos);
+}
+kernel void toneTransmissionCoefficients(texture2d<float,access::read> means [[texture(0)]],
+                                         texture2d<float,access::write> output [[texture(1)]],
+                                         constant uint& unused [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float4 m=means.read(pos);float a=(m.w-m.x*m.y)/(max(0.f,m.z-m.x*m.x)+.001f);
+    output.write(float4(a,m.y-a*m.x,0,0),pos);
+}
+kernel void toneTransmission(texture2d<float,access::read> moments [[texture(0)]],
+                             texture2d<float,access::read> coefficients [[texture(1)]],
+                             texture2d<float,access::write> output [[texture(2)]],
+                             constant uint& unused [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float2 c=coefficients.read(pos).xy;
+    output.write(float4(clamp(c.x*moments.read(pos).x+c.y,.2f,1.f),0,0,0),pos);
+}
+float3 toneBeforeClarity(float3 rgb,float transmission,constant GraphUniform& p) {
+    rgb=spatialDehaze(rgb,p.toneAtmosphere.xyz,transmission,p.toneSpatialSettings.x);
+    rgb=pointOp(rgb,1,p.tone0.y,false);rgb=pointOp(rgb,2,p.tone0.z,false);
+    rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false);
+    return pointOp(rgb,4,p.tone1.x,false);
+}
+kernel void toneLogMoments(texture2d<float,access::read> scene [[texture(0)]],
+                           texture2d<float,access::read> base [[texture(1)]],
+                           texture2d<float,access::read> transmission [[texture(2)]],
+                           texture2d<float,access::write> output [[texture(3)]],
+                           constant GraphUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float t=transmission.read(pos).x;
+    float h=log2(lum(toneBeforeClarity(scene.read(pos).rgb,t,p))+1e-4f);
+    float b=log2(lum(toneBeforeClarity(base.read(pos).rgb,t,p))+1e-4f);
+    output.write(float4(h,h*h,b,b*b),pos);
+}
+kernel void toneLogCoefficients(texture2d<float,access::read> means [[texture(0)]],
+                               texture2d<float,access::write> output [[texture(1)]],
+                               constant uint& unused [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float4 m=means.read(pos);float2 variance=max(float2(0),m.yw-m.xz*m.xz),a=variance/(variance+.04f);
+    output.write(float4(a.x,m.x*(1-a.x),a.y,m.z*(1-a.y)),pos);
+}
+kernel void toneFinishMap(texture2d<float,access::read> logs [[texture(0)]],
+                          texture2d<float,access::read> coefficients [[texture(1)]],
+                          texture2d<float,access::read> transmission [[texture(2)]],
+                          texture2d<float,access::write> output [[texture(3)]],
+                          constant uint& unused [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    float4 c=coefficients.read(pos),l=logs.read(pos);
+    output.write(float4(transmission.read(pos).x,c.x*l.x+c.y,c.z*l.z+c.w,0),pos);
 }
 // One small patch, before the mixer; no readback of the full preview is needed.
 kernel void graphMixerSample(texture2d<float,access::read> src [[texture(0)]],
@@ -810,7 +929,7 @@ kernel void graphMixerSample(texture2d<float,access::read> src [[texture(0)]],
     int2 high=int2(src.get_width()-1,src.get_height()-1);
     for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
         uint2 site=uint2(clamp(int2(p.region.zw)+int2(x,y),int2(0),high));
-        rgb+=graphScene(src.read(site),p,cube,table,false,true,true);
+        rgb+=graphScene(src.read(site),p,cube,table,false,true,(float2(site)+.5f)/float2(src.get_width(),src.get_height()),true,true);
     }
     result[0]=float4(rgb/9.f,1);
 }

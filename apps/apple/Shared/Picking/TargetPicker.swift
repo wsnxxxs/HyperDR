@@ -36,12 +36,26 @@ import Observation
     /// Called when the mode turns on, so a host can end the others.
     @ObservationIgnored var onActivate: () -> Void = {}
 
-    @ObservationIgnored private var origin: CGPoint?
-    @ObservationIgnored private var rise: CGFloat = 0
-    @ObservationIgnored private var drag: Drag?
-    @ObservationIgnored private var released = false
+    /// One press, from its own origin: its rise, its edit once the sample is
+    /// in, and whether the finger has lifted. A press whose sample is still
+    /// being read when the finger lifts keeps its own state, so the next
+    /// press cannot overwrite it.
+    private final class Gesture {
+        let origin: CGPoint
+        let generation: Int
+        var rise: CGFloat = 0
+        var drag: Drag?
+        var released = false
+        init(origin: CGPoint, generation: Int) { self.origin = origin; self.generation = generation }
+    }
+
+    /// The press that is down.
+    @ObservationIgnored private var held: Gesture?
+    /// The last sample queued: each press samples after the one before has
+    /// applied and finished, so each drag is its own step in order.
     @ObservationIgnored private var sampling: Task<Void, Never>?
-    /// Counts presses; a sample still being read from an earlier one finds it changed.
+    /// Counts resets; a sample still being read from an earlier press finds it
+    /// changed after one.
     @ObservationIgnored private var generation = 0
 
     func toggle() { isActive ? cancel() : start() }
@@ -62,8 +76,10 @@ import Observation
     /// forgets the marks.
     func reset() {
         generation += 1
-        drag?.finish()
-        end()
+        held?.drag?.finish()
+        held?.drag = nil
+        held = nil
+        isPressing = false
         isActive = false
         marks = [:]
     }
@@ -71,49 +87,41 @@ import Observation
     /// The press at `point` (canvas points).
     func press(at point: CGPoint) {
         guard isActive, !isPressing, let fraction = photoPoint(point) else { return }
+        let gesture = Gesture(origin: point, generation: generation)
+        held = gesture
         isPressing = true
-        origin = point
-        rise = 0
-        released = false
-        drag = nil
-        generation += 1
-        let token = generation
         let begin = begin
+        let previous = sampling
         sampling = Task { @MainActor in
+            await previous?.value
+            guard gesture.generation == generation else { return }
             let started = try? await begin(fraction)
-            guard token == generation, isPressing || released else { started?.finish(); return }
-            guard let started else { end(); return }
-            drag = started
+            guard gesture.generation == generation else { started?.finish(); return }
+            guard let started else {
+                if held === gesture { held = nil; isPressing = false }
+                return
+            }
+            gesture.drag = started
             marks = started.marks
-            started.apply(rise)
-            if released { finish() }
+            started.apply(gesture.rise)
+            if gesture.released { started.finish(); gesture.drag = nil }
         }
     }
 
     /// The pointer or finger moved to `point` with the press down.
     func move(to point: CGPoint) {
-        guard isPressing, let origin else { return }
-        rise = origin.y - point.y
-        drag?.apply(rise)
+        guard isPressing, let gesture = held else { return }
+        gesture.rise = gesture.origin.y - point.y
+        gesture.drag?.apply(gesture.rise)
     }
 
     /// The pointer or finger lifted.
     func release() {
-        guard isPressing else { return }
-        released = true
-        if drag != nil { finish() }
-        // Else the sample is still being read: it finishes the press when it arrives.
-    }
-
-    private func finish() {
-        drag?.finish()
-        end()
-    }
-
-    private func end() {
-        drag = nil
-        origin = nil
+        guard let gesture = held else { return }
+        gesture.released = true
+        held = nil
         isPressing = false
-        released = false
+        // A sample still being read finishes the press when it arrives.
+        if let drag = gesture.drag { drag.finish(); gesture.drag = nil }
     }
 }

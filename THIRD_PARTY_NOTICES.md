@@ -35,8 +35,12 @@ substitute for those license texts.
 Film emulation uses film stock data derived from spektrafilm by Andrea
 Volpato (https://github.com/andreavolpato/spektrafilm), licensed CC BY-SA 4.0
 (https://creativecommons.org/licenses/by-sa/4.0/). HyperDR converted the
-Kodak Portra 400, Kodak Gold 200, Kodak Portra Endura, Fujifilm Velvia 100,
-Kodak Kodachrome 64, Kodak Vision3 500T and Kodak 2383 profiles with `scripts/convert_spektrafilm_stocks.py` (spectral
+Kodak Portra 160, 400 and 800 (and 800 pushed one and two stops), Kodak Ektar 100,
+Kodak Gold 200, Kodak UltraMax 400, Fujifilm Pro 400H, Fujifilm C200, Fujifilm
+X-TRA 400, Fujifilm Velvia 100, Fujifilm Provia 100F, Kodak Kodachrome 64, Kodak
+Ektachrome 100, Kodak Vision3 50D, 250D, 200T and 500T, Kodak Verita 200D, and the
+Kodak Portra Endura, Fujifilm Crystal Archive Type II and Kodak 2383 print
+profiles with `scripts/convert_spektrafilm_stocks.py` (spectral
 upsampling baked per film, illuminants, neutral print filters, scanner levels
 and fitted curves resolved, grain variance and halation parameters tabulated); the converted data in `HyperDRRender/Resources/Film` remains
 CC BY-SA 4.0. No spektrafilm code is included. Stock names are trademarks of

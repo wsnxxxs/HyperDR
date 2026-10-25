@@ -76,7 +76,7 @@ Captured and Expand, and shows the AI sources as unavailable.
 
 ## Looks from film, LUTs that know their colour space
 
-- **Film** — Kodak Portra 400, Gold 200, Kodachrome 64, Vision3 500T and Fujifilm Velvia 100. Turn off a stock’s antihalation layer for the red highlight bloom of motion-picture film with its backing removed, as CineStill does to Vision3 500T.
+- **Film** — twenty stocks: colour negatives (Kodak Portra 160 / 400 / 800, pushed 800, Ektar 100, Gold 200, UltraMax 400; Fujifilm Pro 400H, C200, X-TRA 400), slides (Fujifilm Velvia 100, Provia 100F; Kodak Kodachrome 64, Ektachrome 100) and motion-picture negatives (Kodak Vision3 50D / 250D / 200T / 500T, Verita 200D). Turn off a stock’s antihalation layer for the red highlight bloom of motion-picture film with its backing removed, as CineStill does to Vision3 500T.
 - **Grain and halation** — computed from the emulsion’s physical scatter, not overlaid, and available on every photo, with or without a look.
 - **LUTs** — import `.cube` files into HyperDR’s own library. Every LUT remembers its input and output space, and a LUT whose input the photo cannot supply is disabled rather than forced on as if it were sRGB.
 - **Camera Log** — LUTs for S-Log3, V-Log, F-Log2, LogC3, LogC4 or Canon Log 3 are fed from a scene-linear RAW development, with the file’s baseline exposure kept and gamut compression off, so middle grey lands where the curve expects it.

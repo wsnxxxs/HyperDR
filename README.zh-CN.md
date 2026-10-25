@@ -57,7 +57,7 @@
 
 ## 胶片风格，认得色彩空间的 LUT
 
-- **胶片**：Kodak Portra 400、Gold 200、Kodachrome 64、Vision3 500T 和 Fujifilm Velvia 100。可以单独关掉防光晕层，做出像 CineStill 改造 Vision3 500T 那样在高光边缘透出红晕的效果。
+- **胶片**：共 20 卷。彩色负片有 Kodak Portra 160 / 400 / 800（另有 800 增感一档、两档）、Ektar 100、Gold 200、UltraMax 400，以及 Fujifilm Pro 400H、C200、X-TRA 400；反转片有 Fujifilm Velvia 100、Provia 100F，以及 Kodak Kodachrome 64、Ektachrome 100；电影负片有 Kodak Vision3 50D / 250D / 200T / 500T 和 Verita 200D。可以单独关掉防光晕层，做出像 CineStill 改造 Vision3 500T 那样在高光边缘透出红晕的效果。
 - **颗粒与光晕**：按乳剂的物理散射过程计算，不是贴上去的纹理；任何照片都能用，不论有没有套用风格。
 - **LUT**：把 `.cube` 文件导入 HyperDR 自己的 LUT 库。每个 LUT 都记得自己的输入和输出色彩空间，照片给不了它需要的输入时就会被禁用，而不是假装它是 sRGB 硬套上去。
 - **相机 Log**：S-Log3、V-Log、F-Log2、LogC3、LogC4、Canon Log 3 的 LUT 会接收按场景线性重新显影的 RAW，保留文件自己的基准曝光、关闭色域压缩，让 18% 中灰正好落在曲线预期的位置。

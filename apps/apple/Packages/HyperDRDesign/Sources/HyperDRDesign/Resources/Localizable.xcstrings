@@ -1349,6 +1349,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "反转片" } }
       }
     },
+    "look.film.c200" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Fujifilm Crystal Archive paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm C200" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm C200" } }
+      }
+    },
+    "look.film.ektachrome100" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Ektachrome 100" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Ektachrome 100" } }
+      }
+    },
+    "look.film.ektar100" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Ektar 100" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Ektar 100" } }
+      }
+    },
     "look.film.gold200" : {
       "comment" : "Film stock option (look.film): a consumer colour negative, printed on Kodak Portra Endura paper.",
       "localizations" : {
@@ -1370,11 +1391,60 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
       }
     },
+    "look.film.portra160" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 160" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 160" } }
+      }
+    },
     "look.film.portra400" : {
       "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 400" } }
+      }
+    },
+    "look.film.portra800" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800" } }
+      }
+    },
+    "look.film.portra800-push1" : {
+      "comment" : "Film stock option (look.film): Portra 800 pushed one stop in development, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800 Push 1" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800 增感 1 档" } }
+      }
+    },
+    "look.film.portra800-push2" : {
+      "comment" : "Film stock option (look.film): Portra 800 pushed two stops in development, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800 Push 2" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Portra 800 增感 2 档" } }
+      }
+    },
+    "look.film.pro400h" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Fujifilm Crystal Archive paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Pro 400H" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Pro 400H" } }
+      }
+    },
+    "look.film.provia100f" : {
+      "comment" : "Film stock option (look.film): a slide film, viewed directly.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Provia 100F" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Provia 100F" } }
+      }
+    },
+    "look.film.ultramax400" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Kodak Portra Endura paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak UltraMax 400" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak UltraMax 400" } }
       }
     },
     "look.film.velvia100" : {
@@ -1384,11 +1454,46 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm Velvia 100" } }
       }
     },
+    "look.film.verita200d" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Verita 200D" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Verita 200D" } }
+      }
+    },
+    "look.film.vision3-200t" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 200T" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 200T" } }
+      }
+    },
+    "look.film.vision3-250d" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 250D" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 250D" } }
+      }
+    },
     "look.film.vision3-500t" : {
       "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 500T" } }
+      }
+    },
+    "look.film.vision3-50d" : {
+      "comment" : "Film stock option (look.film): a motion-picture negative, printed on Kodak 2383.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 50D" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kodak Vision3 50D" } }
+      }
+    },
+    "look.film.xtra400" : {
+      "comment" : "Film stock option (look.film): a colour negative, printed on Fujifilm Crystal Archive paper.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm X-TRA 400" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Fujifilm X-TRA 400" } }
       }
     },
     "look.input.clog3-cinemagamut" : {

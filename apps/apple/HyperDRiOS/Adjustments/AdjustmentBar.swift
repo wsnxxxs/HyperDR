@@ -763,12 +763,22 @@ private struct FilmSwatches: View {
                    isCurrent: control.selectedOption == "none" && !lookIsImported, action: removeLook)
             .onAppear { shown(true) }
             .onDisappear { shown(false) }
-        ForEach(control.options.filter { $0.id != "none" }, id: \.id) { option in
-            LookSwatch(image: previews[LookPreviews.filmKey(option.id)], mark: option.id,
-                       name: AdjustmentText.option(option), isCurrent: control.selectedOption == option.id) {
-                choose(option.id)
+        // Negatives, slides, motion-picture negatives, each after a rule, as
+        // the rings' groups are.
+        ForEach(AdjustmentText.optionSections(control).filter { $0.filmFamily != nil }) { section in
+            Capsule()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: 1, height: 28)
+                .padding(.bottom, 16)
+                .accessibilityElement()
+                .accessibilityLabel(section.title ?? Text(verbatim: ""))
+            ForEach(section.options, id: \.id) { option in
+                LookSwatch(image: previews[LookPreviews.filmKey(option.id)], mark: option.id,
+                           name: AdjustmentText.option(option), isCurrent: control.selectedOption == option.id) {
+                    choose(option.id)
+                }
+                .disabled(control.disabledOptions.contains(option.id))
             }
-            .disabled(control.disabledOptions.contains(option.id))
         }
     }
 }

@@ -465,10 +465,18 @@ struct FilmPicker: View {
                 HStack(alignment: .top, spacing: Space.s2) {
                     tile("none", name: Text("look.lut.none", bundle: .module), preview: "", mark: nil, side: side,
                          isSelected: control.selectedOption == "none" && recipe.look == nil)
-                    ForEach(control.options.filter { $0.id != "none" }, id: \.id) { option in
-                        tile(option.id, name: AdjustmentText.option(option), preview: "film:" + option.id, mark: option.id,
-                             side: side, isSelected: control.selectedOption == option.id)
-                            .disabled(control.disabledOptions.contains(option.id))
+                    // Negatives, slides, motion-picture negatives, each after a rule.
+                    ForEach(AdjustmentText.optionSections(control).filter { $0.filmFamily != nil }) { section in
+                        Capsule()
+                            .fill(Color.hdr.line)
+                            .frame(width: 1, height: side * 0.6)
+                            .padding(.top, side * 0.2)
+                            .help(section.title ?? Text(verbatim: ""))
+                        ForEach(section.options, id: \.id) { option in
+                            tile(option.id, name: AdjustmentText.option(option), preview: "film:" + option.id, mark: option.id,
+                                 side: side, isSelected: control.selectedOption == option.id)
+                                .disabled(control.disabledOptions.contains(option.id))
+                        }
                     }
                 }
                 .padding(.vertical, 2)

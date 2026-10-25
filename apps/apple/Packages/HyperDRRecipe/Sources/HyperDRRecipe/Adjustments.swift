@@ -212,13 +212,20 @@ public enum Adjustments {
     /// `none` first, then the stocks Render bundles, in menu order: colour negatives,
     /// slides, motion-picture negatives. Ids are stable; the order is only the menu's.
     /// A literal list: scripts/check_apple_i18n.py reads the option keys from it.
-    public static let filmStocks = ["none", "portra400", "gold200", "velvia100", "kodachrome64", "vision3-500t"]
+    public static let filmStocks = [
+        "none",
+        "portra160", "portra400", "portra800", "portra800-push1", "portra800-push2",
+        "ektar100", "gold200", "ultramax400", "pro400h", "c200", "xtra400",
+        "velvia100", "provia100f", "kodachrome64", "ektachrome100",
+        "vision3-50d", "vision3-250d", "vision3-200t", "vision3-500t", "verita200d",
+    ]
 
     /// The stocks of each kind, for menu sections; together, `filmStocks` after `none`.
     public static let filmFamilies: [(family: FilmFamily, stocks: [String])] = [
-        (.negative, ["portra400", "gold200"]),
-        (.slide, ["velvia100", "kodachrome64"]),
-        (.cinema, ["vision3-500t"]),
+        (.negative, ["portra160", "portra400", "portra800", "portra800-push1", "portra800-push2",
+                     "ektar100", "gold200", "ultramax400", "pro400h", "c200", "xtra400"]),
+        (.slide, ["velvia100", "provia100f", "kodachrome64", "ektachrome100"]),
+        (.cinema, ["vision3-50d", "vision3-250d", "vision3-200t", "vision3-500t", "verita200d"]),
     ]
 
     public static func filmFamily(_ stock: String) -> FilmFamily? {

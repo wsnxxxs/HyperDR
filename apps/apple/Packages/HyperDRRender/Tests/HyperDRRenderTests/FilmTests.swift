@@ -130,19 +130,23 @@ private func code(_ value: Double) -> Int {
             for scale in grain.scales {
                 let longEdge = Int((film.pitch(longEdge: 1) / scale.pixelMicrons).rounded())
                 for (level, mean) in scale.densityMean.enumerated() {
-                    let density = SIMD3(mean[0], mean[1], mean[2]), side = 100
+                    // A pixel and its right neighbour every `stride` pixels: at small pixels the
+                    // dye clouds correlate a contiguous field, whose skewness then wanders by
+                    // more than the tolerance from window to window.
+                    let density = SIMD3(mean[0], mean[1], mean[2]), rows = 100, pairs = 50, stride = 8
                     var field = [SIMD3<Double>]()
-                    for y in 0..<side { for x in 0..<side {
-                        field.append(film.addGrain(density, at: FilmGrainSite(x: x, y: y, longEdge: longEdge, amount: 1)) - density)
-                    } }
+                    for y in 0..<rows { for pair in 0..<pairs { for dx in 0..<2 {
+                        let site = FilmGrainSite(x: pair * stride + dx, y: y * stride, longEdge: longEdge, amount: 1)
+                        field.append(film.addGrain(density, at: site) - density)
+                    } } }
                     let average = field.reduce(.zero, +) / Double(field.count)
                     var second = SIMD3<Double>.zero, third = SIMD3<Double>.zero, neighbours = SIMD3<Double>.zero
                     for (i, d) in field.enumerated() {
                         let e = d - average
                         second += e * e; third += e * e * e
-                        if i % side < side - 1 { neighbours += e * (field[i + 1] - average) }
+                        if i % 2 == 0 { neighbours += e * (field[i + 1] - average) }
                     }
-                    second /= Double(field.count); third /= Double(field.count); neighbours /= Double(field.count - side)
+                    second /= Double(field.count); third /= Double(field.count); neighbours /= Double(field.count / 2)
                     let label = "\(id.rawValue) \(scale.pixelMicrons) µm level \(level)"
                     for c in 0..<3 {
                         let rms = second[c].squareRoot(), skew = third[c] / (rms * rms * rms), correlation = neighbours[c] / second[c]

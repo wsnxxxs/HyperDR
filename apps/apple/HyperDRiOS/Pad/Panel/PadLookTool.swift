@@ -66,15 +66,27 @@ struct PadLookTool: View {
         let previews = panel.context.lutPreviews
         LookTile(image: previews[LookPreviews.none], mark: nil, name: AdjustmentText.command(.noLUT),
                  isCurrent: control.selectedOption == "none" && recipe.look == nil, action: removeLook)
-        ForEach(control.options.filter { $0.id != "none" }, id: \.id) { option in
-            LookTile(image: previews[LookPreviews.filmKey(option.id)], mark: option.id, name: AdjustmentText.option(option),
-                     isCurrent: control.selectedOption == option.id) {
-                // One write, one undo step (`AdjustmentPanel.chooseFilm`).
-                var edited = recipe
-                panel.chooseFilm(option.id, in: &edited)
-                recipe = edited
+        // Negatives, slides, motion-picture negatives, under their headings.
+        ForEach(AdjustmentText.optionSections(control).filter { $0.filmFamily != nil }) { section in
+            Section {
+                ForEach(section.options, id: \.id) { option in
+                    LookTile(image: previews[LookPreviews.filmKey(option.id)], mark: option.id, name: AdjustmentText.option(option),
+                             isCurrent: control.selectedOption == option.id) {
+                        // One write, one undo step (`AdjustmentPanel.chooseFilm`).
+                        var edited = recipe
+                        panel.chooseFilm(option.id, in: &edited)
+                        recipe = edited
+                    }
+                    .disabled(control.disabledOptions.contains(option.id))
+                }
+            } header: {
+                (section.title ?? Text(verbatim: ""))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+                    .accessibilityAddTraits(.isHeader)
             }
-            .disabled(control.disabledOptions.contains(option.id))
         }
     }
 

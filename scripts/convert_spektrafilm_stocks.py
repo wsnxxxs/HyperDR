@@ -48,11 +48,26 @@ FIXTURE = RENDER / "Tests/HyperDRRenderTests/Fixtures/film-reference.json"
 # HyperDR id and spektrafilm profile, in menu order (Recipe's Adjustments.filmStocks).
 # Negatives print on the profile's target paper; slides are viewed directly.
 STOCKS = [
+    ("portra160", "kodak_portra_160"),
     ("portra400", "kodak_portra_400"),
+    ("portra800", "kodak_portra_800"),
+    ("portra800-push1", "kodak_portra_800_push1"),
+    ("portra800-push2", "kodak_portra_800_push2"),
+    ("ektar100", "kodak_ektar_100"),
     ("gold200", "kodak_gold_200"),
+    ("ultramax400", "kodak_ultramax_400"),
+    ("pro400h", "fujifilm_pro_400h"),
+    ("c200", "fujifilm_c200"),
+    ("xtra400", "fujifilm_xtra_400"),
     ("velvia100", "fujifilm_velvia_100"),
+    ("provia100f", "fujifilm_provia_100f"),
     ("kodachrome64", "kodak_kodachrome_64"),
+    ("ektachrome100", "kodak_ektachrome_100"),
+    ("vision3-50d", "kodak_vision3_50d"),
+    ("vision3-250d", "kodak_vision3_250d"),
+    ("vision3-200t", "kodak_vision3_200t"),
     ("vision3-500t", "kodak_vision3_500t"),
+    ("verita200d", "kodak_verita_200d"),
 ]
 
 ATTRIBUTION = ("Derived from spektrafilm by Andrea Volpato, https://github.com/andreavolpato/spektrafilm, "
@@ -309,24 +324,26 @@ def grain_reference(film_name: str, print_name: str | None) -> dict:
     """Statistics of spektrafilm's stochastic grain on flat fields (central crop): film
     density mean, RMS, skewness and the correlation of horizontal neighbours, for pixels
     from 91 um (a 384-pixel 35 mm frame) down to 1.5 um, where the dye clouds and the
-    particle counts shape it."""
+    particle counts shape it. At 3 um and below the dye clouds correlate neighbouring
+    pixels, so those fields are larger: on 384 pixels their skewness wanders by a tenth."""
     size, levels = 384, [0.03, 0.184, 0.8]
     result = []
     for pixel in [None, 6.0, 3.0, 1.5]:
         params = params_for(film_name, print_name, grain=True)
+        field = 1024 if pixel is not None and pixel <= 3 else size
         if pixel is not None:
-            params.camera.film_format_mm = pixel * size / 1000
+            params.camera.film_format_mm = pixel * field / 1000
         pipeline = SimulationPipeline(params)
         means, deviations, skews, correlations = [], [], [], []
         for level in levels:
-            density = pipeline.process(np.full((size, size, 3), level), collect=Tap.CMY_FILM)[32:-32, 32:-32]
+            density = pipeline.process(np.full((field, field, 3), level), collect=Tap.CMY_FILM)[32:-32, 32:-32]
             flat = density.reshape(-1, 3)
             centred = flat - flat.mean(axis=0)
             means.append(flat.mean(axis=0))
             deviations.append(flat.std(axis=0))
             skews.append((centred ** 3).mean(axis=0) / flat.std(axis=0) ** 3)
             correlations.append([np.corrcoef(density[:, :-1, c].ravel(), density[:, 1:, c].ravel())[0, 1] for c in range(3)])
-        result.append({"pixelMicrons": float(params.camera.film_format_mm * 1000 / size), "densityMean": rows(means),
+        result.append({"pixelMicrons": float(params.camera.film_format_mm * 1000 / field), "densityMean": rows(means),
                        "densityRMS": rows(deviations), "skewness": rows(skews), "correlation": rows(correlations)})
     return {"size": size, "levels": levels, "scales": result}
 
@@ -357,7 +374,7 @@ def main() -> None:
                         "across a bright square (Vision3 500T without its antihalation layer); and film exposure "
                         "after in-emulsion scatter alone."),
                "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {},
-               "scatter": scatter_reference(STOCKS[0][1])}
+               "scatter": scatter_reference("kodak_portra_400")}
     RESOURCES.mkdir(parents=True, exist_ok=True)
     if not arguments.check:
         for old in list(RESOURCES.glob("*.json")) + list(RESOURCES.glob("*.spectral")):

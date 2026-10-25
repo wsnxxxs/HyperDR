@@ -4,8 +4,12 @@ import Metal
 
 /// Option ids of Recipe's `look.film`, one bundled resource each, in its menu order.
 public enum FilmStockID: String, CaseIterable, Hashable, Sendable {
-    case portra400, gold200, velvia100, kodachrome64
-    case vision3500T = "vision3-500t"
+    case portra160, portra400, portra800
+    case portra800Push1 = "portra800-push1", portra800Push2 = "portra800-push2"
+    case ektar100, gold200, ultramax400, pro400h, c200, xtra400
+    case velvia100, provia100f, kodachrome64, ektachrome100
+    case vision350D = "vision3-50d", vision3250D = "vision3-250d"
+    case vision3200T = "vision3-200t", vision3500T = "vision3-500t", verita200d
 }
 
 /// Film emulation. The film exposes the scene before the HDR split (highlights reach

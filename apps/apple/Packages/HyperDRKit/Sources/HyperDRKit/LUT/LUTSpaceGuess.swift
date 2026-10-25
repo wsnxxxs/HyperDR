@@ -46,14 +46,14 @@ extension LUTSpace {
         if let log {
             // A declared input may itself name Rec.2020. Prefer the output
             // portion in the common camera-space-to-display-space filenames.
-            let output: LUTSpace = outputName.contains("hlg") ? .hlg : outputName.contains("pq") || outputName.contains("st2084") ? .pq : outputName.contains("2020") ? .rec2020 : .rec709
+            let output: LUTSpace = outputName.contains("709") ? .rec709 : outputName.contains("hlg") ? .hlg : outputName.contains("pq") || outputName.contains("st2084") ? .pq : outputName.contains("2020") ? .rec2020 : .rec709
             return (log, output)
         }
         if inputName.contains("2020") {
             return (.rec2020, outputName.contains("709") ? .rec709 : .rec2020)
         }
         if inputName.contains("709") {
-            return (.rec709, outputName.contains("2020") ? .rec2020 : .rec709)
+            return (.rec709, outputName.contains("709") ? .rec709 : outputName.contains("2020") ? .rec2020 : .rec709)
         }
         return nil
     }

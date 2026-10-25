@@ -50,8 +50,12 @@ import Testing
 
     @Test func gradingKeepsHDRLuminanceAndMatchesDouble() async throws {
         let engine = try RenderEngine()
-        let red = DoubleReference.colorGrade(SIMD3(repeating:0.18),wheels:[.zero,.zero,.zero,SIMD3(0,1,0)])
-        #expect(red.x > red.y && red.y > red.z)
+        for hue in [0.0,120,210,240] {
+            let graded = DoubleReference.colorGrade(SIMD3(repeating:0.18),wheels:[.zero,.zero,.zero,SIMD3(Float(hue),1,0)])
+            let expected = DoubleReference.encodeLUT(graded,space:.sRGB)
+            let swatch = GradingColor.displayRGB(hue:hue,saturation:100)
+            for c in 0..<3 { #expect(abs(swatch[c]-expected[c])<1e-6) }
+        }
         for level in [0.03,0.18,1.0,4.0] {
             let rgb = SIMD3<Double>(repeating:level)
             let image = CIImage(color:CIColor(red:level,green:level,blue:level,

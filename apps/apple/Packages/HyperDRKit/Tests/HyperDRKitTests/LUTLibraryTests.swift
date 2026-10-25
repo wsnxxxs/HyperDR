@@ -59,6 +59,7 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
         }
         #expect(LUTSpace.guess(fileName: "AppleLog_to_Rec2020")?.output == .rec2020)
         #expect(LUTSpace.guess(fileName: "AppleLog_Rec2020_to_Rec709")?.output == .rec709)
+        #expect(LUTSpace.guess(fileName: "NLog_BT2020_to_BT709")?.output == .rec709)
         #expect(LUTSpace.guess(fileName: "Rec2020_to_Rec709")?.input == .rec2020)
         #expect(LUTSpace.guess(fileName: "Rec2020_to_Rec709")?.output == .rec709)
         #expect(LUTSpace.guess(fileName: "Warm") == nil)

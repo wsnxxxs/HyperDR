@@ -102,6 +102,9 @@ import SwiftUI
     private(set) var openFailureMessage: LocalizedStringKey = "ios.error.load"
     /// A failure over an open photo, shown for a moment.
     var notice: LocalizedStringKey?
+    /// A failure over an open photo that is too long for `notice`: the RAW of
+    /// another camera that nothing here can develop. Shown as an alert.
+    var editorFailure: LocalizedStringKey?
 
     @ObservationIgnored private var load: Task<Void, Never>?
     @ObservationIgnored private var factsTask: Task<Void, Never>?
@@ -185,6 +188,7 @@ import SwiftUI
         openFailed = false
         showsOpenFailure = false
         openFailureMessage = "ios.error.load"
+        editorFailure = nil
         // A notice belongs to the photo it was about.
         notice = nil
         isEditing = true
@@ -248,10 +252,18 @@ import SwiftUI
                 openFailureMessage = "ios.error.rawDecoderUnavailable \(version)"
             } else if case RenderError.unsupportedRAWCompatibility(let converter) = error {
                 openFailureMessage = "ios.error.rawDecoderUnavailable \(converter)"
+            } else if case RenderError.rawUnsupported(let camera) = error {
+                if let camera, !camera.isEmpty {
+                    openFailureMessage = "ios.error.rawUnsupported.model \(camera)"
+                } else {
+                    openFailureMessage = "ios.error.rawUnsupported"
+                }
             }
             if editor.source == nil {
                 openFailed = true
                 isEditing = false
+            } else if case RenderError.rawUnsupported = error {
+                editorFailure = openFailureMessage
             } else {
                 notice = openFailureMessage
             }

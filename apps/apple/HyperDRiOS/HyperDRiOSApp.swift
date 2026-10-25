@@ -71,10 +71,17 @@ private struct EditorRoot: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        if StudioRoot.usesStudio(sizeClass) {
-            PadEditor(session: session, editor: editor)
-        } else {
-            EditorScreen(session: session, editor: editor)
+        Group {
+            if StudioRoot.usesStudio(sizeClass) {
+                PadEditor(session: session, editor: editor)
+            } else {
+                EditorScreen(session: session, editor: editor)
+            }
+        }
+        // A RAW nothing here can develop, opened over a photo: too long for the notice.
+        .alert(Text(session.editorFailure ?? ""), isPresented: Binding(
+            get: { session.editorFailure != nil }, set: { if !$0 { session.editorFailure = nil } })) {
+            Button("ios.common.ok", role: .cancel) {}
         }
     }
 }

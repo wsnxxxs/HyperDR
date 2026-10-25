@@ -121,6 +121,40 @@
         }
       }
     },
+    "ios.error.rawUnsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. This camera is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：这台相机比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "ios.error.rawUnsupported.model %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. The %@ is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：%@ 比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
     "ios.error.rawDecoderUnavailable %@" : {
       "extractionState" : "manual",
       "localizations" : {

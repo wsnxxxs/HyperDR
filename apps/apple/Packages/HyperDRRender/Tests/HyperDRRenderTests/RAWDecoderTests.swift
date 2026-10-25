@@ -20,6 +20,32 @@ final class RAWDecoderTests: XCTestCase {
         XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [CIRAWDecoderVersion.none.rawValue, ""], systemDefault: ""))
     }
 
+    func testInvalidNativeDimensionsAreDecodeFailuresInsteadOfGeometryTraps() throws {
+        XCTAssertEqual(try RenderEngine.rawNativeSize(CGSize(width: 7008, height: 4672), rotated: false),
+                       PixelSize(width: 7008, height: 4672))
+        XCTAssertEqual(try RenderEngine.rawNativeSize(CGSize(width: 7008, height: 4672), rotated: true),
+                       PixelSize(width: 4672, height: 7008))
+        let invalid = [
+            CGSize.zero,
+            CGSize(width: 0, height: 4672),
+            CGSize(width: 7008, height: 0),
+            CGSize(width: 0.5, height: 12),
+            CGSize(width: -1, height: 12),
+            CGSize(width: Double.nan, height: 12),
+            CGSize(width: 12, height: Double.infinity),
+            CGSize(width: Double(UInt32.max) + 1, height: 12),
+        ]
+        for native in invalid {
+            for rotated in [false, true] {
+                XCTAssertThrowsError(try RenderEngine.rawNativeSize(native, rotated: rotated)) { error in
+                    guard case RenderError.cannotDecodeSource = error else {
+                        return XCTFail("Unexpected error for \(native): \(error)")
+                    }
+                }
+            }
+        }
+    }
+
     private func fixture(_ name: String = "sony-ilce-7s.ARW") throws -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 { root.deleteLastPathComponent() }

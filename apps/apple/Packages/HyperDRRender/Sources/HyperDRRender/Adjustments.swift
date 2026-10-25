@@ -55,6 +55,8 @@ public struct LookAdjustments: Hashable, Sendable {
     public var strength: Float = RenderParameter.defaultNumber("look.strength")
     public var input: LUTSpace = .sRGB
     public var output: LUTSpace = .sRGB
+    /// Absolute scene exposure before Log encoding; nil uses the LUT meter.
+    public var exposure: Float? = 0
     public init() {}
     public var isIdentity: Bool { !enabled || lut == nil || strength == 0 }
 }
@@ -93,6 +95,7 @@ public struct RenderAdjustments: Hashable, Sendable {
             try RenderParameter.check(value,id:id)
         }
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
+        if let exposure = look.exposure { try RenderParameter.check(exposure,id:"look.exposure") }
         if let exposure = film.exposure { try RenderParameter.check(exposure,id:"look.filmExposure") }
         if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
         guard look.isIdentity || !usesFilmProcessing else { throw RenderError.invalidAdjustment }

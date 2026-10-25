@@ -296,7 +296,7 @@ extension DoubleReference {
     }
     public static func look(_ rgb: RGB, settings: LookAdjustments) -> RGB {
         guard !settings.isIdentity, let lut = settings.lut else { return rgb }
-        let mapped = decodeLUT(sampleLUT(encodeLUT(rgb,space:settings.input),lut:lut),space:settings.output)
+        let mapped = decodeLUT(sampleLUT(encodeLUT(rgb * (settings.input.isLog ? exp2(Double(settings.exposure ?? 0)) : 1),space:settings.input),lut:lut),space:settings.output)
         let upper = settings.input.isSDR && settings.output.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z)
         let fitted = fitP3(mapped,upper:upper)
         return rgb+(fitted-rgb)*Double(settings.strength)

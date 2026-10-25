@@ -1,6 +1,54 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "undo.look.exposure" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT Exposure"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT 曝光"
+          }
+        }
+      }
+    },
+    "ctrl.look.exposure.help" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatically match display brightness, or set the exposure before the LUT."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动匹配显示亮度，或手动设置进入 LUT 前的曝光。"
+          }
+        }
+      }
+    },
+    "ctrl.look.exposure.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT Exposure"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT 曝光"
+          }
+        }
+      }
+    },
     "look.input.flog-fgamut" : {
       "comment" : "LUT colour space option (look.input).",
       "localizations" : {

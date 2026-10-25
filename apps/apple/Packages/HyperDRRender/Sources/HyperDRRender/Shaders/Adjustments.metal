@@ -90,6 +90,7 @@ struct GraphUniform {
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
     float4 light; // whites, curve table offset, curve table size
+    float4 lutExposure; // scene multiplier before Log encoding
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -252,7 +253,7 @@ float3 lutSample(float3 rgb,constant GraphUniform& p, texture3d<float,access::re
 }
 float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
     if(p.color.y==0) return rgb;
-    float3 changed=lutDecode(lutSample(lutEncode(rgb,p.lutInfo.z),p,cube,table),p.lutInfo.w);
+    float3 changed=lutDecode(lutSample(lutEncode(rgb*p.lutExposure.x,p.lutInfo.z),p,cube,table),p.lutInfo.w);
     changed=fit(changed,p.flags.y && (p.lutInfo.w<=2 || p.lutInfo.w==20) ? 1.f : max(1.f,maximum(changed)));
     return changed;
 }

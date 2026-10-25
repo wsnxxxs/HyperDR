@@ -94,6 +94,7 @@ extension RenderAdjustments {
         look.strength = try values.number("look.strength")
         look.input = try values.space("look.input")
         look.output = try values.space("look.output")
+        look.exposure = try values.optionalNumber("look.exposure")
         film.strength = try values.number("look.filmStrength")
         effects.grain = try values.number("effect.grain")
         film.exposure = try values.optionalNumber("look.filmExposure")

@@ -186,6 +186,9 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.strength", group: .look, kind: .float, range: 0...100, step: 1,
             default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isSet("look.lut")),
+        ParameterDeclaration(id: "look.exposure", group: .look, kind: .floatOrAuto, range: -4...4, step: 0.01,
+            default: .auto, format: .ev, scale: .direct,
+            visibleWhen: .all([.isSet("look.lut"), .isOneOf("look.input", Array(logLookSpaces))])),
         ParameterDeclaration(id: "look.input", group: .look, kind: .choice,
             default: .constant(.string("srgb")),
             options: lookSpaces.map {

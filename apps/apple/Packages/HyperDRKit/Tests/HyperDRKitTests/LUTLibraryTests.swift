@@ -101,7 +101,7 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
             #expect(throws: HyperDRError.self) { _ = try LUTID(rawValue: raw) }
             #expect(throws: HyperDRError.self) { _ = try JSONDecoder().decode(LUTID.self, from: JSONEncoder().encode(raw)) }
         }
-        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut"].sorted())
+        #expect(LUTSpace.allCases.map(\.rawValue).sorted() == ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine", "slog3-sgamut3", "vlog-vgamut", "flog2-fgamut", "logc3-awg3", "logc4-awg4", "clog3-cinemagamut", "flog-fgamut", "flog2c-fgamutc", "applelog-rec2020", "nlog-rec2020", "dlog-dgamut", "clog2-cinemagamut", "davinci-dwg", "acescct-ap1", "rec2020"].sorted())
         #expect(LUTSpace(rawValue: "linear") == nil)
     }
     @Test func calibrationInvalidUTF8AndWrongExtensionsAreRejected() async throws {

@@ -21,7 +21,7 @@ extension LUTSpace {
             log = .flogFGamut
         } else if name.contains("applelog") {
             log = .appleLogRec2020
-        } else if name.contains("nlog") {
+        } else if name.contains("nlog") && !name.contains("canonlog") {
             log = .nlogRec2020
         } else if name.contains("dlog") {
             log = .dlogDGamut

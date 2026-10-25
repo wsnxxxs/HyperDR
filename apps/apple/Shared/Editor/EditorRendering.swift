@@ -190,6 +190,8 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     /// parameters the recipe sets: the ruler marks it as their default.
     /// Whole-image renders only; a region's is empty.
     var automaticValues: [String: Double] = [:]
+    /// Global render capacity, including on detail/ROI frames.
+    var renderedRange: Float = 3
 
     var size: HyperDRRender.PixelSize { request.size }
 

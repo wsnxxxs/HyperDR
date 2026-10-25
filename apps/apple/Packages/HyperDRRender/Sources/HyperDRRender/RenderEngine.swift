@@ -51,7 +51,7 @@ public actor RenderEngine {
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
-    var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lutCache: (id: String, curve: ToneCurve, texture: any MTLTexture, buffer: any MTLBuffer)?
     var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
     /// The look baseline of the rendered source, and separately of the fixed
     /// analysis source: a partial-strength render needs both, and one shared

@@ -42,7 +42,7 @@ import HyperDRRecipe
         let weights = RenderEngine.readTexture(mask.texture)
         #expect(mask.texture.pixelFormat == .r32Float && mask.outputSize == source.size)
         for (i,y) in [0.05,0.5,0.9].enumerated() {
-            #expect(abs(Double(weights[i])-DoubleReference.smoothStep(0.4,1,y)) < 0.00001)
+            #expect(abs(Double(weights[i])-DoubleReference.smoothStep(0.15,1,y)) < 0.00001)
         }
         let disabledMask = try await engine.effectMask(source,recipe:recipe,parameterID:"tone.highlights",options:bypass)
         #expect(RenderEngine.readTexture(disabledMask.texture) == [0,0,0])

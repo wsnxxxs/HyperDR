@@ -74,6 +74,10 @@ extension RenderAdjustments {
         tone.shadows = try values.number("tone.shadows")
         tone.whites = try values.number("tone.whites")
         tone.blacks = try values.number("tone.blacks")
+        guard case .array(let points) = values.value("tone.curve") else { throw RenderError.invalidAdjustment }
+        let coordinates = points.compactMap(\.numberValue)
+        guard coordinates.count == points.count else { throw RenderError.invalidAdjustment }
+        do { tone.curve = try ToneCurve(coordinates) } catch { throw RenderError.invalidAdjustment }
         color.warmth = try values.number("color.warmth")
         color.tint = try values.number("color.tint")
         color.vibrance = try values.number("color.vibrance")

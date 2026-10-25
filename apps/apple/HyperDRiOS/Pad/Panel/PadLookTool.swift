@@ -133,6 +133,8 @@ struct PadLookTool: View {
                          symbol: AdjustmentSymbols.control(declaration))
         case .choice:
             PadChoiceRow(control: control) { panel.set(control.id, option: $0, in: &recipe) }
+        case .curve:
+            EmptyView()
         case .reference:
             EmptyView()
         }

@@ -95,6 +95,7 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
         case choice(String)
         /// A chosen LUT (content hash) or model id; nil for none.
         case reference(String?)
+        case curve([Double])
     }
 
     public let declaration: ParameterDeclaration
@@ -314,6 +315,9 @@ public struct AdjustmentPanel: Sendable {
             value = .toggle(recipe.conditionValue(id)?.boolValue ?? false)
         case .choice:
             value = .choice(recipe.conditionValue(id)?.stringValue ?? declaration.options.first?.id ?? "")
+        case .curve:
+            if case .array(let points) = stored { value = .curve(points.compactMap(\.numberValue)) }
+            else { value = .curve(ToneCurve().coordinates) }
         case .reference:
             value = .reference(recipe.conditionValue(id)?.stringValue)
         }

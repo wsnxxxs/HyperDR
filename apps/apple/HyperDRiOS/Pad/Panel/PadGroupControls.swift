@@ -99,6 +99,8 @@ struct PadGroupControls: View {
                 .disabled(!control.isAvailable)
         case .choice:
             PadChoiceRow(control: control) { panel.set(control.id, option: $0, in: &recipe) }
+        case .curve:
+            EmptyView()
         case .reference:
             PadMenuRow(title: AdjustmentText.label(declaration),
                        value: Text(verbatim: panel.context.models.first { $0.id == control.reference }?.name ?? "")) {

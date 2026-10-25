@@ -115,7 +115,7 @@ public enum AdjustmentText {
         case .choice:
             guard let option = control.options.first(where: { $0.id == control.selectedOption }) else { return label }
             return String(format: item, label, DesignStrings.string(option.labelKey, locale: locale))
-        case .reference:
+        case .reference, .curve:
             return label
         }
     }

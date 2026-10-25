@@ -198,6 +198,8 @@ public struct AdjustmentRow: View {
             AdjustmentChoiceRow(control: control, style: style,
                                 selection: Binding(get: { control.selectedOption ?? "" },
                                                    set: { panel.set(control.id, option: $0, in: &recipe) }))
+        case .curve:
+            EmptyView()
         case .reference:
             let selection = Binding(get: { control.reference ?? "" },
                                     set: { panel.set(control.id, reference: $0.isEmpty ? nil : $0, in: &recipe) })

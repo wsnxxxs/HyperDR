@@ -596,6 +596,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整白色" } }
       }
     },
+    "ctrl.tone.curve.label" : {
+      "comment" : "Adjustment control name (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线" } }
+      }
+    },
+    "ctrl.tone.curve.help" : {
+      "comment" : "Adjustment control help (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shape SDR luminance without changing light above SDR white." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 SDR 范围内的亮度，不改变 SDR 白以上的高光。" } }
+      }
+    },
+    "undo.tone.curve" : {
+      "comment" : "Undo action name (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整曲线" } }
+      }
+    },
     "ctrl.tone.blacks.help" : {
       "comment" : "Adjustment control help (tone.blacks).",
       "localizations" : {

@@ -9,6 +9,7 @@ public struct ToneAdjustments: Hashable, Sendable {
     public var highlights: Float = RenderParameter.defaultNumber("tone.highlights")
     public var shadows: Float = RenderParameter.defaultNumber("tone.shadows")
     public var whites: Float = RenderParameter.defaultNumber("tone.whites")
+    public var curve = ToneCurve()
     public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
     public init() {}
     public var isIdentity: Bool { self == Self() }

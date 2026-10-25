@@ -83,7 +83,7 @@ struct GraphUniform {
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
-    float4 light; // x: whites
+    float4 light; // whites, curve table offset, curve table size
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -214,12 +214,23 @@ float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read
     return changed;
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
+float3 applyToneCurve(float3 rgb, constant GraphUniform& p, device const float4* table) {
+    float y=lum(rgb);
+    if(p.light.z==0 || y<=0 || y>=1) return rgb;
+    float encoded=y<=.0031308f ? 12.92f*y : 1.055f*pow(y,1.f/2.4f)-.055f;
+    float position=encoded*(p.light.z-1);
+    uint i=min(uint(position),uint(p.light.z)-2), offset=uint(p.light.y);
+    float mapped=mix(table[offset+i].x,table[offset+i+1].x,position-float(i));
+    float target=mapped<=.04045f ? mapped/12.92f : pow((mapped+.055f)/1.055f,2.4f);
+    return rgb*(target/y);
+}
 // Light and colour in linear light; each look declares its own input transform.
 float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
     rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
@@ -595,7 +606,7 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
         rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
         rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
         if(p.mode.x>0)rgb=pointOp(rgb,2,p.tone0.z,false);
-        if(p.mode.x>1)rgb=pointOp(rgb,3,p.tone0.w,false);
+        if(p.mode.x>1) { rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false); }
         float y=lum(rgb);
         weight=p.mode.x==0 ? sm(.15f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
     } else if(p.mode.x<5) {

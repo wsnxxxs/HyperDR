@@ -33,6 +33,8 @@ public enum ParameterKind: String, Codable, CaseIterable, Sendable {
     case choice
     /// A named resource: a LUT (`look.lut`) or a model (`hdr.model`).
     case reference
+    /// An SDR luminance curve, stored as alternating x/y coordinates.
+    case curve
 }
 
 /// One recipe value: a small JSON tree, so a value this build does not understand
@@ -315,7 +317,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
     public let id: String
     public let group: ParameterGroup
     public let kind: ParameterKind
-    /// Static range; `nil` for `bool`, `choice` and `reference`.
+    /// Static range; `nil` for `bool`, `choice`, `reference` and `curve`.
     public let range: ClosedRange<Double>?
     /// Keyboard and stepper increment; `nil` for non-numeric kinds.
     public let step: Double?

@@ -254,6 +254,37 @@ private func wideHalf() -> String {
                 }
                 #expect(pixels.baseRGBA[0] == 0)
                 if amount == 1 { #expect(pixels.gain[32*pixels.gainChannelCount] > 0.99) }
+                if amount == 1 {
+                    edit.hdr.range = 0.5
+                    let limited = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                    let white = Double(limited.baseRGBA[32*4]) * exp2(Double(limited.gain[32*limited.gainChannelCount]))
+                    #expect(white <= exp2(0.5))
+                }
+            }
+        }
+    }
+
+    @Test func sdrCurveShapesMidtonesAndKeepsHDR() async throws {
+        let curve = try ToneCurve([0,0, 0.25,0.16, 0.5,0.5, 0.75,0.84, 1,1])
+        let xs = [0.0, 0.05, 0.18, 0.5, 0.9, 1, 1.5]
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.5), curve: curve).x > 0.5)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.05), curve: curve).x < 0.05)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 1.5), curve: curve).x == 1.5)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.18), curve: ToneCurve()).x == 0.18)
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        // A 1D look shares the table buffer with the baked tone curve.
+        let identity = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        for lut in [nil, identity] {
+            var recipe = Recipe(inputDomain: .hdr)
+            recipe.setValue(curve.parameterValue, for: "tone.curve")
+            recipe.setValue(.number(4), for: "hdr.range")
+            if let lut { recipe.look = LUTReference(contentHash: lut.contentHash, name: "Identity") }
+            let pixels = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: lut))
+            for i in xs.indices {
+                let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                let expected = DoubleReference.toneCurve(SIMD3(repeating: xs[i]), curve: curve).x
+                #expect(abs(actual - expected) < 0.0001)
             }
         }
     }

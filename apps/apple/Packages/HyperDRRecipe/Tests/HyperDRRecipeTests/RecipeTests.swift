@@ -4,7 +4,7 @@ import Testing
 
 @Test func parameterTableIsComplete() throws {
     let all = Adjustments.all
-    #expect(all.count == 34)
+    #expect(all.count == 36)
     #expect(Set(all.map(\.id)).count == all.count, "duplicate parameter ids")
     #expect(Adjustments.byID.count == all.count)
 
@@ -308,4 +308,15 @@ private extension ParameterDefault {
         #expect(recipe.visibleParameters.map(\.id) == legacy.visibleParameters.map(\.id))
         #expect(Recipe(adjustmentData: try recipe.adjustmentData())?.rawDecoderVersion == version)
     }
+}
+
+@Test func sdrCurveRecipeRoundTrip() throws {
+    let curve = try ToneCurve([0,0, 0.3,0.2, 0.7,0.8, 1,1])
+    var recipe = Recipe()
+    recipe.setValue(curve.parameterValue, for: "tone.curve")
+    let restored = try Recipe.decode(Data(recipe.jsonString().utf8))
+    #expect(restored.value(for: "tone.curve") == curve.parameterValue)
+    recipe.setValue(ToneCurve().parameterValue, for: "tone.curve")
+    #expect(recipe.value(for: "tone.curve") == nil)
+    #expect(throws: ToneCurve.Error.invalidPoints) { try ToneCurve([0,0, 0.8,0.4, 0.2,0.6, 1,1]) }
 }

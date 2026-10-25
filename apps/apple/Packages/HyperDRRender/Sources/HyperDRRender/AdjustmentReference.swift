@@ -291,8 +291,11 @@ extension DoubleReference {
         var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
-            (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
+            (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks)]
         for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
+        x = toneCurve(x, curve: settings.tone.curve)
+        x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
+        x = point(x, operation: .saturation, value: Double(settings.color.saturation))
         let active = !settings.look.isIdentity
         // A log look keeps linear-P3 negatives through the primary matrix. Fit after
         // the strength mix so the gain split never sees a negative component.

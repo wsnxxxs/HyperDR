@@ -68,31 +68,41 @@ extension RenderEngine {
         return source.texture
     }
 
-    func lookupResources(_ lut: ColorLUT?) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
+    func lookupResources(_ lut: ColorLUT?, curve: ToneCurve = ToneCurve()) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
         let id = lut?.id ?? ""
-        if let cache = lutCache, cache.id == id { return (cache.texture, cache.buffer) }
+        if let cache = lutCache, cache.id == id, cache.curve == curve { return (cache.texture, cache.buffer) }
+        // Curve drags replace only the small table, keeping the installed 3D LUT.
+        let cachedTexture = lutCache.flatMap { $0.id == id ? $0.texture : nil }
         lutCache = nil
-        let edge = lut?.is3D == true ? lut!.size : 2
-        guard edge > 0, edge <= 2048 else { throw RenderError.invalidSize }
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba32Float
-        descriptor.width = edge; descriptor.height = edge; descriptor.depth = edge
-        descriptor.storageMode = .shared; descriptor.usage = .shaderRead
-        guard let texture = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
-        let values = lut?.values.map { SIMD4($0, 1) } ?? [SIMD4<Float>(repeating: 0)]
-        if lut?.is3D == true {
-            values.withUnsafeBytes { bytes in
-                texture.replace(region: MTLRegionMake3D(0, 0, 0, edge, edge, edge), mipmapLevel: 0,
-                                slice: 0, withBytes: bytes.baseAddress!, bytesPerRow: edge * 16, bytesPerImage: edge * edge * 16)
+        let texture: any MTLTexture
+        if let cachedTexture { texture = cachedTexture }
+        else {
+            let edge = lut?.is3D == true ? lut!.size : 2
+            guard edge > 0, edge <= 2048 else { throw RenderError.invalidSize }
+            let descriptor = MTLTextureDescriptor()
+            descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba32Float
+            descriptor.width = edge; descriptor.height = edge; descriptor.depth = edge
+            descriptor.storageMode = .shared; descriptor.usage = .shaderRead
+            guard let created = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
+            if lut?.is3D == true {
+                let values = lut!.values.map { SIMD4($0, 1) }
+                values.withUnsafeBytes { bytes in
+                    created.replace(region: MTLRegionMake3D(0, 0, 0, edge, edge, edge), mipmapLevel: 0,
+                                    slice: 0, withBytes: bytes.baseAddress!, bytesPerRow: edge * 16, bytesPerImage: edge * edge * 16)
+                }
             }
+            texture = created
         }
-        let bufferValues = lut?.is3D == false ? values : [SIMD4<Float>(repeating: 0)]
+        var bufferValues = lut?.is3D == false ? lut!.values.map { SIMD4($0, 1) } : [SIMD4<Float>(repeating: 0)]
+        if !curve.isIdentity {
+            bufferValues += curve.samples().map { SIMD4(Float($0), 0, 0, 0) }
+        }
         let buffer = try bufferValues.withUnsafeBytes { bytes in
             guard let value = device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
                 else { throw RenderError.allocationFailed }
             return value
         }
-        lutCache = (id, texture, buffer)
+        lutCache = (id, curve, texture, buffer)
         return (texture, buffer)
     }
 
@@ -173,7 +183,7 @@ extension RenderEngine {
             effects: SIMD4(edit.film.stock == nil ? edit.effects.grain : 0,
                            edit.film.stock == nil ? edit.effects.halation : 0,
                            referenceArea, edit.usesFilmProcessing ? 1 : 0),
-            light: SIMD4(t.whites, 0, 0, 0))
+            light: SIMD4(t.whites, Float(lut?.is3D == false ? lut!.values.count : 1), t.curve.isIdentity ? 0 : 1024, 0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -198,7 +208,7 @@ extension RenderEngine {
         let cells = try texture(), peaks = try texture(), masks = try texture()
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
         let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, curve: edit.tone.curve)
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
@@ -404,7 +414,7 @@ extension RenderEngine {
             .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
         let target = try authoredSourceAtOutputGrid(source, size: size, region: inputRegion)
         let input = try target?.hdr ?? workingInput(source)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, curve: edit.tone.curve)
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing, genericGrain: edit.film.stock == nil && edit.effects.grain > 0)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)

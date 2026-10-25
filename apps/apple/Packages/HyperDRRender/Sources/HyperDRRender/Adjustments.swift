@@ -22,6 +22,10 @@ public struct ColorAdjustments: Hashable, Sendable {
     public var saturation: Float = RenderParameter.defaultNumber("color.saturation")
     /// Eight bands in HSLBand order, hue/saturation/luminance in engine units.
     public var mixer: [SIMD3<Float>] = Array(repeating: .zero, count: 8)
+    /// Shadows, midtones, highlights, global: hue degrees, saturation, luminance.
+    public var grading: [SIMD3<Float>] = Array(repeating: .zero, count: 4)
+    public var gradingBlending: Float = 0.5
+    public var gradingBalance: Float = 0
     public init() {}
     public var isIdentity: Bool { self == Self() }
 }
@@ -102,6 +106,14 @@ public struct RenderAdjustments: Hashable, Sendable {
                 try RenderParameter.check(color.mixer[i][c],id:"hsl.\(band.rawValue).\(component.rawValue)")
             }
         }
+        guard color.grading.count == 4 else { throw RenderError.invalidAdjustment }
+        for (i, zone) in GradingZone.allCases.enumerated() {
+            for (c, component) in HSLComponent.allCases.enumerated() {
+                try RenderParameter.check(color.grading[i][c],id:"grade.\(zone.rawValue).\(component.rawValue)")
+            }
+        }
+        try RenderParameter.check(color.gradingBlending,id:"grade.blending")
+        try RenderParameter.check(color.gradingBalance,id:"grade.balance")
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
         if let exposure = look.exposure { try RenderParameter.check(exposure,id:"look.exposure") }
         if let exposure = film.exposure { try RenderParameter.check(exposure,id:"look.filmExposure") }

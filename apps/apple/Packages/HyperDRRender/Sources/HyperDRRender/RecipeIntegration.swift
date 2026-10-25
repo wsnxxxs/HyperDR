@@ -87,6 +87,13 @@ extension RenderAdjustments {
                 color.mixer[i][c] = try values.number("hsl.\(band.rawValue).\(component.rawValue)")
             }
         }
+        for (i, zone) in GradingZone.allCases.enumerated() {
+            for (c, component) in HSLComponent.allCases.enumerated() {
+                color.grading[i][c] = try values.number("grade.\(zone.rawValue).\(component.rawValue)")
+            }
+        }
+        color.gradingBlending = try values.number("grade.blending")
+        color.gradingBalance = try values.number("grade.balance")
         hdr.enabled = try values.bool("hdr.enabled")
         if options.bypassedGroups.contains(.hdr) { hdr.enabled = false }
         hdr.source = options.bypassedGroups.contains(.hdr) ? nil : recipe.hdrSource

@@ -65,7 +65,7 @@ public enum Adjustments {
     /// Physical effects share the adjustment group but are independent of colour looks.
     public static let effectIDs = ["effect.grain", "effect.halation"]
 
-    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + look + detail
+    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + grading + look + detail
 
     public static let byID: [String: ParameterDeclaration] =
         Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -225,6 +225,37 @@ public enum Adjustments {
         ParameterDeclaration(id: "hsl.magenta.saturation", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "hsl.magenta.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+    ]
+
+    private static let grading: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "grade.shadows.hue", group: .color, kind: .float, range: 0...360, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .direct, origin: .zero),
+        ParameterDeclaration(id: "grade.shadows.saturation", group: .color, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.shadows.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.midtones.hue", group: .color, kind: .float, range: 0...360, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .direct, origin: .zero),
+        ParameterDeclaration(id: "grade.midtones.saturation", group: .color, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.midtones.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.highlights.hue", group: .color, kind: .float, range: 0...360, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .direct, origin: .zero),
+        ParameterDeclaration(id: "grade.highlights.saturation", group: .color, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.highlights.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.global.hue", group: .color, kind: .float, range: 0...360, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .direct, origin: .zero),
+        ParameterDeclaration(id: "grade.global.saturation", group: .color, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.global.luminance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
+        ParameterDeclaration(id: "grade.blending", group: .color, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(50)), format: .percent, scale: .hundredth),
+        ParameterDeclaration(id: "grade.balance", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
     ]
 

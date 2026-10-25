@@ -47,6 +47,29 @@ import Testing
         #expect(DoubleReference.hslWeights(SIMD3(repeating:0.4)).reduce(0,+)==0)
     }
 
+    @Test func gradingKeepsHDRLuminanceAndMatchesDouble() async throws {
+        let engine = try RenderEngine()
+        for level in [0.03,0.18,1.0,4.0] {
+            let rgb = SIMD3<Double>(repeating:level)
+            let image = CIImage(color:CIColor(red:level,green:level,blue:level,
+                colorSpace:RenderEngine.workingColorSpace)!).cropped(to:CGRect(x:0,y:0,width:4,height:4))
+            let source = try await engine.source(image:image,domain:.rawEDR)
+            let recipe = Recipe(inputDomain:.rawEDR,values:["grade.shadows.hue":.number(220),
+                "grade.shadows.saturation":.number(50),"grade.highlights.hue":.number(45),
+                "grade.highlights.saturation":.number(50),"grade.global.hue":.number(30),
+                "grade.global.saturation":.number(15),"hdr.range":.number(4)])
+            let settings = try RenderAdjustments(recipe:recipe)
+            let changed = DoubleReference.colorGrade(rgb,wheels:settings.color.grading)
+            #expect(abs(DoubleReference.luma(changed)-level)<1e-8)
+            let expected = DoubleReference.prepare(rgb,settings:settings,sdr:false)
+            let pixels = RenderEngine.readPixels(try await engine.render(source,recipe:recipe))
+            for c in 0..<3 {
+                #expect(abs(Double(pixels.baseRGBA[c])-expected.base[c])<3e-5)
+                #expect(abs(Double(pixels.gain[c])-expected.gains[c])<3e-5)
+            }
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_COLOR_REVIEW"] != nil))
     func localVibranceComparison() async throws {
         let root = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_COLOR_REVIEW"]!)
@@ -74,6 +97,26 @@ import Testing
                 ("blue-saturation",["hsl.blue.saturation":.number(80),"hsl.aqua.saturation":.number(40)]),
                 ("green-hue",["hsl.green.hue":.number(65),"hsl.yellow.hue":.number(30)]),
                 ("orange-luminance",["hsl.orange.luminance":.number(70),"hsl.red.luminance":.number(30)])]
+            for (name,values) in variants {
+                let recipe = Recipe(inputDomain:source.domain,values:values)
+                try writeReview(RenderEngine.readPixels(try await engine.render(source,recipe:recipe)),to:output.appendingPathComponent(sample+"-"+name+".png"))
+            }
+        }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_COLOR_REVIEW"] != nil))
+    func localGradingComparison() async throws {
+        let root = URL(fileURLWithPath:ProcessInfo.processInfo.environment["HYPERDR_COLOR_REVIEW"]!)
+        let output = root.appendingPathComponent("grading")
+        try FileManager.default.createDirectory(at:output,withIntermediateDirectories:true)
+        for sample in ["DSC01468.ARW", "IMG_3891.HEIC", "DSC01422.HIF"] {
+            let engine = try RenderEngine()
+            let source = try await engine.load(URL(fileURLWithPath:"/Users/nxxxs/Desktop/HyperDR/测试照片/"+sample),options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:768,height:768))))
+            let variants: [(String,[String:ParameterValue])] = [("before",[:]),
+                ("teal-orange",["grade.shadows.hue":.number(220),"grade.shadows.saturation":.number(45),
+                    "grade.highlights.hue":.number(50),"grade.highlights.saturation":.number(35),
+                    "grade.midtones.hue":.number(30),"grade.midtones.saturation":.number(15)]),
+                ("global-warm",["grade.global.hue":.number(55),"grade.global.saturation":.number(35)])]
             for (name,values) in variants {
                 let recipe = Recipe(inputDomain:source.domain,values:values)
                 try writeReview(RenderEngine.readPixels(try await engine.render(source,recipe:recipe)),to:output.appendingPathComponent(sample+"-"+name+".png"))

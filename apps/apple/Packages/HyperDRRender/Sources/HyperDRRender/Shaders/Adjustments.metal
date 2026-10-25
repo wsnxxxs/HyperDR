@@ -101,7 +101,7 @@ kernel void adjustPoint(texture2d<float,access::read> src [[texture(0)]],
     dst.write(float4(pointOp(x.rgb,p.op,p.value,p.sdr),x.a),pos);
 }
 
-struct ColorToolsUniform { float4 band0, band1, band2, band3, band4, band5, band6, band7; };
+struct ColorToolsUniform { float4 band0, band1, band2, band3, band4, band5, band6, band7; float4 grade0,grade1,grade2,grade3,gradeOptions; };
 struct GraphUniform {
     float4 tone0, tone1, color, hdr;
     uint4 flags, lutInfo;
@@ -142,6 +142,22 @@ float3 colorMixer(float3 rgb,constant ColorToolsUniform& p) {
     float chroma=length(lab.yz)*max(0.f,1+delta.y);
     lab.yz=chroma*float2(cos(hue),sin(hue));
     return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y*exp2(delta.z));
+}
+float3 colorGrade(float3 rgb,constant ColorToolsUniform& p) {
+    const float3 wheels[4]={p.grade0.xyz,p.grade1.xyz,p.grade2.xyz,p.grade3.xyz};
+    bool active=false;for(uint i=0;i<4;i++) active=active || wheels[i].y!=0 || wheels[i].z!=0;
+    if(!active) return rgb;
+    float y=lum(rgb);float3 lab=colorLab(rgb/max(1.f,y));
+    float position=clamp(min(1.f,cb(y))+p.gradeOptions.y*.2f,0.f,1.f),width=.08f+.22f*p.gradeOptions.x;
+    float shadows=1-sm(.35f-width,.35f+width,position),highlights=sm(.75f-width,.75f+width,position);
+    const float weights[4]={shadows,1-shadows-highlights,highlights,1};
+    float2 offset=0;float light=0;
+    for(uint i=0;i<4;i++) {
+        float hue=wheels[i].x*M_PI_F/180.f,chroma=.18f*wheels[i].y*weights[i]*lab.x;
+        offset+=chroma*float2(cos(hue),sin(hue));light+=wheels[i].z*weights[i];
+    }
+    lab.yz+=offset;
+    return colorPreserveY(labToRGB(lab.x,lab.y,lab.z),y*exp2(light));
 }
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -329,6 +345,7 @@ float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     if(beforeMixer) return rgb;
     rgb=colorMixer(rgb,p.colorTools);
+    rgb=colorGrade(rgb,p.colorTools);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
     bool logLook=p.flags.z && p.lutInfo.z>=5 && p.lutInfo.z!=20;

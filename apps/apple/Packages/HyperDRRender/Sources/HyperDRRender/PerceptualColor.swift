@@ -60,4 +60,24 @@ extension DoubleReference {
         return preserveLuminance(oklabRGB(lab),target:y*exp2(delta.z))
     }
 
+    public static func colorGrade(_ rgb: RGB, wheels: [SIMD3<Float>], blending: Double = 0.5, balance: Double = 0) -> RGB {
+        guard wheels.contains(where: { $0.y != 0 || $0.z != 0 }) else { return rgb }
+        let y = luma(rgb)
+        var lab = oklab(rgb/max(1,y))
+        let position = min(1,max(0,min(1,cbrt(y))+balance*0.2))
+        let width = 0.08+0.22*blending
+        let shadows = 1-smoothStep(0.35-width,0.35+width,position)
+        let highlights = smoothStep(0.75-width,0.75+width,position)
+        let weights = [shadows,1-shadows-highlights,highlights,1]
+        var a = 0.0, b = 0.0, light = 0.0
+        for i in 0..<4 {
+            let hue = Double(wheels[i].x)*Double.pi/180
+            let chroma = 0.18*Double(wheels[i].y)*weights[i]*lab.x
+            a += chroma*cos(hue); b += chroma*sin(hue)
+            light += Double(wheels[i].z)*weights[i]
+        }
+        lab.y += a; lab.z += b
+        return preserveLuminance(oklabRGB(lab),target:y*exp2(light))
+    }
+
 }

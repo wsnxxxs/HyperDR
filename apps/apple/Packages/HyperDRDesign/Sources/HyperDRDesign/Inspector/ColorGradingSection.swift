@@ -31,6 +31,20 @@ public enum WheelZone: String, CaseIterable, Identifiable, Sendable {
 /// from the right (the angular gradient's own start), saturation from the
 /// centre (0) to the rim (100).
 enum GradingWheelMath {
+    /// What the grading makes of mid grey for a hue (the recipe's degrees) and a
+    /// saturation (0…100): the shader's own result, so a swatch is the colour
+    /// the photo takes.
+    static func colour(hue: Double, saturation: Double) -> Color {
+        let rgb = GradingColor.displayRGB(hue: hue, saturation: saturation)
+        return Color(.sRGB, red: rgb.x, green: rgb.y, blue: rgb.z, opacity: 1)
+    }
+
+    /// The colour circle at full saturation, from hue 0 round to 360.
+    static func ring(steps: Int = 24) -> [Color] { (0...steps).map { colour(hue: 360 * Double($0) / Double(steps), saturation: 100) } }
+
+    /// Mid grey: the middle of the disc.
+    static var neutral: Color { colour(hue: 0, saturation: 0) }
+
     /// The point for `hue` (degrees) and `saturation` (0…100) on a disc of `radius` about `center`.
     static func point(hue: Double, saturation: Double, center: CGPoint, radius: CGFloat) -> CGPoint {
         let angle = hue * .pi / 180
@@ -78,9 +92,7 @@ struct GradingWheel: View {
 
     private var puckSize: CGFloat { style == .touch ? 26 : 18 }
 
-    static func tint(hue: Double, saturation: Double) -> Color {
-        Color(hue: hue / 360, saturation: saturation / 100, brightness: 0.95)
-    }
+    static func tint(hue: Double, saturation: Double) -> Color { GradingWheelMath.colour(hue: hue, saturation: saturation) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -90,10 +102,9 @@ struct GradingWheel: View {
             let puck = GradingWheelMath.point(hue: hue, saturation: saturation, center: center, radius: radius)
             ZStack {
                 Circle()
-                    .fill(AngularGradient(colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 0.85, brightness: 0.9) },
-                                          center: .center))
+                    .fill(AngularGradient(colors: GradingWheelMath.ring(), center: .center))
                     .overlay {
-                        Circle().fill(RadialGradient(colors: [Color.hdr.histogramBackdrop, Color.hdr.histogramBackdrop.opacity(0)],
+                        Circle().fill(RadialGradient(colors: [GradingWheelMath.neutral, GradingWheelMath.neutral.opacity(0)],
                                                      center: .center, startRadius: 0, endRadius: radius))
                     }
                     .overlay { Circle().strokeBorder(Color.hdr.line) }
@@ -163,9 +174,8 @@ private struct GradingZoneTab: View {
             VStack(spacing: 4) {
                 ZStack {
                     Circle()
-                        .fill(AngularGradient(colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 0.7, brightness: 0.8) },
-                                              center: .center))
-                        .overlay { Circle().fill(RadialGradient(colors: [Color.hdr.histogramBackdrop, Color.hdr.histogramBackdrop.opacity(0)],
+                        .fill(AngularGradient(colors: GradingWheelMath.ring(), center: .center))
+                        .overlay { Circle().fill(RadialGradient(colors: [GradingWheelMath.neutral, GradingWheelMath.neutral.opacity(0)],
                                                                  center: .center, startRadius: 0, endRadius: side / 2)) }
                         .opacity(isSelected ? 1 : 0.55)
                     Circle()
@@ -311,9 +321,9 @@ struct ColorGradingLayout<Slider: View>: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Space.s1)
                 VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-                    slider(zone.hueID, MixerAttribute.hue.title, TrackGradient.ring())
+                    slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring())
                     slider(zone.saturationID, MixerAttribute.saturation.title,
-                           TrackGradient.saturation(toward: GradingWheel.tint(hue: current.hue, saturation: 100)))
+                           [GradingWheelMath.neutral, GradingWheel.tint(hue: current.hue, saturation: 100)])
                     slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
                 }
                 Divider().padding(.vertical, Space.s1)

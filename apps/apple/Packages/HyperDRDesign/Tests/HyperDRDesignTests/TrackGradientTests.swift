@@ -1,4 +1,5 @@
 import AppKit
+import HyperDRRecipe
 import SwiftUI
 import Testing
 @testable import HyperDRDesign
@@ -20,8 +21,14 @@ import Testing
     #expect(stops[0] == TrackGradient.grey)
 }
 
-@Test func ringCoversTheWholeCircle() {
-    #expect(TrackGradient.ring().count == 13)
+@Test func wheelSwatchesAreTheShadersColours() {
+    // Hue is the recipe's own angle, so the wheel's red end and its opposite differ,
+    // and zero saturation is the neutral middle.
+    #expect(GradingWheelMath.ring().count == 25)
+    #expect(GradingWheelMath.colour(hue: 40, saturation: 0) == GradingWheelMath.neutral)
+    #expect(GradingWheelMath.colour(hue: 30, saturation: 80) != GradingWheelMath.colour(hue: 210, saturation: 80))
+    let red = GradingColor.displayRGB(hue: 30, saturation: 100)
+    #expect(red.x > red.z)
 }
 
 /// Writes the colour sections with their gradient tracks, in light and dark,

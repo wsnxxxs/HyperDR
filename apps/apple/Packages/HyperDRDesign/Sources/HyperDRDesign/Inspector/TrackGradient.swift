@@ -14,11 +14,6 @@ enum TrackGradient {
     /// The grey a saturation track starts from.
     static let grey = Color(white: 0.55)
 
-    /// The whole circle, red to red.
-    static func ring(steps: Int = 12) -> [Color] {
-        (0...steps).map { colour(turns: Double($0) / Double(steps), saturation: 0.85) }
-    }
-
     /// Stops from one angle to another along the shorter way round.
     static func sweep(from start: Double, to end: Double, steps: Int = 4) -> [Color] {
         var delta = (end - start).truncatingRemainder(dividingBy: 1)

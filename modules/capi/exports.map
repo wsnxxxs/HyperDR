@@ -11,6 +11,7 @@
     hyperdr_probe;
     hyperdr_package;
     hyperdr_package_rows;
+    hyperdr_package_rows_progress;
     hyperdr_package_rows_supported;
     hyperdr_cancel_create;
     hyperdr_cancel_request;

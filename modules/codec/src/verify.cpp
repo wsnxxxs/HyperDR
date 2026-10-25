@@ -70,5 +70,9 @@ VerificationResult verify_encoded_file(const std::filesystem::path& path,HdrEnco
   }
   return codec::verify_heif_pixels(bytes,encoding,frame);
 }
+VerificationResult verify_avif_file(const std::filesystem::path& path,const AvifCellDigests& decoded) {
+  VerificationFile file(path);
+  return verify_avif_pixels(file.bytes(),&decoded);
+}
 } // namespace hyperdr
 #endif

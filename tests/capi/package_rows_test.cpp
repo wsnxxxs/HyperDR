@@ -8,6 +8,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include <avif/avif.h>
+#include <array>
 #include <memory>
 #include <algorithm>
 #include <cmath>
@@ -28,6 +29,10 @@ struct Source {
   float gain_scale=1.f, gain_bias=0.f;
   hyperdr_cancel* token=nullptr;
   unsigned largest=0, reads=0;
+  std::vector<std::array<uint32_t,3>> progress_events;
+  static void progress(void* context,uint32_t phase,uint32_t done,uint32_t total) {
+    static_cast<Source*>(context)->progress_events.push_back({phase,done,total});
+  }
   static float gain_scale_value(const Source& s,float u,float v,unsigned c) {
     return s.gain_bias+s.gain_scale*((s.channels==3?-.3f:0.f)+1.8f*u*v*(1-.1f*float(c)));
   }
@@ -171,6 +176,33 @@ int main(int argc,char** argv) try {
     bool rejected=false;try{(void)hyperdr::verify_avif_pixels(broken);}catch(const std::exception&){rejected=true;}
     REQUIRE(rejected);
     std::filesystem::remove(stream);
+  }
+  // The progress entry reports every AVIF grid cell's encode and check (the
+  // check runs beside the next encode), never backwards; other formats report
+  // nothing, and the plain entry stays the same call without a callback.
+  {
+    source.width=base.width=gain.plane.width=2100;source.height=base.height=gain.plane.height=1100;
+    source.channels=gain.plane.channels=1;source.frame=false;request.presentation_frame=0;request.has_frame_photo=0;
+    for(const char* format:{"avif-pq","sdr-jpeg"}) {
+      request.format=format;request.gain=std::string(format).starts_with("sdr-")?nullptr:&gain;
+      request.output_path=stream_path.c_str();request.parameters_json="{\"quality\":60,\"overwrite\":true}";
+      source.progress_events.clear();char* report=nullptr;error=nullptr;
+      const auto code=hyperdr_package_rows_progress(engine,&request,64,Source::read,Source::progress,&source,&report,&error);
+      status(code,report,error);
+      if(std::string(format)=="sdr-jpeg") { REQUIRE(source.progress_events.empty()); continue; }
+      uint32_t encoded=0,verified=0;
+      for(const auto& [phase,done,total]:source.progress_events) {
+        REQUIRE(total==6&&(phase==HYPERDR_PACKAGE_PHASE_ENCODE||phase==HYPERDR_PACKAGE_PHASE_VERIFY));
+        auto& counter=phase==HYPERDR_PACKAGE_PHASE_ENCODE?encoded:verified;
+        REQUIRE(done>=counter&&done<=total);counter=done;REQUIRE(verified<=encoded);
+      }
+      REQUIRE(encoded==6&&verified==6);
+      const auto verified_file=hyperdr::verify_encoded_file(stream,*hyperdr::hdr_encoding_from_name(format));
+      REQUIRE(verified_file.width==2100&&verified_file.height==1100);
+    }
+    std::filesystem::remove(stream);
+    source.width=base.width=gain.plane.width=65;source.height=base.height=gain.plane.height=533;
+    request.parameters_json="{\"quality\":93}";
   }
   // AVIF must keep whole-plane's 8-bit gain-code quantization, not HEIC's
   // continuous-code rule. Use exact one-cell dimensions to exclude grid seams;

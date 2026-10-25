@@ -62,7 +62,9 @@ inline constexpr std::uint32_t kAvifRowMaxCellSide = 1024;
 // writer: its one-cell-at-a-time decode bound is 4096, NOT the row writer's
 // 1024 encode bound. Do not use this compatibility ceiling to price row exports.
 inline constexpr std::uint32_t kAvifVerifyMaxCellSide = kAvifMaxCellSide;
-inline constexpr int kAvifRowMaxThreads = 2;
+// Encoder threads for one cell. A second thread decodes the previous cell to
+// verify it while this one encodes (write_avif_rows).
+inline constexpr int kAvifRowMaxThreads = 4;
 [[nodiscard]] constexpr AvifGridLayout avif_row_grid_layout(std::uint32_t width,
                                                            std::uint32_t height) noexcept {
   const auto columns = std::max(1U, (width + kAvifRowMaxCellSide - 1) / kAvifRowMaxCellSide);

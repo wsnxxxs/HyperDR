@@ -25,11 +25,23 @@ public struct RecipeExportProgress: Sendable {
     /// How many sequential passes the row writer makes over the rows (gain
     /// extrema, base, gain); nil when unknown or outside the row writer.
     public let rowPasses: Int?
+    /// The writer encodes independent cells after its rows (AVIF): the rows
+    /// are rendering only, and the cells take the ring from `cellsStart`.
+    public let cellsFollow: Bool
+    /// AVIF grid cells encoded and verified so far; nil before the first.
+    public let cells: Cells?
+    public struct Cells: Sendable, Equatable {
+        public let encoded, verified, total: Int
+        public init(encoded: Int, verified: Int, total: Int) {
+            self.encoded = encoded; self.verified = verified; self.total = total
+        }
+    }
     /// Once every row is written, checking and saving the file are one
     /// “Finishing up”, not stages of their own.
     public var stageMessage: ExportMessage {
         .init(key: "export.stage." + (isFinishing && stage != .delivering ? "finishing"
-            : includesRendering ? "renderingEncoding" : stage.rawValue))
+            : cells != nil ? "encoding"
+            : includesRendering ? (cellsFollow ? "rendering" : "renderingEncoding") : stage.rawValue))
     }
     /// The whole export's completion, 0...1, so one bar fills once instead of
     /// once per pass: the rows (every pass of the row writer, or the stripes
@@ -44,10 +56,15 @@ public struct RecipeExportProgress: Sendable {
                 // A whole-plane encode follows all of its rendered stripes.
                 return stage == .encoding && !includesRendering ? Self.wholePlaneRenderShare : nil
             }
+            if let cells, cells.total > 0 {
+                // Each cell counts once encoded and once verified.
+                let units = Double(min(cells.encoded, cells.total) + min(cells.verified, cells.total))
+                return Self.cellsStart + (Self.rowsShare - Self.cellsStart) * units / Double(2 * cells.total)
+            }
             let rows = min(1, max(0, Double(done) / Double(total)))
             guard let pass = rowPass else { return Self.wholePlaneRenderShare * rows }
             let passes = max(pass, rowPasses ?? pass)
-            return Self.rowsShare * (Double(pass - 1) + rows) / Double(passes)
+            return (cellsFollow ? Self.cellsStart : Self.rowsShare) * (Double(pass - 1) + rows) / Double(passes)
         case .verifying: return Self.rowsShare
         case .publishing: return 0.95
         case .delivering: return 0.98
@@ -59,16 +76,21 @@ public struct RecipeExportProgress: Sendable {
         switch stage {
         case .verifying, .publishing, .delivering: return true
         case .encoding:
-            guard let pass = rowPass, let passes = rowPasses, let total = totalRows else { return false }
+            if let cells { return cells.encoded >= cells.total && cells.verified >= cells.total }
+            guard !cellsFollow, let pass = rowPass, let passes = rowPasses, let total = totalRows else { return false }
             return pass >= passes && completedRows == total
         case .preparing, .model, .developing, .rendering: return false
         }
     }
     static let rowsShare = 0.9
+    /// Where an AVIF's cells start: its rows (the gain scan and the staging
+    /// pass) take less time on a phone than encoding and verifying the cells.
+    static let cellsStart = 0.4
     static let wholePlaneRenderShare = 0.6
     public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil, includesRendering: Bool = false,
-                rowPass: Int? = nil, rowPasses: Int? = nil) {
+                rowPass: Int? = nil, rowPasses: Int? = nil, cellsFollow: Bool = false, cells: Cells? = nil) {
         self.includesRendering = includesRendering; self.rowPass = rowPass; self.rowPasses = rowPasses
+        self.cellsFollow = cellsFollow; self.cells = cells
         self.stage = stage; self.completedRows = completedRows; self.totalRows = totalRows
     }
 }

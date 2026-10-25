@@ -145,13 +145,24 @@ public struct PackageReport: Codable, Sendable {
 public typealias PackageRowReader = @Sendable (_ y: Int, _ rows: Int,
     _ base: UnsafeMutableBufferPointer<Float>, _ gain: UnsafeMutableBufferPointer<Float>?) throws -> Void
 
+/// A row writer's independent units once its rows are read: AVIF grid cells,
+/// each encoded and then verified (on a second thread, beside the next encode).
+public enum PackagePhase: UInt32, Sendable {
+    case encode = 1, verify = 2
+}
+
+/// Called on the native package thread, between units; `done` never decreases
+/// within a phase and reaches `total`. Return quickly; never call the engine.
+public typealias PackageProgressHandler = @Sendable (_ phase: PackagePhase, _ done: Int, _ total: Int) -> Void
+
 private final class PackageRowContext {
     let width: Int
     let channels: Int
     let read: PackageRowReader
+    let progress: PackageProgressHandler?
     var failure: (any Error)?
-    init(width: Int, channels: Int, read: @escaping PackageRowReader) {
-        self.width = width; self.channels = channels; self.read = read
+    init(width: Int, channels: Int, read: @escaping PackageRowReader, progress: PackageProgressHandler?) {
+        self.width = width; self.channels = channels; self.read = read; self.progress = progress
     }
 }
 
@@ -195,12 +206,14 @@ extension Engine {
     }
 
     /// Packages repeatable bands without caller-owned whole float planes. AVIF
-    /// stages quantized rows on disk, encoding and verifying one cell at a time.
+    /// stages quantized rows on disk, then encodes one cell at a time while the
+    /// previous cell is verified, reporting both through `progress`.
     /// A separate system reader may still need native-area decoder workspace.
     public func packageRows(width: Int, height: Int, gainChannels: Int = 0,
                             gainMetadata: PackageGainMetadata? = nil, rows: Int = 256,
                             to output: URL, options: PackageOptions,
-                            read: @escaping PackageRowReader) async throws -> PackageReport {
+                            read: @escaping PackageRowReader,
+                            progress: PackageProgressHandler? = nil) async throws -> PackageReport {
         guard width > 0, height > 0, width <= Int(UInt32.max), height <= Int(UInt32.max),
               rows > 0, rows <= 4096, [0, 1, 3].contains(gainChannels),
               (gainChannels == 0) == (gainMetadata == nil) else {
@@ -214,7 +227,7 @@ extension Engine {
             try Self.packageNow(engine: self.pointer, sdr: base, gain: gain, gainMetadata: gainMetadata,
                 output: output, format: options.format, parameters: parameters,
                 presentationFrame: options.presentationFrame, framePhoto: options.framePhoto,
-                exif: options.exif ?? Data(), cancellation: cancellation, reader: read, rows: rows)
+                exif: options.exif ?? Data(), cancellation: cancellation, reader: read, progress: progress, rows: rows)
         }
     }
 
@@ -232,7 +245,8 @@ extension Engine {
                                    format: String, parameters: String,
                                    presentationFrame: Bool, framePhoto: FrameLayout.Rect?,
                                    exif: Data,
-                                   cancellation: Cancellation, reader: PackageRowReader? = nil, rows: Int = 256) throws -> PackageReport {
+                                   cancellation: Cancellation, reader: PackageRowReader? = nil,
+                                   progress: PackageProgressHandler? = nil, rows: Int = 256) throws -> PackageReport {
         var base = hyperdr_package_plane()
         base.data = UnsafeRawPointer(sdr.samples.baseAddress)
         base.row_bytes = 0
@@ -259,7 +273,9 @@ extension Engine {
         gainSettings.alternate_headroom = gainMetadata?.alternateHeadroom ?? 0
         let gamut = gainMetadata?.workingGamut ?? "display-p3"
 
-        let rowContext = reader.map { PackageRowContext(width: sdr.width, channels: gain?.channels ?? 0, read: $0) }
+        let rowContext = reader.map {
+            PackageRowContext(width: sdr.width, channels: gain?.channels ?? 0, read: $0, progress: progress)
+        }
         var reportPointer: UnsafeMutablePointer<CChar>?
         var error: UnsafeMutablePointer<hyperdr_error>?
         let status: Int32 = output.path.withCString { path in
@@ -292,7 +308,12 @@ extension Engine {
                                     }
                                     request.cancel = cancellation.pointer
                                     if let rowContext {
-                                        return hyperdr_package_rows(engine, &request, UInt32(rows), { user, y, count, base, gain in
+                                        let report: hyperdr_package_progress_callback? = progress == nil ? nil : { user, phase, done, total in
+                                            let context = Unmanaged<PackageRowContext>.fromOpaque(user!).takeUnretainedValue()
+                                            guard let phase = PackagePhase(rawValue: phase) else { return }
+                                            context.progress?(phase, Int(done), Int(total))
+                                        }
+                                        return hyperdr_package_rows_progress(engine, &request, UInt32(rows), { user, y, count, base, gain in
                                             let context = Unmanaged<PackageRowContext>.fromOpaque(user!).takeUnretainedValue()
                                             do {
                                                 let pixels = context.width * Int(count)
@@ -304,7 +325,7 @@ extension Engine {
                                                 context.failure = error
                                                 return 1
                                             }
-                                        }, Unmanaged.passUnretained(rowContext).toOpaque(), &reportPointer, &error)
+                                        }, report, Unmanaged.passUnretained(rowContext).toOpaque(), &reportPointer, &error)
                                     }
                                     return hyperdr_package(engine, &request, &reportPointer, &error)
                                 }

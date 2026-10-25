@@ -247,13 +247,13 @@ public actor RecipeExportService: RecipeExportServicing {
             var imageIOReport: ImageIOGainWriteReport?
             let actualRenderRows: Int?
             if plan.memory.usesRowInput {
-                guard let rowRenderer, let lazySource,
+                guard let rowRenderer, let exportSource = lazySource,
                       Engine.supportsPackageRows(format: plan.encoding.rawValue) else {
                     throw HyperDRError(code: "unsupported_format", message: "Incremental export is unavailable")
                 }
                 actualRenderRows = plan.memory.renderRows
                 emit(.rendering)
-                let rows = try await rowRenderer.prepareRows(lazySource, recipe: snapshot.recipe, lut: frozenLUT,
+                let rows = try await rowRenderer.prepareRows(exportSource, recipe: snapshot.recipe, lut: frozenLUT,
                     modelGain: model, request: renderRequest, rows: plan.memory.renderRows)
                 report = rows.report
                 guard report.canvasSize == renderRequest.canvasSize,
@@ -281,7 +281,8 @@ public actor RecipeExportService: RecipeExportServicing {
                         depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
                         gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
                         presentationFrame: report.presentationFrame, framePhoto: framePhoto, exif: try photoMetadata.nativeExif()),
-                    read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
+                    read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) },
+                    progress: { phase, done, total in bridge.cell(phase, done: done, total: total) })
                 guard packaged.verified, (packaged.gain?.clippedSamples ?? 0) == 0 else {
                     throw RecipeExportError.verificationFailed("package_rows_unverified")
                 }
@@ -294,6 +295,11 @@ public actor RecipeExportService: RecipeExportServicing {
                 stageStart = stageStart.addingTimeInterval(bridge.readSeconds)
                 packageJSON = packaged.rawJSON
                 thumbnail = try bridge.thumbnail()
+                // Package has written and read back the file. End the export
+                // source's native development here, so the system reader below
+                // (a whole-file decode for AVIF) does not run beside it.
+                lazySource = nil
+                _ = consume source
                 emit(.verifying)
             } else {
                 actualRenderRows = nil

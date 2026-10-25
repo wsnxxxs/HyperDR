@@ -264,9 +264,12 @@ extension ExportMemoryEstimate {
         // flight; reserve their buffers/framework workspace separately (32 MiB).
         // Completed tiles are spooled to an anonymous file, not retained by VT.
         // AVIF's RGB16 staging and compressed samples are file-backed. Only
-        // one <=1024-square cell / two-thread libaom context is resident. Keep
-        // a conservative 96 B/cell-pixel plus 64 MiB for codec/container buffers.
-        let avifWorkspace = avifRowCell(canvas: input.canvas).pixels * 96 + (64 << 20)
+        // one <=1024-square cell / four-thread libaom context is resident,
+        // beside one cell decoder verifying the previous cell and at most two
+        // waiting samples. Keep a conservative 96 B/cell-pixel plus 64 MiB for
+        // codec/container buffers and 48 MiB for the verifier and the extra
+        // threads (a whole 88MP q100 packageRows peaked at +171 MiB on the Mac).
+        let avifWorkspace = avifRowCell(canvas: input.canvas).pixels * 96 + (64 << 20) + (48 << 20)
         let codec = avif ? avifWorkspace
             : heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
             : input.canvas.width * 32
@@ -292,10 +295,15 @@ extension ExportMemoryEstimate {
         // No full auxiliary dictionary on native row output. JPEG/HEIC CI
         // readback requests decoder subsampling by 8 and a <=256px thumbnail.
         // Keep decoder row/tile workspace beside fixed base/gain/float buffers.
-        // ImageIO can decode every AVIF grid cell to make its thumbnail. Unlike
-        // JPEG/HEVC subsampling, a 256px result does not bound that workspace.
-        // Reserve a native-area decoder here, after the native cell reader ends.
-        let systemVerify = verifierResident + (avif ? input.canvas.pixels * 24 : nativeWorkspace)
+        // ImageIO decodes every AVIF grid cell to make its thumbnail, but one
+        // cell at a time: a 10772 × 8174 PQ file (88MP, 1024² cells) peaked at
+        // +33 MiB HDR and +13 MiB SDR (Mac, 2026-10-25), not a native-area
+        // decode. Reserve two cells at 24 B/pixel plus 64 MiB of codec state.
+        // The export source's development ends before this reader starts
+        // (RecipeExportService), so only the fixed work allowance stays beside it.
+        let releasedResident = 512 * 1024 * 1024 + input.retainedBytes
+        let systemAVIF = avifRowCell(canvas: input.canvas).pixels * 24 * 2 + (64 << 20)
+        let systemVerify = releasedResident + (avif ? systemAVIF : nativeWorkspace)
             + 256 * 256 * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
                      packaging: assembly, encode: encode, verify: max(nativeVerify, systemVerify),

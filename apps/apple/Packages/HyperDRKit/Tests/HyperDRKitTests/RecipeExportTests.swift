@@ -921,6 +921,25 @@ struct RowWriterProgressTests {
             for y in ys { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
             return (bridge.started, events.withLock { $0 })
         }
+        // AVIF: the gain scan and the staging pass are rendering, up to 40 %;
+        // each cell then counts once encoded and once verified, up to 90 %.
+        do {
+            let events = Mutex<[RecipeExportProgress]>([])
+            let bridge = PackageRowBridge(source: FakeRows(fake: fake, request: request, report: fake.report(request)),
+                frame: nil, encoding: .avifPq, progress: { event in events.withLock { $0.append(event) } })
+            var base = [Float](repeating: 0, count: 8 * 4 * 3)
+            for y in [0, 4, 0, 4] { try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) } }
+            for (phase, done) in [(PackagePhase.encode, 1), (.encode, 2), (.verify, 1), (.verify, 2)] {
+                bridge.cell(phase, done: done, total: 2)
+            }
+            let avif = events.withLock { $0 }
+            let fractions = avif.compactMap(\.fraction)
+            #expect(fractions.count == 8 && zip(fractions, fractions.dropFirst()).allSatisfy { $0 < $1 })
+            #expect(abs(fractions[3] - 0.4) < 1e-9 && abs(fractions[7] - 0.9) < 1e-9)
+            #expect(avif.map(\.isFinishing) == [false, false, false, false, false, false, false, true])
+            let words = avif.map { $0.stageMessage.localized(locale: Locale(identifier: "zh-Hans")) }
+            #expect(words[0] == "渲染中" && words[3] == "渲染中" && words[4] == "编码中" && words[7] == "正在收尾")
+        }
         // PQ: the gain's extrema, then one HDR picture.
         let (started, pq) = try run(.pq, [0, 4, 0, 4])
         #expect(started.fraction == 0 && started.rowPasses == 2 && !started.isFinishing)

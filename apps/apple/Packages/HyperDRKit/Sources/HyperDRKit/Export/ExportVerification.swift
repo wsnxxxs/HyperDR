@@ -28,19 +28,23 @@ enum ExportVerification {
                   let width = props[kCGImagePropertyPixelWidth] as? Int,
                   let height = props[kCGImagePropertyPixelHeight] as? Int,
                   width == plan.size.width, height == plan.size.height,
-                  (props[kCGImagePropertyOrientation] as? Int ?? 1) == 1,
-                  CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 256,
-                    kCGImageSourceDecodeRequest: kCGImageSourceDecodeToSDR] as CFDictionary) != nil else {
+                  (props[kCGImagePropertyOrientation] as? Int ?? 1) == 1 else {
                 throw RecipeExportError.verificationFailed("imageio_readback")
             }
             let depth = props[kCGImagePropertyDepth] as? Int ?? 0
             guard depth == plan.baseBitDepth else {
                 throw RecipeExportError.verificationFailed("imageio_bit_depth")
             }
+            // The bounded reader decodes its own thumbnail, in the range the
+            // plan wrote. A second SDR one would decode an AVIF's every cell again.
             if plan.memory.usesRowInput {
                 return try boundedSystem(source, properties: props, plan: plan, gainMetadata: gainMetadata)
+            }
+            guard CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 256,
+                kCGImageSourceDecodeRequest: kCGImageSourceDecodeToSDR] as CFDictionary) != nil else {
+                throw RecipeExportError.verificationFailed("imageio_readback")
             }
             let auxiliary = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap)
                 ?? CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap)

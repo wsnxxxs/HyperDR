@@ -196,6 +196,21 @@ HYPERDR_API int hyperdr_package_rows(hyperdr_engine*, const hyperdr_package_requ
     uint32_t rows, hyperdr_package_row_callback, void* user,
     char** out_report_json, hyperdr_error** err);
 
+/* Additive in ABI 5: hyperdr_package_rows plus a progress callback for the
+ * writer's independent units after the rows are read. PQ/HLG AVIF reports each
+ * grid cell as it is encoded (HYPERDR_PACKAGE_PHASE_ENCODE) and as it is
+ * verified (HYPERDR_PACKAGE_PHASE_VERIFY); its cells are verified on a second
+ * thread while the next one encodes. Other formats report nothing. `done`
+ * never decreases within a phase and reaches `total`. Called synchronously on
+ * the package thread with the same `user`; it must return quickly and never
+ * call another engine operation. `progress` may be NULL. */
+#define HYPERDR_PACKAGE_PHASE_ENCODE 1u
+#define HYPERDR_PACKAGE_PHASE_VERIFY 2u
+typedef void (*hyperdr_package_progress_callback)(void* user, uint32_t phase, uint32_t done, uint32_t total);
+HYPERDR_API int hyperdr_package_rows_progress(hyperdr_engine*, const hyperdr_package_request*,
+    uint32_t rows, hyperdr_package_row_callback, hyperdr_package_progress_callback progress, void* user,
+    char** out_report_json, hyperdr_error** err);
+
 #ifdef __cplusplus
 }
 #endif

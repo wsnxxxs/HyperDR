@@ -79,14 +79,21 @@ struct ExportSheet: View {
         return nil
     }
 
-    @ViewBuilder private var content: some View {
-        switch model.phase {
-        case .choosing: choosing(model.plan(editor))
-        case .running(let progress): running(progress)
-        case .finished(let finished): result(finished)
-        case .failed(let failure): failed(failure)
+    /// The phases cross-fade: the choices give way to the ring, the ring to
+    /// the result or the failure.
+    private var content: some View {
+        ZStack {
+            switch model.phase {
+            case .choosing: choosing(model.plan(editor)).transition(Self.phaseTransition)
+            case .running(let progress): running(progress).transition(Self.phaseTransition)
+            case .finished(let finished): result(finished).transition(Self.phaseTransition)
+            case .failed(let failure): failed(failure).transition(Self.phaseTransition)
+            }
         }
+        .animation(.smooth(duration: 0.35), value: model.phaseKind)
     }
+
+    private static let phaseTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.97))
 
     // MARK: - Choosing
 
@@ -423,32 +430,21 @@ struct ExportSheet: View {
         let progress = progress ?? RecipeExportProgress(stage: .preparing)
         return VStack(spacing: Space.s5) {
             Spacer(minLength: 0)
-            ZStack {
-                Circle().stroke(Color.white.opacity(0.1), lineWidth: 6)
-                if let fraction {
-                    Circle()
-                        .trim(from: 0, to: fraction)
-                        .stroke(Color.hdr.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.2), value: fraction)
-                    Text(fraction, format: .percent.precision(.fractionLength(0)))
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                        .contentTransition(.numericText())
-                } else {
-                    ProgressView().controlSize(.large)
-                }
-            }
-            .frame(width: 96, height: 96)
+            ExportProgressRing(fraction: fraction, finishing: progress.isFinishing)
+                .frame(width: 96, height: 96)
             VStack(spacing: Space.s2) {
+                // A new stage's words replace the last ones in place.
                 Text(verbatim: progress.stageMessage.localized(locale: locale))
                     .font(.headline)
-                    .contentTransition(.opacity)
+                    .id(progress.stageMessage.key)
+                    .transition(.blurReplace)
                 Text("ios.export.stayInApp")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 320)
             }
+            .animation(.smooth(duration: 0.3), value: progress.stageMessage.key)
             Spacer(minLength: 0)
         }
         .padding(Space.s6)

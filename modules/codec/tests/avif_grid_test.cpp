@@ -5,6 +5,7 @@
 #include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/cancel.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/codec/avif_grid.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -18,10 +19,12 @@
 #include <ImageIO/ImageIO.h>
 
 #include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 using namespace hyperdr;
@@ -106,7 +109,7 @@ void row_layout_rule() {
   }
   const auto l = avif_row_grid_layout(9504, 6336);
   require(l.columns == 10 && l.rows == 7 && l.cell_width == 960 && l.cell_height == 960 &&
-          kAvifRowMaxThreads == 2, "61 MP row allocation constants changed; mirror in host budgets");
+          kAvifRowMaxThreads == 4, "61 MP row allocation constants changed; mirror in host budgets");
 }
 
 FloatImage make_hdr(std::uint32_t width, std::uint32_t height) {
@@ -308,6 +311,81 @@ unsigned read_u32(const std::vector<std::uint8_t>& b, std::size_t p) {
   return (unsigned(b.at(p)) << 24) | (unsigned(b.at(p + 1)) << 16) |
          (unsigned(b.at(p + 2)) << 8) | b.at(p + 3);
 }
+// Cells decoded while the next one encodes: every cell reports its encode and
+// its check, in order, and the file check then matches all of them. A sample
+// the writer did not decode (a wrong digest) is decoded again, and a damaged
+// one still fails.
+void overlapped_cell_verification() {
+  const auto path = test::temporary_directory() / "overlap.avif";
+  const unsigned w = 2100, h = 1100;  // 3 x 2 cells
+  const auto hdr = make_hdr(w, h);
+  EncodingRows base{w, h, 3, [&](unsigned y, std::span<float> out) {
+    std::copy_n(hdr.pixels.data() + std::size_t(y) * w * 3, out.size(), out.data());
+  }};
+  EncodingRows gain{w, h, 1, [](unsigned, std::span<float> out) { std::fill(out.begin(), out.end(), 0.f); }};
+  GainMapMetadata map; map.alternate_headroom = {2, 1};
+  PhotoMetadata metadata; metadata.orientation = 1;
+  std::vector<std::pair<PackagePhase, std::uint32_t>> events;
+  std::uint32_t total = 0, last_encoded = 0;
+  const PackageProgress progress = [&](PackagePhase phase, std::uint32_t done, std::uint32_t of) {
+    events.emplace_back(phase, done); total = of;
+    if (phase == PackagePhase::EncodeCells) last_encoded = done;
+    // Let the last pending decode finish after its snapshot was reported but
+    // before drain starts: drain must continue from that snapshot, not done_.
+    if (phase == PackagePhase::VerifyCells && last_encoded == of && done < of)
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  };
+  AvifCellDigests decoded;
+  {
+    PackageProgressScope reporting(&progress);
+    decoded = write_avif_rows(base, gain, map, 2, metadata, HdrEncoding::AvifPq, 90, path, true);
+  }
+  const auto layout = avif_row_grid_layout(w, h);
+  const auto cells = layout.columns * layout.rows;
+  require(cells == 6 && total == cells && decoded.samples.size() == cells, "overlapped AVIF lost cells");
+  std::uint32_t encoded = 0, verified = 0;
+  for (const auto& [phase, done] : events) {
+    auto& counter = phase == PackagePhase::EncodeCells ? encoded : verified;
+    require(done >= counter && done <= cells, "AVIF cell progress went backwards");
+    counter = done;
+    require(verified <= encoded, "a cell was verified before it was encoded");
+  }
+  require(encoded == cells && verified == cells, "AVIF cell progress did not finish");
+  const auto bytes = read_binary_file(path);
+  require(verify_avif_file(path, decoded).pixels == std::uint64_t(w) * h, "matched AVIF cells failed the file check");
+  auto stale = decoded; stale.samples.front() ^= 1;
+  require(verify_avif_pixels(bytes, &stale).width == w, "an unmatched AVIF cell was not decoded again");
+  auto short_list = decoded; short_list.samples.pop_back();
+  bool refused = false;
+  try { (void)verify_avif_pixels(bytes, &short_list); } catch (const std::exception&) { refused = true; }
+  require(refused, "a wrong decoded cell count passed");
+  // Damage the first cell's coded payload: its digest no longer matches, so the
+  // check decodes it and must fail as before.
+  const auto file = read_heif(bytes);
+  const auto first = file.targets(file.primary_item_id, "dimg").front();
+  auto damaged = bytes;
+  const auto& extent = file.item(first).extents.front();
+  for (std::size_t i = extent.length / 2; i < extent.length; ++i) damaged.at(extent.offset + i) = 0xff;
+  bool rejected = false;
+  try { (void)verify_avif_pixels(damaged, &decoded); } catch (const std::exception&) { rejected = true; }
+  require(rejected, "a damaged AVIF cell passed because its neighbours were decoded");
+  // Cancelled after its first cell, the writer stops its verifier thread and returns.
+  CancelToken cancel;
+  unsigned callbacks_after_cancel = 0;
+  const PackageProgress stop = [&](PackagePhase phase, std::uint32_t, std::uint32_t) {
+    if (cancel.requested()) ++callbacks_after_cancel;
+    if (phase == PackagePhase::EncodeCells) cancel.request();
+  };
+  bool cancelled = false;
+  try {
+    CancelScope scope(&cancel); PackageProgressScope reporting(&stop);
+    (void)write_avif_rows(base, gain, map, 2, metadata, HdrEncoding::AvifPq, 90, path, true);
+  } catch (const Cancelled&) { cancelled = true; }
+  require(cancelled, "a cancelled AVIF writer did not stop");
+  require(callbacks_after_cancel == 0, "AVIF progress was reported after cancellation");
+  std::filesystem::remove(path);
+}
+
 void put_number(std::vector<std::uint8_t>& b, std::size_t p, unsigned value, unsigned count = 4) {
   for (unsigned i = 0; i < count; ++i) b.at(p + i) = std::uint8_t(value >> (8 * (count - 1 - i)));
 }
@@ -378,7 +456,7 @@ void original_container_and_codec_are_verified() {
   const auto path = test::temporary_directory() / "corruption.avif";
   EncodingRows base{65, 65, 3, [](unsigned, std::span<float> out) { std::fill(out.begin(), out.end(), .2f); }};
   EncodingRows gain{65, 65, 1, [](unsigned, std::span<float> out) { std::fill(out.begin(), out.end(), 0.f); }};
-  write_avif_rows(base, gain, {}, 1, {}, HdrEncoding::AvifPq, 100, path);
+  const auto decoded = write_avif_rows(base, gain, {}, 1, {}, HdrEncoding::AvifPq, 100, path, true);
   const auto bytes = read_binary_file(path);
   std::filesystem::remove(path);
   const auto file = read_heif(bytes);
@@ -389,6 +467,16 @@ void original_container_and_codec_are_verified() {
     throw std::runtime_error("missing corruption fixture property");
   };
   const auto config = prop_offset("av1C");
+  {
+    auto corrupt = bytes;
+    const auto& cell = file.item(cell_id);
+    const auto ispe = file.properties.at(cell.properties.front().index - 1).payload;
+    put_number(corrupt, std::size_t(ispe.data() - bytes.data()) + 4, 1088);
+    bool rejected = false;
+    try { (void)verify_avif_pixels(corrupt, &decoded); }
+    catch (const std::exception& e) { rejected = std::string(e.what()) == "AVIF codec dimensions differ from ispe"; }
+    require(rejected, "matched AVIF bytes bypassed verification of a changed ispe");
+  }
   for (unsigned length : {0U, 3U, 5U, 4U * 1024 * 1024}) {
     auto corrupt = bytes;
     std::vector<std::uint8_t> payload(length, 0);
@@ -595,6 +683,7 @@ int main() try {
   row_layout_rule();
   grid_matches_single_item();
   pull_rows_match_native_codes();
+  overlapped_cell_verification();
   original_container_and_codec_are_verified();
   spool_lifecycle();
   bad_layouts_are_rejected();

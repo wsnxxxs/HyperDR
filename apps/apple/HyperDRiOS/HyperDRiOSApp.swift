@@ -1,3 +1,4 @@
+import HyperDRDesign
 import HyperDRRender
 import SwiftUI
 
@@ -98,6 +99,21 @@ enum DebugLaunch {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-HyperDRReveal"), index + 1 < arguments.count else { return nil }
         return arguments[index + 1]
+    }
+
+    /// `-HyperDRPanelSide` stands the Studio's panel on the right whatever the window's shape.
+    static let standsPanel = ProcessInfo.processInfo.arguments.contains("-HyperDRPanelSide")
+
+    /// `-HyperDRSection curve|mixer|grading` opens that page of its tool.
+    static var pages: [AdjustmentGroupID: PadPage] {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-HyperDRSection"), index + 1 < arguments.count else { return [:] }
+        switch arguments[index + 1] {
+        case "curve": return [.light: .section(.curves)]
+        case "mixer": return [.color: .section(.mixer)]
+        case "grading": return [.color: .section(.grading)]
+        default: return [:]
+        }
     }
 
     static var tool: PadTool? {

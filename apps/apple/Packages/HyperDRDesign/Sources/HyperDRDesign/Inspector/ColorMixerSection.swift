@@ -145,6 +145,7 @@ struct ColorMixerLayout<Slider: View>: View {
     @State private var attribute = MixerAttribute.hue
     @State private var band = MixerBand.red
     @Environment(\.mixerPicking) private var picking
+    @Environment(\.sectionLayout) private var layout
 
     enum Arrangement: String { case attribute, band }
 
@@ -168,36 +169,17 @@ struct ColorMixerLayout<Slider: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
-                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
-                          isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
-                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
-                if let picking, isExpanded || !showsTitle {
-                    PickToolButton(isActive: picking.isActive,
-                                   title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
-                                   size: style == .touch ? 44 : 22) {
-                        picking.setAttribute(attribute)
-                        picking.toggle()
-                    }
-                    // It adjusts the attribute shown; one band's three have none.
-                    .disabled(arrangement == .band)
-                }
-            }
+            if showsTitle { header }
             if isExpanded || !showsTitle {
-                // One choice: an attribute across the eight bands, or one band's three.
-                SectionSegments(request: SectionSegmentsRequest(
-                    title: Text("design.mixer.arrangement", bundle: .module),
-                    options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) }
-                        + [.init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
-                    selection: Binding(get: { arrangement == .band ? Arrangement.band.rawValue : attribute.rawValue },
-                                       set: { id in
-                                           if let chosen = MixerAttribute(rawValue: id) {
-                                               attribute = chosen
-                                               arrangement = .attribute
-                                           } else {
-                                               arrangement = .band
-                                           }
-                                       })), style: style)
+                if showsTitle {
+                    arrangementChoice
+                } else {
+                    // The page names the section: its tools stand beside the choice.
+                    HStack(spacing: Space.s2) {
+                        arrangementChoice
+                        header.fixedSize(horizontal: true, vertical: false)
+                    }
+                }
                 if picking?.isActive == true {
                     Text("design.mixer.pickHint", bundle: .module)
                         .font(Font.hdr.caption)
@@ -220,14 +202,66 @@ struct ColorMixerLayout<Slider: View>: View {
         }
     }
 
-    // MARK: Arrangements
-
-    private var byAttribute: some View {
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
-            ForEach(MixerBand.allCases) { band in
-                slider(band.id(attribute), band.title, band.swatch, band.swatch, band.gradient(attribute))
+    private var header: some View {
+        SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
+                         isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
+                         isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                         resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
+            if let picking, isExpanded || !showsTitle {
+                PickToolButton(isActive: picking.isActive,
+                               title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
+                               size: style == .touch ? 44 : 22) {
+                    picking.setAttribute(attribute)
+                    picking.toggle()
+                }
+                // It adjusts the attribute shown; one band's three have none.
+                .disabled(arrangement == .band)
             }
         }
+    }
+
+    /// One choice: an attribute across the eight bands, or one band's three.
+    private var arrangementChoice: some View {
+        SectionSegments(request: SectionSegmentsRequest(
+            title: Text("design.mixer.arrangement", bundle: .module),
+            options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) }
+                + [.init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
+            selection: Binding(get: { arrangement == .band ? Arrangement.band.rawValue : attribute.rawValue },
+                               set: { id in
+                                   if let chosen = MixerAttribute(rawValue: id) {
+                                       attribute = chosen
+                                       arrangement = .attribute
+                                   } else {
+                                       arrangement = .band
+                                   }
+                               })), style: style)
+    }
+
+    // MARK: Arrangements
+
+    @ViewBuilder private var byAttribute: some View {
+        let spacing = style == .touch ? Space.s2 : Space.s1
+        switch layout {
+        case .stacked:
+            VStack(alignment: .leading, spacing: spacing) {
+                ForEach(MixerBand.allCases) { band in row(band) }
+            }
+        case .split:
+            // Two columns of four, the warm bands down the first.
+            let half = (MixerBand.allCases.count + 1) / 2
+            HStack(alignment: .top, spacing: Space.s4) {
+                ForEach([Array(MixerBand.allCases.prefix(half)), Array(MixerBand.allCases.dropFirst(half))], id: \.self) { column in
+                    VStack(alignment: .leading, spacing: spacing) {
+                        ForEach(column) { band in row(band) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func row(_ band: MixerBand) -> Slider {
+        slider(band.id(attribute), band.title, band.swatch, band.swatch, band.gradient(attribute))
     }
 
     private var byBand: some View {

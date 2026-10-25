@@ -50,6 +50,18 @@ public struct SectionControls {
 
 extension EnvironmentValues {
     @Entry public var sectionControls: SectionControls?
+    /// How a section arranges itself in the room its host gives it.
+    @Entry public var sectionLayout: SectionLayout = .stacked
+}
+
+/// How the curves, the colour mixer and the grading arrange themselves
+/// (controls-polish §9). Stacked, everything runs down one column; split, a
+/// host with a wide page of its own (the iPad panel lying along the foot)
+/// gets the plot or the wheel on the left and the controls on the right, and
+/// the mixer's eight bands in two columns of four.
+public enum SectionLayout: Hashable, Sendable {
+    case stacked
+    case split
 }
 
 /// One declared number control inside a section: a slider on the id's value,

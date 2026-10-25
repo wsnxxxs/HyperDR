@@ -133,3 +133,106 @@ struct PadToolRail: View {
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }
+
+/// A page of an adjustment tool (controls-polish §9): its own rows, or one of
+/// the sections it holds (light: Basic | Curve; colour: Basic | Mixer |
+/// Grading). A section on its page takes the panel's full width and arranges
+/// itself in it; the basic rows stay in the panel's one or two columns.
+enum PadPage: Hashable {
+    case basic
+    case section(AdjustmentSections.Kind)
+
+    /// The pages of a group, or none when it holds no section beside its rows.
+    static func pages(_ state: AdjustmentGroupState?) -> [PadPage] {
+        guard let state else { return [] }
+        let sections = state.controls.compactMap { AdjustmentSections.section(anchoredBy: $0.id) }
+        guard !sections.isEmpty else { return [] }
+        let hasRows = state.controls.contains { AdjustmentSections.kind(of: $0.id) == nil && $0.id != Recipe.hdrSourceID }
+        let pages = (hasRows ? [PadPage.basic] : []) + sections.map(PadPage.section)
+        return pages.count > 1 ? pages : []
+    }
+
+    /// The page a control is on.
+    static func page(of id: String) -> PadPage {
+        AdjustmentSections.kind(of: id).map(PadPage.section) ?? .basic
+    }
+
+    func holds(_ control: AdjustmentControl) -> Bool {
+        switch self {
+        case .basic: AdjustmentSections.kind(of: control.id) == nil
+        case .section(let kind): AdjustmentSections.kind(of: control.id) == kind
+        }
+    }
+
+    var title: Text {
+        switch self {
+        case .basic: Text("ipad.page.basic")
+        case .section(.curves): Text("ipad.page.curve")
+        case .section(.mixer): Text("ipad.page.mixer")
+        case .section(.grading): Text("ipad.page.grading")
+        }
+    }
+}
+
+/// The pages of a tool under its title: a small segmented row, a dot on a
+/// page that holds changes. ⌘[ and ⌘] step through them.
+struct PadPageBar: View {
+    let pages: [PadPage]
+    let selection: PadPage
+    let isModified: (PadPage) -> Bool
+    let choose: (PadPage) -> Void
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(pages, id: \.self) { page in
+                let isCurrent = page == selection
+                Button { choose(page) } label: {
+                    HStack(spacing: 5) {
+                        page.title.lineLimit(1).minimumScaleFactor(0.8)
+                        if isModified(page) {
+                            Circle().fill(Color.hdr.accent).frame(width: 5, height: 5)
+                        }
+                    }
+                    .font(.footnote.weight(isCurrent ? .semibold : .medium))
+                    .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background {
+                        if isCurrent {
+                            Capsule()
+                                .fill(Color.white.opacity(0.14))
+                                .matchedGeometryEffect(id: "page", in: highlight)
+                        }
+                    }
+                    .contentShape(.capsule)
+                    .contentShape(.hoverEffect, .capsule)
+                    .hoverEffect(.highlight)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                .accessibilityValue(isModified(page) ? Text("ipad.page.changed") : Text(verbatim: ""))
+            }
+        }
+        .padding(3)
+        .frame(height: 36)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .background {
+            // ⌘[ and ⌘] for the previous and next page.
+            Group {
+                Button("ipad.page.previous") { step(-1) }.keyboardShortcut("[", modifiers: .command)
+                Button("ipad.page.next") { step(1) }.keyboardShortcut("]", modifiers: .command)
+            }
+            .opacity(0)
+            .accessibilityHidden(true)
+        }
+        .animation(.smooth(duration: 0.25), value: selection)
+        .sensoryFeedback(.selection, trigger: selection)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func step(_ offset: Int) {
+        guard let index = pages.firstIndex(of: selection) else { return }
+        let next = index + offset
+        if pages.indices.contains(next) { choose(pages[next]) }
+    }
+}

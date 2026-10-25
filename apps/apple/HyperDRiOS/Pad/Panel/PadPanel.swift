@@ -11,6 +11,8 @@ struct PadPanel<Rail: View, Histogram: View, Header: View, Content: View, Footer
     let expanded: Bool
     /// The tool shown, so switching tools starts the scroll afresh.
     let tool: PadTool
+    /// The tool's page, so switching pages starts the scroll afresh too.
+    var page: PadPage?
     /// A control the tool is to scroll to once shown (a note elsewhere led
     /// here); `onRevealed` clears it.
     var reveal: String?
@@ -102,7 +104,7 @@ struct PadPanel<Rail: View, Histogram: View, Header: View, Content: View, Footer
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
-            .id(tool)
+            .id([AnyHashable(tool), AnyHashable(page)])
             .task(id: reveal) {
                 guard let reveal else { return }
                 // The tool has just been swapped in; let it lay out first.

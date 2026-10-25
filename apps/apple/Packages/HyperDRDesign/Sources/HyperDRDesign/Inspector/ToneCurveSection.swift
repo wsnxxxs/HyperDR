@@ -169,6 +169,7 @@ public struct ToneCurveSection: View {
     private let control: AdjustmentControl
     private let panel: AdjustmentPanel
     private let style: AdjustmentControlStyle
+    private let showsTitle: Bool
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
 
     @State private var isExpanded: Bool
@@ -179,19 +180,22 @@ public struct ToneCurveSection: View {
     /// The parametric zone whose slider is being dragged, lit on the plot.
     @State private var activeZone: Int?
     @Environment(\.curvePicking) private var picking
+    @Environment(\.sectionLayout) private var layout
 
     enum Mode: Hashable { case parameters, points }
 
     public init(recipe: Binding<Recipe>, control: AdjustmentControl, panel: AdjustmentPanel,
-                style: AdjustmentControlStyle, onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in }) {
+                style: AdjustmentControlStyle, showsTitle: Bool = true,
+                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in }) {
         _recipe = recipe
         self.control = control
         self.panel = panel
         self.style = style
+        self.showsTitle = showsTitle
         self.onEditingChanged = onEditingChanged
         let anyChanged = !control.isDefault
             || (ParametricCurveIDs.isDeclared && ParametricCurveIDs.all.contains { !(panel.control($0, in: recipe.wrappedValue)?.isDefault ?? true) })
-        _isExpanded = State(initialValue: style == .touch || anyChanged)
+        _isExpanded = State(initialValue: style == .touch || !showsTitle || anyChanged)
         // Open on the parameters when they are what was edited.
         let parametric = ParametricCurveIDs.amounts.contains { !(panel.control($0, in: recipe.wrappedValue)?.isDefault ?? true) }
         _mode = State(initialValue: parametric && control.isDefault ? .parameters : .points)
@@ -251,19 +255,42 @@ public struct ToneCurveSection: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            header
-            if isExpanded {
-                if hasParameters {
-                    SectionSegments(request: SectionSegmentsRequest(
-                        title: Text("design.curve.mode", bundle: .module),
-                        options: [.init(id: "parameters", title: Text("design.curve.mode.parameters", bundle: .module)),
-                                  .init(id: "points", title: Text("design.curve.mode.points", bundle: .module))],
-                        selection: Binding(get: { mode == .parameters ? "parameters" : "points" },
-                                           set: { mode = $0 == "parameters" ? .parameters : .points })), style: style)
-                }
-                switch effectiveMode {
-                case .points: pointsEditor
-                case .parameters: parametricEditor
+            if showsTitle { header }
+            if isExpanded || !showsTitle {
+                switch layout {
+                case .stacked:
+                    choiceRow
+                    switch effectiveMode {
+                    case .points:
+                        pointsControls
+                        pointsPlot
+                        pointsHint
+                    case .parameters:
+                        parametricPlot
+                        parametricControls
+                    }
+                case .split:
+                    // The plot on the left, what drives it on the right.
+                    HStack(alignment: .top, spacing: Space.s4) {
+                        Group {
+                            switch effectiveMode {
+                            case .points: pointsPlot
+                            case .parameters: parametricPlot
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            choiceRow
+                            switch effectiveMode {
+                            case .points:
+                                pointsControls
+                                pointsHint
+                            case .parameters:
+                                parametricControls
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
@@ -275,11 +302,34 @@ public struct ToneCurveSection: View {
         .onChange(of: effectiveMode) { _, now in if now == .parameters, picking?.isActive == true { picking?.toggle() } }
     }
 
+    /// The mode, and where the page names the section, its tools beside it.
+    @ViewBuilder private var choiceRow: some View {
+        if showsTitle {
+            modeChoice
+        } else {
+            HStack(spacing: Space.s2) {
+                if hasParameters { modeChoice } else { Spacer(minLength: 0) }
+                header.fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+
+    @ViewBuilder private var modeChoice: some View {
+        if hasParameters {
+            SectionSegments(request: SectionSegmentsRequest(
+                title: Text("design.curve.mode", bundle: .module),
+                options: [.init(id: "parameters", title: Text("design.curve.mode.parameters", bundle: .module)),
+                          .init(id: "points", title: Text("design.curve.mode.points", bundle: .module))],
+                selection: Binding(get: { mode == .parameters ? "parameters" : "points" },
+                                   set: { mode = $0 == "parameters" ? .parameters : .points })), style: style)
+        }
+    }
+
     // MARK: Points
 
-    @ViewBuilder private var pointsEditor: some View {
+    /// The curve's component and, for the luminance, the version it is on.
+    @ViewBuilder private var pointsControls: some View {
         let channel = effectiveChannel
-        let stops = hdrStops(for: channel)
         if availableChannels.count > 1 {
             HStack(spacing: Space.s2) {
                 CurveComponentPicker(components: availableComponents, selection: channel.component, style: style,
@@ -305,6 +355,11 @@ public struct ToneCurveSection: View {
                 .foregroundStyle(channel.target == .hdr ? Color.hdr.amber : Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder private var pointsPlot: some View {
+        let channel = effectiveChannel
+        let stops = hdrStops(for: channel)
         if let declaration = Adjustments.declaration(channel.id) {
             ToneCurveEditor(coordinates: coordinates(channel), style: style, hdrStops: stops,
                             marker: picking?.inputs[channel.id], tint: channel.tint,
@@ -314,7 +369,10 @@ public struct ToneCurveSection: View {
                 .frame(maxWidth: style == .touch ? 400 : .infinity)
                 .frame(maxWidth: .infinity)
         }
-        if isDefault(channel.id) {
+    }
+
+    @ViewBuilder private var pointsHint: some View {
+        if isDefault(effectiveChannel.id) {
             // How to start, until there is a curve; then the plot speaks for itself.
             Text(style == .touch ? "design.curve.hint.touch" : "design.curve.hint.pointer", bundle: .module)
                 .font(Font.hdr.caption)
@@ -382,7 +440,7 @@ public struct ToneCurveSection: View {
         panel.set(ParametricCurveIDs.splits[index], number: moved[index], in: &recipe)
     }
 
-    @ViewBuilder private var parametricEditor: some View {
+    @ViewBuilder private var parametricPlot: some View {
         ParametricCurveEditor(preview: preview, style: style, activeZone: activeZone, moveSplit: moveSplit,
                               onEditingChanged: { index, editing in
             if let declaration = Adjustments.declaration(ParametricCurveIDs.splits[index]) {
@@ -391,6 +449,9 @@ public struct ToneCurveSection: View {
         })
         .frame(maxWidth: style == .touch ? 400 : .infinity)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private var parametricControls: some View {
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
             ForEach(Array(ParametricCurveIDs.amounts.enumerated()), id: \.element) { index, id in
                 // Listed highlights first; the plot's zones go shadows first.
@@ -400,8 +461,8 @@ public struct ToneCurveSection: View {
                 }
             }
         }
-if ParametricCurveIDs.all.allSatisfy(isDefault) {
-                    Text("design.curve.parametricHint", bundle: .module)
+        if ParametricCurveIDs.all.allSatisfy(isDefault) {
+            Text("design.curve.parametricHint", bundle: .module)
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -416,9 +477,10 @@ if ParametricCurveIDs.all.allSatisfy(isDefault) {
     }
 
     private var header: some View {
-        SubsectionHeader(title: AdjustmentText.label(control.declaration), style: style, isChanged: changedCount > 0,
+        SubsectionHeader(title: AdjustmentText.label(control.declaration), style: style, showsTitle: showsTitle,
+                      isChanged: changedCount > 0,
                       canReset: !currentIsDefault, summary: SectionSummary.changes(changedCount),
-                      isExpanded: style == .pointer ? $isExpanded : nil,
+                      isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
                       resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) {
             if let picking, isExpanded {
                 PickToolButton(isActive: picking.isActive,

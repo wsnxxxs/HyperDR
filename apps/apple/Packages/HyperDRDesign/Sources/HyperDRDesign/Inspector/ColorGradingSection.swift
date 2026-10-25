@@ -276,6 +276,7 @@ struct ColorGradingLayout<Slider: View>: View {
     @State private var zone = WheelZone.midtones
     @State private var isExpanded: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.sectionLayout) private var layout
 
     init(style: AdjustmentControlStyle, showsTitle: Bool,
          colour: @escaping (WheelZone) -> (hue: Double, saturation: Double, luminance: Double),
@@ -318,35 +319,70 @@ struct ColorGradingLayout<Slider: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            SubsectionHeader(title: Text("design.grade.title", bundle: .module), style: style, showsTitle: showsTitle,
-                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
-                          isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
-                          resetLabel: Text("design.grade.reset", bundle: .module), reset: resetAll) { EmptyView() }
+            if showsTitle { header }
             if isExpanded || !showsTitle {
-                SectionSegments(request: SectionSegmentsRequest(
-                    title: Text("design.grade.zone", bundle: .module),
-                    options: WheelZone.allCases.map { option in .init(id: option.rawValue, title: zoneTitle(option)) },
-                    selection: Binding(get: { zone.rawValue }, set: { zone = WheelZone(rawValue: $0) ?? .midtones })),
-                                style: style)
-                let current = colour(zone)
-                GradingWheel(hue: current.hue, saturation: current.saturation, style: style, label: zone.title,
-                             write: { writeWheel(zone, $0, $1) }, reset: { resetWheel(zone) },
-                             onEditingChanged: { wheelEditing(zone, $0) })
-                    .frame(maxWidth: style == .touch ? 220 : 168)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Space.s1)
-                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
-                    slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring(scheme))
-                    slider(zone.saturationID, MixerAttribute.saturation.title,
-                           GradingWheelMath.saturationTrack(hue: current.hue, scheme))
-                    slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
+                if showsTitle {
+                    zoneChoice
+                } else {
+                    // The page names the section: its reset stands beside the zones.
+                    HStack(spacing: Space.s2) {
+                        zoneChoice
+                        header.fixedSize(horizontal: true, vertical: false)
+                    }
                 }
-                Divider().padding(.vertical, Space.s1)
-                VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
-                    slider(WheelZone.blendingID, nil, nil)
-                    slider(WheelZone.balanceID, nil, nil)
+                switch layout {
+                case .stacked:
+                    wheel
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Space.s1)
+                    sliders
+                case .split:
+                    // The wheel on the left, its numbers and the blending on the right.
+                    HStack(alignment: .top, spacing: Space.s4) {
+                        wheel
+                            .frame(maxWidth: .infinity)
+                        sliders
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
+        }
+    }
+
+    private var header: some View {
+        SubsectionHeader(title: Text("design.grade.title", bundle: .module), style: style, showsTitle: showsTitle,
+                         isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
+                         isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                         resetLabel: Text("design.grade.reset", bundle: .module), reset: resetAll) { EmptyView() }
+    }
+
+    private var zoneChoice: some View {
+        SectionSegments(request: SectionSegmentsRequest(
+            title: Text("design.grade.zone", bundle: .module),
+            options: WheelZone.allCases.map { option in .init(id: option.rawValue, title: zoneTitle(option)) },
+            selection: Binding(get: { zone.rawValue }, set: { zone = WheelZone(rawValue: $0) ?? .midtones })),
+                        style: style)
+    }
+
+    private var wheel: some View {
+        let current = colour(zone)
+        return GradingWheel(hue: current.hue, saturation: current.saturation, style: style, label: zone.title,
+                            write: { writeWheel(zone, $0, $1) }, reset: { resetWheel(zone) },
+                            onEditingChanged: { wheelEditing(zone, $0) })
+            .frame(maxWidth: style == .touch ? 220 : 168)
+    }
+
+    private var sliders: some View {
+        let current = colour(zone)
+        let spacing = style == .touch ? Space.s2 : Space.s1
+        return VStack(alignment: .leading, spacing: spacing) {
+            slider(zone.hueID, MixerAttribute.hue.title, GradingWheelMath.ring(scheme))
+            slider(zone.saturationID, MixerAttribute.saturation.title,
+                   GradingWheelMath.saturationTrack(hue: current.hue, scheme))
+            slider(zone.luminanceID, MixerAttribute.luminance.title, nil)
+            Divider().padding(.vertical, Space.s1)
+            slider(WheelZone.blendingID, nil, nil)
+            slider(WheelZone.balanceID, nil, nil)
         }
     }
 }

@@ -18,6 +18,8 @@ struct PadGroupControls: View {
     let panel: AdjustmentPanel
     let group: AdjustmentGroupID
     var columns = 1
+    /// The page shown, for a group with pages (`PadPage.pages`); nil shows all of it.
+    var page: PadPage?
     var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
     var onReset: (AdjustmentReset) -> Void = { _ in }
     /// Why AI cannot be chosen, when it cannot.
@@ -30,38 +32,61 @@ struct PadGroupControls: View {
         let off = actual?.isSwitchedOff ?? false
         if let state = off ? switchedOn() ?? actual : actual {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
-            let rows = state.controls.filter {
+            let shown = state.controls.filter { page?.holds($0) ?? true }
+            let rows = shown.filter {
                 $0.id != lead?.id && $0.kind != .curve && !AdjustmentSections.isDrawnBySection($0.id)
             }
             // The curves share one section; the others it draws itself are its channels.
-            let curves = state.controls.filter { $0.kind == .curve && !AdjustmentSections.isDrawnBySection($0.id) }
-            VStack(alignment: .leading, spacing: 12) {
-                if let lead {
-                    VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
-                        source(lead)
-                        if let aiUnavailable { PadNote(text: aiUnavailable, symbol: "exclamationmark.circle") }
+            let curves = shown.filter { $0.kind == .curve && !AdjustmentSections.isDrawnBySection($0.id) }
+            if case .section(let kind)? = page {
+                // A section on its own page: the full width, its title the page's.
+                sectionPage(kind, curves: curves)
+                    .disabled(off)
+                    .environment(\.sectionControls, padSectionControls)
+                    .environment(\.sectionLayout, columns > 1 ? .split : .stacked)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let lead {
+                        VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
+                            source(lead)
+                            if let aiUnavailable { PadNote(text: aiUnavailable, symbol: "exclamationmark.circle") }
+                        }
+                        .disabled(off)
+                    }
+                    PadRows(columns: columns) {
+                        ForEach(rows) { control in
+                            row(control)
+                        }
+                        ForEach(state.unsupported, id: \.id) { declaration in
+                            PadUnsupportedRow(declaration: declaration)
+                        }
                     }
                     .disabled(off)
-                }
-                PadRows(columns: columns) {
-                    ForEach(rows) { control in
-                        row(control)
-                    }
-                    ForEach(state.unsupported, id: \.id) { declaration in
-                        PadUnsupportedRow(declaration: declaration)
+                    // The tone curve's plot takes the panel's width, below the rows.
+                    ForEach(curves) { control in
+                        ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch,
+                                         onEditingChanged: onEditingChanged)
+                            .disabled(off)
                     }
                 }
-                .disabled(off)
-                // The tone curve's plot takes the panel's width, below the rows.
-                ForEach(curves) { control in
-                    ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch,
-                                     onEditingChanged: onEditingChanged)
-                        .disabled(off)
-                }
+                .saturation(off ? 0 : 1)
+                .animation(.smooth(duration: 0.2), value: off)
+                .environment(\.sectionControls, padSectionControls)
             }
-            .saturation(off ? 0 : 1)
-            .animation(.smooth(duration: 0.2), value: off)
-            .environment(\.sectionControls, padSectionControls)
+        }
+    }
+
+    @ViewBuilder private func sectionPage(_ kind: AdjustmentSections.Kind, curves: [AdjustmentControl]) -> some View {
+        switch kind {
+        case .curves:
+            ForEach(curves) { control in
+                ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch, showsTitle: false,
+                                 onEditingChanged: onEditingChanged)
+            }
+        case .mixer:
+            ColorMixerSection(recipe: $recipe, panel: panel, style: .touch, showsTitle: false, onEditingChanged: onEditingChanged)
+        case .grading:
+            ColorGradingSection(recipe: $recipe, panel: panel, style: .touch, showsTitle: false, onEditingChanged: onEditingChanged)
         }
     }
 

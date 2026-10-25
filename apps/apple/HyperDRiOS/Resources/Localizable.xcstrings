@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "ipad.page.next" : {"comment": "iPad Studio: keyboard command (⌘]) for the tool's next page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Next Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "下一页"}}}},
+    "ipad.page.previous" : {"comment": "iPad Studio: keyboard command (⌘[) for the tool's previous page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Previous Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上一页"}}}},
+    "ipad.page.changed" : {"comment": "VoiceOver value of a tool page that holds changes.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "已更改"}}}},
+    "ipad.page.grading" : {"comment": "iPad Studio: the colour tool's page holding the colour grading wheels.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "分级"}}}},
+    "ipad.page.mixer" : {"comment": "iPad Studio: the colour tool's page holding the colour mixer.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "混色器"}}}},
+    "ipad.page.curve" : {"comment": "iPad Studio: the light tool's page holding the tone curve.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Curve"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "曲线"}}}},
+    "ipad.page.basic" : {"comment": "iPad Studio: the page of a tool with its own rows (as opposed to its curve, mixer or grading).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Basic"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "基本"}}}},
     "ios.export.error.storage" : {
       "comment" : "Export failure: the export's temporary files need more free storage than the device has.",
       "extractionState" : "manual",

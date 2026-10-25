@@ -24,6 +24,12 @@ struct PadEditor: View {
     @State private var tool = PadTool.group(.hdr)
     #endif
     @State private var expanded = true
+    /// The page each tool with pages was last on (controls-polish §9).
+    #if DEBUG
+    @State private var pages: [AdjustmentGroupID: PadPage] = DebugLaunch.pages
+    #else
+    @State private var pages: [AdjustmentGroupID: PadPage] = [:]
+    #endif
     /// A control to scroll to once its tool is shown (the film exposure note's tap).
     #if DEBUG
     @State private var revealed: String? = DebugLaunch.reveal
@@ -214,17 +220,27 @@ struct PadEditor: View {
 
     private func panel(_ layout: PadLayout) -> some View {
         let groups = groups
-        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool, reveal: revealed,
+        let pageList = tool.group.map { group in PadPage.pages(groups.first { $0.group == group }) } ?? []
+        let page = self.page(in: pageList)
+        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool, page: page, reveal: revealed,
                         onRevealed: { revealed = nil }) { axis in
             PadToolRail(items: PadTool.tools(groups).map { PadRailItem(tool: $0, marked: isModified($0, groups)) },
                         selection: tool, axis: axis, choose: choose, onBypass: bypass)
         } histogram: {
             PadHistogram(current: scopes.current, original: scopes.original, channels: $channels)
         } header: {
-            header(groups, compact: layout.placement == .bottom)
-                .disabled(locksEditing)
+            VStack(alignment: .leading, spacing: 10) {
+                header(groups, compact: layout.placement == .bottom)
+                if let group = tool.group, let page {
+                    PadPageBar(pages: pageList, selection: page,
+                               isModified: { isModified($0, in: groups.first { $0.group == group }) }) { next in
+                        withAnimation(.smooth(duration: 0.25)) { pages[group] = next }
+                    }
+                }
+            }
+            .disabled(locksEditing)
         } content: {
-            toolContent(columns: layout.columns)
+            toolContent(columns: layout.columns, page: page)
                 .environment(\.whiteBalancePicking, session.whiteBalance.picking)
                 .environment(\.curvePicking, session.curvePick.picking)
                 .environment(\.mixerPicking, session.mixerPick.picking)
@@ -239,14 +255,25 @@ struct PadEditor: View {
         }
     }
 
-    /// Opens the tool that holds the control and scrolls to its row.
+    /// Opens the tool and the page that hold the control and scrolls to its row.
     private func reveal(_ id: String) {
         guard let group = Adjustments.declaration(id)?.group else { return }
         withAnimation(.smooth(duration: 0.3)) {
             tool = .group(group)
+            pages[group] = PadPage.page(of: id)
             expanded = true
         }
         revealed = id
+    }
+
+    /// The current tool's page: the one it was last on, else its first.
+    private func page(in pageList: [PadPage]) -> PadPage? {
+        guard let group = tool.group, let first = pageList.first else { return nil }
+        return pages[group].flatMap { pageList.contains($0) ? $0 : nil } ?? first
+    }
+
+    private func isModified(_ page: PadPage, in state: AdjustmentGroupState?) -> Bool {
+        state?.controls.contains { page.holds($0) && !$0.isDefault } ?? false
     }
 
     /// A tool from the rail; the current one again folds the panel away.
@@ -293,14 +320,14 @@ struct PadEditor: View {
         }
     }
 
-    @ViewBuilder private func toolContent(columns: Int) -> some View {
+    @ViewBuilder private func toolContent(columns: Int, page: PadPage?) -> some View {
         switch tool {
         case .group(.look):
             PadLookTool(recipe: recipe, panel: panel, columns: columns, revealing: revealed,
                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                         onLibrary: { showingLUTs = true })
         case .group(let group):
-            PadGroupControls(recipe: recipe, panel: panel, group: group, columns: columns,
+            PadGroupControls(recipe: recipe, panel: panel, group: group, columns: columns, page: page,
                              onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                              aiUnavailable: group == .hdr ? aiUnavailable : nil)
         case .crop:

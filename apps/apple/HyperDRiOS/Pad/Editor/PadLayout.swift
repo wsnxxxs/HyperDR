@@ -26,7 +26,12 @@ struct PadLayout: Equatable {
     init(size: CGSize, bottomInset: CGFloat, expanded: Bool) {
         let margin = PadMetrics.margin
         let strip = PadMetrics.canvasBarStrip
-        if size.width >= 960, size.width >= size.height * 1.15 {
+        var standing = size.width >= 960 && size.width >= size.height * 1.15
+        #if DEBUG
+        // The simulator ignores the landscape request of a multitasking app.
+        if DebugLaunch.standsPanel { standing = true }
+        #endif
+        if standing {
             placement = .side
             let width = expanded ? min(392, max(352, size.width * 0.28)) : PadMetrics.railWidth
             panel = CGRect(x: size.width - margin - width, y: 2, width: width, height: max(0, size.height - 2 - margin))

@@ -1,6 +1,312 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "choice.lutInput.flog-fgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.flog-fgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.flog2c-fgamutc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.flog2c-fgamutc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        }
+      }
+    },
+    "choice.lutInput.applelog-rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.applelog-rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "choice.lutInput.nlog-rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.nlog-rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "choice.lutInput.dlog-dgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.dlog-dgamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.clog2-cinemagamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.clog2-cinemagamut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.davinci-dwg" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.davinci-dwg" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        }
+      }
+    },
+    "choice.lutInput.acescct-ap1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.acescct-ap1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        }
+      }
+    },
+    "choice.lutInput.rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        }
+      }
+    },
+    "choice.lutOutput.rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        }
+      }
+    },
     "err.server.export_storage_full" : {
       "comment" : "Export failure: the export's temporary files need more free storage than the disk has.",
       "extractionState" : "manual",

@@ -79,7 +79,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     let sdr = Recipe(inputDomain: .sdr)
     #expect(panel.groups(for: sdr).map(\.group) == [.hdr, .light, .color, .look], "no detail group outside RAW")
     let mixer = HSLBand.allCases.flatMap { band in HSLComponent.allCases.map { "hsl.\(band.rawValue).\($0.rawValue)" } }
-    let grading = GradingZone.allCases.flatMap { zone in HSLComponent.allCases.map { "grade.\(zone.rawValue).\($0.rawValue)" } } + ["grade.blending","grade.balance"]
+    let grading = ColorGradingZone.allCases.flatMap { zone in HSLComponent.allCases.map { "grade.\(zone.rawValue).\($0.rawValue)" } } + ["grade.blending","grade.balance"]
     #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation"] + mixer + grading + ["effect.grain", "effect.halation"],
             "grain and halation on every photo, without a look")
     #expect(ids(sdr, .hdr).contains("hdr.coverage"))

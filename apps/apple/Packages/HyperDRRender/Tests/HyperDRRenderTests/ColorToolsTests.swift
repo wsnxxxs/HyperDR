@@ -10,12 +10,13 @@ import Testing
     @Test func vibranceKeepsLuminanceAndProtectsSkin() {
         let skin = DoubleReference.oklabRGB(SIMD3(0.65, 0.06, 0.07))
         let cool = DoubleReference.oklabRGB(SIMD3(0.65, -0.06, -0.07))
-        func gain(_ rgb: SIMD3<Double>) -> Double {
+        func gain(_ rgb: SIMD3<Double>, _ amount: Double = 1) -> Double {
             let lab = DoubleReference.oklab(rgb)
-            let changed = DoubleReference.oklab(DoubleReference.vibrance(rgb, amount: 1))
+            let changed = DoubleReference.oklab(DoubleReference.vibrance(rgb, amount: amount))
             return hypot(changed.y,changed.z)/hypot(lab.y,lab.z)
         }
         #expect(gain(cool) > gain(skin))
+        #expect(gain(cool,-1) < gain(skin,-1))
         for rgb in [skin, cool, skin*8] {
             #expect(DoubleReference.vibrance(rgb, amount: 0) == rgb)
             for amount in [-1.0, 1] {
@@ -49,6 +50,8 @@ import Testing
 
     @Test func gradingKeepsHDRLuminanceAndMatchesDouble() async throws {
         let engine = try RenderEngine()
+        let red = DoubleReference.colorGrade(SIMD3(repeating:0.18),wheels:[.zero,.zero,.zero,SIMD3(0,1,0)])
+        #expect(red.x > red.y && red.y > red.z)
         for level in [0.03,0.18,1.0,4.0] {
             let rgb = SIMD3<Double>(repeating:level)
             let image = CIImage(color:CIColor(red:level,green:level,blue:level,

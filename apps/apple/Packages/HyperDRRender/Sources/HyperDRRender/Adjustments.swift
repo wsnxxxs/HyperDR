@@ -118,7 +118,7 @@ public struct RenderAdjustments: Hashable, Sendable {
             }
         }
         guard color.grading.count == 4 else { throw RenderError.invalidAdjustment }
-        for (i, zone) in GradingZone.allCases.enumerated() {
+        for (i, zone) in ColorGradingZone.allCases.enumerated() {
             for (c, component) in HSLComponent.allCases.enumerated() {
                 try RenderParameter.check(color.grading[i][c],id:"grade.\(zone.rawValue).\(component.rawValue)")
             }

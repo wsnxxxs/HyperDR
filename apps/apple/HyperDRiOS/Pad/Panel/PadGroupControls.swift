@@ -22,6 +22,8 @@ struct PadGroupControls: View {
     var onReset: (AdjustmentReset) -> Void = { _ in }
     /// Why AI cannot be chosen, when it cannot.
     var aiUnavailable: Text?
+    /// The white balance eyedropper, when the host offers one.
+    @Environment(\.whiteBalancePicking) private var whiteBalance
 
     var body: some View {
         let actual = panel.group(group: group, in: recipe)
@@ -83,13 +85,28 @@ struct PadGroupControls: View {
         switch control.kind {
         case .float, .floatOrAuto:
             if let spec = control.spec {
-                PadSlider(AdjustmentText.label(declaration),
-                          value: Binding(get: { control.sliderValue },
-                                         set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
-                          spec: spec, tint: tint, help: AdjustmentText.help(declaration),
-                          onEditingChanged: { onEditingChanged(declaration, $0) },
-                          onResetGroup: control.group == group ? { onReset(.group(control.group)) } : nil)
+                let slider = PadSlider(AdjustmentText.label(declaration),
+                                       value: Binding(get: { control.sliderValue },
+                                                      set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
+                                       spec: spec, tint: tint, help: AdjustmentText.help(declaration),
+                                       onEditingChanged: { onEditingChanged(declaration, $0) },
+                                       onResetGroup: control.group == group ? { onReset(.group(control.group)) } : nil)
                     .disabled(!control.isAvailable)
+                if WhiteBalancePicking.offers(control.id), let whiteBalance {
+                    // The eyedropper stands beside the temperature bar, a finger's size.
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        HStack(spacing: Space.s2) {
+                            slider
+                            WhiteBalancePickButton(whiteBalance, size: PadMetrics.row)
+                                .disabled(!control.isAvailable)
+                        }
+                        if let notice = whiteBalance.notice {
+                            WhiteBalanceNoticeLine(notice).padding(.horizontal, 4)
+                        }
+                    }
+                } else {
+                    slider
+                }
             }
         case .bool:
             PadToggleRow(title: AdjustmentText.label(declaration),

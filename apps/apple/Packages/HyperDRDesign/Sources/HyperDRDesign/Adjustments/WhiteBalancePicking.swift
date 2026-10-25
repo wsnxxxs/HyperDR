@@ -56,19 +56,30 @@ public struct WhiteBalancePickButton: View {
         let label = Text(picking.isActive ? "design.wb.stop" : "design.wb.pick", bundle: .module)
         Button(action: picking.toggle) {
             Image(systemName: "eyedropper")
-                .font(.system(size: size >= 40 ? 17 : 12, weight: .medium))
+                .font(.system(size: touch ? 17 : 12, weight: .medium))
                 .foregroundStyle(foreground)
                 .frame(width: size, height: size)
-                .background(picking.isActive ? Color.hdr.accentFill : hovered && isEnabled ? Color.hdr.surfaceHover : Color.clear,
-                            in: .rect(cornerRadius: Radius.xs))
-                .overlay { RoundedRectangle(cornerRadius: Radius.xs).strokeBorder(picking.isActive ? Color.clear : Color.hdr.line) }
-                .contentShape(.rect(cornerRadius: Radius.xs))
+                .background(fill, in: .rect(cornerRadius: radius))
+                .overlay {
+                    if !touch { RoundedRectangle(cornerRadius: radius).strokeBorder(picking.isActive ? Color.clear : Color.hdr.line) }
+                }
+                .contentShape(.rect(cornerRadius: radius))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(picking.isActive ? .isSelected : [])
+    }
+
+    /// A finger's size: a filled square like the Studio's rows, not an outlined one.
+    private var touch: Bool { size >= 40 }
+    private var radius: CGFloat { touch ? 10 : Radius.xs }
+
+    private var fill: Color {
+        if picking.isActive { return Color.hdr.accentFill }
+        if touch { return Color.white.opacity(0.06) }
+        return hovered && isEnabled ? Color.hdr.surfaceHover : Color.clear
     }
 
     private var foreground: Color {

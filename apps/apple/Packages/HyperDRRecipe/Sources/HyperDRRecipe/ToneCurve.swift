@@ -57,7 +57,7 @@ private struct ToneCurveInterpolation {
     }
     func value(at input: Double) -> Double {
         if input <= x[0] { return y[0] }
-        if input >= x.last! { return y.last! + max(0,input-x.last!)*tangent.last! }
+        if input >= x.last! { return y.last! + max(0,input-x.last!) }
         let i = (0..<(x.count-1)).first { input <= x[$0+1] }!
         let h = x[i+1]-x[i], t = (input-x[i])/h, t2 = t*t, t3 = t2*t
         return (2*t3-3*t2+1)*y[i] + (t3-2*t2+t)*h*tangent[i]

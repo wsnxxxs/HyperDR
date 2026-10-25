@@ -5,6 +5,43 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 struct ExtendedCurveTests {
+    @Test func endpointCurvesFitSDRExtrapolateAndSampleAtTheirOwnInputs() async throws {
+        let engine = try RenderEngine()
+        func source(_ rgb: SIMD3<Float>) async throws -> RenderSource {
+            let rgba = [rgb.x,rgb.y,rgb.z,Float(1)]
+            let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) },bytesPerRow: 16,
+                size: CGSize(width: 1,height: 1),format: .RGBAf,colorSpace: RenderEngine.workingColorSpace)
+            return try await engine.source(image: image,domain: .hdr)
+        }
+        let red = try await source(.init(0.8,0.1,0.1))
+        var edit = RenderAdjustments(); edit.hdr.range = 4; edit.hdr.coverage = 0
+        edit.tone.curveSDR = try ToneCurve([0,0,0.5,0.8,1,1])
+        let pixels = RenderEngine.readPixels(try await engine.render(red,adjustments: edit))
+        for c in 0..<3 {
+            #expect(pixels.baseRGBA[c] <= 1)
+            let hdr = Double(pixels.baseRGBA[c])*exp2(Double(pixels.gain[c]))
+            #expect(abs(hdr-(c == 0 ? 0.8 : 0.1)) < 0.00001)
+        }
+        let gray = try await source(.init(repeating: 2))
+        edit = RenderAdjustments(); edit.hdr.range = 4; edit.hdr.coverage = 0; edit.tone.exposure = 4
+        edit.tone.curveHDR = try ToneCurve([0,0,1,1,3,2])
+        #expect(edit.tone.curveHDR.value(at: 6) == 5)
+        let result = RenderEngine.readPixels(try await engine.render(gray,adjustments: edit))
+        let prepared = DoubleReference.prepare(.init(repeating: 2),settings: edit,sdr: false)
+        let expected = DoubleReference.hdrOutput(prepared,settings: edit.hdr,range: 4,shoulder: true,
+            allowRolloff: true,tone: edit.tone)
+        #expect(abs(Double(result.baseRGBA[0])*exp2(Double(result.gain[0]))-expected.base.x*exp2(expected.gains.x)) < 0.0001)
+        var recipe = Recipe(inputDomain: .hdr)
+        recipe.setValue(try ToneCurve([0,0,1,1,2,3]).parameterValue,for: "tone.curve")
+        let beforeBoth = try await engine.pickCurve(gray,recipe: recipe,parameterID: "tone.curve",point: .init(x: 0.5,y: 0.5))
+        let beforeHDR = try await engine.pickCurve(gray,recipe: recipe,parameterID: "tone.curveHDR",point: .init(x: 0.5,y: 0.5))
+        #expect(abs(beforeBoth.coordinate-2) < 0.00001)
+        #expect(abs(beforeHDR.coordinate-3) < 0.00001)
+        recipe = Recipe(inputDomain: .hdr); recipe.setValue(.number(100),for: "hdr.sdrRolloff")
+        let beforeSDR = try await engine.pickCurve(gray,recipe: recipe,parameterID: "tone.curveSDR",point: .init(x: 0.5,y: 0.5))
+        #expect(abs(beforeSDR.coordinate-1) < 1e-12)
+    }
+
     @Test func HDRAndEndpointCurvesMatchTheirReference() async throws {
         let engine = try RenderEngine()
         let values: [Float] = [0.03,0.18,0.5,0.8,1,2,4]

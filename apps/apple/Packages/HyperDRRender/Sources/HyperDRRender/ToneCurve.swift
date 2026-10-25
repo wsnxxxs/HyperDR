@@ -63,7 +63,7 @@ extension DoubleReference {
     }
     /// Endpoint curves run after HDR generation, before the range shoulder.
     public static func endpointCurves(base: RGB, hdr: RGB, tone: ToneAdjustments) -> (base: RGB, hdr: RGB) {
-        let b = toneCurve(base, curve: tone.curveSDR)
+        let b = fitP3(toneCurve(base, curve: tone.curveSDR))
         var h = hdr
         func map(_ curve: ToneCurve, sdr: Bool) {
             let y = luma(h)

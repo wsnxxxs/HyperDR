@@ -11,6 +11,7 @@ public struct ToneAdjustments: Hashable, Sendable {
     public var whites: Float = RenderParameter.defaultNumber("tone.whites")
     public var curve = ToneCurve()
     public var blacks: Float = RenderParameter.defaultNumber("tone.blacks")
+    var curveProbeStage: UInt32 = 0
     public var curveSDR = ToneCurve(), curveHDR = ToneCurve()
     public var curveRed = ToneCurve(), curveGreen = ToneCurve(), curveBlue = ToneCurve()
     public var parametricHighlights: Float = 0, parametricLights: Float = 0

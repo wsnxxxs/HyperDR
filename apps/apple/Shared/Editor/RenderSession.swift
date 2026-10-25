@@ -102,7 +102,9 @@ actor RenderSession: EditorRendering {
         var options = try SourceOptions(recipe: restoring ?? Recipe(), resolution: resolution)
         if restoring == nil {
             if let generation = rawDecoderPreference.generation {
-                options.rawDecoderVersion = try await engine.rawDecoder(url, generation: generation)
+                let selection = try await engine.rawDecoderSelection(url, generation: generation)
+                options.rawDecoderVersion = selection.version
+                options.rawCompatibility = selection.converterID
             } else {
                 options.rawDecoderVersion = await engine.preferredRAWDecoder(url)
             }

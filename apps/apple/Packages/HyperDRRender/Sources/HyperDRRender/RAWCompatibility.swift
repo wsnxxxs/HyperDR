@@ -310,18 +310,20 @@ extension RenderEngine {
     }
 
     /// Selection runs before the first open. If Apple has no usable filter,
-    /// select on the converted DNG; a conversion failure returns nil so the
-    /// normal open can report the embedded-preview result or its final error.
-    static func decoderSelectionURL(_ url: URL) async throws -> URL? {
-        if !forcesRAWCompatibility, usableSelectionFilter(url) != nil { return url }
+    /// select on the converted DNG and retain its identity for the actual load;
+    /// a conversion failure returns nil so the normal open can report the
+    /// embedded-preview result or its final error.
+    static func decoderSelection(_ url: URL) async throws -> (url: URL, converterID: String?)? {
+        if !forcesRAWCompatibility, usableSelectionFilter(url) != nil { return (url, nil) }
         guard compatibilityConverter() != nil else { return nil }
         let revision = try SourceRevision(url: url)
         do {
             var options = SourceOptions(kind: .raw)
             options = try await recoverRAW(url, options: options, revision: revision, progress: nil)
-            if options.rawEmbeddedPreview { return nil }
-            return resolvedCompatibility(url, revision: revision, kind: .convertedDNG,
-                                         converterID: options.rawCompatibility)
+            guard !options.rawEmbeddedPreview, let converterID = options.rawCompatibility,
+                  let converted = resolvedCompatibility(url, revision: revision, kind: .convertedDNG,
+                                                        converterID: converterID) else { return nil }
+            return (converted, converterID)
         } catch RenderError.rawUnsupported {
             return nil
         }

@@ -49,23 +49,24 @@ final class RAWCompatibilityTests: XCTestCase {
         super.tearDown()
     }
 
-    private func fixture() throws -> URL {
+    private func fixture(named name: String = "sony-ilce-7s.ARW") throws -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 { root.deleteLastPathComponent() }
-        let input = root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ARW")
+        let input = root.appendingPathComponent("build/fixtures/" + name)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + "." + input.pathExtension)
         try FileManager.default.copyItem(at: input, to: url)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
     }
 
-    private func jpeg() throws -> URL {
+    private func jpeg(width: Int = 8, height: Int = 4) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
-        let context = try XCTUnwrap(CGContext(data: nil, width: 8, height: 4, bitsPerComponent: 8,
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
             bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.setFillColor(CGColor(red: 0.25, green: 0.5, blue: 0.75, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: 8, height: 4))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let image = try XCTUnwrap(context.makeImage())
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
@@ -98,6 +99,25 @@ final class RAWCompatibilityTests: XCTestCase {
         XCTAssertEqual(converter.conversions, 2)
     }
 
+    func testExplicitDecoderSelectionKeepsConvertedDNG() async throws {
+        let url = try fixture()
+        let dng = try fixture(named: "canon-eos-5d-iii-lossy.dng")
+        let converter = CompatibilityConverter(dng: dng, preview: nil)
+        RenderEngine.registerRAWCompatibilityConverter(converter)
+        RenderEngine.forcesRAWCompatibility = true
+        let selection = try await RenderEngine().rawDecoderSelection(url, generation: 8)
+        XCTAssertEqual(selection.version, "8.dng")
+        XCTAssertEqual(selection.converterID, converter.converterID)
+
+        var options = SourceOptions(resolution: .preview(maximumSize: PixelSize(width: 128, height: 128)))
+        options.rawDecoderVersion = selection.version
+        options.rawCompatibility = selection.converterID
+        let source = try await RenderEngine().load(url, options: options)
+        XCTAssertEqual(source.sourceCompatibility, .convertedDNG)
+        XCTAssertEqual(source.rawCompatibility, converter.converterID)
+        XCTAssertEqual(source.rawSettings?.decoderVersion, "8.dng")
+    }
+
     func testNativeDecodeDoesNotInvokeRegisteredConverter() async throws {
         let url = try fixture()
         let converter = CompatibilityConverter(dng: url, preview: nil)
@@ -128,6 +148,17 @@ final class RAWCompatibilityTests: XCTestCase {
         } catch RenderError.rawUnsupported(let camera) {
             XCTAssertEqual(camera, "ILCE-7M5")
         }
+    }
+
+    func testDeferredEmbeddedPreviewUsesRAWOrientation() throws {
+        let preview = try jpeg(width: 5000, height: 3000)
+        var options = SourceOptions(kind: .imageIO)
+        options.embeddedPreviewOrientation = 6
+        let immediate = try RenderEngine.open(preview, options: options, deferred: false)
+        let deferred = try RenderEngine.open(preview, options: options, deferred: true)
+        XCTAssertEqual(immediate.image.extent.size, CGSize(width: 3000, height: 5000))
+        XCTAssertEqual(deferred.image.extent.size, immediate.image.extent.size)
+        XCTAssertEqual(deferred.nativeSize, immediate.nativeSize)
     }
 
     func testRecordedConverterVersionIsRequired() async throws {

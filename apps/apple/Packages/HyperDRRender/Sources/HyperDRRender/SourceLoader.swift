@@ -98,6 +98,18 @@ private struct RasterPreviewPlan {
     }
 }
 
+/// An explicitly requested decoder and, when Apple could not select it on the
+/// original RAW, the converted source on which it was selected.
+public struct RAWDecoderSelection: Equatable, Sendable {
+    public let version: String?
+    public let converterID: String?
+
+    public init(version: String? = nil, converterID: String? = nil) {
+        self.version = version
+        self.converterID = converterID
+    }
+}
+
 extension RenderEngine {
     static func open(_ url: URL, options: SourceOptions, deferred: Bool = false,
                      progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) throws -> OpenedSource {
@@ -190,11 +202,13 @@ extension RenderEngine {
         let nativeLinear = CGColorSpaceCreateExtendedLinearized(baseSpace)
         let base: CIImage
         if deferred, !cacheTIFF, max(nativeSize.width,nativeSize.height) > 4096, !auxiliary.contains(where:{ $0.1 != nil }),
-           let fileImage = CIImage(contentsOf:url,options:[.toneMapHDRtoSDR:false,.applyOrientationProperty:true]) {
+           let fileImage = CIImage(contentsOf:url,options:[.toneMapHDRtoSDR:false,.applyOrientationProperty:false]) {
             // Other large rasters keep Core Image's file/region provider.
             // TIFF uses the reusable native bitmap detached above; bounded
             // (<=4096) rasters keep the cheaper ImageIO CGImage provider.
-            base = fileImage
+            // Apply the resolved orientation ourselves: an embedded preview's
+            // RAW orientation overrides, rather than supplements, its EXIF.
+            base = fileImage.oriented(forExifOrientation: orientation)
         } else {
             base = CIImage(cgImage:baseCG,options:[.toneMapHDRtoSDR:false]).oriented(forExifOrientation:orientation)
         }
@@ -257,17 +271,22 @@ extension RenderEngine {
     /// Resolve an explicit generation for a newly opened photo. Raster inputs
     /// have no RAW decoder; an unsupported RAW generation must never fall back.
     public func rawDecoder(_ url: URL, generation: Int) async throws -> String? {
+        try await rawDecoderSelection(url, generation: generation).version
+    }
+
+    /// Resolve an explicit generation without losing a conversion selected
+    /// because the original container has no usable native filter.
+    public func rawDecoderSelection(_ url: URL, generation: Int) async throws -> RAWDecoderSelection {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let identifier = CGImageSourceGetType(source),
-              UTType(identifier as String)?.conforms(to: .rawImage) == true else { return nil }
-        let selection = try await Self.decoderSelectionURL(url)
-        guard let selection else { return nil }
-        guard let filter = CIRAWFilter(imageURL: selection) else { throw RenderError.cannotDecodeSource }
+              UTType(identifier as String)?.conforms(to: .rawImage) == true else { return RAWDecoderSelection() }
+        guard let selection = try await Self.decoderSelection(url) else { return RAWDecoderSelection() }
+        guard let filter = CIRAWFilter(imageURL: selection.url) else { throw RenderError.cannotDecodeSource }
         let version = String(generation)
         guard let supported = filter.supportedDecoderVersions.first(where: {
             $0.rawValue == version || $0.rawValue == version + ".dng"
         }) else { throw RenderError.unsupportedRAWDecoder(version) }
-        return supported.rawValue
+        return RAWDecoderSelection(version: supported.rawValue, converterID: selection.converterID)
     }
 
     /// New photos prefer generation 9, then 8 (including their DNG variants).
@@ -283,8 +302,8 @@ extension RenderEngine {
 
     /// Retry generation 8 explicitly: the system default may itself be 9.
     public func fallbackRAWDecoder(_ url: URL) async -> String? {
-        guard let selection = try? await Self.decoderSelectionURL(url),
-              let filter = Self.usableSelectionFilter(selection) ?? CIRAWFilter(imageURL: selection) else { return nil }
+        guard let selection = try? await Self.decoderSelection(url),
+              let filter = Self.usableSelectionFilter(selection.url) ?? CIRAWFilter(imageURL: selection.url) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue, allowing9: false)
     }

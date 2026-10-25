@@ -20,6 +20,9 @@ nonisolated struct ExportStack: Sendable {
     static func live() async throws -> ExportStack {
         let configuration = KitConfiguration()
         let sessions = SessionStore(configuration: configuration, formats: InputFormats())
+        // Imports have fresh temporary URLs, so their converted DNGs cannot be
+        // the next photo's cache hit. Run Kit's age/size bound on every launch.
+        _ = await sessions.cleanupExpired()
         let engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
         RenderEngine.registerRAWCompatibilityConverter(
             RAWCompatibilityConverter(engine: engine, configuration: configuration))

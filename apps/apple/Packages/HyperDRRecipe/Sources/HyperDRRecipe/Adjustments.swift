@@ -205,7 +205,7 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.filmStrength", group: .look, kind: .float, range: 0...100, step: 1,
             default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
-        // Auto meters the original photo centre-weighted to 18.4 % grey, as spektrafilm's camera.
+        // Auto matches the original display brightness through the selected stock.
         ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -3...3, step: 0.1,
             default: .auto, format: .ev, scale: .direct,
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),

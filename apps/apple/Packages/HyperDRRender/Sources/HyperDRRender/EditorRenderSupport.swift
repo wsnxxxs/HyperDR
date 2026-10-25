@@ -36,7 +36,7 @@ extension RenderEngine {
             values["hdr.expansionStart"] = Adjustments.automaticExpansionStart
         }
         if edit.usesFilmProcessing && edit.film.exposure == nil {
-            values["look.filmExposure"] = Double(try filmMeter(source))
+            values["look.filmExposure"] = Double(try filmMeter(source, stock: edit.film.stock!, antihalation: edit.film.antihalation))
         }
         return values
     }

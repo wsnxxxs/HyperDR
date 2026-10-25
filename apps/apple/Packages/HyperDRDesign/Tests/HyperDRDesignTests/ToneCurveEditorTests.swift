@@ -131,15 +131,15 @@ private let identity = [0.0, 0, 1, 1]
 }
 
 @Test func theHDRSegmentIsIdentityWithoutPointsAndCarriesOnFromTheLastOne() {
-    #expect(CurveInterpolation(identity).value(at: 2.7) == 2.7)
-    let lifted = CurveInterpolation([0, 0, 1, 1, 2, 2.6])
-    #expect(abs(lifted.value(at: 2) - 2.6) < 1e-12)
-    #expect(abs(lifted.value(at: 3.5) - 4.1) < 1e-12, "slope 1 past the last point")
-    #expect(lifted.value(at: 1.5) > 1.5, "the segment between white and the point is lifted")
+    #expect(ToneCurvePoints.value(identity, at: 2.7) == 2.7)
+    let lifted = [0.0, 0, 1, 1, 2, 2.6]
+    #expect(abs(ToneCurvePoints.value(lifted, at: 2) - 2.6) < 1e-12)
+    #expect(abs(ToneCurvePoints.value(lifted, at: 3.5) - 4.1) < 1e-12, "slope 1 past the last point")
+    #expect(ToneCurvePoints.value(lifted, at: 1.5) > 1.5, "the segment between white and the point is lifted")
     // The SDR part matches the renderer's table.
     let sdr = [0.0, 0, 0.3, 0.45, 1, 1]
     for x in stride(from: 0.0, through: 1.0, by: 0.05) {
-        #expect(abs(CurveInterpolation(sdr).value(at: x) - ToneCurvePoints.curve(sdr).value(at: x)) < 1e-12)
+        #expect(abs(ToneCurvePoints.value(sdr, at: x) - ToneCurvePoints.curve(sdr).value(at: x)) < 1e-12)
     }
 }
 

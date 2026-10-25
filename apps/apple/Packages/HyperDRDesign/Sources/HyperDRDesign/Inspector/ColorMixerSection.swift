@@ -178,7 +178,13 @@ struct ColorMixerLayout<Slider: View>: View {
             }
         }
         .onChange(of: attribute) { _, now in picking?.setAttribute(now) }
-        .onChange(of: arrangement) { _, now in if now == .attribute { picking?.setAttribute(attribute) } }
+        .onChange(of: arrangement) { _, now in
+            switch now {
+            case .attribute: picking?.setAttribute(attribute)
+            // The eyedropper belongs to the by-attribute view: leaving it ends the pick.
+            case .band: if picking?.isActive == true { picking?.toggle() }
+            }
+        }
     }
 
     // MARK: Arrangements

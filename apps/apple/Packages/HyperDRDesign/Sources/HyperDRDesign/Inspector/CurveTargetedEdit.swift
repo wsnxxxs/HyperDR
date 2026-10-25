@@ -41,7 +41,7 @@ public struct CurveTargetedEdit: Sendable {
         if let index = points.indices.first(where: { abs(Double(points[$0].x) - input) < near / 2 }) {
             return ToneCurvePoints.isFixed(points[index]) ? nil : (base, index)
         }
-        let y = CurveInterpolation(base).value(at: input)
+        let y = ToneCurvePoints.value(base, at: input)
         return ToneCurvePoints.inserted(base, at: CGPoint(x: input, y: y), maxValue: maxValue, liftsOnly: liftsOnly)
     }
 

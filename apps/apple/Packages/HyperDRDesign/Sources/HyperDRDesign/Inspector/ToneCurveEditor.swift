@@ -23,8 +23,15 @@ enum ToneCurvePoints {
     static func flat(_ points: [CGPoint]) -> [Double] { points.flatMap { [Double($0.x), Double($0.y)] } }
 
     /// The curve a list of coordinates draws; identity when they are not a valid
-    /// SDR-only curve. For anything with an HDR segment use `CurveInterpolation`.
+    /// SDR-only curve. 
     static func curve(_ coordinates: [Double]) -> ToneCurve { (try? ToneCurve(coordinates)) ?? ToneCurve() }
+
+    /// The curve's output at `input`, as the renderer's own `ToneCurve` has it
+    /// (SDR and HDR segments interpolated apart, meeting at SDR white);
+    /// the identity for coordinates it does not accept.
+    static func value(_ coordinates: [Double], at input: Double) -> Double {
+        (try? ToneCurve(coordinates))?.value(at: input) ?? input
+    }
 
     /// The fixed points: the black and the SDR white.
     static func isFixed(_ point: CGPoint) -> Bool {
@@ -90,7 +97,7 @@ enum ToneCurvePoints {
         else { return nil }
         let x = (edges[widest] + edges[widest + 1]) / 2
         guard edges[widest + 1] - edges[widest] >= 2 * gap(hdr: x > 1) else { return nil }
-        return inserted(coordinates, at: CGPoint(x: x, y: CurveInterpolation(coordinates).value(at: x)), maxValue: maxValue,
+        return inserted(coordinates, at: CGPoint(x: x, y: value(coordinates, at: x)), maxValue: maxValue,
                         liftsOnly: liftsOnly)
     }
 
@@ -303,12 +310,13 @@ public struct ToneCurveEditor: View {
             context.stroke(line, with: .color(.hdr.inkMuted), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
         }
 
-        let interpolation = CurveInterpolation(coordinates)
+        let curve = (try? ToneCurve(coordinates)) ?? ToneCurve()
         func trace(_ from: Double, _ to: Double, count: Int, color: Color) {
             var path = Path()
-            for i in 0...count {
+            let samples = curve.samples(count: count + 1, from: from, through: to)
+            for (i, value) in samples.enumerated() {
                 let x = from + (to - from) * Double(i) / Double(count)
-                let p = l.view(CGPoint(x: x, y: min(max(interpolation.value(at: x), 0), l.maxValue)))
+                let p = l.view(CGPoint(x: x, y: min(max(value, 0), l.maxValue)))
                 i == 0 ? path.move(to: p) : path.addLine(to: p)
             }
             context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
@@ -402,49 +410,5 @@ public struct ToneCurveEditor: View {
         guard isEnabled else { return }
         let removed = ToneCurvePoints.removed(coordinates, index: index)
         if removed != coordinates { write(removed) }
-    }
-}
-
-/// The curve through a list of points, the way the renderer bakes it:
-/// monotone cubic (Fritsch–Carlson) tangents, so the curve never overshoots
-/// its points. Past the last point it carries on straight at slope 1 (an HDR
-/// segment with no points is the identity).
-struct CurveInterpolation {
-    private let x: [Double], y: [Double], tangent: [Double]
-    /// The renderer's own curve when the coordinates are valid for it: the SDR
-    /// and HDR segments are interpolated separately, meeting at SDR white.
-    private let curve: ToneCurve?
-
-    init(_ coordinates: [Double]) {
-        curve = try? ToneCurve(coordinates)
-        let p = coordinates.count >= 4 ? coordinates : [0, 0, 1, 1]
-        let x = stride(from: 0, to: p.count - 1, by: 2).map { p[$0] }
-        let y = stride(from: 1, to: p.count, by: 2).map { p[$0] }
-        let n = min(x.count, y.count)
-        let slopes = (0..<(n - 1)).map { (y[$0 + 1] - y[$0]) / max(x[$0 + 1] - x[$0], 1e-9) }
-        var m = [slopes[0]] + (1..<(n - 1)).map { i in
-            slopes[i - 1] * slopes[i] <= 0 ? 0 : (slopes[i - 1] + slopes[i]) / 2
-        } + [slopes[n - 2]]
-        for i in slopes.indices {
-            if slopes[i] == 0 { m[i] = 0; m[i + 1] = 0; continue }
-            let a = m[i] / slopes[i], b = m[i + 1] / slopes[i]
-            let norm = a * a + b * b
-            if norm > 9 {
-                let factor = 3 / norm.squareRoot()
-                m[i] = factor * a * slopes[i]; m[i + 1] = factor * b * slopes[i]
-            }
-        }
-        self.x = Array(x.prefix(n)); self.y = Array(y.prefix(n)); tangent = m
-    }
-
-    func value(at input: Double) -> Double {
-        if let curve { return curve.value(at: input) }
-        guard let last = x.last, let lastY = y.last else { return input }
-        if input <= x[0] { return y[0] }
-        if input >= last { return lastY + (input - last) }
-        let i = x.indices.dropLast().first { input <= x[$0 + 1] } ?? 0
-        let h = x[i + 1] - x[i], t = (input - x[i]) / h, t2 = t * t, t3 = t2 * t
-        return (2 * t3 - 3 * t2 + 1) * y[i] + (t3 - 2 * t2 + t) * h * tangent[i]
-            + (-2 * t3 + 3 * t2) * y[i + 1] + (t3 - t2) * h * tangent[i + 1]
     }
 }

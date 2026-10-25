@@ -345,6 +345,10 @@ extension RenderEngine {
             }
             filter.decoderVersion = supported
         }
+        let supportedVersions = filter.supportedDecoderVersions.filter {
+            !$0.rawValue.isEmpty && $0 != CIRAWDecoderVersion.none
+        }
+        guard !supportedVersions.isEmpty else { throw RenderError.cannotDecodeSource }
         // AE-2 G2: leave file baselineExposure untouched. Apple's boost is a tone
         // curve (2026-10-22: scene 0.18 lands near 0.385, ratio ~1.29 at 0.90), so a
         // log look develops at boost 0 and keeps that baseline. Measured on Sony,

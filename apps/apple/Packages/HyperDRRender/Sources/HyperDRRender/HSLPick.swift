@@ -16,7 +16,7 @@ extension RenderEngine {
                         lut: ColorLUT? = nil, options: RenderOptions = RenderOptions()) throws -> HSLColorSample {
         let edit = try RenderAdjustments(recipe: recipe,lut: lut,options: options)
         let input = try workingInput(source)
-        let resources = try lookupResources(lut,curve: edit.tone.curve)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut,curve: edit.tone.curve)
         guard let command = queue.makeCommandBuffer(),
               let result = device.makeBuffer(length: 16,options:.storageModeShared) else { throw RenderError.allocationFailed }
         var uniform = graphUniform(source,edit,size:source.size,

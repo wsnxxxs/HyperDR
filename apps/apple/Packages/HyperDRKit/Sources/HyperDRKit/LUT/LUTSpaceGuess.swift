@@ -8,6 +8,9 @@ extension LUTSpace {
     /// the import keeps sRGB in and out.
     static func guess(fileName: String) -> (input: LUTSpace, output: LUTSpace)? {
         let name = String(fileName.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+        let separator = name.range(of: "to")
+        let inputName = separator.map { String(name[..<$0.lowerBound]) } ?? name
+        let outputName = separator.map { String(name[$0.upperBound...]) } ?? name
         let log: LUTSpace?
         if name.contains("slog3") {
             log = name.contains("sgamut3") && !name.contains("sgamut3cine") ? .slog3SGamut3 : .slog3SGamut3Cine
@@ -41,10 +44,17 @@ extension LUTSpace {
             log = nil
         }
         if let log {
-            let output: LUTSpace = name.contains("hlg") ? .hlg : name.contains("pq") || name.contains("st2084") ? .pq : name.contains("2020") ? .rec2020 : .rec709
+            // A declared input may itself name Rec.2020. Prefer the output
+            // portion in the common camera-space-to-display-space filenames.
+            let output: LUTSpace = outputName.contains("hlg") ? .hlg : outputName.contains("pq") || outputName.contains("st2084") ? .pq : outputName.contains("2020") ? .rec2020 : .rec709
             return (log, output)
         }
-        if name.contains("2020") { return (.rec2020, .rec2020) }
-        return name.contains("rec709") || name.contains("bt709") ? (.rec709, .rec709) : nil
+        if inputName.contains("2020") {
+            return (.rec2020, outputName.contains("709") ? .rec709 : .rec2020)
+        }
+        if inputName.contains("709") {
+            return (.rec709, outputName.contains("2020") ? .rec2020 : .rec709)
+        }
+        return nil
     }
 }

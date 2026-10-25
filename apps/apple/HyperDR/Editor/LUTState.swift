@@ -12,7 +12,7 @@ extension LUTSpace {
     /// cameras' Log encodings, which only a RAW photo's look can take as input.
     var family: LUTSpaceFamily {
         switch self {
-        case .srgb, .p3, .rec709: .display
+        case .srgb, .p3, .rec709, .rec2020: .display
         case .hlg, .pq: .hdr
         default: .log
         }

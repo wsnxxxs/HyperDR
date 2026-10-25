@@ -320,6 +320,8 @@ public struct ToneCurveSection: View {
             if now.component == .luma { lumaTarget = now.target }
         }
         .onChange(of: effectiveMode) { _, now in if now == .parameters, picking?.isActive == true { picking?.toggle() } }
+        // The eyedropper belongs to the section on screen: a page or tool left ends the pick.
+        .onDisappear { if picking?.isActive == true { picking?.toggle() } }
     }
 
     /// The mode, and where the page names the section, its tools beside it.
@@ -503,9 +505,7 @@ public struct ToneCurveSection: View {
                       isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
                       resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) {
             if let picking, isExpanded {
-                PickToolButton(isActive: picking.isActive,
-                               title: Text(picking.isActive ? "design.curve.pick.stop" : "design.curve.pick", bundle: .module),
-                               size: style == .touch ? 44 : 22) {
+                PickToolButton.curve(isActive: picking.isActive, size: style == .touch ? 44 : 22) {
                     picking.select(effectiveChannel.id)
                     picking.toggle()
                 }

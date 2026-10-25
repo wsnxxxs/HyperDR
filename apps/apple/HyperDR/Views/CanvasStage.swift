@@ -68,7 +68,6 @@ struct CanvasStage: View {
             .background { PhotoShadow(frame: photoFrame) }
             .overlay { PhotoCorners(frame: photoFrame) }
             .overlay { if model.cropLayout == nil { PhotoBadge(model: model) } }
-            .overlay { ClippingLegendLayer(model: model) }
             .overlay { WhiteBalanceCanvasLayer(model: model) }
             .overlay { TargetPickCanvasLayer(model: model) }
             .overlay {
@@ -275,27 +274,6 @@ private struct PhotoCorners: View {
 /// "HDR" over the edited photo when it has extended range; "Original" while
 /// the original is shown. Pinned to the visible part of the photo, so it
 /// stays on screen when zoomed in.
-/// What the clipping display's colours mean, at the photo's bottom leading
-/// corner while it shows (a white or black point drag, or ⌥ held).
-private struct ClippingLegendLayer: View {
-    let model: EditorModel
-
-    var body: some View {
-        GeometryReader { proxy in
-            if model.clippingMasks != nil,
-               let frame = model.canvas.imageFrame?.intersection(CGRect(origin: .zero, size: proxy.size)), !frame.isNull {
-                ClippingLegend()
-                    .padding(Space.s3)
-                    .frame(width: frame.width, height: frame.height, alignment: .bottomLeading)
-                    .position(x: frame.midX, y: frame.midY)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.smooth(duration: 0.2), value: model.clippingMasks != nil)
-        .allowsHitTesting(false)
-    }
-}
-
 private struct PhotoBadge: View {
     let model: EditorModel
 

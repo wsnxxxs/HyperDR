@@ -200,6 +200,8 @@ struct ColorMixerLayout<Slider: View>: View {
             case .band: if picking?.isActive == true { picking?.toggle() }
             }
         }
+        // And to the section on screen: a page or tool left ends the pick.
+        .onDisappear { if picking?.isActive == true { picking?.toggle() } }
     }
 
     private var header: some View {
@@ -208,9 +210,7 @@ struct ColorMixerLayout<Slider: View>: View {
                          isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
             if let picking, isExpanded || !showsTitle {
-                PickToolButton(isActive: picking.isActive,
-                               title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
-                               size: style == .touch ? 44 : 22) {
+                PickToolButton.mixer(isActive: picking.isActive, size: style == .touch ? 44 : 22) {
                     picking.setAttribute(attribute)
                     picking.toggle()
                 }

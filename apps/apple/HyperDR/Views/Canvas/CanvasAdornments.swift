@@ -56,9 +56,15 @@ struct CanvasAdornments: View {
                     .position(x: visible.midX, y: visible.midY)
                     .allowsHitTesting(false)
             }
-            if !legend.isEmpty {
+            // The clipping display's key joins the legend while it shows (a white
+            // or black point drag, ⌥ held), never over the original.
+            let clipping = model.clippingMasks != nil && !peeking && model.viewMode != .original
+            if !legend.isEmpty || clipping {
                 let dividerX = comparing ? SplitGeometry.dividerX(ratio: model.splitRatio, in: image) : visible.minX  // legend sits right of the divider
-                CanvasLegend(rows: legend)
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    if clipping { ClippingLegend().transition(.opacity) }
+                    if !legend.isEmpty { CanvasLegend(rows: legend) }
+                }
                     .reportsCanvasFrame(name: "legend")
                     .padding(.leading, 12 + max(0, dividerX - visible.minX))
                     .padding(.bottom, 12 + clearance)
@@ -66,7 +72,7 @@ struct CanvasAdornments: View {
                     .position(x: visible.midX, y: visible.midY)
                     .allowsHitTesting(false)
             }
-            if let key = hint.shown, legend.isEmpty {
+            if let key = hint.shown, legend.isEmpty, !clipping {
                 CanvasHint(Text(LocalizedStringKey(key)))
                     .frame(maxWidth: max(0, canvasWidth - 32))
                     .reportsCanvasFrame(name: "hint")
@@ -78,6 +84,7 @@ struct CanvasAdornments: View {
             }
         }
         .hdrAnimation(Motion.slow, value: hint.shown)
+        .animation(.smooth(duration: 0.2), value: model.clippingMasks != nil)
     }
 
     // MARK: Rules

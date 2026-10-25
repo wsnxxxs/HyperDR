@@ -140,6 +140,8 @@ struct EditorScreen: View {
         // The eyedroppers belong to their pages: leaving one ends its pick.
         .onChange(of: section) { session.resetTargetPickers() }
         .onChange(of: editor.source?.id) { session.resetTargetPickers() }
+        // Another photo comes in on the rings (a RAW's refined source is the same photo).
+        .onChange(of: session.photo?.url) { old, _ in if old != nil { section = nil } }
         .onChange(of: locksEditing) { if locksEditing { session.resetTargetPickers() } }
         if layout.axis == .horizontal {
             VStack(spacing: 0) {

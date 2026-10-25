@@ -111,6 +111,7 @@ struct DockSectionPane: View {
         .frame(maxHeight: .infinity, alignment: kind == .curves ? .top : .bottom)
         .padding(.horizontal, axis == .horizontal ? Space.s4 : 0)
         .onChange(of: attribute) { _, now in mixerPicking?.setAttribute(now) }
+        .onDisappear { if kind == .mixer, mixerPicking?.isActive == true { mixerPicking?.toggle() } }
     }
 
     // MARK: Header
@@ -171,8 +172,8 @@ struct DockSectionPane: View {
 
     @ViewBuilder private var curvePage: some View {
         // The section's anchor, the luminance curve.
-        if let control = panel.groups(for: recipe).flatMap(\.controls)
-            .first(where: { AdjustmentSections.section(anchoredBy: $0.id) == .curves }) {
+        if let anchor = Adjustments.all.first(where: { AdjustmentSections.section(anchoredBy: $0.id) == .curves }),
+           let control = panel.control(anchor.id, in: recipe) {
             ScrollView(.vertical, showsIndicators: false) {
                 ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch, showsTitle: false,
                                  onEditingChanged: onEditingChanged)
@@ -263,15 +264,21 @@ struct DockSectionPane: View {
             Button(role: .cancel) {} label: { Text("ios.adjust.cancel") }
             Button {
                 var edited = recipe
-                if let hue = Double(hueDraft.replacingOccurrences(of: "°", with: "")) {
+                if let hue = Self.number(hueDraft.replacingOccurrences(of: "°", with: "")) {
                     panel.set(zone.hueID, number: hue, in: &edited)
                 }
-                if let saturation = Double(saturationDraft) { panel.set(zone.saturationID, number: saturation, in: &edited) }
+                if let saturation = Self.number(saturationDraft) { panel.set(zone.saturationID, number: saturation, in: &edited) }
                 recipe = edited
             } label: {
                 Text("ios.adjust.apply")
             }
         }
+    }
+
+    /// A typed number in the user's own way of writing it, else the plain one.
+    static func number(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return (try? Double(trimmed, format: .number)) ?? Double(trimmed)
     }
 
     private func gradeID(_ ring: GradeRing) -> String {

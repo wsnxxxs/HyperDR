@@ -152,14 +152,17 @@ struct PadLookTool: View {
         switch control.kind {
         case .float, .floatOrAuto:
             if let spec = control.spec {
-                PadSlider(AdjustmentText.label(declaration),
-                          value: Binding(get: { control.sliderValue },
-                                         set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
-                          spec: spec, help: AdjustmentText.help(declaration),
-                          onEditingChanged: { onEditingChanged(declaration, $0) },
-                          onResetGroup: { onReset(.group(.look)) })
-                    .disabled(!control.isAvailable)
-                LookExposureAutoNote(control: control).padding(.horizontal, 4)
+                // One grid cell: the bar, and under it how Auto meters when it does.
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    PadSlider(AdjustmentText.label(declaration),
+                              value: Binding(get: { control.sliderValue },
+                                             set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
+                              spec: spec, help: AdjustmentText.help(declaration),
+                              onEditingChanged: { onEditingChanged(declaration, $0) },
+                              onResetGroup: { onReset(.group(.look)) })
+                        .disabled(!control.isAvailable)
+                    LookExposureAutoNote(control: control).padding(.horizontal, 4)
+                }
             }
         case .bool:
             PadToggleRow(title: AdjustmentText.label(declaration),

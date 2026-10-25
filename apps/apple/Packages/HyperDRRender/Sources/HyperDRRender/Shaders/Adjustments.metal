@@ -3,11 +3,19 @@ float maximum(float3 x) { return max(x.r, max(x.g, x.b)); }
 float rawY(float3 x) { return dot(x, float3(.2289746f,.6917385f,.0792869f)); }
 float contrastY(float y, float c) {
     if (c == 1 || y >= 1 || y <= 0) return y;
-    if (y <= .18f) return .18f * pow(y / .18f, c);
-    // AE-3 anchors and gray-point slope, with a cubic upper segment whose
-    // derivative is exactly one at white, matching the EDR identity segment.
-    float t = (y - .18f) / .82f;
-    return .18f + .82f * (t + (c-1) * t * (1-t) * (1-t));
+    // Shape perceptual lightness, keeping black, middle gray and white fixed.
+    // Both pieces share the gray slope; the white slope is exactly one.
+    float x = pow(y, 1.f / 2.4f), pivot = pow(.18f, 1.f / 2.4f);
+    float a = log(c) / log(1.6f), k = a * (a > 0 ? 1.6f : .8f);
+    float target;
+    if (x <= pivot) {
+        float t = x / pivot;
+        target = pivot * (t - k*t*t*t*(1-t));
+    } else {
+        float t = (x-pivot)/(1-pivot);
+        target = pivot + (1-pivot)*(t + k*t*(1-t)*(1-t));
+    }
+    return pow(target, 2.4f);
 }
 float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 1 ? amount == 1 : amount == 0) return rgb;
@@ -41,7 +49,13 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         return y + chroma * factor;
     }
     if (op == 1) target = contrastY(y,amount);
-    if (op == 2) target = y > 1 ? 1+(y-1)*exp2(2*a) : y + .3f*a*sm(.4f,1.f,y)*(1-y);
+    if (op == 2) {
+        if (y > 1) target = 1+(y-1)*exp2(2*a);
+        else if (y > .15f) {
+            float t = (y-.15f)/.85f;
+            target = .15f + .85f*t/(t+(1-t)*exp2(-3*a*t));
+        }
+    }
     if (op == 3 && y < .5f) { float t=y/.5f; target=.5f*(t+.8f*a*t*(1-t)*(1-t)); }
     if (op == 4 && y < .1f) target = max(0.f,y-.03f*a*(1-sm(0.f,.1f,y)));
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
@@ -351,7 +365,7 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
         peak=max(peak,float4(maximum((v.base+offset)*exp2(v.gain)-offset),maximum(v.base),maximum(v.gain),maximum(original.rgb)));
     }
     float4 mean=sum/float((hi.x-lo.x)*(hi.y-lo.y));stats.write(mean,pos);peaks.write(peak,pos);
-    masks.write(float4(sm(.4f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
+    masks.write(float4(sm(.15f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
 }
 struct BoxUniform { uint radius,vertical,width,height; };
 kernel void graphBox(texture2d<float,access::read> src [[texture(0)]],texture2d<float,access::write> dst [[texture(1)]],
@@ -579,7 +593,7 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
         if(p.mode.x>0)rgb=pointOp(rgb,2,p.tone0.z,false);
         if(p.mode.x>1)rgb=pointOp(rgb,3,p.tone0.w,false);
         float y=lum(rgb);
-        weight=p.mode.x==0 ? sm(.4f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
+        weight=p.mode.x==0 ? sm(.15f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
     } else if(p.mode.x<5) {
         float4 guide=originalGuide.sample(s,uv);
         if(p.mode.w)weight=p.mode.w==1 ? 1.f : sm(.75f*p.hdr.x,max(.001f,min(1.f,1.1f*p.hdr.x)),guide.x);

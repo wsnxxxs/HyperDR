@@ -210,6 +210,30 @@ private func wideHalf() -> String {
         #expect(abs(DoubleReference.luma(reconstructed)-DoubleReference.luma(saturated)) < 0.0001)
     }
 
+    @Test func perceptualContrastAndHighlightsStrength() async throws {
+        let engine = try RenderEngine()
+        let xs = (0...256).map { Double($0)/256 } + [1.5]
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        for operation in [AdjustmentOperation.contrast, .highlights] {
+            for amount in [-100.0, 100.0] {
+                let value = operation == .contrast ? ParameterDeclaration.contrastMultiplier(for: amount) : amount/100
+                let pixels = RenderEngine.readPixels(try await engine.render(source, nodes: [AdjustmentNode(operation, value: Float(value))]))
+                let expected = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: operation, value: value).x }
+                #expect(zip(expected, expected.dropFirst()).allSatisfy { $0 <= $1 })
+                for i in xs.indices {
+                    let rendered = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                    #expect(abs(rendered - expected[i]) < 0.00002)
+                }
+            }
+        }
+        let contrast = DoubleReference.point(SIMD3(repeating: 0.5), operation: .contrast, value: 1.6).x
+        let dark = DoubleReference.point(SIMD3(repeating: 0.05), operation: .contrast, value: 1.6).x
+        #expect(log2(contrast/0.5) > 0.4 && log2(contrast/0.5) < 0.5)
+        #expect(log2(dark/0.05) > -1 && log2(dark/0.05) < -0.7)
+        let highlight = DoubleReference.point(SIMD3(repeating: 0.6), operation: .highlights, value: 1).x
+        #expect(log2(highlight/0.6) > 0.4 && log2(highlight/0.6) < 0.5)
+    }
+
     @Test func analyticExpansionMasksAndFixedScaleCache() async throws {
         let engine = try RenderEngine(), width = 16, height = 12
         let values = (0..<(width*height)).map { i -> SIMD3<Double> in

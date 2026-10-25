@@ -23,16 +23,23 @@ extension DoubleReference {
             return x
         case .contrast:
             if y >= 1 || y <= 0 { return rgb }
-            let c = value
+            let x = pow(y, 1/2.4), pivot = pow(0.18, 1/2.4)
+            let amount = log(value) / log(1.6)
+            let k = amount * (amount > 0 ? 1.6 : 0.8)
             let target: Double
-            if y <= 0.18 { target = 0.18*pow(y/0.18,c) }
-            else {
-                let t = (y-0.18)/0.82
-                target = 0.18+0.82*(t+(c-1)*t*(1-t)*(1-t))
+            if x <= pivot {
+                let t = x / pivot
+                target = pivot * (t - k*t*t*t*(1-t))
+            } else {
+                let t = (x-pivot)/(1-pivot)
+                target = pivot + (1-pivot)*(t+k*t*(1-t)*(1-t))
             }
-            return scale(target)
+            return scale(pow(target, 2.4))
         case .highlights:
-            return scale(y > 1 ? 1+(y-1)*exp2(2*a) : y+0.3*a*smoothStep(0.4,1,y)*(1-y))
+            if y > 1 { return scale(1+(y-1)*exp2(2*a)) }
+            guard y > 0.15 else { return rgb }
+            let t = (y-0.15)/0.85
+            return scale(0.15+0.85*t/(t+(1-t)*exp2(-3*a*t)))
         case .shadows:
             guard y < 0.5 else { return rgb }
             let t = y/0.5

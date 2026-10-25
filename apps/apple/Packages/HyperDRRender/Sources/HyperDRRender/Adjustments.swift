@@ -33,7 +33,7 @@ public struct ColorAdjustments: Hashable, Sendable {
     public var saturation: Float = RenderParameter.defaultNumber("color.saturation")
     /// Eight bands in HSLBand order, hue/saturation/luminance in engine units.
     public var mixer: [SIMD3<Float>] = Array(repeating: .zero, count: 8)
-    /// Shadows, midtones, highlights, global: hue degrees, saturation, luminance.
+    /// Shadows, midtones, highlights, global: OKLCH hue degrees, saturation, luminance.
     public var grading: [SIMD3<Float>] = Array(repeating: .zero, count: 4)
     public var gradingBlending: Float = 0.5
     public var gradingBalance: Float = 0

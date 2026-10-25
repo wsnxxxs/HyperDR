@@ -53,7 +53,9 @@ this checkout. This file summarizes what they decide.
   selected automatically when all six capture fields are usable and both its
   spatial model and EXIF estimator are included; otherwise model 1 is used.
   Missing or zero ISO, exposure time, aperture or focal lengths are not usable;
-  a recorded zero exposure bias is usable. There is no model picker. Without
+  a recorded zero exposure bias is usable. Both research models reconstruct
+  with equal 1e-5 offsets; the graph preserves that HDR endpoint when encoding
+  its output pair. There is no model picker. Without
   model 1 (`ModelGain.isIncluded`, `EditorRendering.includesModel`), all platforms
   offer Captured and Expand, show AI as not included, and tests marked
   `.needsModel` skip. Published releases are built without the model.

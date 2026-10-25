@@ -410,9 +410,10 @@ extension RenderEngine {
         context.diagnosticPhase("graphRegion.inputReady", width: input.width, height: input.height)
 #endif
         let base = try context.texture(width: Int(region.width), height: Int(region.height))
+        let modelOffset = model == nil ? 0 : (edit.hdr.modelGain?.reconstructionOffset ?? 0)
         let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
         let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
-        let rgbGain = source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm || (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1))
+        let rgbGain = modelOffset > 0 || source.domain == .dual || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm || (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1))
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
 #if DEBUG || HYPERDR_FILM_PROFILE
         context.diagnosticPhase("graphRegion.outputsAllocated", width: base.width, height: base.height)
@@ -422,6 +423,10 @@ extension RenderEngine {
         if let target { p.inputRegion = sourceSampling(target.source.texture, target.source.samplingRegion) }
         p.mode.x = configuration.expand ? 1 : 0
         p.mode.y = model == nil ? 0 : 1
+        // Preserve AI-lit black channels and captured RGB ratios in the target pair.
+        // The model offset remains separate: effects may require a larger pair offset.
+        p.pair.x = max(p.pair.x, modelOffset)
+        p.pair.y = modelOffset
         if analysis.filmHalation != nil, edit.usesFilmProcessing, let stock = edit.film.stock, let data = try? FilmStock.named(stock) {
             p.halation = SIMD4(SIMD3<Float>(data.halationStrength(edit.film, amount: edit.effects.halation)), 1)
         }

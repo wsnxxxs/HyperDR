@@ -10,6 +10,9 @@ A missing EXIF tree or spatial package also falls back to model 1. Compiled
 `.mlmodelc` directories are accepted in place of `.mlpackage`.
 
 Both models use five linear Display-P3 feature planes and a stride-16 output.
+Both reconstruct with `HDR = (base + 1e-5) * 2^stops - 1e-5`. Predictions carry
+this offset; the graph converts the reconstructed HDR into its destination
+pair before combining AI and captured gain, including black channels.
 Model 2 removes the spatial grid's mean in double precision and restores the
 EXIF estimator's predicted level. Preview, detail and export share this provider.
 The private JSON is the original `export_research_assets.py` tree export; it is

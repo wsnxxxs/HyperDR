@@ -15,8 +15,8 @@ import Metal
 /// stride-16 grid, one cell per 16 × 16 base pixels, rows top-down, values in
 /// signed log2 stops. Its size is the grid size (`ModelGain.gridSize`), so the
 /// consumer derives sampling from the texture itself; nothing here upscales to
-/// the base, and no offsets are attached (our own separations carry zero
-/// offsets). Strength, range, rolloff and expansion start are applied after
+/// the base. Both research models carry their 1e-5 reconstruction offset.
+/// Strength, range, rolloff and expansion start are applied after
 /// prediction, by the graph.
 ///
 /// The input is the SDR version of the photograph the user actually sees, at the
@@ -54,7 +54,7 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
     public func modelID(for capture: ModelGainCapture) -> String {
         guard capture.isUsable, let exifModel, exifLevel != nil else { return modelID }
         return [exifModel.modelIdentifier, exifModel.version, ModelGain.preprocessingRevision,
-                "analysis-\(analysisLongSide)", "exif-level-v1"].joined(separator: "/")
+                "analysis-\(analysisLongSide)", "exif-level-v1", ModelGain.reconstructionRevision].joined(separator: "/")
     }
     private let context: CIContext
     private let device: any MTLDevice
@@ -77,7 +77,7 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
             ? nil : try ModelGainModel(computeUnits: computeUnits, bundle: bundle, modelName: ModelGain.exifModelName)
         self.analysisLongSide = analysisLongSide
         self.modelID = [model.modelIdentifier, model.version, ModelGain.preprocessingRevision,
-                        "analysis-\(analysisLongSide)"].joined(separator: "/")
+                        "analysis-\(analysisLongSide)", ModelGain.reconstructionRevision].joined(separator: "/")
         self.context = CIContext(mtlDevice: device, options: [
             .workingColorSpace: RenderEngine.workingColorSpace,
             .workingFormat: CIFormat.RGBAf.rawValue,
@@ -157,7 +157,8 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
             grid = try model.gain(for: features)
         }
         let texture = try makeTexture(grid)
-        let prediction = ModelGainPrediction(sourceID: sourceID, modelID: identity, gain: texture)
+        let prediction = ModelGainPrediction(sourceID: sourceID, modelID: identity, gain: texture,
+                                             reconstructionOffset: ModelGain.reconstructionOffset)
         cached = (sourceID, tensor, prediction)
         return prediction
     }

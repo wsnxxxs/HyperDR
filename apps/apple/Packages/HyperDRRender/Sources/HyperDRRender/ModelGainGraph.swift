@@ -3,8 +3,8 @@ import CoreImage
 import Metal
 
 extension ModelGainPrediction: Hashable {
-    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.sourceID == rhs.sourceID && lhs.modelID == rhs.modelID }
-    public func hash(into hasher: inout Hasher) { hasher.combine(sourceID); hasher.combine(modelID) }
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.sourceID == rhs.sourceID && lhs.modelID == rhs.modelID && lhs.reconstructionOffset == rhs.reconstructionOffset }
+    public func hash(into hasher: inout Hasher) { hasher.combine(sourceID); hasher.combine(modelID); hasher.combine(reconstructionOffset) }
 }
 struct ModelPredictionKey: Hashable { let source: UUID; let model: String }
 struct ModelFilterKey: Equatable { let prediction: ModelPredictionKey; let start: Float? }

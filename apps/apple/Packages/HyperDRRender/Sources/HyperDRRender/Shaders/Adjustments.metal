@@ -64,7 +64,7 @@ struct GraphUniform {
     float4 film; // strength (0: no film), grain amount, 1/pixel area (µm⁻²), exposure factor
     float4 halation; // per-channel strength, w: the render samples a halation map
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
-    float4 pair; // x: equal offset for independently edited SDR/HDR endpoints
+    float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
@@ -438,11 +438,12 @@ kernel void graphFilmExposure(texture2d<float,access::sample> src [[texture(0)]]
     float3 rgb=graphScene(sourceSample(src,float2(pos+p.region.zw)+.5f,float2(p.region.xy),p.inputRegion),p,cube,table);
     dst.write(float4(filmRaw(rgb*p.film.w,film,filmLUT),0),pos);
 }
-// Expansion/model values describe zero-offset HDR = base * 2^stops, rather
-// than the encoded paired curve. Convert that target before combining gains.
-float3 expansionGain(float3 base,float stops,float offset) {
-    if(offset==0) return float3(stops);
-    return log2((base*exp2(stops)+offset)/(base+offset));
+// Reconstruct each gain source using its own offset, then encode that HDR
+// endpoint in the destination pair before combining it with captured gain.
+float3 expansionGain(float3 base,float stops,float offset,float reconstructionOffset) {
+    if(offset==reconstructionOffset) return float3(stops);
+    float3 hdr=(base+reconstructionOffset)*exp2(stops)-reconstructionOffset;
+    return log2((max(hdr,0.f)+offset)/(base+offset));
 }
 float3 scaleEndpointGain(float3 base,float3 gain,float strength,float offset,uint domain) {
     if(offset==0 || domain==3 || strength==1) return gain*strength;
@@ -474,8 +475,8 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     pair=applyEffects(pair,p.effects.y>0 ? filmSmooth(halation,uv) : float3(0),int2(pos+p.region.zw),p,film,grainKernel);
     float3 g=pair.gain;
     float offset=p.pair.x;
-    if(p.mode.x)g=max(g,expansionGain(pair.base,expansion.sample(s,uv).x*p.color.z/3,offset));
-    if(p.mode.y)g=max(g,expansionGain(pair.base,model.sample(s,uv).x,offset));
+    if(p.mode.x)g=max(g,expansionGain(pair.base,expansion.sample(s,uv).x*p.color.z/3,offset,0));
+    if(p.mode.y)g=max(g,expansionGain(pair.base,model.sample(s,uv).x,offset,p.pair.y));
     g=scaleEndpointGain(pair.base,g,p.color.w,offset,p.flags.x);
     float3 hdr=(pair.base+offset)*exp2(g)-offset;
     float limit=exp2(p.color.z);

@@ -8,8 +8,11 @@ public struct ModelGainPrediction: @unchecked Sendable {
     public let sourceID: UUID
     public let modelID: String
     public let gain: any MTLTexture
-    public init(sourceID: UUID, modelID: String, gain: any MTLTexture) {
+    /// The model's equal base/alternate reconstruction offset, before target-pair encoding.
+    public let reconstructionOffset: Float
+    public init(sourceID: UUID, modelID: String, gain: any MTLTexture, reconstructionOffset: Float = 0) {
         self.sourceID = sourceID; self.modelID = modelID; self.gain = gain
+        self.reconstructionOffset = reconstructionOffset
     }
 }
 

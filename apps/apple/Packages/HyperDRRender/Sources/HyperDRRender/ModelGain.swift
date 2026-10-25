@@ -39,6 +39,9 @@ public enum ModelGain {
     /// File stem of the converted Core ML model inside the package resources.
     public static let modelName = "research-cnn-v1"
     public static let exifModelName = "research-exif-v1"
+    /// Both frozen research manifests reconstruct HDR with equal base/alternate offsets.
+    public static let reconstructionOffset: Float = 1 / 100000
+    public static let reconstructionRevision = "reconstruction-offset-1e-5"
     /// Model version recorded by the conversion script; also embedded in the
     /// compiled model's metadata, which is what `ModelGainModel.version` reads.
     public static let modelVersion = "research-demo-fold0-seed908/v1"
@@ -162,7 +165,8 @@ public struct ModelGainFeatures: Sendable, Equatable {
 /// The predicted gain field: signed log2 stops on the stride-16 grid.
 ///
 /// Rows are top-down, matching plan textures. Every value is a stop count that
-/// multiplies the SDR base: `HDR = base * 2^stops`. Downstream smoothing, the
+/// reconstructs HDR using the prediction's offset:
+/// `HDR = (base + offset) * 2^stops - offset`. Downstream smoothing, the
 /// strength and range controls and the ISO packaging all work on this grid; the
 /// model itself only predicts it.
 public struct ModelGainGrid: Sendable, Equatable {

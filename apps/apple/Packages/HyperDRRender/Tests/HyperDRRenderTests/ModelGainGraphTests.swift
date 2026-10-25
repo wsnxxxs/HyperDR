@@ -88,4 +88,66 @@ private func aiPrediction(_ source: RenderSource, _ values: [Float], device: any
         do { _ = try await engine.render(hdr,adjustments:edit); Issue.record("HDR accepted AI source") }
         catch RenderError.invalidAdjustment {}
     }
+
+    @Test(arguments: [false, true])
+    func researchOffsetSurvivesPreviewDetailAndExport(largerPairOffset: Bool) async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let engine = try RenderEngine(device: device)
+        let source = try await engine.source(image: aiImage([
+            SIMD3(repeating: 0), SIMD3(repeating: 1e-5), SIMD3(repeating: 1e-3)
+        ]), domain: .sdr)
+        let grid = try aiPrediction(source, [3, 3, 3], device: device)
+        var edit = RenderAdjustments()
+        edit.hdr.source = .ai; edit.hdr.range = 4
+        edit.hdr.modelGain = ModelGainPrediction(sourceID: source.id, modelID: grid.modelID,
+            gain: grid.gain, reconstructionOffset: ModelGain.reconstructionOffset)
+        // Independent effects use a different target-pair offset (1/64).
+        // AI must first reconstruct with 1e-5, then encode into that pair.
+        if largerPairOffset { edit.effects.halation = 0.1 }
+        let preview = try await engine.render(source, adjustments: edit)
+        @Sendable func check(_ planes: RenderPlanes) throws {
+            guard case .pairedLog2(let offset, _) = planes.encoding else {
+                Issue.record("Research gain lost its black-capable paired encoding"); return
+            }
+            #expect(offset == (largerPairOffset ? 1 / 64 : ModelGain.reconstructionOffset))
+            let pixels = RenderEngine.readPixels(planes)
+            for pixel in 0..<pixels.size.width {
+                for channel in 0..<3 {
+                    let base = pixels.baseRGBA[pixel * 4 + channel]
+                    let gain = pixels.gain[pixel * 3 + channel]
+                    let actual = (base + offset) * exp2(gain) - offset
+                    let expected = (base + Float(1e-5)) * 8 - Float(1e-5)
+                    #expect(abs(actual - expected) < 2e-8)
+                }
+            }
+        }
+        try check(preview)
+        let detail = try await engine.render(source, adjustments: edit, region: CGRect(x: 1, y: 0, width: 1, height: 1))
+        try check(detail)
+        try await engine.renderStripes(source, adjustments: edit, rows: 1) { try check($0) }
+    }
+
+    @Test func researchOffsetMergesCapturedHDRPerChannel() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let engine = try RenderEngine(device: device)
+        let source = try await engine.source(image: aiImage([SIMD3(8, 8e-5, 0)]), domain: .rawEDR)
+        let grid = try aiPrediction(source, [1], device: device)
+        var edit = RenderAdjustments(); edit.hdr.source = .capturedAI; edit.hdr.range = 4
+        edit.hdr.modelGain = ModelGainPrediction(sourceID: source.id, modelID: grid.modelID,
+            gain: grid.gain, reconstructionOffset: ModelGain.reconstructionOffset)
+        let output = try await engine.render(source, adjustments: edit)
+        #expect(output.gainChannelCount == 3)
+        guard case .pairedLog2(let offset, _) = output.encoding else {
+            Issue.record("Expected paired gain"); return
+        }
+        let pixels = RenderEngine.readPixels(output)
+        for channel in 0..<3 {
+            let base = pixels.baseRGBA[channel]
+            let captured = base * 8
+            let predicted = (base + Float(1e-5)) * 2 - Float(1e-5)
+            let actual = (base + offset) * exp2(pixels.gain[channel]) - offset
+            #expect(abs(actual - max(captured, predicted)) < max(2e-8, captured * 1e-6))
+        }
+    }
+
 }

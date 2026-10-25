@@ -84,6 +84,8 @@ struct ModelGainExifTests {
         let provider = try CoreMLModelGainProvider()
         let exif = try await engine.predictModelGain(source, provider: provider)
         #expect(exif.modelID.hasPrefix(ModelGain.exifModelName + "/"))
+        #expect(exif.reconstructionOffset == Float(1e-5))
+        #expect(exif.modelID.contains(ModelGain.reconstructionRevision))
         let stops = RenderEngine.readTexture(exif.gain)
         let mean = stops.reduce(0.0) { $0 + Double($1) } / Double(stops.count)
         let estimator = try #require(ModelGainExifLevel.bundled())
@@ -91,6 +93,8 @@ struct ModelGainExifTests {
         source.modelCapture = .empty
         let fallback = try await engine.predictModelGain(source, provider: provider)
         #expect(fallback.modelID.hasPrefix(ModelGain.modelName + "/"))
+        #expect(fallback.reconstructionOffset == Float(1e-5))
+        #expect(fallback.modelID.contains(ModelGain.reconstructionRevision))
         #expect(fallback.gain !== exif.gain)
         source.modelCapture = complete
         let repeated = try await engine.predictModelGain(source, provider: provider)

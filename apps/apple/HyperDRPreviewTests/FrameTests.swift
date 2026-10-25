@@ -1,4 +1,5 @@
 import XCTest
+import CoreText
 import HyperDREngine
 import ImageIO
 import AppKit
@@ -84,6 +85,80 @@ import UniformTypeIdentifiers
         XCTAssertEqual(CaptureFacts.shutter(1), "1 s")
         XCTAssertEqual(CaptureFacts.shutter(1.3), "1.3 s")
         XCTAssertEqual(CaptureFacts.shutter(30), "30 s")
+    }
+
+    /// A launch keeps the look and the typefaces, never the switch.
+    func testSettingsKeepTheLookAcrossLaunchesButNotTheSwitch() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "FrameTests.\(UUID().uuidString)"))
+        var settings = FrameSettings()
+        settings.isEnabled = true; settings.style = .instant; settings.tone = .ink; settings.signature = "R. W."
+        settings.textFace = .family("Avenir Next"); settings.signatureFace = .rounded
+        settings.save(to: defaults)
+        let loaded = FrameSettings.load(from: defaults)
+        XCTAssertFalse(loaded.isEnabled)
+        var expected = settings; expected.isEnabled = false
+        XCTAssertEqual(loaded, expected)
+    }
+
+    /// Settings saved before the typefaces existed keep everything else.
+    func testSettingsSavedWithoutTypefacesStillLoad() throws {
+        let old = #"{"isEnabled":true,"style":"label","tone":"mist","showsShadow":false,"showsExposure":true,"showsCamera":false,"showsDate":true,"signature":"A"}"#
+        let settings = try JSONDecoder().decode(FrameSettings.self, from: Data(old.utf8))
+        XCTAssertEqual(settings.style, .label); XCTAssertEqual(settings.tone, .mist)
+        XCTAssertFalse(settings.showsShadow); XCTAssertFalse(settings.showsCamera); XCTAssertTrue(settings.showsDate)
+        XCTAssertEqual(settings.signature, "A")
+        XCTAssertEqual(settings.textFace, .system); XCTAssertEqual(settings.signatureFace, .serif)
+    }
+
+    func testTypefacesRoundTrip() throws {
+        for face in FrameTypeface.designs + [.family("Didot"), .family("My Font: Bold")] {
+            let data = try JSONEncoder().encode(face)
+            XCTAssertEqual(try JSONDecoder().decode(FrameTypeface.self, from: data), face)
+        }
+        XCTAssertEqual(try JSONDecoder().decode(FrameTypeface.self, from: Data(#""unknown""#.utf8)), .system)
+        XCTAssertTrue(FrameTypeface.system.isAvailable)
+        XCTAssertFalse(FrameTypeface.family("No Such Family 7f3a").isAvailable)
+        XCTAssertTrue(FrameTypeface.family("Helvetica Neue").isAvailable)
+    }
+
+    /// The caption's typeface reaches the export's overlay.
+    func testTheCaptionTypefaceChangesTheOverlay() throws {
+        var settings = FrameSettings(); settings.isEnabled = true; settings.style = .gallery; settings.signature = "Signature"
+        let layout = try XCTUnwrap(EditorModel.frameLayout(for: .gallery, photoWidth: 3000, photoHeight: 2000))
+        func png(_ settings: FrameSettings) throws -> Data {
+            let caption = settings.style.caption(settings, facts: sony, variant: layout.variant)
+            return try FrameOverlayRenderer.png(caption, settings: settings, layout: layout)
+        }
+        let system = try png(settings)
+        var mono = settings; mono.textFace = .monospaced
+        var script = settings; script.signatureFace = .family("Snell Roundhand")
+        XCTAssertNotEqual(system, try png(mono))
+        XCTAssertNotEqual(system, try png(script))
+        // A family that is not installed sets the caption in the system face.
+        var missing = settings; missing.textFace = .family("No Such Family 7f3a")
+        XCTAssertEqual(system, try png(missing))
+    }
+
+    /// An imported font is copied in, registered under its family and removed again.
+    func testImportedFontsAreRegisteredAndRemoved() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "FrameFonts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let library = FrameFontLibrary(directory: directory)
+        let font = CTFontCreateWithName("Helvetica" as CFString, 12, nil)
+        let source = try XCTUnwrap(CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
+        let family = try library.importFont(from: source)
+        XCTAssertFalse(family.isEmpty)
+        XCTAssertEqual(library.entries.count, 1)
+        XCTAssertTrue(library.families.contains(family))
+        XCTAssertEqual(try library.importFont(from: source), family, "the same font is imported once")
+        XCTAssertEqual(library.entries.count, 1)
+        let text = FileManager.default.temporaryDirectory.appending(path: "not-a-font-\(UUID().uuidString).ttf")
+        try Data("hello".utf8).write(to: text)
+        defer { try? FileManager.default.removeItem(at: text) }
+        XCTAssertThrowsError(try library.importFont(from: text))
+        library.remove(library.entries[0])
+        XCTAssertTrue(library.entries.isEmpty)
+        XCTAssertTrue((try? FileManager.default.contentsOfDirectory(atPath: directory.path))?.isEmpty ?? true)
     }
 
     func testEngineDocumentFollowsTheSettings() {

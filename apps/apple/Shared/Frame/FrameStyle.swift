@@ -166,7 +166,11 @@ enum FrameTone: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// What the user chose. Kept across launches; applied by export once enabled.
+/// What the user chose. The look (style, paper, caption, typefaces) is kept
+/// across launches and photos; whether the frame is on belongs to the photo:
+/// every photo opens without one, and export carries a frame only after the
+/// person turns it on for this photo (a style in the frame's controls, or the
+/// export's own switch).
 struct FrameSettings: Equatable, Codable {
     var isEnabled = false
     var style: FrameStyle = .gallery
@@ -176,6 +180,34 @@ struct FrameSettings: Equatable, Codable {
     var showsCamera = true
     var showsDate = false
     var signature = ""
+    /// The exposure, camera, lens and date lines.
+    var textFace: FrameTypeface = .system
+    /// The signature; the system designs set it in italic.
+    var signatureFace: FrameTypeface = .serif
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled, style, tone, showsShadow, showsExposure, showsCamera, showsDate, signature
+        case textFace, signatureFace
+    }
+
+    /// Settings saved by an older version lack the newer keys: each missing
+    /// key keeps its default instead of losing the whole choice.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = FrameSettings()
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
+        style = (try? c.decodeIfPresent(FrameStyle.self, forKey: .style)) ?? defaults.style
+        tone = (try? c.decodeIfPresent(FrameTone.self, forKey: .tone)) ?? defaults.tone
+        showsShadow = try c.decodeIfPresent(Bool.self, forKey: .showsShadow) ?? defaults.showsShadow
+        showsExposure = try c.decodeIfPresent(Bool.self, forKey: .showsExposure) ?? defaults.showsExposure
+        showsCamera = try c.decodeIfPresent(Bool.self, forKey: .showsCamera) ?? defaults.showsCamera
+        showsDate = try c.decodeIfPresent(Bool.self, forKey: .showsDate) ?? defaults.showsDate
+        signature = try c.decodeIfPresent(String.self, forKey: .signature) ?? defaults.signature
+        textFace = (try? c.decodeIfPresent(FrameTypeface.self, forKey: .textFace)) ?? defaults.textFace
+        signatureFace = (try? c.decodeIfPresent(FrameTypeface.self, forKey: .signatureFace)) ?? defaults.signatureFace
+    }
 
     /// The hyperdr.frame/v1 document. The caption band is the style's own,
     /// with or without caption text, so a photo without EXIF keeps the same
@@ -220,9 +252,12 @@ struct FrameSettings: Equatable, Codable {
 
     private static let defaultsKey = "FrameSettings"
 
+    /// The look last chosen, with the frame off: a launch, like opening a
+    /// photo, never puts a frame on an export by itself.
     static func load(from defaults: UserDefaults = .standard) -> FrameSettings {
         guard let data = defaults.data(forKey: defaultsKey),
-              let settings = try? JSONDecoder().decode(FrameSettings.self, from: data) else { return FrameSettings() }
+              var settings = try? JSONDecoder().decode(FrameSettings.self, from: data) else { return FrameSettings() }
+        settings.isEnabled = false
         return settings
     }
 

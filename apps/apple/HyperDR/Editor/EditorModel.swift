@@ -489,6 +489,9 @@ import UniformTypeIdentifiers
                 applyInitialPreferences()
                 if restored != nil { armRestoreNotice() }
                 if let replacedName { sourceReplacedNotice = replacedName }
+                // The frame's look carries over; being on does not: each photo
+                // opens without a frame until it is turned on for it.
+                if frame.isEnabled { frame.isEnabled = false }
                 refreshExportMetadata()
                 if let old = previous.photo, old != opened { await services.close(old) }
             } catch {

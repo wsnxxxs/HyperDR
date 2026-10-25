@@ -184,7 +184,9 @@ import XCTest
         settings.signature = "Injected suite"
         settings.save(to: services.preferences)
         let model = EditorModel(services: services)
-        XCTAssertEqual(model.frame, settings)
+        // The look is injected; the switch never survives a launch.
+        var expected = settings; expected.isEnabled = false
+        XCTAssertEqual(model.frame, expected)
         model.frame.signature = "Changed"
         XCTAssertEqual(FrameSettings.load(from: services.preferences).signature, "Changed")
         let independent = EditorModel(services: ScriptedEditorServices())

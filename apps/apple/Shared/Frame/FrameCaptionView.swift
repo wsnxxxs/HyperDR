@@ -120,10 +120,14 @@ struct FrameCaptionView: View {
     private func font(_ line: FrameCaptionLine) -> Font {
         let size = line.size * reference
         switch line.face {
-        case .text: return .system(size: size).monospacedDigit()
-        case .semibold: return .system(size: size, weight: .semibold)
-        // New York italic: a signature set in type rather than a script face.
-        case .signature: return .system(size: size, design: .serif).italic()
+        case .text: return settings.textFace.font(size: size).monospacedDigit()
+        case .semibold: return settings.textFace.font(size: size, weight: .semibold)
+        case .signature:
+            // A system design is set in italic (New York italic by default: a
+            // signature in type rather than a script face); a named family
+            // as it is, since it may be a script already.
+            let font = settings.signatureFace.font(size: size)
+            return settings.signatureFace.familyName == nil ? font.italic() : font
         }
     }
 }

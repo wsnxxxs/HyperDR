@@ -29,9 +29,9 @@ public struct InspectorNotice: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(style == .warning ? EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9) : EdgeInsets())
+        .padding(style == .warning ? EdgeInsets(top: 7, leading: 11, bottom: 7, trailing: 11) : EdgeInsets())
         .background {
-            if style == .warning { RoundedRectangle(cornerRadius: Radius.sm).fill(Color.hdr.warnSoft) }
+            if style == .warning { SoftCapsule(maxRadius: 12).fill(Color.hdr.warnSoft) }
         }
         .accessibilityElement(children: .combine)
     }

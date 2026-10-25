@@ -146,8 +146,8 @@ struct SourceMissingBanner: View {
                     .foregroundStyle(Color.hdr.overlayInk)
                     .padding(.horizontal, Space.s2)
                     .frame(height: BusyChip.height)
-                    .background(hovered ? Color.hdr.overlayHover : .clear, in: .rect(cornerRadius: Radius.md))
-                    .contentShape(.rect(cornerRadius: Radius.md))
+                    .background(hovered ? Color.hdr.overlayHover : Color.hdr.overlayTrack, in: .capsule)
+                    .contentShape(.capsule)
             }
             .buttonStyle(.plain)
             .disabled(isChecking)

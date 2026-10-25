@@ -8,6 +8,8 @@ struct HyperDRiOSApp: App {
         MetricsCollector.shared.start()
         // No scene is open yet: copies from an earlier run are nobody's.
         ImportedPhoto.discardAll()
+        // Captions set in an imported font need it before the first frame draws.
+        FrameFontLibrary.shared.registerAll()
     }
 
     var body: some Scene {

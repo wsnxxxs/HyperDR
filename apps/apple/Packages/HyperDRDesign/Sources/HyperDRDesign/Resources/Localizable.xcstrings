@@ -1058,15 +1058,15 @@
     "export.reason.ceiling %@" : {
       "comment" : "Export plan notice: a destination holds the output's peak, in stops (\"+3\").",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This export goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This export goes up to %@ EV; brighter highlights are brought down." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。" } }
       }
     },
     "export.reason.ceilingFormat %@" : {
       "comment" : "Export plan notice: the format holds the output's peak, in stops (\"+3\").",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This format goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这种格式最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This format goes up to %@ EV; brighter highlights are brought down." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这种格式最高 %@ EV，更亮的高光会被压下来。" } }
       }
     },
     "export.reason.hdrOff" : {

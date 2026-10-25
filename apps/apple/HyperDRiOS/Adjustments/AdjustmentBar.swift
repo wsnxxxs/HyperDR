@@ -207,15 +207,9 @@ struct AdjustmentControls: View {
                     .frame(maxWidth: 420)
                     .padding(.horizontal, Space.s4)
             }
-            if off {
-                // In the readout's place: what the switch being off means.
-                Text("ios.adjust.hdrOff")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(minHeight: 28)
-            } else if let current {
+            // With the switch off there is no readout: the switch says so, and
+            // the export page says an SDR version is written.
+            if !off, let current {
                 readout(current)
             } else {
                 Color.clear.frame(height: 28)

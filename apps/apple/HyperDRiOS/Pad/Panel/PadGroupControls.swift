@@ -30,13 +30,9 @@ struct PadGroupControls: View {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
             let rows = state.controls.filter { $0.id != lead?.id }
             VStack(alignment: .leading, spacing: 12) {
-                if off {
-                    PadNote(text: Text("ios.adjust.hdrOff"), symbol: "moon.zzz", tint: Color.hdr.amber)
-                }
                 if let lead {
                     VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
                         source(lead)
-                        if let note = AdjustmentText.note(for: lead) { PadNote(text: note) }
                         if let aiUnavailable { PadNote(text: aiUnavailable, symbol: "exclamationmark.circle") }
                     }
                     .disabled(off)

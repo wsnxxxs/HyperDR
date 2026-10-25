@@ -379,6 +379,21 @@ import HyperDRRender
 }
 
 @MainActor extension ExportModelTests {
+    /// The frame's look carries over to the next photo; being on does not, so
+    /// an export never carries a frame nobody turned on for that photo.
+    func testEachPhotoOpensWithoutAFrameButKeepsTheLook() async {
+        let (m,s)=await ready()
+        var frame=m.frame; frame.isEnabled=true; frame.style = .label; frame.textFace = .monospaced; m.frame=frame
+        XCTAssertNotNil(m.frameLayout)
+        m.open([second])
+        await eventually(timeout:.seconds(10)) { m.photo?.url == second && m.document?.phase == .ready }
+        XCTAssertFalse(m.frame.isEnabled)
+        XCTAssertEqual(m.frame.style, .label); XCTAssertEqual(m.frame.textFace, .monospaced)
+        await running(m,s)
+        XCTAssertNil(s.exportCalls.first?.job.snapshot.frame)
+        s.sendExport(.finished(result:result(),failure:nil))
+        await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
+    }
     func testExportCarriesNoFrameWhileTheSwitchIsOff() async {
         let (m,s)=await ready()
         XCTAssertFalse(m.frame.isEnabled)

@@ -67,7 +67,8 @@ import SwiftUI
     }
     @ObservationIgnored private let defaults: UserDefaults
 
-    /// The frame chosen for exports, kept across launches as on the Mac.
+    /// The frame chosen for exports. Its look is kept across launches as on
+    /// the Mac; it is off for every photo until turned on for that photo.
     var frame = FrameSettings.load() {
         didSet {
             guard frame != oldValue else { return }
@@ -231,6 +232,9 @@ import SwiftUI
             try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference)
             photo?.discard()
             photo = imported
+            // The frame's look carries over; being on does not: each photo
+            // opens without a frame until it is turned on for it.
+            frame.isEnabled = false
             exports.photoOpened(imported.url)
             readFacts(imported.url)
         } catch {

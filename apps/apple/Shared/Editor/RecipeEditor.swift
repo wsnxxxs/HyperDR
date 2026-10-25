@@ -956,6 +956,14 @@ import Observation
         return try await renderer.sdrThumbnail(frame, maximumSize: maximumSize)
     }
 
+    /// The shown frame's diagnostic mask. Red channel is dead black (paint blue),
+    /// green is clipping (paint red). Request only while dragging whites/blacks
+    /// or holding Option; discard it when the shown frame changes.
+    func clippingMask() async throws -> RenderMask {
+        guard let frame else { throw EditorRenderingError.noSource }
+        return try await renderer.clippingMask(frame)
+    }
+
     // MARK: - LUTs and export
 
     /// Makes a LUT available to the recipe's look, for previews and exports.

@@ -65,8 +65,13 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 3 && y < .5f) { float t=y/.5f; target=.5f*(t+.8f*a*t*(1-t)*(1-t)); }
     // Whites deliberately crosses SDR white; the gain split retains that light.
     // This replaces the original plan's concern that a white-point control clips HDR.
-    if (op == 9 && y > 0) target = y*exp2(1.25f*a*y*y/(y*y+.25f));
-    if (op == 4 && y < .1f) target = max(0.f,y-.03f*a*(1-sm(0.f,.1f,y)));
+    if (op == 9 && y > 0) target = y*exp2(2.f*a*y/(y+.5f));
+    if (op == 4 && y < .5f) {
+        float encoded = (y<=.0031308f ? 12.92f*max(0.f,y) : 1.055f*pow(y,1.f/2.4f)-.055f);
+        float changed = a > 0 ? max(0.f,encoded-.1f*a*(1-sm(.1f,.5f,encoded)))
+                              : encoded-.12f*a*(1-sm(0.f,.5f,encoded));
+        target = (changed<=.04045f ? changed/12.92f : pow((changed+.055f)/1.055f,2.4f));
+    }
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
 }
 struct PointUniform { uint op, sdr; float value, unused; };

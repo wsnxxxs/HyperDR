@@ -50,10 +50,14 @@ extension DoubleReference {
             return scale(0.5*(t+0.8*a*t*(1-t)*(1-t)))
         case .whites:
             guard y > 0 else { return rgb }
-            return scale(y*exp2(1.25*a*y*y/(y*y+0.25)))
+            return scale(y*exp2(2*a*y/(y+0.5)))
         case .blacks:
-            guard y < 0.1 else { return rgb }
-            let target = max(0,y-0.03*a*(1-smoothStep(0,0.1,y)))
+            guard y < 0.5 else { return rgb }
+            let encoded = (y <= 0.0031308 ? 12.92*max(0,y) : 1.055*pow(y,1/2.4)-0.055)
+            let changed = a > 0
+                ? max(0, encoded - 0.1*a*(1-smoothStep(0.1,0.5,encoded)))
+                : encoded - 0.12*a*(1-smoothStep(0,0.5,encoded))
+            let target = (changed <= 0.04045 ? changed/12.92 : pow((changed+0.055)/1.055,2.4))
             return y > 1e-8 ? scale(target) : rgb + RGB(repeating: target)
         case .warmth, .tint:
             let diagonal = operation == .warmth ? RGB(exp2(0.4*a),1,exp2(-0.4*a))

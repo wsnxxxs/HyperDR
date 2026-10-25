@@ -86,6 +86,16 @@ actor RenderSession: EditorRendering {
                                                 photoSize: opened.editor.pixelSize, raw: opened.editor.domain == .rawEDR)
     }
 
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
+        guard opened?.editor.id == frame.request.sourceID else { throw EditorRenderingError.staleSource }
+        let recipe = frame.request.recipe
+        let range: Float
+        if case .number(let value) = recipe.value(for: "hdr.range") { range = Float(value) }
+        else { range = Float(frame.automaticValues["hdr.range"] ?? Double(frame.display.alternateHeadroom)) }
+        let enabled = recipe.value(for: "hdr.enabled") != .bool(false) && !frame.request.bypassedGroups.contains(.hdr)
+        return try await engine.clippingMask(frame.display, range: range, hdrEnabled: enabled)
+    }
+
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
         await EmbeddedPreview.read(url)
     }

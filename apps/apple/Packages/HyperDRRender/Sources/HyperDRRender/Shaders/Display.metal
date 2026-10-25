@@ -69,3 +69,22 @@ kernel void displayLegacyGain(texture2d<float,access::sample> base [[texture(0)]
     // Legacy headroom describes HDR / SDR white, rather than HDR / local base.
     if(p.size.z)displayPeak(log2(max(float3(1),p.gainToP3*h)),peak,lane);
 }
+
+struct ClippingUniform {
+    float3x3 p3ToGain,gainToP3;
+    float4 baseOffset,alternateOffset,controls;
+};
+kernel void clippingMask(texture2d<float,access::read> base [[texture(0)]],
+                         texture2d<float,access::sample> gain [[texture(1)]],
+                         texture2d<float,access::write> output [[texture(2)]],
+                         constant ClippingUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
+    float3 b=base.read(pos).rgb;
+    float3 g=gain.sample(s,(float2(pos)+.5f)/float2(base.get_width(),base.get_height())).rgb;
+    if(p.controls.x==1)g=g.rrr;
+    float3 h=p.gainToP3*((p.p3ToGain*b+p.baseOffset.xyz)*exp2(g)-p.alternateOffset.xyz);
+    float knee=1+.75f*(p.controls.y-1);
+    bool clipped=p.controls.z!=0 ? max(h.r,max(h.g,h.b))>=knee : max(b.r,max(b.g,b.b))>=1;
+    output.write(float4(all(b<=1.f/1023.f) ? 1.f : 0.f,clipped ? 1.f : 0.f,0,0),pos);
+}

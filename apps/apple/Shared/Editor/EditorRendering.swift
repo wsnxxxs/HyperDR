@@ -50,6 +50,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask
+
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample
 
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
@@ -238,6 +240,10 @@ extension EditorRendering {
     nonisolated var includesModel: Bool { true }
 
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? { nil }
+
+    func clippingMask(_ frame: EditorFrame) async throws -> RenderMask {
+        throw EditorRenderingError.unsupported("Clipping overlay")
+    }
 
     func yieldMemory() async {}
 

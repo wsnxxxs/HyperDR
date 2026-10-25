@@ -568,7 +568,15 @@ private func wideHalf() -> String {
             (.flog2FGamut, 0.3910072419, 0.092864),
             (.logC3AWG3, 0.3910068320, 0.092809),
             (.logC4AWG4, 0.2783958365, 95.0/1023),
-            (.clog3CinemaGamut, 0.3433893704, 0.12512219)]
+            (.clog3CinemaGamut, 0.3433893704, 0.12512219),
+            (.flogFGamut, 0.4593184587, 0.092864),
+            (.flog2cFGamutC, 0.3910072419, 0.092864),
+            (.appleLogRec2020, 0.4882724585, 0.1504764523),
+            (.nlogRec2020, 0.3636678832, 0.1243726159),
+            (.dlogDGamut, 0.3987645562, 0.0929),
+            (.clog2CinemaGamut, 0.3982546940, 0.092864125),
+            (.davinciDWG, 0.3360432724, 0),
+            (.acescctAP1, 0.4135884025, 0.0729055342)]
         let samples = [-0.2, -0.02, 0, 0.001, 0.01125, 0.05, 0.18, 0.9, 1, 4]
         let color = SIMD3<Double>(-0.15, 0.4, 1.1)
         for (space, gray, black) in spaces {
@@ -576,7 +584,7 @@ private func wideHalf() -> String {
             let encodedBlack = DoubleReference.encodeLUT(.zero, space: space).x
             #expect(abs(encodedGray - gray) < 1e-6, "space \(space.rawValue) 18%")
             #expect(abs(encodedBlack - black) < 1e-6, "space \(space.rawValue) black")
-            for sample in samples {
+            for sample in samples where space != .appleLogRec2020 || sample >= -0.05641088 {
                 let back = DoubleReference.decodeLUT(DoubleReference.encodeLUT(SIMD3(repeating: sample), space: space), space: space)
                 #expect(back.x.isFinite && abs(back.x - sample) < 1e-5, "space \(space.rawValue) \(sample)")
             }

@@ -51,6 +51,13 @@ private func lutCode(_ body: () async throws -> Void) async -> String? {
             let guess = try #require(LUTSpace.guess(fileName: name), "\(name)")
             #expect(guess.input == input && guess.output == output, "\(name)")
         }
+        for (name, input) in [("FLog_to_ETERNA_33grid_V.1.00", LUTSpace.flogFGamut),
+                              ("FLog2_to_PROVIA_33grid_V.1.00", .flog2FGamut),
+                              ("FLog2C_to_ETERNA_33grid_V.1.00", .flog2cFGamutC)] {
+            #expect(LUTSpace.guess(fileName: name)?.input == input)
+            #expect(LUTSpace.guess(fileName: name)?.output == .rec709)
+        }
+        #expect(LUTSpace.guess(fileName: "AppleLog_to_Rec2020")?.output == .rec2020)
         #expect(LUTSpace.guess(fileName: "Warm") == nil)
         let env = try LUTEnvironment()
         let entry = try await env.luts.importLUT(env.source("VLog_to_V709.cube"))

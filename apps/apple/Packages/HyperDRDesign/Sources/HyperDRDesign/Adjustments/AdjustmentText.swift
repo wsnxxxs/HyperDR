@@ -167,7 +167,7 @@ public enum AdjustmentText {
         /// camera's Log encoding.
         public init(_ id: String) {
             switch id {
-            case "srgb", "p3", "rec709": self = .display
+            case "srgb", "p3", "rec709", "rec2020": self = .display
             case "hlg", "pq": self = .hdr
             default: self = .log
             }

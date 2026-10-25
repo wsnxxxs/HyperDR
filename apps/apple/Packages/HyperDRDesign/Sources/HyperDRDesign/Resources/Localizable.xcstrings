@@ -1,6 +1,312 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "look.input.flog-fgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        }
+      }
+    },
+    "look.output.flog-fgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log / F-Gamut"
+          }
+        }
+      }
+    },
+    "look.input.flog2c-fgamutc" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        }
+      }
+    },
+    "look.output.flog2c-fgamutc" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "F-Log2C / F-Gamut C"
+          }
+        }
+      }
+    },
+    "look.input.applelog-rec2020" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "look.output.applelog-rec2020" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "look.input.nlog-rec2020" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "look.output.nlog-rec2020" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N-Log / Rec.2020"
+          }
+        }
+      }
+    },
+    "look.input.dlog-dgamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        }
+      }
+    },
+    "look.output.dlog-dgamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D-Log / D-Gamut"
+          }
+        }
+      }
+    },
+    "look.input.clog2-cinemagamut" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        }
+      }
+    },
+    "look.output.clog2-cinemagamut" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canon Log 2 / Cinema Gamut"
+          }
+        }
+      }
+    },
+    "look.input.davinci-dwg" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        }
+      }
+    },
+    "look.output.davinci-dwg" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DaVinci Intermediate / Wide Gamut"
+          }
+        }
+      }
+    },
+    "look.input.acescct-ap1" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        }
+      }
+    },
+    "look.output.acescct-ap1" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACEScct / AP1"
+          }
+        }
+      }
+    },
+    "look.input.rec2020" : {
+      "comment" : "LUT colour space option (look.input).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        }
+      }
+    },
+    "look.output.rec2020" : {
+      "comment" : "LUT colour space option (look.output).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec.2020 (Gamma 2.4)"
+          }
+        }
+      }
+    },
     "crop.aspect" : {
       "comment" : "Crop inspector: the ratio section.",
       "localizations" : {

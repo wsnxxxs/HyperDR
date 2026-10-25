@@ -28,6 +28,15 @@ public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
     case logC3AWG3 = "logc3-awg3"
     case logC4AWG4 = "logc4-awg4"
     case clog3CinemaGamut = "clog3-cinemagamut"
+    case flogFGamut = "flog-fgamut"
+    case flog2cFGamutC = "flog2c-fgamutc"
+    case appleLogRec2020 = "applelog-rec2020"
+    case nlogRec2020 = "nlog-rec2020"
+    case dlogDGamut = "dlog-dgamut"
+    case clog2CinemaGamut = "clog2-cinemagamut"
+    case davinciDWG = "davinci-dwg"
+    case acescctAP1 = "acescct-ap1"
+    case rec2020 = "rec2020"
     public var renderSpace: HyperDRRender.LUTSpace {
         switch self {
         case .srgb: .sRGB
@@ -42,6 +51,15 @@ public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
         case .logC3AWG3: .logC3AWG3
         case .logC4AWG4: .logC4AWG4
         case .clog3CinemaGamut: .clog3CinemaGamut
+        case .flogFGamut: .flogFGamut
+        case .flog2cFGamutC: .flog2cFGamutC
+        case .appleLogRec2020: .appleLogRec2020
+        case .nlogRec2020: .nlogRec2020
+        case .dlogDGamut: .dlogDGamut
+        case .clog2CinemaGamut: .clog2CinemaGamut
+        case .davinciDWG: .davinciDWG
+        case .acescctAP1: .acescctAP1
+        case .rec2020: .rec2020
         }
     }
 }

@@ -55,7 +55,7 @@ private struct RecipeValues {
     }
     func space(_ id: String) throws -> LUTSpace {
         // Index is LUTSpace.rawValue. Append only; the shader and Kit use the same order.
-        let names = ["srgb","p3","rec709","hlg","pq","slog3-sgamut3cine","slog3-sgamut3","vlog-vgamut","flog2-fgamut","logc3-awg3","logc4-awg4","clog3-cinemagamut"]
+        let names = ["srgb","p3","rec709","hlg","pq","slog3-sgamut3cine","slog3-sgamut3","vlog-vgamut","flog2-fgamut","logc3-awg3","logc4-awg4","clog3-cinemagamut", "flog-fgamut", "flog2c-fgamutc", "applelog-rec2020", "nlog-rec2020", "dlog-dgamut", "clog2-cinemagamut", "davinci-dwg", "acescct-ap1", "rec2020"]
         guard let name = value(id)?.stringValue, let index = names.firstIndex(of:name),
               let result = LUTSpace(rawValue:UInt32(index)) else { throw RenderError.invalidAdjustment }
         return result

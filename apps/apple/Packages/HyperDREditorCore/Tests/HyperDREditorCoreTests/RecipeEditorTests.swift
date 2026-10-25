@@ -49,6 +49,24 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
 }
 
 @MainActor @Suite struct RecipeEditorUndoTests {
+    @Test func targetedMixerDragIsOneUndoStep() async throws {
+        let h = Harness(undo:true)
+        try await h.open()
+        let weights = [0.25,0.75,0,0,0,0,0,0]
+        h.step {
+            h.editor.editingHSL(.hue,true)
+            h.editor.adjustHSL(.hue,weights:weights,delta:20)
+            h.editor.adjustHSL(.hue,weights:weights,delta:20)
+            h.editor.editingHSL(.hue,false)
+        }
+        #expect(h.editor.recipe.value(for:"hsl.red.hue") == .number(10))
+        #expect(h.editor.recipe.value(for:"hsl.orange.hue") == .number(30))
+        h.undoManager.undo()
+        #expect(h.editor.recipe.isDefault("hsl.red.hue"))
+        #expect(h.editor.recipe.isDefault("hsl.orange.hue"))
+        #expect(!h.undoManager.canUndo)
+    }
+
     @Test func oneDragIsOneStep() async throws {
         let h = Harness(undo: true)
         try await h.open()

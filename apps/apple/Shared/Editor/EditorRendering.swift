@@ -55,6 +55,7 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     func clippingMask(_ frame: EditorFrame) async throws -> RenderMask
 
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample
+    func pickHSL(_ request: EditorRenderRequest, at point: CGPoint) async throws -> HSLColorSample
 
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
@@ -254,6 +255,10 @@ extension EditorRendering {
     }
 
     func yieldMemory() async {}
+
+    func pickHSL(_ request: EditorRenderRequest, at point: CGPoint) async throws -> HSLColorSample {
+        throw EditorRenderingError.unsupported("HSL sampling")
+    }
 
     func pickWhiteBalance(_ request: EditorRenderRequest, at point: CGPoint) async throws -> WhiteBalanceSample {
         throw EditorRenderingError.unsupported("White balance sampling")

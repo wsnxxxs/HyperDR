@@ -13,8 +13,24 @@ extension LUTSpace {
             log = name.contains("sgamut3") && !name.contains("sgamut3cine") ? .slog3SGamut3 : .slog3SGamut3Cine
         } else if name.contains("vlog") {
             log = .vlogVGamut
+        } else if name.contains("flog2c") {
+            log = .flog2cFGamutC
         } else if name.contains("flog2") {
             log = .flog2FGamut
+        } else if name.contains("flog") {
+            log = .flogFGamut
+        } else if name.contains("applelog") {
+            log = .appleLogRec2020
+        } else if name.contains("nlog") && !name.contains("canonlog") {
+            log = .nlogRec2020
+        } else if name.contains("dlog") {
+            log = .dlogDGamut
+        } else if name.contains("clog2") || name.contains("canonlog2") {
+            log = .clog2CinemaGamut
+        } else if name.contains("davinci") || name.contains("dwg") || name.contains("intermediate") {
+            log = .davinciDWG
+        } else if name.contains("acescct") {
+            log = .acescctAP1
         } else if name.contains("logc4") {
             log = .logC4AWG4
         } else if name.contains("logc") {
@@ -25,9 +41,10 @@ extension LUTSpace {
             log = nil
         }
         if let log {
-            let output: LUTSpace = name.contains("hlg") ? .hlg : name.contains("pq") || name.contains("st2084") ? .pq : .rec709
+            let output: LUTSpace = name.contains("hlg") ? .hlg : name.contains("pq") || name.contains("st2084") ? .pq : name.contains("2020") ? .rec2020 : .rec709
             return (log, output)
         }
+        if name.contains("2020") { return (.rec2020, .rec2020) }
         return name.contains("rec709") || name.contains("bt709") ? (.rec709, .rec709) : nil
     }
 }

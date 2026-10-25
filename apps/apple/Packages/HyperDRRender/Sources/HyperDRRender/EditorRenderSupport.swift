@@ -25,6 +25,7 @@ extension RenderEngine {
             edit.hdr.range = nil
             edit.hdr.expansionStart = nil
             edit.film.exposure = nil
+            edit.look.exposure = nil
         }
         let analysis = try self.analysis(source,adjustments:edit)
         let model = try filteredModelGain(source,edit:edit)
@@ -37,6 +38,9 @@ extension RenderEngine {
         }
         if edit.usesFilmProcessing && edit.film.exposure == nil {
             values["look.filmExposure"] = Double(try filmMeter(source, stock: edit.film.stock!, antihalation: edit.film.antihalation))
+        }
+        if !edit.look.isIdentity && edit.look.input.isLog && edit.look.exposure == nil, let lut = edit.look.lut {
+            values["look.exposure"] = Double(try lutMeter(source, lut: lut, input: edit.look.input, output: edit.look.output))
         }
         return values
     }

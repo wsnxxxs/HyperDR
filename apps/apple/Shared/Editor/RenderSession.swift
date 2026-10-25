@@ -184,7 +184,17 @@ actor RenderSession: EditorRendering {
                                   rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback,
                                   sourceCompatibility: source.sourceCompatibility,
                                   rawCompatibility: source.rawCompatibility)
-        let effectiveOptions = source.sourceOptions ?? options
+        var effectiveOptions = options
+        if let openedOptions = source.sourceOptions {
+            // RenderSource.origin keeps the full-resolution family key. Copy
+            // only the source choices an open can resolve; retain this open's
+            // actual preview tier so the first canvas render reuses it.
+            effectiveOptions.rawDecoderVersion = openedOptions.rawDecoderVersion
+            effectiveOptions.rawCompatibility = openedOptions.rawCompatibility
+            effectiveOptions.rawEmbeddedPreview = openedOptions.rawEmbeddedPreview
+            effectiveOptions.sceneLinear = openedOptions.sceneLinear
+            effectiveOptions.draftRAWPreview = openedOptions.draftRAWPreview
+        }
         opened = Opened(editor: editor, revision: revision, source: source,
                         options: effectiveOptions, previewOptions: effectiveOptions)
         EditorLog.notice("Opened \(source.domain) \(source.nativeSize.width)x\(source.nativeSize.height) decoder=\(source.rawSettings?.decoderVersion ?? "none") compatibility=\(source.sourceCompatibility?.rawValue ?? "native") in \(began.duration(to: clock.now))")

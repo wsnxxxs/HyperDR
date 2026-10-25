@@ -35,6 +35,9 @@ public struct AdjustmentInspector: View {
     private let only: Set<AdjustmentGroupID>?
 
     @State private var expanded: Set<AdjustmentGroupID>
+    /// The control a note asked to bring into view, until the host has scrolled
+    /// to it: the look section switches to the kind that holds it.
+    @State private var revealing: String?
     @Environment(\.locale) private var locale
     @Environment(\.revealControl) private var reveal
 
@@ -78,9 +81,11 @@ public struct AdjustmentInspector: View {
     /// once the group has laid out.
     private func revealControl(_ id: String, host: @escaping (String) -> Void) {
         if let group = Adjustments.declaration(id)?.group { expanded.insert(group) }
+        revealing = id
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(150))
             host(id)
+            revealing = nil
         }
     }
 
@@ -123,7 +128,7 @@ public struct AdjustmentInspector: View {
                               summary: isExpanded.wrappedValue ? nil : Text(verbatim: AdjustmentText.summary(state, locale: locale)),
                               isExpanded: isExpanded, collapsible: only == nil) {
             if state.group == .look {
-                LookSection(recipe: $recipe, state: state, panel: panel, style: style,
+                LookSection(recipe: $recipe, state: state, panel: panel, style: style, revealing: revealing,
                             onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
             } else {
                 controls(state)
@@ -429,10 +434,20 @@ struct LookSection: View {
     let state: AdjustmentGroupState
     let panel: AdjustmentPanel
     let style: AdjustmentControlStyle
+    /// The control a note asked to show: its kind's tab comes forward.
+    var revealing: String?
     let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     let onLUTLibrary: (() -> Void)?
 
     enum Kind: Hashable { case builtIn, imported }
+
+    /// The tab to show when `id` is to be brought into view: a film's control
+    /// is under Built-in (a film stays on while its LUT tab is browsed); any
+    /// other look control is the LUT's.
+    static func kind(revealing id: String?, current: Kind) -> Kind {
+        guard let id, id.hasPrefix(Recipe.filmID), Adjustments.declaration(id)?.group == .look else { return current }
+        return .builtIn
+    }
 
     /// The kind shown, once chosen; until then the recipe's.
     @State private var chosen: Kind?
@@ -462,6 +477,7 @@ struct LookSection: View {
                 rows(lutControls)
             }
         }
+        .onChange(of: revealing) { chosen = Self.kind(revealing: revealing, current: kind) }
     }
 
     private func rows(_ controls: [AdjustmentControl]) -> some View {

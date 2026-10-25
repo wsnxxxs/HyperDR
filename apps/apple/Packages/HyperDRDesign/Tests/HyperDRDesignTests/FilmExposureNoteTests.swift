@@ -42,3 +42,11 @@ private func panel(automatic: Double? = 0.59) -> AdjustmentPanel {
     #expect(ids[film + 1] == "look.filmExposure")
     #expect(ids[film + 2] == "look.filmStrength")
 }
+
+@Test func revealingTheFilmExposureBringsTheBuiltInTabForward() {
+    #expect(LookSection.kind(revealing: "look.filmExposure", current: .imported) == .builtIn)
+    #expect(LookSection.kind(revealing: "look.filmStrength", current: .imported) == .builtIn)
+    #expect(LookSection.kind(revealing: "look.strength", current: .imported) == .imported)
+    #expect(LookSection.kind(revealing: "tone.exposure", current: .imported) == .imported)
+    #expect(LookSection.kind(revealing: nil, current: .imported) == .imported)
+}

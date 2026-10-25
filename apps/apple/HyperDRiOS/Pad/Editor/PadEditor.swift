@@ -281,7 +281,7 @@ struct PadEditor: View {
     @ViewBuilder private func toolContent(columns: Int) -> some View {
         switch tool {
         case .group(.look):
-            PadLookTool(recipe: recipe, panel: panel, columns: columns,
+            PadLookTool(recipe: recipe, panel: panel, columns: columns, revealing: revealed,
                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                         onLibrary: { showingLUTs = true })
         case .group(let group):

@@ -142,17 +142,42 @@ public struct WellModifier: ViewModifier {
     }
 }
 
+/// A rounded rectangle whose corners are half its height, up to `maxRadius`:
+/// a capsule around one line, a soft card around several. Notices take it,
+/// so a one-line status and a two-line banner read as the same family.
+public struct SoftCapsule: InsettableShape {
+    public var maxRadius: CGFloat
+    private var inset: CGFloat = 0
+
+    public init(maxRadius: CGFloat = 18) { self.maxRadius = maxRadius }
+
+    public func path(in rect: CGRect) -> Path {
+        let rect = rect.insetBy(dx: inset, dy: inset)
+        return Path(roundedRect: rect, cornerRadius: max(0, min(rect.height / 2, maxRadius - inset)), style: .continuous)
+    }
+
+    public func inset(by amount: CGFloat) -> SoftCapsule {
+        var shape = self
+        shape.inset += amount
+        return shape
+    }
+}
+
 /// A chip floating on the photograph (CSS `.view-tag`, upload and detail
-/// status): dark in both appearances, so the photograph decides nothing.
+/// status, notices and banners): frosted and dark in both appearances, so
+/// the photograph decides nothing, in a `SoftCapsule` with a hairline edge and
+/// a soft shadow that lifts it off bright pixels.
 public struct OverlayChipModifier: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .font(.hdr.caption)
             .foregroundStyle(Color.hdr.overlayInk)
-            .padding(.horizontal, Space.s2)
+            .padding(.horizontal, Space.s3)
             .padding(.vertical, Space.s1)
-            .background(Color.hdr.overlay, in: .rect(cornerRadius: Radius.sm))
-            .overlay { RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Color.hdr.overlayLine) }
+            .background(Color.hdr.overlay, in: SoftCapsule())
+            .background(.ultraThinMaterial, in: SoftCapsule())
+            .overlay { SoftCapsule().strokeBorder(Color.hdr.overlayLine, lineWidth: 0.5) }
+            .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
             .environment(\.colorScheme, .dark)
     }
 }

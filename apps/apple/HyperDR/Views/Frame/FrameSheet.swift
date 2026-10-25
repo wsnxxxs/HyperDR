@@ -1,5 +1,6 @@
 import SwiftUI
 import HyperDRDesign
+import UniformTypeIdentifiers
 
 /// File ▸ Frame…: the presentation frame around the photograph, previewed on
 /// a live EDR canvas. The frame is drawn in SDR, so on an HDR display it sits
@@ -368,11 +369,105 @@ struct FrameSettingsPanel: View {
                     Text("frame.signature")
                         .font(Font.hdr.caption)
                 }
+                FrameTypefaceControls(settings: $settings)
             } else {
                 Text("frame.text.none")
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)
             }
+        }
+    }
+}
+
+/// The caption's typefaces: one for its lines, one for the signature, each a
+/// system design, a family the system ships, or a font the person imported.
+private struct FrameTypefaceControls: View {
+    @Binding var settings: FrameSettings
+    @State private var importing = false
+    @State private var importFailed = false
+    private var library: FrameFontLibrary { .shared }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SectionHeading("frame.font")
+            picker("frame.font.text", selection: $settings.textFace)
+            picker("frame.font.signature", selection: $settings.signatureFace)
+            HStack(spacing: Space.s2) {
+                Button("frame.font.import") { importing = true }
+                    .buttonStyle(.hdrSecondary)
+                Spacer()
+                if !library.families.isEmpty {
+                    Menu("frame.font.manage") {
+                        ForEach(library.entries) { entry in
+                            Button(role: .destructive) { remove(entry) } label: {
+                                Text("frame.font.remove \(entry.families.joined(separator: ", "))")
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+            }
+            if importFailed {
+                InspectorNotice(Text("frame.font.importFailed"), style: .warning)
+            }
+            if !settings.textFace.isAvailable || !settings.signatureFace.isAvailable {
+                InspectorNotice(Text("frame.font.missing"), style: .warning)
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.font], allowsMultipleSelection: false) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            do {
+                let family = try library.importFont(from: url)
+                importFailed = false
+                settings.textFace = .family(family)
+            } catch {
+                importFailed = true
+            }
+        }
+    }
+
+    private func picker(_ title: LocalizedStringKey, selection: Binding<FrameTypeface>) -> some View {
+        LabeledContent {
+            Picker(selection: selection) {
+                ForEach(FrameTypeface.designs) { face in
+                    face.title.tag(face)
+                }
+                Divider()
+                ForEach(library.offeredFamilies(), id: \.self) { family in
+                    Text(verbatim: family).tag(FrameTypeface.family(family))
+                }
+                // A family chosen on another Mac, or removed since, stays listed.
+                if let family = selection.wrappedValue.familyName, !library.offeredFamilies().contains(family) {
+                    Text("frame.font.unavailable \(family)").tag(selection.wrappedValue)
+                }
+            } label: {
+                Text(title)
+            }
+            .labelsHidden()
+            .fixedSize()
+        } label: {
+            Text(title).font(Font.hdr.caption)
+        }
+    }
+
+    private func remove(_ entry: FrameFontLibrary.Entry) {
+        for keyPath in [\FrameSettings.textFace, \.signatureFace]
+        where entry.families.contains(settings[keyPath: keyPath].familyName ?? "") {
+            settings[keyPath: keyPath] = keyPath == \.textFace ? .system : .serif
+        }
+        library.remove(entry)
+    }
+}
+
+extension FrameTypeface {
+    var title: Text {
+        switch self {
+        case .system: Text("frame.font.system")
+        case .serif: Text("frame.font.serif")
+        case .rounded: Text("frame.font.rounded")
+        case .monospaced: Text("frame.font.monospaced")
+        case .family(let name): Text(verbatim: name)
         }
     }
 }

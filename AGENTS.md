@@ -70,7 +70,7 @@ this checkout. This file summarizes what they decide.
 | `apps/apple/Shared/Crop` | Shared by the Mac and iOS targets: `CropLayout` (where the crop pane puts the photo, and the `GeometryDisplay` the compositor draws through) and `CropOverlay` (the crop box, its drag and, on the Mac, its cursors). The inspector form of the pane is HyperDRDesign's `GeometryInspector`; on the Mac the inspector's Adjust / Crop switch sets `EditorModel.isCropping` |
 | `apps/apple/Shared/Scope` | Shared by the Mac and iOS targets: `ScopeAnalyzer` (histogram and waveform counts of a frame at full gain, on `ScopeScale`'s ruler) and `TextureReadback`. The Mac's inspector scopes and the iPad Studio's histogram measure with it; not in `HyperDREditorCore`, which has no design package |
 | `apps/apple/Shared/Export` | Shared by the Mac and iOS targets: the editor's export capture in Kit's terms (`RecipeExportSnapshot`, `ExportPlanRequest`); `ExportLongEdge`, the custom format's size choices and the largest long edge that fits when memory blocks; `ExportReasonText`, Kit's typed notices and block reasons (`ExportNotice`, `ExportBlockReason`) in HyperDRDesign's shared words (`ExportReasonPhrase`, in the design package's catalogue). Kit's own catalogue keeps only the export stages |
-| `apps/apple/Shared/Frame` | Shared by the Mac and iOS targets: the presentation frame's model (`FrameStyle`, `FrameSettings`, `CaptureFacts`), `FramePixelLayout`, the caption view (`FrameCaptionView`, `FramedPhoto`) and the export plan (`FrameExportPlan`, `FrameOverlayRenderer`). No catalogue keys: each app names styles and tones in its own catalogue |
+| `apps/apple/Shared/Frame` | Shared by the Mac and iOS targets: the presentation frame's model (`FrameStyle`, `FrameSettings`, `CaptureFacts`), caption typefaces (`FrameTypeface`: the system designs, curated families, and fonts imported into `FrameFontLibrary` under Application Support/FrameFonts, registered for the process at launch), `FramePixelLayout`, the caption view (`FrameCaptionView`, `FramedPhoto`) and the export plan (`FrameExportPlan`, `FrameOverlayRenderer`). No catalogue keys: each app names styles and tones in its own catalogue |
 | `apps/apple/Shared/AppIcon` | `HyperDR.icon`, the Icon Composer app icon of both targets (`ASSETCATALOG_COMPILER_APPICON_NAME = HyperDR`): two stacked instant prints, the front one a sun over mountains. It is a copy of `designs/hyperdr-icon-instant-scenes/s2-mountains/HyperDR.icon`; change it through that folder's `make_icons.py` and copy the bundle back |
 
 ## Building and testing
@@ -139,6 +139,10 @@ planes. Frame pixels are SDR, with exactly zero gain; package enforces E5's
 zero-code alignment, bounded mat readback and staged publication. Never draw
 photo-dependent HDR content into the mat.
 
+- The frame's look (style, paper, caption, typefaces) is remembered across
+  launches and photos; being on is not: `FrameSettings.load` and every newly
+  opened photo (Mac and iOS) turn it off, so an export carries a frame only
+  after it is turned on for that photo (user, 2026-10-25).
 - `modules/image/src/frame.cpp` retains frame spec parsing and even-pixel layout;
   Kit's ExportPlanner uses `hyperdr_frame_layout`.
 - `Shared/Frame/` (Mac and iOS) captures a paper/shadow/caption snapshot. Core Image/Metal in

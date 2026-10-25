@@ -91,8 +91,8 @@ struct FrameCaptionSections: View {
     @Binding var settings: FrameSettings
 
     var body: some View {
-        Section {
-            if settings.style.hasCaption {
+        if settings.style.hasCaption {
+            Section {
                 Toggle("ios.frame.text.exposure", isOn: $settings.showsExposure)
                 Toggle("ios.frame.text.camera", isOn: $settings.showsCamera)
                 Toggle("ios.frame.text.date", isOn: $settings.showsDate)
@@ -101,11 +101,10 @@ struct FrameCaptionSections: View {
                 }
                 .textInputAutocapitalization(.words)
                 .submitLabel(.done)
-            } else {
-                Text("ios.frame.text.none").foregroundStyle(.secondary)
+            } header: {
+                Text("ios.frame.caption")
             }
-        } header: {
-            Text("ios.frame.caption")
+            FrameTypefaceSection(settings: $settings)
         }
         Section {
             Toggle("ios.frame.shadow", isOn: $settings.showsShadow)

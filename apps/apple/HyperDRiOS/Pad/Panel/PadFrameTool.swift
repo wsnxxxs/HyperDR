@@ -52,28 +52,29 @@ struct PadFrameTool: View {
                         }
                         signature
                     } else {
-                        PadNote(text: Text("ios.frame.text.none"))
                         PadToggleRow(title: Text("ios.frame.shadow"), isOn: $settings.showsShadow, symbol: "shadow")
                             .disabled(settings.style.geometry.shadow == nil)
+                    }
+                }
+                if settings.style.hasCaption {
+                    PadSection(Text("ios.frame.font")) {
+                        PadFrameTypefaceRows(settings: $settings)
                     }
                 }
             }
             .disabled(!settings.isEnabled)
             .opacity(settings.isEnabled ? 1 : 0.45)
-            VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
-                if let output, settings.isEnabled {
-                    HStack {
-                        Text("ios.frame.output").font(.subheadline)
-                        Spacer()
-                        Text(verbatim: "\(output.width) × \(output.height)")
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, PadMetrics.inset)
-                    .frame(height: PadMetrics.row)
-                    .padRow()
+            if let output, settings.isEnabled {
+                HStack {
+                    Text("ios.frame.output").font(.subheadline)
+                    Spacer()
+                    Text(verbatim: "\(output.width) × \(output.height)")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                PadNote(text: Text("ios.frame.sdrNote"), symbol: "sun.max")
+                .padding(.horizontal, PadMetrics.inset)
+                .frame(height: PadMetrics.row)
+                .padRow()
             }
         }
         .tint(Color.hdr.accent)

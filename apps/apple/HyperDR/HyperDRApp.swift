@@ -18,6 +18,8 @@ import SwiftUI
         applicationDelegate.editor = editor
         if !isTesting {
             ViewerSessionState.shared.scopeChannels = editor.preferences.value.histogramRGB ? .rgb : .luma
+            // Captions set in an imported font need it before the first frame draws.
+            FrameFontLibrary.shared.registerAll()
         }
     }
 

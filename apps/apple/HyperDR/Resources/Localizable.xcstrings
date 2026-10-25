@@ -1626,13 +1626,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The frame stays SDR and never enters the HDR gain, so highlights shine above its white."
+            "value" : "Off for every photo you open, until you turn it on for that photo. The frame stays SDR and never enters the HDR gain, so highlights shine above its white."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "边框保持 SDR，不进入 HDR 增益：照片高光会亮过这张“纸白”。"
+            "value" : "每张新打开的照片默认不加边框，在这里为这张照片打开后导出才会带上。边框保持 SDR，不进入 HDR 增益：照片高光会亮过这张“纸白”。"
           }
         }
       }
@@ -10031,6 +10031,240 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前照片正在用它，它的风格会一并去掉，可以撤销。其他已经用过它的照片与导出不受影响。"
+          }
+        }
+      }
+    },
+    "frame.font" : {
+      "comment" : "Frame caption: heading of the typeface choices.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typeface"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "字体"
+          }
+        }
+      }
+    },
+    "frame.font.text" : {
+      "comment" : "Frame caption: the typeface of the exposure, camera and date lines.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caption"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字"
+          }
+        }
+      }
+    },
+    "frame.font.signature" : {
+      "comment" : "Frame caption: the typeface of the signature.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "署名"
+          }
+        }
+      }
+    },
+    "frame.font.import" : {
+      "comment" : "Frame caption: imports a .ttf/.otf font file.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Font…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入字体…"
+          }
+        }
+      }
+    },
+    "frame.font.importFailed" : {
+      "comment" : "Frame caption: a font file could not be imported.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That file holds no font HyperDR can use."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件里没有可用的字体。"
+          }
+        }
+      }
+    },
+    "frame.font.missing" : {
+      "comment" : "Frame caption: a typeface chosen earlier is missing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A chosen font is not on this device; the caption uses the system font until it is imported again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选字体不在这台设备上，重新导入之前文字会使用系统字体。"
+          }
+        }
+      }
+    },
+    "frame.font.unavailable %@" : {
+      "comment" : "Frame caption: a typeface that is not on this device, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (missing)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（缺失）"
+          }
+        }
+      }
+    },
+    "frame.font.system" : {
+      "comment" : "Frame caption typeface: SF Pro.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统"
+          }
+        }
+      }
+    },
+    "frame.font.serif" : {
+      "comment" : "Frame caption typeface: New York.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serif"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "衬线"
+          }
+        }
+      }
+    },
+    "frame.font.rounded" : {
+      "comment" : "Frame caption typeface: SF Pro Rounded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rounded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "圆体"
+          }
+        }
+      }
+    },
+    "frame.font.monospaced" : {
+      "comment" : "Frame caption typeface: SF Mono.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monospaced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等宽"
+          }
+        }
+      }
+    },
+    "frame.font.manage" : {
+      "comment" : "Frame caption: menu of imported fonts, for removing them.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Imported Fonts"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已导入字体"
+          }
+        }
+      }
+    },
+    "frame.font.remove %@" : {
+      "comment" : "Frame caption: removes an imported font, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除 %@"
           }
         }
       }

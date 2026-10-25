@@ -516,24 +516,6 @@
         }
       }
     },
-    "ios.adjust.hdrOff" : {
-      "comment" : "Dock: beside the HDR switch while HDR is off.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR off · exports write SDR"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR 已关闭 · 导出 SDR 版本"
-          }
-        }
-      }
-    },
     "ios.adjust.more" : {
       "comment" : "Dock: the button at the end of the ring row with a group's other settings.",
       "extractionState" : "manual",
@@ -1151,13 +1133,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This export goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged."
+            "value" : "This export peaks at %@ EV; brighter highlights are compressed."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。"
+            "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。"
           }
         }
       }
@@ -1671,13 +1653,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The look uses “%@”, which is not in the LUT library. Import it again, or set the look to None."
+            "value" : "“%@” is no longer in the LUT library. Import it again."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "风格用到的“%@”不在 LUT 库里。重新导入它，或把风格改为“无”。"
+            "value" : "风格用到的“%@”不在 LUT 库里，请重新导入。"
           }
         }
       }
@@ -2182,13 +2164,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This style doesn’t fit this photo’s proportions. Choose another style."
+            "value" : "This style doesn’t fit this photo’s proportions."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这种样式不适合这张照片的比例，请换一种样式。"
+            "value" : "这种样式不适合这张照片的比例。"
           }
         }
       }
@@ -2223,23 +2205,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "输出"
-          }
-        }
-      }
-    },
-    "ios.frame.sdrNote" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The frame stays SDR, so the photo’s highlights shine above its white. Every export carries it while it is on."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "边框保持 SDR，照片的高光会亮过这张“纸白”。开启时每次导出都会带上它。"
           }
         }
       }
@@ -2444,23 +2409,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍摄参数"
-          }
-        }
-      }
-    },
-    "ios.frame.text.none" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This style has no caption."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这种样式不放文字。"
           }
         }
       }
@@ -3904,6 +3852,222 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "适合"
+          }
+        }
+      }
+    },
+    "ios.frame.font" : {
+      "comment" : "Frame caption: heading of the typeface choices.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typeface"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "字体"
+          }
+        }
+      }
+    },
+    "ios.frame.font.text" : {
+      "comment" : "Frame caption: the typeface of the exposure, camera and date lines.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caption"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字"
+          }
+        }
+      }
+    },
+    "ios.frame.font.signature" : {
+      "comment" : "Frame caption: the typeface of the signature.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "署名"
+          }
+        }
+      }
+    },
+    "ios.frame.font.import" : {
+      "comment" : "Frame caption: imports a .ttf/.otf font file.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Font…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入字体…"
+          }
+        }
+      }
+    },
+    "ios.frame.font.importFailed" : {
+      "comment" : "Frame caption: a font file could not be imported.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t import this font."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入这个字体。"
+          }
+        }
+      }
+    },
+    "ios.frame.font.unavailable %@" : {
+      "comment" : "Frame caption: a typeface that is not on this device, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (missing)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（缺失）"
+          }
+        }
+      }
+    },
+    "ios.frame.font.system" : {
+      "comment" : "Frame caption typeface: SF Pro.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统"
+          }
+        }
+      }
+    },
+    "ios.frame.font.serif" : {
+      "comment" : "Frame caption typeface: New York.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serif"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "衬线"
+          }
+        }
+      }
+    },
+    "ios.frame.font.rounded" : {
+      "comment" : "Frame caption typeface: SF Pro Rounded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rounded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "圆体"
+          }
+        }
+      }
+    },
+    "ios.frame.font.monospaced" : {
+      "comment" : "Frame caption typeface: SF Mono.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monospaced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等宽"
+          }
+        }
+      }
+    },
+    "ios.frame.font.remove" : {
+      "comment" : "Frame caption: removes an imported font.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
+    "ios.frame.font.removeNamed %@" : {
+      "comment" : "Frame caption: removes an imported font, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除 %@"
           }
         }
       }

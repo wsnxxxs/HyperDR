@@ -210,6 +210,134 @@ private func wideHalf() -> String {
         #expect(abs(DoubleReference.luma(reconstructed)-DoubleReference.luma(saturated)) < 0.0001)
     }
 
+    @Test func perceptualContrastAndHighlightsStrength() async throws {
+        let engine = try RenderEngine()
+        let xs = (0...256).map { Double($0)/256 } + [1.5]
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        for operation in [AdjustmentOperation.contrast, .highlights] {
+            for amount in [-100.0, 100.0] {
+                let value = operation == .contrast ? ParameterDeclaration.contrastMultiplier(for: amount) : amount/100
+                let pixels = RenderEngine.readPixels(try await engine.render(source, nodes: [AdjustmentNode(operation, value: Float(value))]))
+                let expected = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: operation, value: value).x }
+                #expect(zip(expected, expected.dropFirst()).allSatisfy { $0 <= $1 })
+                for i in xs.indices {
+                    let rendered = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                    #expect(abs(rendered - expected[i]) < 0.00002)
+                }
+            }
+        }
+        let contrast = DoubleReference.point(SIMD3(repeating: 0.5), operation: .contrast, value: 1.6).x
+        let dark = DoubleReference.point(SIMD3(repeating: 0.05), operation: .contrast, value: 1.6).x
+        #expect(log2(contrast/0.5) > 0.4 && log2(contrast/0.5) < 0.5)
+        #expect(log2(dark/0.05) > -1 && log2(dark/0.05) < -0.7)
+        let highlight = DoubleReference.point(SIMD3(repeating: 0.6), operation: .highlights, value: 1).x
+        #expect(log2(highlight/0.6) > 0.4 && log2(highlight/0.6) < 0.5)
+    }
+
+    @Test func highlightsJoinSmoothlyAcrossSDRWhite() async throws {
+        let epsilon = 1e-6
+        let xs = [1-epsilon, 1, 1+epsilon, 2-epsilon, 2, 2+epsilon, 3]
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        for amount in [-1.0, 1.0] {
+            let ys = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: .highlights, value: amount).x }
+            let left = (ys[1]-ys[0])/epsilon, right = (ys[2]-ys[1])/epsilon
+            #expect(abs(left-right) < 0.0002)
+            #expect(abs(right-(amount < 0 ? 1 : exp2(-3*amount))) < 0.0002)
+            #expect(abs((ys[5]-ys[4])/epsilon-exp2(2*amount)) < 0.0002)
+            #expect(zip(ys, ys.dropFirst()).allSatisfy { $0 <= $1 })
+            if amount < 0 {
+                for value in stride(from: 0.0, through: 4.0, by: 0.01) {
+                    #expect(DoubleReference.point(SIMD3(repeating: value), operation: .highlights, value: amount).x <= value+1e-12)
+                }
+            }
+            let pixels = RenderEngine.readPixels(try await engine.render(source, nodes: [AdjustmentNode(.highlights, value: Float(amount))]))
+            for i in xs.indices {
+                let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                #expect(abs(actual-ys[i]) < 0.00002)
+            }
+        }
+    }
+
+    @Test func whitesCrossesWhiteWithoutClipping() async throws {
+        let xs = (0...64).map { Double($0)/32 }
+        let engine = try RenderEngine()
+        for domain in [InputDomain.sdr, .hdr] {
+            let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: domain)
+            for amount: Float in [-1, 0, 1] {
+                var edit = RenderAdjustments()
+                edit.tone.whites = amount
+                edit.hdr.coverage = 0
+                edit.hdr.range = 4
+                let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                let reference = xs.map { DoubleReference.point(SIMD3(repeating: $0), operation: .whites, value: Double(amount)).x }
+                #expect(zip(reference, reference.dropFirst()).allSatisfy { $0 <= $1 })
+                for i in xs.indices {
+                    let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                    // SDR fixtures contain only values up to white; HDR also exercises the extension.
+                    if domain == .hdr || xs[i] <= 1 { #expect(abs(actual - reference[i]) < 0.00005) }
+                }
+                #expect(pixels.baseRGBA[0] == 0)
+                if amount == 1 { #expect(pixels.gain[32*pixels.gainChannelCount] > 0.99) }
+                if amount == 1 {
+                    edit.hdr.range = 0.5
+                    let limited = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                    let white = Double(limited.baseRGBA[32*4]) * exp2(Double(limited.gain[32*limited.gainChannelCount]))
+                    #expect(white <= exp2(0.5))
+                }
+            }
+        }
+    }
+
+    @Test func whitesStartsContinuouslyWithExistingSDRColourOverflow() async throws {
+        let rgb = SIMD3<Double>(0.95,0.70,0.65), engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap([rgb], width: 1, height: 1), domain: .sdr)
+        let lut = try ColorLUT(cube: cube())
+        for strength in [0.0, 0.5] {
+            var previous: PlanePixels?
+            for whites: Float in [0, 0.0001, -0.0001] {
+                var edit = RenderAdjustments()
+                edit.color.warmth = 1; edit.tone.whites = whites
+                edit.hdr.coverage = 0; edit.hdr.range = 4
+                if strength > 0 { edit.look.lut = lut; edit.look.strength = Float(strength) }
+                let pixels = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
+                compare(pixels, [DoubleReference.prepare(rgb, settings: edit, sdr: true)])
+                if let zero = previous {
+                    for c in 0..<3 { #expect(abs(pixels.baseRGBA[c]-zero.baseRGBA[c]) < 0.001) }
+                    #expect(abs(pixels.gain[0]-zero.gain[0]) < 0.001)
+                } else {
+                    #expect(pixels.gain[0] == 0)
+                    previous = pixels
+                }
+            }
+        }
+    }
+
+    @Test func sdrCurveShapesMidtonesAndKeepsHDR() async throws {
+        let curve = try ToneCurve([0,0, 0.25,0.16, 0.5,0.5, 0.75,0.84, 1,1])
+        let xs = [0.0, 0.05, 0.18, 0.5, 0.9, 1, 1.5]
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.5), curve: curve).x > 0.5)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.05), curve: curve).x < 0.05)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 1.5), curve: curve).x == 1.5)
+        #expect(DoubleReference.toneCurve(SIMD3(repeating: 0.18), curve: ToneCurve()).x == 0.18)
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: bitmap(xs.map { SIMD3(repeating: $0) }, width: xs.count, height: 1), domain: .hdr)
+        // A 1D look shares the table buffer with the baked tone curve.
+        let identity = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        for lut in [nil, identity] {
+            var recipe = Recipe(inputDomain: .hdr)
+            recipe.setValue(curve.parameterValue, for: "tone.curve")
+            recipe.setValue(.number(4), for: "hdr.range")
+            if let lut { recipe.look = LUTReference(contentHash: lut.contentHash, name: "Identity") }
+            let pixels = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: lut))
+            for i in xs.indices {
+                let actual = Double(pixels.baseRGBA[i*4]) * exp2(Double(pixels.gain[i*pixels.gainChannelCount]))
+                let expected = DoubleReference.toneCurve(SIMD3(repeating: xs[i]), curve: curve).x
+                #expect(abs(actual - expected) < 0.0001)
+            }
+        }
+    }
+
     @Test func analyticExpansionMasksAndFixedScaleCache() async throws {
         let engine = try RenderEngine(), width = 16, height = 12
         let values = (0..<(width*height)).map { i -> SIMD3<Double> in

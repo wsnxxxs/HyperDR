@@ -152,18 +152,20 @@ float3 filmSmooth(texture2d<float,access::sample> map,float2 uv) {
     return g0.y*(g0.x*map.sample(s,float2(h0.x,h0.y)).rgb+g1.x*map.sample(s,float2(h1.x,h0.y)).rgb)
           +g1.y*(g0.x*map.sample(s,float2(h0.x,h1.y)).rgb+g1.x*map.sample(s,float2(h1.x,h1.y)).rgb);
 }
-// One row per thread: centre-weighted (Gaussian, sigma 0.2 of the long edge) sums of
-// luminance and weight, for RenderEngine.filmMeter.
+// One row per thread: log luminance and centre weight per sample.
+// Half uniform, half Gaussian (sigma 0.2 long edge): keep the whole photograph
+// represented while giving its centre twice the weight of the corners.
+// The CPU takes their weighted median, so highlights and crushed shadows cannot
+// dictate the exposure of the rest of the photograph.
 kernel void filmMeter(texture2d<float,access::read> src [[texture(0)]],constant uint& unused [[buffer(0)]],
-                      device float2* rows [[buffer(1)]],uint2 pos [[thread_position_in_grid]]) {
+                      device float2* samples [[buffer(1)]],uint2 pos [[thread_position_in_grid]]) {
     uint w=src.get_width(),h=src.get_height();
     if(pos.x>=h) return;
     float edge=float(max(w,h)),y=(float(pos.x)/float(h)-.5f)*float(h)/edge;
-    float2 sum=0;
     for(uint x=0;x<w;x++) {
-        float u=(float(x)/float(w)-.5f)*float(w)/edge,weight=exp(-(u*u+y*y)/(2*.04f));
+        float u=(float(x)/float(w)-.5f)*float(w)/edge,weight=.5f+.5f*exp(-(u*u+y*y)/(2*.04f));
         float3 c=src.read(uint2(x,pos.x)).rgb;
-        sum+=float2(weight*max(0.f,dot(c,float3(.2289746f,.6917385f,.0792869f))),weight);
+        float luminance=max(1e-6f,dot(c,float3(.2289746f,.6917385f,.0792869f)));
+        samples[pos.x*w+x]=float2(log2(luminance),weight);
     }
-    rows[pos.x]=sum;
 }

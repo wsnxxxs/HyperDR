@@ -61,27 +61,35 @@ public struct DetentCrossing: Equatable, Sendable {
 /// - The value holds at the default for `detentPoints` of finger travel
 ///   either side. A control whose default is Auto takes what Auto resolves
 ///   to as its default.
+/// - Kelvin runs on a reciprocal (`TrackSpacing.reciprocal`) tape: its
+///   units are mired, one reach is `kelvinReachMired`, and the ticks thin
+///   out towards the cool end.
 public struct RulerScale: Equatable, Sendable {
     public let range: ClosedRange<Double>
     public let step: Double
     public let defaultValue: Double?
     public let majorTick: Double
-    /// Points the tape moves per unit of the value.
+    /// Points the tape moves per unit of the track (`track.position`).
     public let pointsPerUnit: Double
+    public let spacing: TrackSpacing
 
     /// A reach is this much of the ruler's width, and no less than `minimumReach`.
     public static let reachFraction: CGFloat = 0.75
     public static let minimumReach: CGFloat = 260
     /// How far either side of the default the value holds there, in finger points.
     public static let detentPoints: CGFloat = 5
+    /// Mired one reach covers on a kelvin tape: 2000 K to the cool end, or
+    /// 2000 to 4000 K.
+    public static let kelvinReachMired = 500.0
 
     public init(range: ClosedRange<Double>, step: Double, defaultValue: Double?, majorTick: Double,
-                pointsPerUnit: Double) {
+                pointsPerUnit: Double, spacing: TrackSpacing = .linear) {
         self.range = range
         self.step = step
         self.defaultValue = defaultValue
         self.majorTick = majorTick
         self.pointsPerUnit = max(pointsPerUnit, 1e-6)
+        self.spacing = spacing
     }
 
     /// For a declared parameter: exposure has a major tick every 1 EV, ±100
@@ -98,9 +106,10 @@ public struct RulerScale: Equatable, Sendable {
         }
         let reach = Double(max(width * Self.reachFraction, Self.minimumReach))
         // An Auto default is what Auto resolves to: the dot, the lit span and the detent sit there.
+        let units = control.spacing == .reciprocal ? Self.kelvinReachMired
+            : Self.reachUnits(range, format: control.declaration.format)
         self.init(range: range, step: spec.step, defaultValue: control.defaultNumber ?? control.automaticNumber,
-                  majorTick: major,
-                  pointsPerUnit: reach / Self.reachUnits(range, format: control.declaration.format))
+                  majorTick: major, pointsPerUnit: reach / units, spacing: control.spacing)
     }
 
     /// The units one reach covers: 100 for percent and ±100 controls, else
@@ -119,7 +128,7 @@ public struct RulerScale: Equatable, Sendable {
     /// Points from the needle to `value` on the tape when the needle is at
     /// `needle`; values outside the range sit at its ends.
     public func offset(of value: Double, needle: Double) -> Double {
-        (clamped(value) - clamped(needle)) * pointsPerUnit
+        (spacing.position(clamped(value)) - spacing.position(clamped(needle))) * pointsPerUnit
     }
 
     // MARK: Dragging
@@ -129,9 +138,12 @@ public struct RulerScale: Equatable, Sendable {
     /// `speed` is the fine-tune factor. Clamped and held at the default, not
     /// yet snapped.
     public func value(from start: Double, translation: CGFloat, speed: Double = 1) -> Double {
-        let raw = clamped(clamped(start) - Double(translation) * speed / pointsPerUnit)
-        return DefaultDetent.apply(raw, defaultValue: defaultValue, pointsPerUnit: pointsPerUnit / max(speed, 1e-3),
-                                   points: Self.detentPoints)
+        let position = spacing.position(clamped(start)) - Double(translation) * speed / pointsPerUnit
+        let lower = spacing.position(range.lowerBound), upper = spacing.position(range.upperBound)
+        let raw = clamped(spacing.value(atPosition: min(max(position, lower), upper)))
+        guard let defaultValue else { return raw }
+        let held = abs(spacing.position(raw) - spacing.position(clamped(defaultValue))) * pointsPerUnit / max(speed, 1e-3)
+        return held <= Double(Self.detentPoints) ? defaultValue : raw
     }
 
     /// On the step grid; the default stays as it is, even off the grid.
@@ -148,7 +160,13 @@ public struct RulerScale: Equatable, Sendable {
             let before = (old - defaultValue).sign, after = (new - defaultValue).sign
             crossing.defaultValue = new == defaultValue || (old != defaultValue && before != after)
         }
-        let tick = { (value: Double) in (value / majorTick + 1e-9).rounded(.down) }
+        let tick = { (value: Double) -> Double in
+            guard spacing == .reciprocal else { return (value / majorTick + 1e-9).rounded(.down) }
+            // The kelvin tape's major ticks (reciprocalTicks), counted.
+            if value <= 10000 { return (value / 1000 + 1e-9).rounded(.down) }
+            if value <= 20000 { return 10 + ((value - 10000) / 5000 + 1e-9).rounded(.down) }
+            return 12 + ((value - 20000) / 10000 + 1e-9).rounded(.down)
+        }
         // The ends have a feedback of their own.
         crossing.majorTick = tick(old) != tick(new) && new != range.lowerBound && new != range.upperBound
         crossing.limit = new == range.lowerBound || new == range.upperBound
@@ -164,6 +182,7 @@ public struct RulerScale: Equatable, Sendable {
 
     /// The ticks to draw, the bounds always included as major ones.
     public var ticks: [(value: Double, isMajor: Bool)] {
+        if spacing == .reciprocal { return reciprocalTicks }
         let minor = minorTick
         var ticks: [(value: Double, isMajor: Bool)] = [(range.lowerBound, true)]
         var index = (range.lowerBound / minor).rounded(.down) + 1
@@ -175,6 +194,30 @@ public struct RulerScale: Equatable, Sendable {
             guard (range.upperBound - value) * pointsPerUnit >= 3 else { break }
             let ratio = value / majorTick
             ticks.append((value, abs(ratio - ratio.rounded()) < 1e-6))
+        }
+        ticks.append((range.upperBound, true))
+        return ticks
+    }
+
+    /// Kelvin ticks on a mired tape: at each point the finest of 100, 250,
+    /// 500, 1000, 2500, 5000 and 10000 K that stays 7 pt apart; major every
+    /// 1000 K up to 10000, then every 5000 K, then every 10000 K.
+    private var reciprocalTicks: [(value: Double, isMajor: Bool)] {
+        let steps = [100.0, 250, 500, 1000, 2500, 5000, 10000]
+        let points = { (a: Double, b: Double) in abs(spacing.position(b) - spacing.position(a)) * pointsPerUnit }
+        let major = { (value: Double) -> Bool in
+            let every = value <= 10000 ? 1000.0 : value <= 20000 ? 5000 : 10000
+            let ratio = value / every
+            return abs(ratio - ratio.rounded()) < 1e-6
+        }
+        var ticks: [(value: Double, isMajor: Bool)] = [(range.lowerBound, true)]
+        var value = range.lowerBound
+        while true {
+            // The step's own width here; the next multiple of it can be a little closer.
+            guard let step = steps.first(where: { points(value, value + $0) >= 7 }) else { break }
+            value = (value / step + 1e-9).rounded(.down) * step + step
+            guard value < range.upperBound, points(value, range.upperBound) >= 3 else { break }
+            ticks.append((value, major(value)))
         }
         ticks.append((range.upperBound, true))
         return ticks

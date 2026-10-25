@@ -74,7 +74,7 @@ extension DoubleReference {
         let filtered = box(coefficients,radius:radius)
         let expansion = cells.indices.map { i in min(weights[i].y,max(0,filtered[i].x*cells[i].x+filtered[i].y)) }
         peaks.w = expansion.max() ?? 0
-        let masks = cells.map { c in SIMD4(smoothStep(0.4,1,c.x),1-smoothStep(0,0.5,c.x),1-smoothStep(0,0.1,c.x),c.y) }
+        let masks = cells.map { c in SIMD4(smoothStep(0.15,1,c.x),1-smoothStep(0,0.5,c.x),1-smoothStep(0,0.1,c.x),c.y) }
         return ReferenceSpatialAnalysis(size:PixelSize(width:w,height:h),cells:cells,masks:masks,expansion:expansion,peaks:peaks,
                                         sourceHeadroom:log2(originalPeak))
     }

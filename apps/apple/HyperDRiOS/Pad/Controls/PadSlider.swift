@@ -257,11 +257,8 @@ struct PadSlider: View {
                 drag = anchor
                 return
             }
-            let span = spec.range.upperBound - spec.range.lowerBound
-            let pointsPerUnit = Double(max(width, 1)) / span
-            let raw = anchor.start + Double(location.x - anchor.x) / pointsPerUnit * speed.factor
-            let detent = spec.isAutomatic(spec.defaultValue) ? nil : spec.defaultValue
-            write(DefaultDetent.apply(spec.snapped(raw), defaultValue: detent, pointsPerUnit: pointsPerUnit / speed.factor))
+            write(spec.dragged(from: anchor.start, by: Double(location.x - anchor.x),
+                               length: Double(max(width, 1)), speed: speed.factor))
         case .ended:
             guard drag != nil else { return }
             drag = nil

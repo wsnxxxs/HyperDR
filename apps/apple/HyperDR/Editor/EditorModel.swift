@@ -14,6 +14,8 @@ import UniformTypeIdentifiers
     private(set) var display: DisplayState
     private(set) var alert: UserFacingError?
     let canvas = CanvasModel()
+    /// The white balance eyedropper: wired to the canvas and editor in `init`.
+    let whiteBalance = WhiteBalancePicker()
     /// The editing session: the recipe, its undo steps, preview rendering and
     /// AI (p7-2b §2). The inspector binds to it.
     let editor: RecipeEditor
@@ -303,6 +305,7 @@ import UniformTypeIdentifiers
             }
         }
         observeEditor()
+        wireWhiteBalance()
     }
 
     deinit {

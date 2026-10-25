@@ -292,7 +292,8 @@ extension RenderEngine {
         return PixelSize(width: Int(width), height: Int(height))
     }
 
-    static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
+    static func configuredRAW(_ url: URL, options: SourceOptions) throws
+        -> (CIRAWFilter, PixelSize, [String: Double], Bool) {
         guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
         // An unavailable recorded decoder must fail rather than silently change a saved edit.
         if let version = options.rawDecoderVersion {
@@ -354,6 +355,11 @@ extension RenderEngine {
         if filter.isColorNoiseReductionSupported, let value = raw.colorNR { filter.colorNoiseReductionAmount = value }
         if filter.isSharpnessSupported, let value = raw.sharpness { filter.sharpnessAmount = value }
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
+        return (filter, nativeSize, sourceValues, draft)
+    }
+
+    static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
+        let (filter, nativeSize, sourceValues, draft) = try configuredRAW(url, options: options)
         try Task.checkCancellation()
         guard let decoded = filter.outputImage else { throw RenderError.cannotDecodeSource }
         let decodedExtent = decoded.extent

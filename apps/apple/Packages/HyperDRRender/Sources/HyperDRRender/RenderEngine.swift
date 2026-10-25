@@ -51,10 +51,15 @@ public actor RenderEngine {
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
-    var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lutCache: (id: String, curve: ToneCurve, texture: any MTLTexture, buffer: any MTLBuffer)?
     var filmCache: (id: FilmStockID?, texture: any MTLTexture, buffer: any MTLBuffer)?
+    /// The look baseline of the rendered source, and separately of the fixed
+    /// analysis source: a partial-strength render needs both, and one shared
+    /// entry would develop the RAW twice for every strength step.
     var lookBaselineCache: (id: UUID, texture: any MTLTexture)?
-    var filmMeterCache: (id: UUID, ev: Float)?
+    var analysisLookBaselineCache: (id: UUID, texture: any MTLTexture)?
+    var filmMeterCache: [FilmMeterKey: Float] = [:]
+    var filmMeterInputCache: (id: UUID, scene: RenderSource, target: Double)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
     private var sourceFamily: (key: SourceKey, id: UUID)?
@@ -133,8 +138,10 @@ public actor RenderEngine {
         analysisCache = nil
         lutCache = nil
         filmCache = nil
-        filmMeterCache = nil
+        filmMeterCache.removeAll()
+        filmMeterInputCache = nil
         lookBaselineCache = nil
+        analysisLookBaselineCache = nil
         authorCache = nil
         displayMatrices.removeAll()
         context.clearCaches()
@@ -303,10 +310,10 @@ public actor RenderEngine {
         // space, even for a tone-only edit. source.texture can be native sRGB.
         if source.domain == .dual {
             if CFEqual(source.baseSpace, Self.workingColorSpace) { return source.texture }
-            if let cached = lookBaselineCache, cached.id == source.renderID { return cached.texture }
+            if let cached = cachedLookBaseline(source) { return cached }
             guard let image = source.authoredBaseImage else { throw RenderError.missingGainMap }
             let texture = try rasterize(image, space: Self.workingColorSpace)
-            lookBaselineCache = (source.renderID, texture)
+            cacheLookBaseline(texture, for: source)
             return texture
         }
         let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
@@ -314,10 +321,11 @@ public actor RenderEngine {
         guard source.domain == .rawEDR, (weight > 0 && weight < 1) || zeroColourStockEffects,
               let origin = source.origin, origin.options.sceneLinear else {
             lookBaselineCache = nil
+            analysisLookBaselineCache = nil
             return source.texture
         }
-        if let cached = lookBaselineCache, cached.id == source.renderID { return cached.texture }
-        lookBaselineCache = nil
+        if let cached = cachedLookBaseline(source) { return cached }
+        cacheLookBaseline(nil, for: source)
         try origin.revision.validate(origin.url)
         if let staged = source.stagedLookBaseline {
             // The same window the reopened graph below would develop, read from
@@ -328,7 +336,7 @@ public actor RenderEngine {
             guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
             let texture = try staged.texture(region: rect, context: nodeContext(domain: .rawEDR, buffer: command))
             guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
-            lookBaselineCache = (source.renderID, texture)
+            cacheLookBaseline(texture, for: source)
             return texture
         }
         var options = origin.options
@@ -349,8 +357,22 @@ public actor RenderEngine {
         }
         guard texture.width == source.texture.width, texture.height == source.texture.height else { throw RenderError.invalidSize }
         try origin.revision.validate(origin.url)
-        lookBaselineCache = (source.renderID, texture)
+        cacheLookBaseline(texture, for: source)
         return texture
+    }
+
+    private func isAnalysisSource(_ source: RenderSource) -> Bool {
+        source.renderID == analysisSource?.renderID
+    }
+
+    private func cachedLookBaseline(_ source: RenderSource) -> (any MTLTexture)? {
+        let cached = isAnalysisSource(source) ? analysisLookBaselineCache : lookBaselineCache
+        return cached?.id == source.renderID ? cached?.texture : nil
+    }
+
+    private func cacheLookBaseline(_ texture: (any MTLTexture)?, for source: RenderSource) {
+        let entry = texture.map { (id: source.renderID, texture: $0) }
+        if isAnalysisSource(source) { analysisLookBaselineCache = entry } else { lookBaselineCache = entry }
     }
 
     func nodeContext(domain: InputDomain, buffer: any MTLCommandBuffer) -> RenderNodeContext {
@@ -717,4 +739,10 @@ public actor RenderEngine {
             initialized = pixels.count
         }
     }
+}
+
+struct FilmMeterKey: Hashable {
+    let source: UUID
+    let stock: FilmStockID
+    let antihalation: Bool
 }

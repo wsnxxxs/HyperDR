@@ -138,8 +138,12 @@ public enum Adjustments {
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "highlights"),
         ParameterDeclaration(id: "tone.shadows", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "shadows"),
+        ParameterDeclaration(id: "tone.whites", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "tone.blacks", group: .light, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "blacks"),
+        ParameterDeclaration(id: "tone.curve", group: .light, kind: .curve,
+            default: .constant(ToneCurve().parameterValue)),
     ]
 
     // MARK: - Color
@@ -150,9 +154,11 @@ public enum Adjustments {
 
     private static let color: [ParameterDeclaration] = [
         // RAW white balance is a development parameter, not a matrix (p7-adjustments §2.5).
-        ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 2000...12000, step: 50,
+        // 1000…50000 K (user, 2026-10-25): underwater and deep-shade light need
+        // both ends; the controls spread it in mired (`TrackSpacing.reciprocal`).
+        ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 1000...50000, step: 50,
             default: .fromSource, format: .kelvin, scale: .direct, domains: [.rawEDR], cost: .redevelop),
-        ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -150...150, step: 1,
+        ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -200...200, step: 1,
             default: .fromSource, format: .signed, scale: .direct, origin: .zero, domains: [.rawEDR], cost: .redevelop),
         ParameterDeclaration(id: "color.warmth", group: .color, kind: .float, range: -100...100, step: 1,
             default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, domains: [.sdr, .hdr, .dual]),
@@ -196,12 +202,12 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.film", group: .look, kind: .choice,
             default: .constant(.string("none")),
             options: filmStocks.map { ParameterOption($0, of: "look.film") }),
-        ParameterDeclaration(id: "look.filmStrength", group: .look, kind: .float, range: 0...100, step: 1,
-            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
-            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
-        // Auto meters the original photo centre-weighted to 18.4 % grey, as spektrafilm's camera.
+        // Auto matches the original display brightness through the selected stock.
         ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -3...3, step: 0.1,
             default: .auto, format: .ev, scale: .direct,
+            visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
+        ParameterDeclaration(id: "look.filmStrength", group: .look, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
         // Off: the film without its antihalation layer, as CineStill does to Vision3.
         ParameterDeclaration(id: "look.filmAntihalation", group: .look, kind: .bool,

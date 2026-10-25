@@ -11,6 +11,10 @@ struct PadPanel<Rail: View, Histogram: View, Header: View, Content: View, Footer
     let expanded: Bool
     /// The tool shown, so switching tools starts the scroll afresh.
     let tool: PadTool
+    /// A control the tool is to scroll to once shown (a note elsewhere led
+    /// here); `onRevealed` clears it.
+    var reveal: String?
+    var onRevealed: () -> Void = {}
     @ViewBuilder let rail: (Axis) -> Rail
     /// Standing only: lying, the header carries a small one.
     @ViewBuilder let histogram: Histogram
@@ -89,15 +93,24 @@ struct PadPanel<Rail: View, Histogram: View, Header: View, Content: View, Footer
     }
 
     private var scroll: some View {
-        ScrollView {
-            content
-                .padding(.horizontal, PadMetrics.inset)
-                .padding(.top, 2)
-                .padding(.bottom, 18)
+        ScrollViewReader { proxy in
+            ScrollView {
+                content
+                    .padding(.horizontal, PadMetrics.inset)
+                    .padding(.top, 2)
+                    .padding(.bottom, 18)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+            .id(tool)
+            .task(id: reveal) {
+                guard let reveal else { return }
+                // The tool has just been swapped in; let it lay out first.
+                try? await Task.sleep(for: .milliseconds(250))
+                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(reveal, anchor: .center) }
+                onRevealed()
+            }
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollDismissesKeyboard(.interactively)
-        .id(tool)
     }
 }
 

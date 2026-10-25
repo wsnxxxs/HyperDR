@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import CoreImage
 import Metal
 import simd
 import HyperDRRecipe
@@ -15,6 +16,7 @@ struct GraphUniform {
     var scatter: SIMD4<Int32> = .zero
     var pair: SIMD4<Float> = .zero
     var effects: SIMD4<Float> = .zero
+    var light: SIMD4<Float> = .zero
 }
 struct FilmBlurUniform { var radius, vertical, accumulate, unused: Int32 }
 struct BoxUniform { var radius, vertical, width, height: UInt32 }
@@ -67,31 +69,41 @@ extension RenderEngine {
         return source.texture
     }
 
-    func lookupResources(_ lut: ColorLUT?) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
+    func lookupResources(_ lut: ColorLUT?, curve: ToneCurve = ToneCurve()) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
         let id = lut?.id ?? ""
-        if let cache = lutCache, cache.id == id { return (cache.texture, cache.buffer) }
+        if let cache = lutCache, cache.id == id, cache.curve == curve { return (cache.texture, cache.buffer) }
+        // Curve drags replace only the small table, keeping the installed 3D LUT.
+        let cachedTexture = lutCache.flatMap { $0.id == id ? $0.texture : nil }
         lutCache = nil
-        let edge = lut?.is3D == true ? lut!.size : 2
-        guard edge > 0, edge <= 2048 else { throw RenderError.invalidSize }
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba32Float
-        descriptor.width = edge; descriptor.height = edge; descriptor.depth = edge
-        descriptor.storageMode = .shared; descriptor.usage = .shaderRead
-        guard let texture = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
-        let values = lut?.values.map { SIMD4($0, 1) } ?? [SIMD4<Float>(repeating: 0)]
-        if lut?.is3D == true {
-            values.withUnsafeBytes { bytes in
-                texture.replace(region: MTLRegionMake3D(0, 0, 0, edge, edge, edge), mipmapLevel: 0,
-                                slice: 0, withBytes: bytes.baseAddress!, bytesPerRow: edge * 16, bytesPerImage: edge * edge * 16)
+        let texture: any MTLTexture
+        if let cachedTexture { texture = cachedTexture }
+        else {
+            let edge = lut?.is3D == true ? lut!.size : 2
+            guard edge > 0, edge <= 2048 else { throw RenderError.invalidSize }
+            let descriptor = MTLTextureDescriptor()
+            descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba32Float
+            descriptor.width = edge; descriptor.height = edge; descriptor.depth = edge
+            descriptor.storageMode = .shared; descriptor.usage = .shaderRead
+            guard let created = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
+            if lut?.is3D == true {
+                let values = lut!.values.map { SIMD4($0, 1) }
+                values.withUnsafeBytes { bytes in
+                    created.replace(region: MTLRegionMake3D(0, 0, 0, edge, edge, edge), mipmapLevel: 0,
+                                    slice: 0, withBytes: bytes.baseAddress!, bytesPerRow: edge * 16, bytesPerImage: edge * edge * 16)
+                }
             }
+            texture = created
         }
-        let bufferValues = lut?.is3D == false ? values : [SIMD4<Float>(repeating: 0)]
+        var bufferValues = lut?.is3D == false ? lut!.values.map { SIMD4($0, 1) } : [SIMD4<Float>(repeating: 0)]
+        if !curve.isIdentity {
+            bufferValues += curve.samples().map { SIMD4(Float($0), 0, 0, 0) }
+        }
         let buffer = try bufferValues.withUnsafeBytes { bytes in
             guard let value = device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
                 else { throw RenderError.allocationFailed }
             return value
         }
-        lutCache = (id, texture, buffer)
+        lutCache = (id, curve, texture, buffer)
         return (texture, buffer)
     }
 
@@ -99,29 +111,86 @@ extension RenderEngine {
     func filmUniform(_ source: RenderSource, _ film: FilmAdjustments, grain: Float, active: Bool, size: PixelSize) -> SIMD4<Float> {
         guard active, let stock = film.stock, let data = try? FilmStock.named(stock) else { return .zero }
         let inverseArea = FilmStock.inverseArea(longEdge: max(size.width, size.height), film: data.resource.filming)
-        let exposure = film.exposure ?? ((try? filmMeter(source)) ?? 0)
+        let exposure = film.exposure ?? ((try? filmMeter(source, stock: stock, antihalation: film.antihalation)) ?? 0)
         return SIMD4(film.strength, grain, Float(inverseArea), exp2(exposure))
     }
 
-    /// The film's automatic exposure in stops: spektrafilm's centre-weighted meter
-    /// (Gaussian, sigma 0.2 of the long edge) of the original photo's luminance, put
-    /// at 18.4 %. Measured on the fixed analysis source, so preview and export agree,
-    /// and before any edit, so the light edits still move the exposure.
-    public func filmMeter(_ source: RenderSource) throws -> Float {
+    /// Match the unedited display rendition, rather than normalizing every scene
+    /// to middle grey. The small render includes the stock's curves and scatter;
+    /// manual trial exposures keep this independent of light edits and strength.
+    /// A centre-weighted log median preserves the body of dark scenes as well as
+    /// daylight scenes, without their highlights or crushed shadows setting the meter.
+    public func filmMeter(_ source: RenderSource, stock: FilmStockID = .portra400,
+                          antihalation: Bool = true) throws -> Float {
         let fixed = try fixedAnalysisSource(source)
-        if let cache = filmMeterCache, cache.id == fixed.id { return cache.ev }
-        let input = try workingInput(fixed)
-        guard let command = queue.makeCommandBuffer(),
-              let rows = device.makeBuffer(length: input.height * 8, options: .storageModeShared) else { throw RenderError.allocationFailed }
-        let context = nodeContext(domain: fixed.domain, buffer: command)
-        var unused: UInt32 = 0
-        try context.dispatch("filmMeter", width: input.height, height: 1, textures: [input], buffers: [rows], value: &unused)
-        try finish(command)
-        let sums = UnsafeBufferPointer(start: rows.contents().bindMemory(to: SIMD2<Float>.self, capacity: input.height), count: input.height)
-        let total = sums.reduce(SIMD2<Double>.zero) { $0 + SIMD2(Double($1.x), Double($1.y)) }
+        let key = FilmMeterKey(source: fixed.id, stock: stock, antihalation: antihalation)
+        if let cached = filmMeterCache[key] { return cached }
+        // Metering renders temporarily use the analysis/cache slots. Restore the
+        // live analysis so dragging strength does not replace it with a trial.
+        let savedAnalysis = analysisCache
+        defer { analysisCache = savedAnalysis }
+        func smallSource(_ original: RenderSource) throws -> RenderSource {
+            let input = try workingInput(original)
+            let image = CIImage(mtlTexture: input, options: [.colorSpace: Self.workingColorSpace])!
+                .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: Double(input.height)))
+            let scale = min(1, 192 / Double(max(input.width, input.height)))
+            let width = max(1, Int((Double(input.width) * scale).rounded()))
+            let height = max(1, Int((Double(input.height) * scale).rounded()))
+            let reduced = image.clampedToExtent().transformed(by: CGAffineTransform(
+                scaleX: Double(width) / Double(input.width), y: Double(height) / Double(input.height)))
+                .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+            return try self.source(image: reduced, domain: original.domain == .dual ? .hdr : original.domain)
+        }
+        func brightness(_ source: RenderSource, _ edit: RenderAdjustments, size: PixelSize? = nil) throws -> Double {
+            let planes = try render(source, adjustments: edit, size: size)
+            let input = planes.base
+            guard let command = queue.makeCommandBuffer(),
+                  let rows = device.makeBuffer(length: input.width * input.height * 8, options: .storageModeShared)
+            else { throw RenderError.allocationFailed }
+            var unused: UInt32 = 0
+            try nodeContext(domain: source.domain, buffer: command).dispatch("filmMeter",
+                width: input.height, height: 1, textures: [input], buffers: [rows], value: &unused)
+            try finish(command)
+            let sums = UnsafeBufferPointer(start: rows.contents().bindMemory(to: SIMD2<Float>.self,
+                capacity: input.width * input.height), count: input.width * input.height)
+            let sorted = sums.sorted { $0.x < $1.x }
+            let halfway = sorted.reduce(0.0) { $0 + Double($1.y) } / 2
+            var weight = 0.0
+            for sample in sorted {
+                weight += Double(sample.y)
+                if weight >= halfway { return Double(sample.x) }
+            }
+            return Double(sorted.last!.x)
+        }
+        let scene: RenderSource, target: Double
+        if let cached = filmMeterInputCache, cached.id == fixed.id {
+            scene = cached.scene; target = cached.target
+        } else {
+            scene = try smallSource(fixed)
+            target = try brightness(modelInputSource(source), RenderAdjustments(), size: scene.size)
+            filmMeterInputCache = (fixed.id, scene, target)
+        }
+        var edit = RenderAdjustments()
+        edit.film.stock = stock; edit.film.strength = 1; edit.film.antihalation = antihalation
+        edit.effects.grain = 0; edit.effects.halation = 1
         let range = Adjustments.declaration("look.filmExposure")!.range!
-        let ev = total.x > 0 && total.y > 0 ? min(max(-log2(total.x / total.y / 0.184), range.lowerBound), range.upperBound) : 0
-        filmMeterCache = (fixed.id, Float(ev))
+        var low = range.lowerBound, high = range.upperBound
+        func residual(_ ev: Double) throws -> Double {
+            edit.film.exposure = Float(ev)
+            return try brightness(scene, edit) - target
+        }
+        var a = try residual(low), b = try residual(high)
+        var ev = abs(a) < abs(b) ? low : high
+        if a < 0 && b > 0 {
+            for _ in 0..<9 {
+                // Bracketed secant: avoid stalling on the film's flat shoulders.
+                ev = min(high - 0.1 * (high-low), max(low + 0.1 * (high-low), low - a * (high-low) / (b-a)))
+                let value = try residual(ev)
+                if abs(value) < 0.005 { break }
+                if value < 0 { low = ev; a = value } else { high = ev; b = value }
+            }
+        }
+        filmMeterCache[key] = Float(ev)
         return Float(ev)
     }
 
@@ -171,7 +240,8 @@ extension RenderEngine {
                         : (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1) ? 1 / 64 : 0), 0, 0, 0),
             effects: SIMD4(edit.film.stock == nil ? edit.effects.grain : 0,
                            edit.film.stock == nil ? edit.effects.halation : 0,
-                           referenceArea, edit.usesFilmProcessing ? 1 : 0))
+                           referenceArea, edit.usesFilmProcessing ? 1 : 0),
+            light: SIMD4(t.whites, Float(lut?.is3D == false ? lut!.values.count : 1), t.curve.isIdentity ? 0 : 1024, 0))
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
@@ -196,7 +266,7 @@ extension RenderEngine {
         let cells = try texture(), peaks = try texture(), masks = try texture()
         let env = try texture(), temp = try texture(), weights = try texture(), means = try texture()
         let coefficients = try texture(), smoothed = try texture(), expansion = try texture(.r32Float)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, curve: edit.tone.curve)
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing)
         var parameters = graphUniform(source, edit, size: source.size,
             region: CGRect(x: 0, y: 0, width: source.size.width, height: source.size.height))
@@ -402,7 +472,7 @@ extension RenderEngine {
             .intersection(CGRect(x: 0, y: 0, width: size.width, height: size.height))
         let target = try authoredSourceAtOutputGrid(source, size: size, region: inputRegion)
         let input = try target?.hdr ?? workingInput(source)
-        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
+        let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut, curve: edit.tone.curve)
         let film = try filmResources(edit.film, active: edit.usesFilmProcessing, genericGrain: edit.film.stock == nil && edit.effects.grain > 0)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: command)

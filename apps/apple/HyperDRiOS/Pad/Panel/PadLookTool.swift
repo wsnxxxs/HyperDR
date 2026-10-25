@@ -18,6 +18,8 @@ struct PadLookTool: View {
     @Binding var recipe: Recipe
     let panel: AdjustmentPanel
     var columns = 1
+    /// The control a note asked to show: its kind's tab comes forward.
+    var revealing: String?
     var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
     var onReset: (AdjustmentReset) -> Void = { _ in }
     var onLibrary: () -> Void = {}
@@ -27,6 +29,13 @@ struct PadLookTool: View {
     @Environment(\.lookPickerShown) private var shown
 
     private var kind: LookKind { chosenKind ?? (recipe.look != nil ? .imported : .builtIn) }
+
+    /// A film's control is under Built-in, which a film that stays on while its
+    /// LUT tab is browsed would otherwise hide.
+    static func kind(revealing id: String?, current: LookKind) -> LookKind {
+        guard let id, id.hasPrefix(Recipe.filmID), Adjustments.declaration(id)?.group == .look else { return current }
+        return .builtIn
+    }
 
     var body: some View {
         if let state = panel.group(group: .look, in: recipe) {
@@ -52,11 +61,12 @@ struct PadLookTool: View {
                 if !controls.isEmpty {
                     PadRows(columns: columns) {
                         ForEach(controls) { control in
-                            row(control)
+                            row(control).id(control.id)
                         }
                     }
                 }
             }
+            .onChange(of: revealing) { chosenKind = Self.kind(revealing: revealing, current: kind) }
         }
     }
 
@@ -145,6 +155,8 @@ struct PadLookTool: View {
                          symbol: AdjustmentSymbols.control(declaration))
         case .choice:
             PadChoiceRow(control: control) { panel.set(control.id, option: $0, in: &recipe) }
+        case .curve:
+            EmptyView()
         case .reference:
             EmptyView()
         }

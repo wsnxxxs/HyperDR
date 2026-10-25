@@ -3,11 +3,19 @@ float maximum(float3 x) { return max(x.r, max(x.g, x.b)); }
 float rawY(float3 x) { return dot(x, float3(.2289746f,.6917385f,.0792869f)); }
 float contrastY(float y, float c) {
     if (c == 1 || y >= 1 || y <= 0) return y;
-    if (y <= .18f) return .18f * pow(y / .18f, c);
-    // AE-3 anchors and gray-point slope, with a cubic upper segment whose
-    // derivative is exactly one at white, matching the EDR identity segment.
-    float t = (y - .18f) / .82f;
-    return .18f + .82f * (t + (c-1) * t * (1-t) * (1-t));
+    // Shape perceptual lightness, keeping black, middle gray and white fixed.
+    // Both pieces share the gray slope; the white slope is exactly one.
+    float x = pow(y, 1.f / 2.4f), pivot = pow(.18f, 1.f / 2.4f);
+    float a = log(c) / log(1.6f), k = a * (a > 0 ? 1.6f : .8f);
+    float target;
+    if (x <= pivot) {
+        float t = x / pivot;
+        target = pivot * (t - k*t*t*t*(1-t));
+    } else {
+        float t = (x-pivot)/(1-pivot);
+        target = pivot + (1-pivot)*(t + k*t*(1-t)*(1-t));
+    }
+    return pow(target, 2.4f);
 }
 float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 1 ? amount == 1 : amount == 0) return rgb;
@@ -41,8 +49,23 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
         return y + chroma * factor;
     }
     if (op == 1) target = contrastY(y,amount);
-    if (op == 2) target = y > 1 ? 1+(y-1)*exp2(2*a) : y + .3f*a*sm(.4f,1.f,y)*(1-y);
+    if (op == 2) {
+        if (y > 1) {
+            float left=a<0 ? 1.f : exp2(-3*a), right=exp2(2*a), x=y-1, t=min(x,1.f);
+            // Integrate a smoothstep of the slope over the first stop above white.
+            // Beyond it the old HDR slope resumes with a constant offset.
+            target=1+right*x+(left-right)*(t-t*t*t+.5f*t*t*t*t);
+        }
+        else if (y > .15f) {
+            float t = (y-.15f)/.85f;
+            target = .15f + .85f*t/(t+(1-t)*exp2(-3*a*t));
+            if(a<0) target=mix(target,y,sm(.8f,1.f,y));
+        }
+    }
     if (op == 3 && y < .5f) { float t=y/.5f; target=.5f*(t+.8f*a*t*(1-t)*(1-t)); }
+    // Whites deliberately crosses SDR white; the gain split retains that light.
+    // This replaces the original plan's concern that a white-point control clips HDR.
+    if (op == 9 && y > 0) target = y*exp2(1.25f*a*y*y/(y*y+.25f));
     if (op == 4 && y < .1f) target = max(0.f,y-.03f*a*(1-sm(0.f,.1f,y)));
     return y > 1e-8f ? rgb * (target/y) : (op == 4 ? rgb + target : rgb);
 }
@@ -66,6 +89,7 @@ struct GraphUniform {
     int4 scatter; // xy: the region's offset in the scattered film exposure, z: the render reads it
     float4 pair; // x: target-pair offset, y: AI model reconstruction offset
     float4 effects; // generic grain, halation, inverse 35 mm pixel area, stock processing
+    float4 light; // whites, curve table offset, curve table size
 };
 float3 p3to709(float3 x) { return float3(dot(x,float3(1.22494018f,-.22494018f,0)),dot(x,float3(-.04205695f,1.04205695f,0)),dot(x,float3(-.01963755f,-.07863605f,1.09827360f))); }
 float3 toP3from709(float3 x) { return float3(dot(x,float3(.82246197f,.17753803f,0)),dot(x,float3(.03319420f,.96680580f,0)),dot(x,float3(.01708263f,.07239741f,.91051996f))); }
@@ -196,18 +220,38 @@ float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read
     return changed;
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
+float3 applyToneCurve(float3 rgb, constant GraphUniform& p, device const float4* table) {
+    float y=lum(rgb);
+    if(p.light.z==0 || y<=0 || y>=1) return rgb;
+    float encoded=y<=.0031308f ? 12.92f*y : 1.055f*pow(y,1.f/2.4f)-.055f;
+    float position=encoded*(p.light.z-1);
+    uint i=min(uint(position),uint(p.light.z)-2), offset=uint(p.light.y);
+    float mapped=mix(table[offset+i].x,table[offset+i+1].x,position-float(i));
+    float target=mapped<=.04045f ? mapped/12.92f : pow((mapped+.055f)/1.055f,2.4f);
+    return rgb*(target/y);
+}
 // Light and colour in linear light; each look declares its own input transform.
-float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false) {
+float3 graphScene(float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,bool authoredBase=false,bool whites=true) {
     float3 rgb=pixel.rgb;
     rgb=pointOp(rgb,5,p.tone1.y,p.flags.x==0);rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
     rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0 || authoredBase);rgb=pointOp(rgb,1,p.tone0.y,false);
-    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    rgb=pointOp(rgb,2,p.tone0.z,false);rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,whites ? p.light.x : 0.f,false);rgb=pointOp(rgb,4,p.tone1.x,false);
+    rgb=applyToneCurve(rgb,p,table);
     rgb=pointOp(rgb,7,p.tone1.w,false);rgb=pointOp(rgb,8,p.color.x,false);
     // Log/film input retains signed wide-gamut scene values through its primary
     // transform. Fit only at the display/output boundary.
     bool logLook=p.flags.z && p.lutInfo.z>=5;
     if(!logLook && p.effects.w==0) rgb=fit(rgb,max(1.f,maximum(rgb))); // C2: fit at an upper bound >= Y, never remove HDR luminance.
     return rgb;
+}
+// Keep pre-existing SDR colour overflow in the SDR fit. Only the increase
+// relative to the same edit without Whites becomes newly generated gain.
+float sdrWhitesGain(float3 rgb,float4 pixel,constant GraphUniform& p,texture3d<float,access::read> cube,
+                    device const float4* table) {
+    if(p.light.x<=0) return 0;
+    float3 original=graphScene(pixel,p,cube,table,false,false);
+    original=fit(original,max(1.f,maximum(original)));
+    return max(0.f,log2(max(1.f,maximum(rgb))/max(1.f,maximum(original))));
 }
 // `exposed`, when w is set, is the film exposure after the in-emulsion scatter.
 WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table,
@@ -220,7 +264,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float3 filmScene=rgb;
     rgb=fit(rgb,max(1.f,maximum(rgb)));
-    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
+    float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : sdrWhitesGain(rgb,pixel,p,cube,table);
     float3 base=fit(rgb*exp2(-g),1.f);
     float3 stockDelta=0;
     bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
@@ -271,7 +315,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
         float3 original=graphScene(baseline,p,cube,table);
         original=fit(original,max(1.f,maximum(original)));
-        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : 0;
+        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table);
         float3 oldBase=fit(original*exp2(-oldGain),1.f);
         float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
         renderedHDR=hdr;
@@ -351,7 +395,7 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
         peak=max(peak,float4(maximum((v.base+offset)*exp2(v.gain)-offset),maximum(v.base),maximum(v.gain),maximum(original.rgb)));
     }
     float4 mean=sum/float((hi.x-lo.x)*(hi.y-lo.y));stats.write(mean,pos);peaks.write(peak,pos);
-    masks.write(float4(sm(.4f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
+    masks.write(float4(sm(.15f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
 }
 struct BoxUniform { uint radius,vertical,width,height; };
 kernel void graphBox(texture2d<float,access::read> src [[texture(0)]],texture2d<float,access::write> dst [[texture(1)]],
@@ -577,9 +621,9 @@ kernel void effectMask(texture2d<float,access::sample> source [[texture(0)]],
         rgb=pointOp(rgb,6,p.tone1.z,p.flags.x==0);
         rgb=pointOp(rgb,0,p.tone0.x,p.flags.x==0);rgb=pointOp(rgb,1,p.tone0.y,false);
         if(p.mode.x>0)rgb=pointOp(rgb,2,p.tone0.z,false);
-        if(p.mode.x>1)rgb=pointOp(rgb,3,p.tone0.w,false);
+        if(p.mode.x>1) { rgb=pointOp(rgb,3,p.tone0.w,false);rgb=pointOp(rgb,9,p.light.x,false); }
         float y=lum(rgb);
-        weight=p.mode.x==0 ? sm(.4f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
+        weight=p.mode.x==0 ? sm(.15f,1.f,y) : p.mode.x==1 ? 1-sm(0.f,.5f,y) : 1-sm(0.f,.1f,y);
     } else if(p.mode.x<5) {
         float4 guide=originalGuide.sample(s,uv);
         if(p.mode.w)weight=p.mode.w==1 ? 1.f : sm(.75f*p.hdr.x,max(.001f,min(1.f,1.1f*p.hdr.x)),guide.x);

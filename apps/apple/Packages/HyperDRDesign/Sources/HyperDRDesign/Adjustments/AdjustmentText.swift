@@ -115,7 +115,7 @@ public enum AdjustmentText {
         case .choice:
             guard let option = control.options.first(where: { $0.id == control.selectedOption }) else { return label }
             return String(format: item, label, DesignStrings.string(option.labelKey, locale: locale))
-        case .reference:
+        case .reference, .curve:
             return label
         }
     }
@@ -222,7 +222,9 @@ public enum AdjustmentSymbols {
         Entry(id: "tone.contrast", symbol: "circle.righthalf.filled"),
         Entry(id: "tone.highlights", symbol: "sun.max.circle"),
         Entry(id: "tone.shadows", symbol: "moon.circle"),
+        Entry(id: "tone.whites", symbol: "circle"),
         Entry(id: "tone.blacks", symbol: "circle.fill"),
+        Entry(id: "tone.curve", symbol: "point.topleft.down.to.point.bottomright.curvepath"),
         Entry(id: "develop.temperature", symbol: "thermometer.medium"),
         Entry(id: "color.warmth", symbol: "thermometer.medium"),
         Entry(id: "develop.tint", symbol: "eyedropper.halffull"),

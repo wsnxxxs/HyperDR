@@ -111,6 +111,11 @@ nonisolated enum TextureReadback {
     private static let queues = Mutex<[ObjectIdentifier: any MTLCommandQueue]>([:])
 
     static func floats(_ texture: any MTLTexture) async throws -> [Float] {
+        try await floats(texture, region: MTLRegionMake2D(0, 0, texture.width, texture.height))
+    }
+
+    /// The same for a rectangle of the texture (the white balance loupe's few pixels).
+    static func floats(_ texture: any MTLTexture, region: MTLRegion) async throws -> [Float] {
         let device = texture.device
         let queue = try queues.withLock { queues -> any MTLCommandQueue in
             if let queue = queues[ObjectIdentifier(device)] { return queue }
@@ -124,22 +129,23 @@ nonisolated enum TextureReadback {
         case .rgba16Float: (4, true)
         default: (4, false)
         }
-        let rowBytes = texture.width * channels * (half ? 2 : 4)
-        guard let buffer = device.makeBuffer(length: max(1, rowBytes * texture.height), options: .storageModeShared),
+        let width = region.size.width, height = region.size.height
+        let rowBytes = width * channels * (half ? 2 : 4)
+        guard let buffer = device.makeBuffer(length: max(1, rowBytes * height), options: .storageModeShared),
               let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
             throw CancellationError()
         }
-        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(),
-                  sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: region.origin,
+                  sourceSize: region.size,
                   to: buffer, destinationOffset: 0, destinationBytesPerRow: rowBytes,
-                  destinationBytesPerImage: rowBytes * texture.height)
+                  destinationBytesPerImage: rowBytes * height)
         blit.endEncoding()
         await withCheckedContinuation { continuation in
             command.addCompletedHandler { _ in continuation.resume() }
             command.commit()
         }
         if let error = command.error { throw error }
-        let count = texture.width * texture.height * channels
+        let count = width * height * channels
         if half {
             let values = buffer.contents().bindMemory(to: Float16.self, capacity: count)
             return (0..<count).map { Float(values[$0]) }

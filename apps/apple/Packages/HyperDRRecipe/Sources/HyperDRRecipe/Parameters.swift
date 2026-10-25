@@ -33,6 +33,8 @@ public enum ParameterKind: String, Codable, CaseIterable, Sendable {
     case choice
     /// A named resource: a LUT (`look.lut`) or a model (`hdr.model`).
     case reference
+    /// An SDR luminance curve, stored as alternating x/y coordinates.
+    case curve
 }
 
 /// One recipe value: a small JSON tree, so a value this build does not understand
@@ -315,7 +317,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
     public let id: String
     public let group: ParameterGroup
     public let kind: ParameterKind
-    /// Static range; `nil` for `bool`, `choice` and `reference`.
+    /// Static range; `nil` for `bool`, `choice`, `reference` and `curve`.
     public let range: ClosedRange<Double>?
     /// Keyboard and stepper increment; `nil` for non-numeric kinds.
     public let step: Double?
@@ -398,7 +400,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
 /// unit:
 ///
 /// - `.direct`: unchanged. EV, stops, kelvin, `develop.temperature`,
-///   `develop.tint` (−150…150 is CIRAWFilter's `neutralTint`).
+///   `develop.tint` (CIRAWFilter's `neutralTint`, which takes at least ±500).
 /// - `.hundredth`: divided by 100. Percent controls, and signed level controls such as
 ///   `tone.shadows` or `color.saturation` (`−100…+100` → `−1…+1`).
 /// - `.contrast`: `2^(value/100 · log2 1.6)`, i.e. `1.6^(value/100)`; 0 → 1 (C1 calls

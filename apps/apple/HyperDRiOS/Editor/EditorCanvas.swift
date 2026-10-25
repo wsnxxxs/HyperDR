@@ -30,6 +30,9 @@ struct EditorCanvas: View {
 
     /// The canvas is held to show the original.
     @Binding var holdingOriginal: Bool
+    /// The white balance eyedropper, where the host offers one (the iPad's
+    /// Studio): while it is active a layer over the photo takes the touch.
+    var whiteBalance: WhiteBalancePicker? = nil
     /// A fit or actual-pixels request (the iPad's canvas bar).
     var zoomRequest: CanvasZoomRequest? = nil
     /// The screen's headroom as it changes (the iPad's canvas bar).
@@ -166,6 +169,21 @@ struct EditorCanvas: View {
                     adornments
                 }
             }
+            .overlay {
+                // Not while the canvas draws the whole photo through the crop: the
+                // photo's rectangle is then not the cropped photo's.
+                if let whiteBalance, whiteBalance.isActive, !cropping, crop == nil, !framed {
+                    WhiteBalanceTouchLayer(picker: whiteBalance, frames: whiteBalanceFrames)
+                }
+            }
+    }
+
+    /// What the eyedropper's loupe reads: the frames as the canvas composes them.
+    private var whiteBalanceFrames: WhiteBalanceFrames {
+        WhiteBalanceFrames(original: original.map { DisplayPair($0.display).base },
+                           edited: editor.frame.map { DisplayPair($0.display).base },
+                           shown: mode == .original ? .original : mode == .compare ? .compare : .edited,
+                           splitRatio: splitRatio, imageFrame: transform?.imageFrame ?? .zero)
     }
 
     /// The crop pane's placement of the photo, drawn from whatever frame is

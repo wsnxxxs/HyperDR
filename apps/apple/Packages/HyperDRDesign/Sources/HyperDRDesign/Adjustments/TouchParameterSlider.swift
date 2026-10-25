@@ -190,12 +190,8 @@ public struct TouchParameterSlider: View {
                     dragStart = (value, drag.location.x)
                     return
                 }
-                let span = spec.range.upperBound - spec.range.lowerBound
-                let pointsPerUnit = Double(travel) / span
-                let raw = anchor.value + Double(drag.location.x - anchor.x) / pointsPerUnit * speed.factor
-                let new = DefaultDetent.apply(spec.snapped(raw), defaultValue: spec.isAutomatic(spec.defaultValue) ? nil : spec.defaultValue,
-                                              pointsPerUnit: pointsPerUnit / speed.factor)
-                write(new)
+                write(spec.dragged(from: anchor.value, by: Double(drag.location.x - anchor.x),
+                                   length: Double(travel), speed: speed.factor))
             }
             .onEnded { _ in
                 guard dragStart != nil else { return }

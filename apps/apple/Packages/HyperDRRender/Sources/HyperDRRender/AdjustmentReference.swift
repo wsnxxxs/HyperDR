@@ -23,20 +23,34 @@ extension DoubleReference {
             return x
         case .contrast:
             if y >= 1 || y <= 0 { return rgb }
-            let c = value
+            let x = pow(y, 1/2.4), pivot = pow(0.18, 1/2.4)
+            let amount = log(value) / log(1.6)
+            let k = amount * (amount > 0 ? 1.6 : 0.8)
             let target: Double
-            if y <= 0.18 { target = 0.18*pow(y/0.18,c) }
-            else {
-                let t = (y-0.18)/0.82
-                target = 0.18+0.82*(t+(c-1)*t*(1-t)*(1-t))
+            if x <= pivot {
+                let t = x / pivot
+                target = pivot * (t - k*t*t*t*(1-t))
+            } else {
+                let t = (x-pivot)/(1-pivot)
+                target = pivot + (1-pivot)*(t+k*t*(1-t)*(1-t))
             }
-            return scale(target)
+            return scale(pow(target, 2.4))
         case .highlights:
-            return scale(y > 1 ? 1+(y-1)*exp2(2*a) : y+0.3*a*smoothStep(0.4,1,y)*(1-y))
+            if y > 1 {
+                let left = a < 0 ? 1.0 : exp2(-3*a), right = exp2(2*a), x = y-1, t = min(x, 1)
+                return scale(1+right*x+(left-right)*(t-t*t*t+0.5*t*t*t*t))
+            }
+            guard y > 0.15 else { return rgb }
+            let t = (y-0.15)/0.85
+            let target = 0.15+0.85*t/(t+(1-t)*exp2(-3*a*t))
+            return scale(a < 0 ? target+(y-target)*smoothStep(0.8,1,y) : target)
         case .shadows:
             guard y < 0.5 else { return rgb }
             let t = y/0.5
             return scale(0.5*(t+0.8*a*t*(1-t)*(1-t)))
+        case .whites:
+            guard y > 0 else { return rgb }
+            return scale(y*exp2(1.25*a*y*y/(y*y+0.25)))
         case .blacks:
             guard y < 0.1 else { return rgb }
             let target = max(0,y-0.03*a*(1-smoothStep(0,0.1,y)))
@@ -278,11 +292,19 @@ extension DoubleReference {
             }
             return Split(base: base, gains: gains)
         }
-        var x = source
         let operations: [(AdjustmentOperation,Float)] = [(.warmth,settings.color.warmth),(.tint,settings.color.tint),
             (.exposure,settings.tone.exposure),(.contrast,settings.tone.contrast),(.highlights,settings.tone.highlights),
-            (.shadows,settings.tone.shadows),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
-        for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
+            (.shadows,settings.tone.shadows),(.whites,settings.tone.whites),(.blacks,settings.tone.blacks)]
+        func adjusted(_ whites: Float) -> RGB {
+            var x = source
+            for (op,value) in operations {
+                x = point(x,operation:op,value:Double(op == .whites ? whites : value),sdr:sdr && op == .exposure)
+            }
+            x = toneCurve(x, curve: settings.tone.curve)
+            x = point(x, operation: .vibrance, value: Double(settings.color.vibrance))
+            return point(x, operation: .saturation, value: Double(settings.color.saturation))
+        }
+        var x = adjusted(settings.tone.whites)
         let active = !settings.look.isIdentity
         // A log look keeps linear-P3 negatives through the primary matrix. Fit after
         // the strength mix so the gain split never sees a negative component.
@@ -293,6 +315,11 @@ extension DoubleReference {
         let filmScene = x
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
         var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
+        if sdr, !(active && !settings.look.input.isSDR), settings.tone.whites > 0 {
+            var original = adjusted(0)
+            original = fitP3(original,upper:max(1,original.x,original.y,original.z))
+            g = max(0,log2(max(1,x.x,x.y,x.z)/max(1,original.x,original.y,original.z)))
+        }
         var base = fitP3(x*exp2(-g))
         if !settings.film.isIdentity, let stock = settings.film.stock, let film = try? FilmStock.named(stock) {
             let exposed = filmScene*exp2(Double(settings.film.exposure ?? 0))

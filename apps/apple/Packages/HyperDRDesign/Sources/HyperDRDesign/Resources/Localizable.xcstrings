@@ -575,6 +575,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "强度" } }
       }
     },
+    "ctrl.tone.whites.label" : {
+      "comment" : "Adjustment control name (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Whites" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "白色" } }
+      }
+    },
+    "ctrl.tone.whites.help" : {
+      "comment" : "Adjustment control help (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Raise bright tones beyond SDR white into HDR, or lower them below white." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正值把亮部推过 SDR 白形成 HDR 高光，负值把亮部压向白以下。" } }
+      }
+    },
+    "undo.tone.whites" : {
+      "comment" : "Undo action name (tone.whites).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Whites" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整白色" } }
+      }
+    },
+    "ctrl.tone.curve.label" : {
+      "comment" : "Adjustment control name (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线" } }
+      }
+    },
+    "ctrl.tone.curve.help" : {
+      "comment" : "Adjustment control help (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shape SDR luminance without changing light above SDR white." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 SDR 范围内的亮度，不改变 SDR 白以上的高光。" } }
+      }
+    },
+    "undo.tone.curve" : {
+      "comment" : "Undo action name (tone.curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整曲线" } }
+      }
+    },
     "ctrl.tone.blacks.help" : {
       "comment" : "Adjustment control help (tone.blacks).",
       "localizations" : {
@@ -994,6 +1036,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "悬停可在画面上查看作用区域" } }
       }
     },
+    "design.slider.readoutHelp" : {
+      "comment" : "Tooltip of a slider's value box: it is where an exact value is typed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to type a value" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点按后可输入数值" } }
+      }
+    },
     "design.slider.reset" : {
       "comment" : "Context menu item and VoiceOver action: return a slider to its default.",
       "localizations" : {
@@ -1020,6 +1069,111 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Comparison divider" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比分界线" } }
+      }
+    },
+    "design.filmNote.auto %@" : {
+      "comment" : "Under Light's exposure row, film on, exposure automatic: the exposure it takes (+0.59).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film auto exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片自动曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.autoPending" : {
+      "comment" : "Under Light's exposure row, film on, automatic exposure not measured yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film auto exposure · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片自动曝光 · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.manual %@" : {
+      "comment" : "Under Light's exposure row, film on, exposure set by hand: its value.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Film exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "胶片曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.filmNote.hint" : {
+      "comment" : "Accessibility hint of the film exposure note under Light's exposure row.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows the film exposure setting in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在风格中显示胶片曝光设置" } }
+      }
+    },
+    "design.curve.addPoint" : {
+      "comment" : "VoiceOver action on the tone curve: adds a control point in the widest gap, on the curve.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加控制点" } }
+      }
+    },
+    "design.curve.reset" : {
+      "comment" : "Button beside the tone curve's title: puts the curve back to a straight line.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置曲线" } }
+      }
+    },
+    "design.curve.hint.pointer" : {
+      "comment" : "Caption under the tone curve plot on the Mac.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to add a point · drag to move it · double-click a point to remove it" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点按空白处加点 · 拖动移动 · 双击点删除" } }
+      }
+    },
+    "design.curve.hint.touch" : {
+      "comment" : "Caption under the tone curve plot on the iPad.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tap to add a point · drag to move it · double-tap a point to remove it" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "轻点空白处加点 · 拖动移动 · 双击点删除" } }
+      }
+    },
+    "design.curve.point %@" : {
+      "comment" : "VoiceOver name of a tone curve point (its number along the curve).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve point %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线点 %@" } }
+      }
+    },
+    "design.curve.pointValue %@ %@" : {
+      "comment" : "VoiceOver value of a tone curve point: input and output in percent.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Input %@%%, output %@%%" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入 %@%%，输出 %@%%" } }
+      }
+    },
+    "design.curve.removePoint" : {
+      "comment" : "VoiceOver action: delete the tone curve point.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove Point" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除点" } }
+      }
+    },
+    "design.wb.clamped" : {
+      "comment" : "Under the temperature row: the neutral the pick needs lies beyond the slider's end, so the end was set.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Beyond the slider's range; set to the nearest value." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "超出滑杆范围，已取最接近的值。" } }
+      }
+    },
+    "design.wb.failed" : {
+      "comment" : "Under the temperature row: the picked point could not be sampled.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not sample that point. Try another." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一点无法取样，请换一处。" } }
+      }
+    },
+    "design.wb.pick" : {
+      "comment" : "Tooltip and VoiceOver name of the white balance eyedropper: pick a neutral grey on the photo.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set white balance from a neutral grey in the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在照片上点一处中性灰来设白平衡" } }
+      }
+    },
+    "design.wb.stop" : {
+      "comment" : "Tooltip and VoiceOver name of the white balance eyedropper while it is picking.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop picking (Esc)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止取样（Esc）" } }
       }
     },
     "design.zebra.highlights" : {

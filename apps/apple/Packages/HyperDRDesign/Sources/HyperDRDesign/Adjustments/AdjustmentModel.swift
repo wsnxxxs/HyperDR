@@ -95,6 +95,7 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
         case choice(String)
         /// A chosen LUT (content hash) or model id; nil for none.
         case reference(String?)
+        case curve([Double])
     }
 
     public let declaration: ParameterDeclaration
@@ -160,8 +161,12 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
         let origin: Double? = declaration.origin == .zero ? min(max(0, range.lowerBound), range.upperBound) : nil
         let defaultValue = defaultNumber ?? automatic?.value ?? origin ?? range.lowerBound
         return ParameterSpec(range: range, step: step, defaultValue: defaultValue, origin: origin,
-                             format: AdjustmentFormat.format(declaration.format, step: step), automatic: automatic)
+                             format: AdjustmentFormat.format(declaration.format, step: step), automatic: automatic,
+                             spacing: spacing)
     }
+
+    /// Kelvin spreads in mired; everything else evenly.
+    public var spacing: TrackSpacing { declaration.format == .kelvin ? .reciprocal : .linear }
 
     /// The value a `ParameterSpec`-based slider binds to: the number, or the
     /// Auto sentinel below the range.
@@ -182,9 +187,10 @@ public struct AdjustmentControl: Identifiable, Equatable, Sendable {
     public var deviation: Double {
         guard let range = declaration.range, case .number(let number) = value else { return 0 }
         let base = defaultNumber ?? (declaration.origin == .zero ? 0 : range.lowerBound)
-        let span = number >= base ? range.upperBound - base : base - range.lowerBound
+        let at = { (value: Double) in spacing.position(min(max(value, range.lowerBound), range.upperBound)) }
+        let span = number >= base ? at(range.upperBound) - at(base) : at(base) - at(range.lowerBound)
         guard span > 0 else { return 0 }
-        return min(max((number - base) / span, -1), 1)
+        return min(max((at(number) - at(base)) / span, -1), 1)
     }
 
     /// The readout: "+0.30", "60%", "Auto · 2.4", "5500".
@@ -309,6 +315,9 @@ public struct AdjustmentPanel: Sendable {
             value = .toggle(recipe.conditionValue(id)?.boolValue ?? false)
         case .choice:
             value = .choice(recipe.conditionValue(id)?.stringValue ?? declaration.options.first?.id ?? "")
+        case .curve:
+            if case .array(let points) = stored { value = .curve(points.compactMap(\.numberValue)) }
+            else { value = .curve(ToneCurve().coordinates) }
         case .reference:
             value = .reference(recipe.conditionValue(id)?.stringValue)
         }
@@ -340,6 +349,15 @@ public struct AdjustmentPanel: Sendable {
         } else {
             recipe.setValue(.number(snapped), for: id)
         }
+    }
+
+    /// A curve's points as `[x0, y0, x1, y1, …]`. The two end points alone are
+    /// the default and not stored, so the control reads as unchanged (points
+    /// that happen to lie on the diagonal are kept: they are the user's);
+    /// coordinates `ToneCurve` rejects are ignored.
+    public func set(_ id: String, curve coordinates: [Double], in recipe: inout Recipe) {
+        guard Adjustments.declaration(id)?.kind == .curve, let curve = try? ToneCurve(coordinates) else { return }
+        recipe.setValue(curve.coordinates == ToneCurve().coordinates ? nil : curve.parameterValue, for: id)
     }
 
     /// The slider binding's write: the Auto sentinel returns to Auto.

@@ -20,6 +20,8 @@ struct PadEditor: View {
 
     @State private var tool = PadTool.group(.hdr)
     @State private var expanded = true
+    /// A control to scroll to once its tool is shown (the film exposure note's tap).
+    @State private var revealed: String?
     /// Where the panel is now, for the toolbar's panel button.
     @State private var placement = PadLayout.Placement.side
     @State private var comparison = Comparison.edited
@@ -95,7 +97,11 @@ struct PadEditor: View {
         }
         .onChange(of: viewport, initial: true) { _, viewport in editor.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init), initial: true) { editor.attach(undoManager: undoManager) }
+        // The eyedropper belongs to the photo it was started on, and to the adjusting tools.
+        .onChange(of: editor.source?.id) { session.whiteBalance.reset() }
+        .onChange(of: locksEditing) { if locksEditing { session.whiteBalance.reset() } }
         .onChange(of: tool, initial: true) { _, tool in
+            session.whiteBalance.reset()
             // The frame is drawn from the whole photo: leave zoom and split behind.
             // The crop pane shows the edit alone (`EditorCanvas.mode`) and keeps
             // the comparison chosen for when it is left.
@@ -144,7 +150,7 @@ struct PadEditor: View {
     private var canvas: some View {
         EditorCanvas(session: session, editor: editor, comparison: comparison, splitRatio: $splitRatio,
                      transform: $transform, framed: tool == .frame, cropping: tool == .crop,
-                     framePadding: 40, holdingOriginal: $holdingOriginal,
+                     framePadding: 40, holdingOriginal: $holdingOriginal, whiteBalance: session.whiteBalance,
                      zoomRequest: zoomRequest, onHeadroom: { headroom = $0 })
             .clipped()
             .padding(.horizontal, 18)
@@ -196,7 +202,8 @@ struct PadEditor: View {
 
     private func panel(_ layout: PadLayout) -> some View {
         let groups = groups
-        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool) { axis in
+        return PadPanel(placement: layout.placement, expanded: expanded, tool: tool, reveal: revealed,
+                        onRevealed: { revealed = nil }) { axis in
             PadToolRail(items: PadTool.tools(groups).map { PadRailItem(tool: $0, marked: isModified($0, groups)) },
                         selection: tool, axis: axis, choose: choose, onBypass: bypass)
         } histogram: {
@@ -206,6 +213,8 @@ struct PadEditor: View {
                 .disabled(locksEditing)
         } content: {
             toolContent(columns: layout.columns)
+                .environment(\.whiteBalancePicking, session.whiteBalance.picking)
+                .environment(\.revealControl) { reveal($0) }
                 .disabled(locksEditing)
         } footer: {
             if editor.source != nil {
@@ -213,6 +222,16 @@ struct PadEditor: View {
                              size: editor.photoSize.map { ($0.width, $0.height) })
             }
         }
+    }
+
+    /// Opens the tool that holds the control and scrolls to its row.
+    private func reveal(_ id: String) {
+        guard let group = Adjustments.declaration(id)?.group else { return }
+        withAnimation(.smooth(duration: 0.3)) {
+            tool = .group(group)
+            expanded = true
+        }
+        revealed = id
     }
 
     /// A tool from the rail; the current one again folds the panel away.
@@ -262,7 +281,7 @@ struct PadEditor: View {
     @ViewBuilder private func toolContent(columns: Int) -> some View {
         switch tool {
         case .group(.look):
-            PadLookTool(recipe: recipe, panel: panel, columns: columns,
+            PadLookTool(recipe: recipe, panel: panel, columns: columns, revealing: revealed,
                         onEditingChanged: { editor.editingChanged($0, $1) }, onReset: reset,
                         onLibrary: { showingLUTs = true })
         case .group(let group):

@@ -34,7 +34,7 @@ private extension RenderEngine {
         for _ in 0..<2 {
             try autoreleasepool {
                 guard let command = queue.makeCommandBuffer(),
-                      let meter = device.makeBuffer(length: height * 8, options: .storageModeShared),
+                      let meter = device.makeBuffer(length: width * height * 8, options: .storageModeShared),
                       let taps = device.makeBuffer(bytes: [SIMD4<Float>(0.25, 0.25, 0.25, 0),
                           SIMD4<Float>(0.5, 0.5, 0.5, 0), SIMD4<Float>(0.25, 0.25, 0.25, 0)],
                           length: 48, options: .storageModeShared) else { throw RenderError.allocationFailed }
@@ -61,7 +61,7 @@ private extension RenderEngine {
 #endif
                 for texture in [cells, exposure, blurred] { bits += Self.readTexture(texture).map(\.bitPattern) }
                 bits += Array(UnsafeBufferPointer(start: meter.contents().bindMemory(to: Float.self,
-                    capacity: height * 2), count: height * 2)).map(\.bitPattern)
+                    capacity: width * height * 2), count: width * height * 2)).map(\.bitPattern)
             }
         }
         return FilmPipelineProbe(bits: bits, creations: creations)

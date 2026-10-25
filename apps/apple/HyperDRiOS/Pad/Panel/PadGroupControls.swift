@@ -22,13 +22,16 @@ struct PadGroupControls: View {
     var onReset: (AdjustmentReset) -> Void = { _ in }
     /// Why AI cannot be chosen, when it cannot.
     var aiUnavailable: Text?
+    /// The white balance eyedropper, when the host offers one.
+    @Environment(\.whiteBalancePicking) private var whiteBalance
 
     var body: some View {
         let actual = panel.group(group: group, in: recipe)
         let off = actual?.isSwitchedOff ?? false
         if let state = off ? switchedOn() ?? actual : actual {
             let lead = state.controls.first { $0.id == Recipe.hdrSourceID }
-            let rows = state.controls.filter { $0.id != lead?.id }
+            let rows = state.controls.filter { $0.id != lead?.id && $0.kind != .curve }
+            let curves = state.controls.filter { $0.kind == .curve }
             VStack(alignment: .leading, spacing: 12) {
                 if let lead {
                     VStack(alignment: .leading, spacing: PadMetrics.rowSpacing) {
@@ -46,6 +49,12 @@ struct PadGroupControls: View {
                     }
                 }
                 .disabled(off)
+                // The tone curve's plot takes the panel's width, below the rows.
+                ForEach(curves) { control in
+                    ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: .touch,
+                                     onEditingChanged: onEditingChanged)
+                        .disabled(off)
+                }
             }
             .saturation(off ? 0 : 1)
             .animation(.smooth(duration: 0.2), value: off)
@@ -83,13 +92,34 @@ struct PadGroupControls: View {
         switch control.kind {
         case .float, .floatOrAuto:
             if let spec = control.spec {
-                PadSlider(AdjustmentText.label(declaration),
-                          value: Binding(get: { control.sliderValue },
-                                         set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
-                          spec: spec, tint: tint, help: AdjustmentText.help(declaration),
-                          onEditingChanged: { onEditingChanged(declaration, $0) },
-                          onResetGroup: control.group == group ? { onReset(.group(control.group)) } : nil)
+                let slider = PadSlider(AdjustmentText.label(declaration),
+                                       value: Binding(get: { control.sliderValue },
+                                                      set: { panel.set(control.id, sliderValue: $0, in: &recipe) }),
+                                       spec: spec, tint: tint, help: AdjustmentText.help(declaration),
+                                       onEditingChanged: { onEditingChanged(declaration, $0) },
+                                       onResetGroup: control.group == group ? { onReset(.group(control.group)) } : nil)
                     .disabled(!control.isAvailable)
+                if WhiteBalancePicking.offers(control.id), let whiteBalance {
+                    // The eyedropper stands beside the temperature bar, a finger's size.
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        HStack(spacing: Space.s2) {
+                            slider
+                            WhiteBalancePickButton(whiteBalance, size: PadMetrics.row)
+                                .disabled(!control.isAvailable)
+                        }
+                        if let notice = whiteBalance.notice {
+                            WhiteBalanceNoticeLine(notice).padding(.horizontal, 4)
+                        }
+                    }
+                } else if control.id == "tone.exposure" {
+                    // A film on takes its own exposure; the note says which, and leads to it.
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        slider
+                        FilmExposureNote(recipe: recipe, panel: panel).padding(.horizontal, 4)
+                    }
+                } else {
+                    slider
+                }
             }
         case .bool:
             PadToggleRow(title: AdjustmentText.label(declaration),
@@ -99,6 +129,8 @@ struct PadGroupControls: View {
                 .disabled(!control.isAvailable)
         case .choice:
             PadChoiceRow(control: control) { panel.set(control.id, option: $0, in: &recipe) }
+        case .curve:
+            EmptyView()
         case .reference:
             PadMenuRow(title: AdjustmentText.label(declaration),
                        value: Text(verbatim: panel.context.models.first { $0.id == control.reference }?.name ?? "")) {

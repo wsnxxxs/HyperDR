@@ -35,7 +35,11 @@ public struct AdjustmentInspector: View {
     private let only: Set<AdjustmentGroupID>?
 
     @State private var expanded: Set<AdjustmentGroupID>
+    /// The control a note asked to bring into view, until the host has scrolled
+    /// to it: the look section switches to the kind that holds it.
+    @State private var revealing: String?
     @Environment(\.locale) private var locale
+    @Environment(\.revealControl) private var reveal
 
     /// `only` shows just those groups, all open: the iPad sidebar shows one
     /// tab's groups at a time, as the iPhone's dock does, and keeps Reset All
@@ -69,6 +73,19 @@ public struct AdjustmentInspector: View {
             ForEach(groups) { state in
                 groupView(state)
             }
+        }
+        .environment(\.revealControl, reveal.map { host in { id in revealControl(id, host: host) } })
+    }
+
+    /// Opens the group the control sits in, then lets the host scroll to it
+    /// once the group has laid out.
+    private func revealControl(_ id: String, host: @escaping (String) -> Void) {
+        if let group = Adjustments.declaration(id)?.group { expanded.insert(group) }
+        revealing = id
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            host(id)
+            revealing = nil
         }
     }
 
@@ -111,7 +128,7 @@ public struct AdjustmentInspector: View {
                               summary: isExpanded.wrappedValue ? nil : Text(verbatim: AdjustmentText.summary(state, locale: locale)),
                               isExpanded: isExpanded, collapsible: only == nil) {
             if state.group == .look {
-                LookSection(recipe: $recipe, state: state, panel: panel, style: style,
+                LookSection(recipe: $recipe, state: state, panel: panel, style: style, revealing: revealing,
                             onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
             } else {
                 controls(state)
@@ -153,6 +170,7 @@ public struct AdjustmentRow: View {
     private let style: AdjustmentControlStyle
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     private let onLUTLibrary: (() -> Void)?
+    @Environment(\.whiteBalancePicking) private var whiteBalance
 
     public init(recipe: Binding<Recipe>, control: AdjustmentControl, panel: AdjustmentPanel,
                 style: AdjustmentControlStyle,
@@ -173,11 +191,13 @@ public struct AdjustmentRow: View {
             if let spec = control.spec {
                 let value = Binding(get: { control.sliderValue },
                                     set: { panel.set(control.id, sliderValue: $0, in: &recipe) })
-                Group {
+                let picking = WhiteBalancePicking.offers(control.id) ? whiteBalance : nil
+                VStack(alignment: .leading, spacing: Space.s1) {
                     switch style {
                     case .pointer:
                         ParameterSlider(AdjustmentText.label(declaration), value: value, spec: spec,
                                         help: AdjustmentText.help(declaration),
+                                        accessory: picking.map { AnyView(WhiteBalancePickButton($0)) },
                                         onEditingChanged: { onEditingChanged(declaration, $0) })
                     case .touch:
                         TouchParameterSlider(AdjustmentText.label(declaration), value: value, spec: spec,
@@ -185,6 +205,8 @@ public struct AdjustmentRow: View {
                                              onEditingChanged: { onEditingChanged(declaration, $0) },
                                              onResetGroup: { panel.reset(group: declaration.group, in: &recipe) })
                     }
+                    if let notice = picking?.notice { WhiteBalanceNoticeLine(notice) }
+                    if control.id == "tone.exposure" { FilmExposureNote(recipe: recipe, panel: panel) }
                 }
                 .disabled(!control.isAvailable)
             }
@@ -198,6 +220,13 @@ public struct AdjustmentRow: View {
             AdjustmentChoiceRow(control: control, style: style,
                                 selection: Binding(get: { control.selectedOption ?? "" },
                                                    set: { panel.set(control.id, option: $0, in: &recipe) }))
+        case .curve:
+            // The Mac's inspector draws the curve editor; the iPad's Studio draws its own,
+            // and the iPhone's dock has none.
+            if style == .pointer {
+                ToneCurveSection(recipe: $recipe, control: control, panel: panel, style: style,
+                                 onEditingChanged: onEditingChanged)
+            }
         case .reference:
             let selection = Binding(get: { control.reference ?? "" },
                                     set: { panel.set(control.id, reference: $0.isEmpty ? nil : $0, in: &recipe) })
@@ -405,10 +434,20 @@ struct LookSection: View {
     let state: AdjustmentGroupState
     let panel: AdjustmentPanel
     let style: AdjustmentControlStyle
+    /// The control a note asked to show: its kind's tab comes forward.
+    var revealing: String?
     let onEditingChanged: (ParameterDeclaration, Bool) -> Void
     let onLUTLibrary: (() -> Void)?
 
     enum Kind: Hashable { case builtIn, imported }
+
+    /// The tab to show when `id` is to be brought into view: a film's control
+    /// is under Built-in (a film stays on while its LUT tab is browsed); any
+    /// other look control is the LUT's.
+    static func kind(revealing id: String?, current: Kind) -> Kind {
+        guard let id, id.hasPrefix(Recipe.filmID), Adjustments.declaration(id)?.group == .look else { return current }
+        return .builtIn
+    }
 
     /// The kind shown, once chosen; until then the recipe's.
     @State private var chosen: Kind?
@@ -438,12 +477,14 @@ struct LookSection: View {
                 rows(lutControls)
             }
         }
+        .onChange(of: revealing) { chosen = Self.kind(revealing: revealing, current: kind) }
     }
 
     private func rows(_ controls: [AdjustmentControl]) -> some View {
         ForEach(controls) { control in
             AdjustmentRow(recipe: $recipe, control: control, panel: panel, style: style,
                           onEditingChanged: onEditingChanged, onLUTLibrary: onLUTLibrary)
+                .id(control.id)
         }
     }
 }

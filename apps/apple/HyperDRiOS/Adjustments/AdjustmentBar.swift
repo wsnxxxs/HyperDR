@@ -650,7 +650,8 @@ private struct BarLayout {
         power = group.states.lazy.compactMap(\.headerToggle).first
         let rest = others.filter { $0.id != lead?.id && $0.id != film?.id && $0.id != lut?.id }
         switches = rest.filter { $0.kind == .bool }
-        more = rest.filter { $0.kind != .bool }
+        // The tone curve is the Mac's and the Studio's; the dock has no editor for it.
+        more = rest.filter { $0.kind != .bool && $0.kind != .curve }
         unsupported = group.states.flatMap(\.unsupported)
     }
 

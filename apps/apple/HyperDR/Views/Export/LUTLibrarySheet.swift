@@ -210,10 +210,10 @@ struct LUTSpacesPopover: View {
                 row("lut.space.input", selection: Binding(get: { item.input }, set: { newInput in
                     let live = self.item ?? item
                     model.setLibraryLUTSpaces(id, input: newInput,
-                                              output: newInput.family == .log && live.input.family != .log ? .rec709 : live.output)
+                                              output: newInput.isSceneReferred && !live.input.isSceneReferred ? .rec709 : live.output)
                 })) { space in
                     let name = AppStrings.string("choice.lutInput.\(space.rawValue)", locale: locale)
-                    return Text(verbatim: space.family == .log && !isRAW
+                    return Text(verbatim: space.isSceneReferred && !isRAW
                                 ? name + " · " + AppStrings.string("lut.space.rawOnly", locale: locale) : name)
                 }
                 row("lut.space.output", selection: Binding(get: { item.output }, set: {

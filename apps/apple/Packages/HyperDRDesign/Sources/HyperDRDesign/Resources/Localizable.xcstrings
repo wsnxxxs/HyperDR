@@ -2405,6 +2405,41 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Global" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全局" } }
       }
+    },
+    "look.space.grading" : {
+      "comment" : "Heading in a LUT space menu: DaVinci Wide Gamut, ACEScct and other grading working spaces.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Grading Spaces" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调色空间" } }
+      }
+    },
+    "design.lutNote.auto %@" : {
+      "comment" : "Under Light's exposure row, a Log LUT on with its exposure automatic: the value.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT auto exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 自动曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.lutNote.autoPending" : {
+      "comment" : "Under Light's exposure row, a Log LUT on, its automatic exposure not measured yet.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT auto exposure · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 自动曝光 · 在风格中调整" } }
+      }
+    },
+    "design.lutNote.manual %@" : {
+      "comment" : "Under Light's exposure row, a Log LUT on, exposure set by hand: its value.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LUT exposure %@ · adjust in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LUT 曝光 %@ · 在风格中调整" } }
+      }
+    },
+    "design.lutNote.hint" : {
+      "comment" : "VoiceOver hint of the note under Light's exposure row about a LUT's exposure.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows the LUT exposure setting in Style" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在风格中显示 LUT 曝光设置" } }
+      }
     }
   },
   "version" : "1.0"

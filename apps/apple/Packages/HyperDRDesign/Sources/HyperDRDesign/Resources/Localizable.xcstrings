@@ -4351,23 +4351,6 @@
         }
       }
     },
-    "design.mixer.arrangement.attribute" : {
-      "comment" : "Mixer arrangement: pick hue, saturation or brightness and see a slider for each color.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "By Attribute"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按属性"
-          }
-        }
-      }
-    },
     "design.mixer.arrangement.band" : {
       "comment" : "Mixer arrangement: pick a color and see its hue, saturation and brightness.",
       "localizations" : {
@@ -4381,23 +4364,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按色区"
-          }
-        }
-      }
-    },
-    "design.mixer.attribute" : {
-      "comment" : "VoiceOver name of the mixer's choice of attribute.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Attribute"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "属性"
           }
         }
       }

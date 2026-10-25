@@ -171,14 +171,39 @@ struct ColorMixerLayout<Slider: View>: View {
             SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
                           isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
                           isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
-                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) { EmptyView() }
+                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
+                if let picking, isExpanded || !showsTitle {
+                    PickToolButton(isActive: picking.isActive,
+                                   title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
+                                   size: style == .touch ? 44 : 22) {
+                        picking.setAttribute(attribute)
+                        picking.toggle()
+                    }
+                    // It adjusts the attribute shown; one band's three have none.
+                    .disabled(arrangement == .band)
+                }
+            }
             if isExpanded || !showsTitle {
+                // One choice: an attribute across the eight bands, or one band's three.
                 SectionSegments(request: SectionSegmentsRequest(
                     title: Text("design.mixer.arrangement", bundle: .module),
-                    options: [.init(id: Arrangement.attribute.rawValue, title: Text("design.mixer.arrangement.attribute", bundle: .module)),
-                              .init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
-                    selection: Binding(get: { arrangement.rawValue },
-                                       set: { arrangement = Arrangement(rawValue: $0) ?? .attribute })), style: style)
+                    options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) }
+                        + [.init(id: Arrangement.band.rawValue, title: Text("design.mixer.arrangement.band", bundle: .module))],
+                    selection: Binding(get: { arrangement == .band ? Arrangement.band.rawValue : attribute.rawValue },
+                                       set: { id in
+                                           if let chosen = MixerAttribute(rawValue: id) {
+                                               attribute = chosen
+                                               arrangement = .attribute
+                                           } else {
+                                               arrangement = .band
+                                           }
+                                       })), style: style)
+                if picking?.isActive == true {
+                    Text("design.mixer.pickHint", bundle: .module)
+                        .font(Font.hdr.caption)
+                        .foregroundStyle(Color.hdr.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 switch arrangement {
                 case .attribute: byAttribute
                 case .band: byBand
@@ -198,28 +223,7 @@ struct ColorMixerLayout<Slider: View>: View {
     // MARK: Arrangements
 
     private var byAttribute: some View {
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
-            HStack(spacing: Space.s2) {
-                SectionSegments(request: SectionSegmentsRequest(
-                    title: Text("design.mixer.attribute", bundle: .module),
-                    options: MixerAttribute.allCases.map { .init(id: $0.rawValue, title: $0.title) },
-                    selection: Binding(get: { attribute.rawValue }, set: { attribute = MixerAttribute(rawValue: $0) ?? .hue })),
-                                style: style)
-                if let picking {
-                    PickToolButton(isActive: picking.isActive,
-                                   title: Text(picking.isActive ? "design.mixer.pick.stop" : "design.mixer.pick", bundle: .module),
-                                   size: style == .touch ? 44 : 28) {
-                        picking.setAttribute(attribute)
-                        picking.toggle()
-                    }
-                }
-            }
-            if picking?.isActive == true {
-                Text("design.mixer.pickHint", bundle: .module)
-                    .font(Font.hdr.caption)
-                    .foregroundStyle(Color.hdr.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
             ForEach(MixerBand.allCases) { band in
                 slider(band.id(attribute), band.title, band.swatch, band.swatch, band.gradient(attribute))
             }
@@ -227,7 +231,7 @@ struct ColorMixerLayout<Slider: View>: View {
     }
 
     private var byBand: some View {
-        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s3) {
+        VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s1) {
             swatches
             ForEach(MixerAttribute.allCases) { attribute in
                 slider(band.id(attribute), attribute.title, band.swatch, nil, band.gradient(attribute))
@@ -237,7 +241,7 @@ struct ColorMixerLayout<Slider: View>: View {
 
     /// The eight zones as dots to pick from; a dot that has changes carries a mark.
     private var swatches: some View {
-        let side: CGFloat = style == .touch ? 34 : 22
+        let side: CGFloat = style == .touch ? 30 : 18
         return HStack(spacing: 0) {
             ForEach(MixerBand.allCases) { option in
                 Button { band = option } label: {
@@ -249,10 +253,10 @@ struct ColorMixerLayout<Slider: View>: View {
                         }
                         .overlay(alignment: .bottom) {
                             if isChanged(band: option) {
-                                Circle().fill(Color.hdr.inkStrong).frame(width: 4, height: 4).offset(y: 9)
+                                Circle().fill(Color.hdr.inkStrong).frame(width: 4, height: 4).offset(y: 8)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: style == .touch ? 44 : 30)
+                        .frame(maxWidth: .infinity, minHeight: style == .touch ? 44 : 32)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)

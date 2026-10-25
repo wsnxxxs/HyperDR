@@ -28,7 +28,21 @@ public actor RAWCompatibilityConverter: RAWCompatibilityConverting {
     private var flights: [String: Flight] = [:]
     private var waiters: [String: Set<UUID>] = [:]
 
-    /// The production initializer is added beside HyperDREngine's ABI wrapper.
+    public init(engine: Engine, configuration: KitConfiguration) {
+        self.root = configuration.cacheDirectory.resolvingSymlinksInPath().standardizedFileURL
+            .appendingPathComponent("decode-cache", isDirectory: true)
+            .appendingPathComponent("raw-compatibility", isDirectory: true)
+        self.converterID = Engine.rawConverterID
+        self.convertOperation = { source, output in
+            _ = try await engine.convertRAWToDNG(source, to: output)
+            return nil
+        }
+        self.extractOperation = { source, output in
+            let report = try await engine.extractRAWPreview(source, to: output)
+            return Int32(report.orientation)
+        }
+    }
+
     /// Tests supply the same two asynchronous operations directly.
     init(root: URL, converterID: String,
          convert: @escaping Operation, extract: @escaping Operation) {

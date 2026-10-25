@@ -20,11 +20,14 @@ public struct Capabilities: Codable, Sendable {
     /// The limit exports are checked against: the configured budget, or the host's memory less a reserve
     /// when none is configured. Zero means the host could not report it.
     public let effectiveMemoryBudgetBytes: UInt64
+    /// LibRaw/DNG converter identity, when the engine reports it (ABI 6+).
+    public let rawConverter: String?
     public let heicTileWorkers: Int
     /// Exact UTF-8 returned by the engine, including the trailing newline.
     public internal(set) var rawJSON = Data()
     private enum CodingKeys: String, CodingKey {
         case schema, version, buildFingerprint, codecs, encodings, encoder, memoryBudgetBytes, effectiveMemoryBudgetBytes, heicTileWorkers
+        case rawConverter = "raw_converter"
     }
 }
 

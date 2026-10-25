@@ -2111,6 +2111,118 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Shadows" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整阴影" } }
       }
+    },
+    "design.curve.hdrPointValue %@ %@" : {
+      "comment" : "VoiceOver value of a point in the tone curve's HDR segment: input and output in stops above SDR white.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Input +%@ stops, output +%@ stops" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入 +%@ 档，输出 +%@ 档" } }
+      }
+    },
+    "design.curve.split %@" : {
+      "comment" : "VoiceOver name of a zone boundary of the parametric curve (its number, 1 to 3).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Zone boundary %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "分区边界 %@" } }
+      }
+    },
+    "design.curve.channel" : {
+      "comment" : "VoiceOver name of the menu choosing which curve is edited.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线" } }
+      }
+    },
+    "design.curve.channel.luma" : {
+      "comment" : "Curve menu: luminance curve on both the SDR and the HDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luminance · Both" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 · 两者" } }
+      }
+    },
+    "design.curve.channel.lumaSDR" : {
+      "comment" : "Curve menu: luminance curve that changes only the SDR base.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luminance · SDR only" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 · 仅 SDR" } }
+      }
+    },
+    "design.curve.channel.lumaHDR" : {
+      "comment" : "Curve menu: luminance curve that changes only the HDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luminance · HDR only" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 · 仅 HDR" } }
+      }
+    },
+    "design.curve.channel.red" : {
+      "comment" : "Curve menu: the red channel's curve.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Red" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "红" } }
+      }
+    },
+    "design.curve.channel.green" : {
+      "comment" : "Curve menu: the green channel's curve.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Green" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "绿" } }
+      }
+    },
+    "design.curve.channel.blue" : {
+      "comment" : "Curve menu: the blue channel's curve.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "蓝" } }
+      }
+    },
+    "design.curve.mode" : {
+      "comment" : "VoiceOver name of the switch between the curve's parameters and its points.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Curve mode" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "曲线模式" } }
+      }
+    },
+    "design.curve.mode.parameters" : {
+      "comment" : "Curve mode: four zone sliders.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Parameters" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "参数" } }
+      }
+    },
+    "design.curve.mode.points" : {
+      "comment" : "Curve mode: a curve edited with points.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Point Curve" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点曲线" } }
+      }
+    },
+    "design.curve.pick" : {
+      "comment" : "Tooltip of the curve eyedropper: press a point on the photo and drag to add a point on the curve there.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust the curve from the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从照片上取点调曲线" } }
+      }
+    },
+    "design.curve.pick.stop" : {
+      "comment" : "Tooltip of the curve eyedropper while it is on.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop picking from the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止从照片取点" } }
+      }
+    },
+    "design.curve.parametricHint" : {
+      "comment" : "Caption under the parametric curve: the zone boundaries and the sliders.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Drag the markers under the plot to move the zone boundaries · double-click a marker to reset it" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拖动图下方的标记调整分区边界 · 双击标记还原" } }
+      }
+    },
+    "design.curve.hdrAxis" : {
+      "comment" : "Label in the amber HDR part of the tone curve plot: its axes count stops above SDR white.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "HDR (stops)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "HDR（档）" } }
+      }
     }
   },
   "version" : "1.0"

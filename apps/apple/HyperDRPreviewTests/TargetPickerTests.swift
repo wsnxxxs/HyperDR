@@ -64,4 +64,22 @@ final class TargetPickerTests: XCTestCase {
         picker.press(at: CGPoint(x: 50, y: 50))
         XCTAssertTrue(picker.isPressing, "a new press is not blocked by the old one")
     }
+
+    /// A second drag that starts while the first one's sample is still being
+    /// read keeps its own origin and its own step: the first is applied by
+    /// its displacement and finished, then the second by its own.
+    func testASecondDragBeforeTheFirstSampleArrivesKeepsItsOwnOriginAndStep() async throws {
+        let log = Log(), picker = picker(log, delay: .milliseconds(40))
+        picker.start()
+        picker.press(at: CGPoint(x: 50, y: 100))
+        picker.move(to: CGPoint(x: 50, y: 80))
+        picker.release()
+        picker.press(at: CGPoint(x: 50, y: 20))
+        XCTAssertTrue(picker.isPressing, "the lifted press no longer holds the picker")
+        picker.move(to: CGPoint(x: 50, y: 10))
+        picker.release()
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(log.applied, [20, 10], "each drag is applied by its own rise")
+        XCTAssertEqual(log.finished, 2, "one step for each drag")
+    }
 }

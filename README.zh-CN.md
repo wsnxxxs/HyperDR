@@ -124,7 +124,7 @@ Gallery、Label、Story、Hairline 和 Instant 五种样式，每种都有五种
 需要 iOS / iPadOS 27，或 Apple 芯片上的 macOS 15 及更高版本。
 
 > [!NOTE]
-> HyperDR 0.6.5 还是预发布版本。iPhone 上 110MP RAW 的全尺寸处理还在验证，iOS 也暂时不能在后台继续导出。
+> HyperDR 0.6.6 还是预发布版本。iPhone 上 110MP RAW 的全尺寸处理还在验证，iOS 也暂时不能在后台继续导出。
 
 <br>
 

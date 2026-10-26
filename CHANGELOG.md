@@ -3,8 +3,15 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
-## Unreleased
+## 0.6.6 - 2026-10-26 (Apple pre-release)
 
+- Mac inspector: Collapse All and Reset All at the top, every chevron at the
+  trailing edge, and which groups are open is remembered across photos and
+  launches.
+- Grain and halation are back in Style, after the looks, with or without a
+  look; the colour group is named Color again.
+- Crop: drag the photo under the crop box, which stays put and stops where
+  the photo ends.
 - Mac: Settings → RAW Development adds LibRaw, which reads every camera the
   same way and develops it as a DNG with a generic colour matrix, so colours
   match across brands (no lens correction or Apple's per-camera tuning). RAW 9

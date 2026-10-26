@@ -445,6 +445,74 @@
         }
       }
     },
+    "settings.rawDeveloper.automaticApple" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.libraw" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw (Consistent Color)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw（统一色彩）"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.noteWithoutNine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to RAW photos opened next. The current photo and saved edits keep their recorded developer. This macOS doesn’t offer RAW 9."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于之后打开的 RAW 照片。当前照片和已保存的编辑会保留所记录的开发器。当前 macOS 不提供 RAW 9。"
+          }
+        }
+      }
+    },
+    "settings.rawDeveloper.libraw.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw reads every camera the same way, and HyperDR develops the result as a DNG with a generic color matrix, so colors stay consistent across brands. There is no lens correction or Apple’s per-camera tuning, and a photo opens a little slower the first time. DNG files open as they are. If LibRaw can’t read a camera, Apple’s decoder is used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw 以同一种方式读取所有相机，HyperDR 再把结果作为 DNG、用通用色彩矩阵显影，因此不同品牌的色彩保持一致。没有镜头校正，也没有 Apple 针对各相机的调校；照片第一次打开会稍慢。DNG 文件按原样打开。LibRaw 读不了的相机会改用 Apple 的解码器。"
+          }
+        }
+      }
+    },
     "mac.err.raw_decoder_unavailable.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8680,6 +8748,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "兼容模式：当前 macOS 暂不支持这台相机，已先转换 RAW 再显影。仍是完整的 RAW 编辑，但没有镜头校正，色彩使用通用矩阵。"
+          }
+        }
+      }
+    },
+    "mac.compat.libraw.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw development, as chosen in Settings: the RAW was read by LibRaw and developed as a DNG. Colors use a generic matrix, and there is no lens correction."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按设置使用 LibRaw 显影：RAW 先由 LibRaw 读取，再作为 DNG 显影。色彩使用通用矩阵，没有镜头校正。"
+          }
+        }
+      }
+    },
+    "mac.compat.libraw.declined %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw can’t read this camera, so Apple’s decoder (RAW %@) developed it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LibRaw 读不了这台相机，已改用 Apple 的解码器（RAW %@）显影。"
           }
         }
       }

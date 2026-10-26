@@ -3,6 +3,13 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## Unreleased
+
+- Mac: Settings → RAW Development adds LibRaw, which reads every camera the
+  same way and develops it as a DNG with a generic colour matrix, so colours
+  match across brands (no lens correction or Apple's per-camera tuning). RAW 9
+  is listed only on systems that have it.
+
 ## 0.6.5 - 2026-10-26 (Apple pre-release)
 
 - New adjustments: dehaze and midtone clarity (fixed-grid GPU, bounded so

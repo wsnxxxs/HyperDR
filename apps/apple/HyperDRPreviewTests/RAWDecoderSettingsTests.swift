@@ -44,8 +44,19 @@ import XCTest
             var preferences = legacy
             preferences.rawDecoder = choice
             preferences.save(to: defaults)
-            XCTAssertEqual(Preferences.load(from: defaults), preferences)
+            XCTAssertEqual(Preferences.load(from: defaults, supportsRAW9: true), preferences)
         }
+    }
+
+    func testRAW9ReadsAsAutomaticWhereTheSystemHasNoRAW9() {
+        let name = "RAWDecoderSettingsTests-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        RAWDecoderPreference.raw9.save(to: defaults)
+        XCTAssertEqual(Preferences.load(from: defaults, supportsRAW9: false).rawDecoder, .automatic)
+        XCTAssertEqual(Preferences.load(from: defaults, supportsRAW9: true).rawDecoder, .raw9)
+        RAWDecoderPreference.libRAW.save(to: defaults)
+        XCTAssertEqual(Preferences.load(from: defaults, supportsRAW9: false).rawDecoder, .libRAW)
     }
 
     func testUnsupportedDecoderHasSpecificLocalizedWording() {

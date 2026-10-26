@@ -181,7 +181,15 @@ for both the canvas and fixed analysis grid and swaps in the result without
 resetting edits or undo. Draft pixels never enter AI inference, detail ROI
 or export.
 Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
-photos. Automatic selects decoder 9 when the system and file support it
+photos; the Mac lists RAW 9 only when `RenderEngine.systemSupportsRAW9` (a
+synthetic 256 px DNG probed once lists `9.dng`; a stored RAW 9 reads as
+Automatic elsewhere), and also offers LibRaw (`RAWDecoderPreference.libRAW`,
+user 2026-10-26: CIRAWFilter's colour differs by camera maker). LibRaw sends a
+new non-DNG RAW through the compatibility converter even when Apple supports
+the camera (`libRAWDecoderSelection`), develops the DNG with 9.dng (8.dng
+retried once, else 8.dng) and records `Recipe.rawCompatibility`; a DNG original
+opens as in Automatic, and a camera LibRaw cannot read opens as Automatic with
+`RAWDecoderFallback.libRAW`, noted in the inspector. Automatic selects decoder 9 when the system and file support it
 (including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without
 either keep their supported older system default. Explicit RAW 8/9 requires
 that exact generation and reports an unavailable version without fallback.

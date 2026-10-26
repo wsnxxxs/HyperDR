@@ -108,7 +108,10 @@ nonisolated enum EditorRenderingError: Error, Equatable, Sendable {
 
 /// A new photo's preferred decoder failed before it opened. The successful
 /// version is recorded in the recipe; hosts may explain the downgrade.
+/// `requested` is `RAWDecoderFallback.libRAW` when LibRaw could not read the
+/// camera and Apple's decoder developed it instead.
 nonisolated struct RAWDecoderFallback: Equatable, Sendable {
+    static let libRAW = "libraw"
     let requested: String
     let used: String
 }
@@ -138,6 +141,9 @@ nonisolated struct EditorSource: Equatable, Sendable {
     var sourceCompatibility: SourceCompatibility? = nil
     /// Exact converter id persisted by RecipeEditor for converted DNGs.
     var rawCompatibility: String? = nil
+    /// The DNG was converted although Apple develops this camera: LibRaw was
+    /// chosen, not needed.
+    var rawCompatibilityByChoice = false
 }
 
 /// One render of the open photo.

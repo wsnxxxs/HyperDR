@@ -1,4 +1,5 @@
 import Foundation
+import HyperDRRender
 import Observation
 
 nonisolated struct Preferences: Equatable {
@@ -14,9 +15,12 @@ nonisolated struct Preferences: Equatable {
     var output: [String: String] = [:]
     static let key = "HyperDRPreferencesV1"
     static let encodings = ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"]
-    static func load(from defaults: UserDefaults) -> Self {
+    /// A RAW 9 choice stored where this system has no RAW 9 (Settings does
+    /// not list it there) reads as Automatic.
+    static func load(from defaults: UserDefaults, supportsRAW9: Bool = RenderEngine.systemSupportsRAW9) -> Self {
         var result = Self()
         result.rawDecoder = .load(from: defaults)
+        if result.rawDecoder == .raw9, !supportsRAW9 { result.rawDecoder = .automatic }
         guard let d = defaults.dictionary(forKey: key) else { return result }
         result.histogramRGB = d["histogramRGB"] as? Bool ?? false
         result.highlightZebra = d["highlightZebra"] as? Bool ?? false

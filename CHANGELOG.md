@@ -3,6 +3,27 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## 0.6.5 - 2026-10-26 (Apple pre-release)
+
+- New adjustments: dehaze and midtone clarity (fixed-grid GPU, bounded so
+  bright surfaces, colour and skin tones are kept); a colour mixer (eight
+  OKLCH bands, Hue | Saturation | Luminance | By Color) and perceptual colour
+  grading with global, shadow, midtone and highlight zones, including HDR
+  highlights; vibrance rebuilt in Oklab with skin protection; stronger white
+  and black points with a clipping display (red and blue paint while dragging
+  or holding Option).
+- Tone curves reach the HDR endpoints and RGB channels, with a parametric
+  mode and a curve eyedropper (press a point of the photo, drag to add or move
+  a curve point) on the Mac and iPad; the mixer has an eyedropper as well.
+- LUTs: nine more input/output spaces (camera Log, grading) recognised from
+  file names, grouped in the space menus; an exposure row under the LUT
+  metered against the camera's own rendition.
+- Controls: inline section sliders, iPad tool pages (Light: Basic | Curve;
+  Adjust: Basic | Mixer | Grading) remembered per tool, iPhone section pages,
+  gradient tracks for hue and saturation, grading wheel drawn in the recipe's
+  hue angle.
+- Builds that include the private AI model were packaged with it.
+
 ## 0.6.0 - 2026-10-26 (Apple pre-release)
 
 - The Mac runs on macOS 15 or later (it needed macOS 27). Code that needs a

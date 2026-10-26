@@ -172,7 +172,7 @@ Team); no paid developer account is needed. See the
 Requires iOS / iPadOS 27, or macOS 15 or later on Apple silicon.
 
 > [!NOTE]
-> HyperDR 0.6.0 is a pre-release. Full-size 110 MP RAW on iPhone is still being
+> HyperDR 0.6.5 is a pre-release. Full-size 110 MP RAW on iPhone is still being
 > verified, and iOS does not yet continue an export in the background.
 
 <br>

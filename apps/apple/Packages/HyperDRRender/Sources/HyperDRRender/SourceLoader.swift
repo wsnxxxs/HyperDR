@@ -311,7 +311,9 @@ extension RenderEngine {
             return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                          systemDefault: filter.decoderVersion.rawValue, allowing9: false)
         }
-        guard let selection = try? await Self.decoderSelection(url),
+        // Raster inputs have no RAW decoder, even with a converter registered.
+        guard Self.isRAWSource(url, options: SourceOptions(kind: .automatic)),
+              let selection = try? await Self.decoderSelection(url),
               let filter = Self.usableSelectionFilter(selection.url) ?? CIRAWFilter(imageURL: selection.url) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
                                      systemDefault: filter.decoderVersion.rawValue, allowing9: false)

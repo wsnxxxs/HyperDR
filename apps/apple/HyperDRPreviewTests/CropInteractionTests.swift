@@ -48,6 +48,34 @@ import simd
         XCTAssertEqual(target.cropRect.midX, 400, accuracy: 1e-6)
         XCTAssertEqual(target.cropRect.midY, 300, accuracy: 1e-6)
     }
+    /// Dragging inside the box moves the photo: the box keeps its place on the
+    /// canvas, the photo goes the pointer's way and stops where it ends.
+    func testMovingThePhotoKeepsTheBoxWhereItIs() throws {
+        let photo = GeometrySize(width: 6000, height: 4000)
+        var geometry = Geometry.identity
+        geometry.crop = CropRect(centre: GeometryPoint(x: 0, y: 0), size: GeometrySize(width: 3000, height: 2000), frame: photo)
+        let layout = CropLayout(photo: photo, geometry: geometry, viewport: CGSize(width: 800, height: 600), margin: 40)
+        let box = layout.cropRect
+        let moved = try XCTUnwrap(layout.movingPhoto(by: CGSize(width: 20, height: -10)))
+        XCTAssertFalse(moved.stopped)
+        // The crop went the other way over the photo.
+        let crop = moved.geometry.cropRect(for: photo).centre
+        XCTAssertEqual(crop.x, -20 / layout.scale, accuracy: 1e-6)
+        XCTAssertEqual(crop.y, 10 / layout.scale, accuracy: 1e-6)
+        let following = layout.following(moved.geometry)
+        XCTAssertEqual(following.cropRect.minX, box.minX, accuracy: 1e-6)
+        XCTAssertEqual(following.cropRect.minY, box.minY, accuracy: 1e-6)
+        XCTAssertTrue(following.settles(at: following.fitted), "nothing to glide to after a move")
+        // As far as the photo goes, then no further.
+        let far = try XCTUnwrap(layout.movingPhoto(by: CGSize(width: 10_000, height: 0)))
+        XCTAssertTrue(far.stopped)
+        XCTAssertEqual(far.geometry.cropRect(for: photo).minX, -3000, accuracy: 0.01)
+        XCTAssertNil(layout.following(far.geometry).movingPhoto(by: CGSize(width: 5, height: 0)))
+        // A full-frame crop has nowhere to go.
+        let whole = CropLayout(photo: photo, geometry: .identity, viewport: CGSize(width: 800, height: 600), margin: 40)
+        XCTAssertNil(whole.movingPhoto(by: CGSize(width: 5, height: 5)))
+    }
+
     func testLockedCornersShrinkOnEitherAxisAndDiagonally() {
         let start = GeometryRect(centre: GeometryPoint(x: 0, y: 0), size: GeometrySize(width: 100, height: 100))
         let quad = GeometryRect(centre: start.centre, size: GeometrySize(width: 400, height: 400)).corners

@@ -91,6 +91,8 @@ struct CanvasStage: View {
             .onChange(of: focused) { _, now in if !now { focusedByPointer = false } }
             .onKeyPress(characters: Self.keys, action: handle)
             .onKeyPress(keys: [.space], phases: [.down, .repeat, .up], action: handleSpace)
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat, .up],
+                        action: handleArrow)
             .onKeyPress(.escape) {
                 if model.isPeekingOriginal {
                     releaseHolds()
@@ -105,8 +107,11 @@ struct CanvasStage: View {
                 model.isCropping = false
                 return .handled
             }
-            .onChange(of: CropEntryTrigger(cropping: model.isCropping, serial: model.photoSerial), initial: true) { _, trigger in
+            .onChange(of: CropEntryTrigger(cropping: model.isCropping, serial: model.photoSerial), initial: true) { old, trigger in
                 cropEntry = trigger.cropping ? model.editor.recipe.geometry : nil
+                // The pane's keys (Return, Esc, the arrows, X) work as soon as it opens.
+                if trigger.cropping, !old.cropping { takeFocus() }
+                if !trigger.cropping { endNudge() }
             }
             // One observation for both what the hint says and which photo it
             // is for, so the first photo's hint is announced once.
@@ -158,8 +163,10 @@ struct CanvasStage: View {
             zoomGesture: { [hint] in hint.dismiss() })
     }
 
-    /// Lets go of whatever holds the original, from every source.
+    /// Lets go of whatever holds the original, from every source, and of a
+    /// held arrow key (its key up never arrives once focus or the window goes).
     private func releaseHolds() {
+        endNudge()
         hold.release()
         peek.releaseAll()
         model.endPeekOriginal()
@@ -181,7 +188,41 @@ struct CanvasStage: View {
         focused = true
     }
 
-    private static let keys = CharacterSet(charactersIn: "fF+=-cC")
+    private static let keys = CharacterSet(charactersIn: "fF+=-cCrRxX")
+
+    /// An arrow key held in the crop pane: one undo step from its press to its release.
+    @State private var nudging = false
+
+    /// The arrows in the crop pane move the photo under the box: a point at a
+    /// time, ten with Shift.
+    private func handleArrow(_ press: KeyPress) -> KeyPress.Result {
+        guard model.isCropping, !model.isEditingLocked,
+              press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+        hint.dismiss()
+        if press.phase == .up {
+            endNudge()
+            return .handled
+        }
+        let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
+        let points: CGSize = switch press.key {
+        case .leftArrow: CGSize(width: -step, height: 0)
+        case .rightArrow: CGSize(width: step, height: 0)
+        case .upArrow: CGSize(width: 0, height: -step)
+        default: CGSize(width: 0, height: step)
+        }
+        if !nudging {
+            nudging = true
+            model.editor.editingGeometry(true)
+        }
+        model.nudgeCrop(by: points)
+        return .handled
+    }
+
+    private func endNudge() {
+        guard nudging else { return }
+        nudging = false
+        model.editor.editingGeometry(false)
+    }
 
     /// Holding Space shows the original at once (no 240 ms: the key is a
     /// deliberate act); letting go brings the edit back.
@@ -203,6 +244,15 @@ struct CanvasStage: View {
         let canvas = model.canvas
         switch press.characters {
         case "c", "C": model.toggleCompare()
+        // R opens the crop pane and finishes it, as Return does.
+        case "r", "R":
+            guard model.isCropping || (model.workspace == .editing && model.hasEditedFrame && !model.isEditingLocked) else {
+                return .ignored
+            }
+            model.isCropping.toggle()
+        case "x", "X":
+            guard model.isCropping else { return .ignored }
+            model.turnCropAspect()
         case "f", "F": canvas.fitToWindow()
         // "=" is + without Shift on most layouts.
         case "+", "=": canvas.zoomIn()

@@ -73,6 +73,23 @@ extension EditorModel {
         editor.setRecipe(recipe)
     }
 
+    /// The arrow keys in the crop pane: the photo moves `points` under the
+    /// crop box. The host brackets a held key as one step (`editingGeometry`).
+    func nudgeCrop(by points: CGSize) {
+        guard isCropping, !isEditingLocked, let layout = cropLayout,
+              let moved = layout.movingPhoto(by: points) else { return }
+        setGeometry(moved.geometry)
+    }
+
+    /// X in the crop pane: the ratio the other way up, when it has one.
+    func turnCropAspect() {
+        guard isCropping, !isEditingLocked, let source = editor.source else { return }
+        let geometry = editor.recipe.geometry
+        guard geometry.aspect.turned != geometry.aspect else { return }
+        let photo = GeometrySize(width: Double(source.pixelSize.width), height: Double(source.pixelSize.height))
+        setGeometry(geometry.settingAspect(geometry.aspect.turned, photo: photo))
+    }
+
     /// The full-size renders of the visible part (the editor's detail
     /// layers), while they are of the frames shown.
     var editedDetailPair: DisplayPair? { editor.shownDetail.map { DisplayPair($0.display) } }

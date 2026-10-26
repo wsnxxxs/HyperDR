@@ -3943,13 +3943,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Drag the box or its edges · Double-click to reset the crop · Return to finish, Esc to cancel"
+            "value" : "Drag the photo or the box's edges · Arrow keys nudge, X turns the ratio · Return to finish, Esc to cancel"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "拖动裁切框或其边缘 · 双击复位裁切 · 回车完成，Esc 取消"
+            "value" : "拖动照片或裁切框边缘 · 方向键微调，X 切换横竖 · 回车完成，Esc 取消"
           }
         }
       }

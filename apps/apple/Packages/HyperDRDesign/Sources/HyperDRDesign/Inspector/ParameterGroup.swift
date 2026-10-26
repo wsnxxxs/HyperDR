@@ -5,13 +5,15 @@ import SwiftUI
 /// title, an optional summary of the group's state and a chevron, then the
 /// controls.
 ///
-/// The header is a button: click or, with keyboard navigation, Space toggles
-/// the group. VoiceOver reads it as a heading with an expanded or collapsed
-/// value. The caller owns `isExpanded`, so it can keep it per window or
-/// across launches.
+/// The header's title side is a button: click or, with keyboard navigation,
+/// Space toggles the group. VoiceOver reads it as a heading with an expanded
+/// or collapsed value. The caller owns `isExpanded`, so it can keep it per
+/// window or across launches.
 ///
-/// `accessory` sits at the header's trailing end, outside the toggle button:
-/// the HDR group's switch, a group's reset. It brings its own trailing inset.
+/// `accessory` sits in the header between the summary and the chevron,
+/// outside the toggle: the HDR group's switch, a group's reset. The chevron
+/// is always last, at the trailing edge, as on the sections inside a group,
+/// so every fold mark lines up down the column.
 ///
 /// A group that is not `collapsible` is a titled section: always open, its
 /// header a heading with no chevron (the iPad sidebar, which shows one tab's
@@ -24,6 +26,8 @@ public struct ParameterGroup<Content: View, Accessory: View>: View {
     @Binding private var isExpanded: Bool
     private let content: Content
     private let accessory: Accessory
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovered = false
 
     public init(_ title: Text, systemImage: String, summary: Text? = nil,
                 isExpanded: Binding<Bool>, collapsible: Bool = true, @ViewBuilder content: () -> Content,
@@ -40,21 +44,7 @@ public struct ParameterGroup<Content: View, Accessory: View>: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(Color.hdr.line).frame(height: 1)
-            HStack(spacing: 0) {
-                if collapsible {
-                    Button {
-                        withHDRAnimation { isExpanded.toggle() }
-                    } label: {
-                        GroupHeader(title: title, systemImage: systemImage, summary: summary, isExpanded: isExpanded)
-                    }
-                    .buttonStyle(GroupHeaderStyle())
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
-                } else {
-                    SectionHeader(title: title, systemImage: systemImage)
-                }
-                accessory
-            }
+            header
             if isExpanded || !collapsible {
                 content
                     .padding(.horizontal, 20)
@@ -65,36 +55,73 @@ public struct ParameterGroup<Content: View, Accessory: View>: View {
         }
         .clipped()
     }
+
+    private func toggle() {
+        withHDRAnimation { isExpanded.toggle() }
+    }
+
+    @ViewBuilder private var header: some View {
+        if collapsible {
+            HStack(spacing: Space.s2) {
+                Button(action: toggle) {
+                    GroupHeader(title: title, systemImage: systemImage, summary: summary)
+                }
+                .buttonStyle(GroupHeaderStyle(hovered: hovered))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(Text(isExpanded ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
+                accessory
+                Button(action: toggle) {
+                    DisclosureChevron(isExpanded: isExpanded)
+                        .frame(width: 16, height: 24)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .background(hovered ? Color.hdr.surfaceHover : .clear)
+            .contentShape(.rect)
+            .onHover { hovered = isEnabled && $0 }
+            .hdrAnimation(Motion.fast, value: hovered)
+        } else {
+            HStack(spacing: Space.s2) {
+                SectionHeader(title: title, systemImage: systemImage)
+                accessory
+            }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+    }
 }
 
+/// The icon, the title and, at the trailing end of the title side, the
+/// summary (a folded group's changes).
 private struct GroupHeader: View {
     let title: Text
     let systemImage: String
     let summary: Text?
-    let isExpanded: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 9) {
-                Image(systemName: systemImage)
-                    .font(.system(size: TypeScale.Size.body))
-                    .foregroundStyle(Color.hdr.inkMuted)
-                    .frame(width: 18)
-                    .accessibilityHidden(true)
-                title.lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            if let summary {
-                summary.foregroundStyle(Color.hdr.inkMuted).lineLimit(1)
-            }
-            Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .semibold))
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: TypeScale.Size.body))
                 .foregroundStyle(Color.hdr.inkMuted)
-                .rotationEffect(.degrees(isExpanded ? 0 : -90))
-                .hdrAnimation(value: isExpanded)
+                .frame(width: 18)
                 .accessibilityHidden(true)
+            title
+                .font(.system(size: TypeScale.Size.control, weight: .semibold))
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: Space.s2)
+            if let summary {
+                summary
+                    .font(.hdr.caption)
+                    .foregroundStyle(Color.hdr.inkMuted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
-        .font(.hdr.caption)
     }
 }
 
@@ -114,35 +141,33 @@ private struct SectionHeader: View {
             title.font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.hdr.inkStrong).lineLimit(1)
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// Full-width row, 15 × 20 padding, wash on hover (CSS `summary:hover`).
+/// The header's title side: the whole height of the row, its ink brighter
+/// while the row is hovered (the row draws the wash, CSS `summary:hover`).
 private struct GroupHeaderStyle: ButtonStyle {
+    let hovered: Bool
+
     func makeBody(configuration: Configuration) -> some View {
-        GroupHeaderBody(configuration: configuration)
+        GroupHeaderBody(configuration: configuration, hovered: hovered)
     }
 }
 
 private struct GroupHeaderBody: View {
     let configuration: ButtonStyleConfiguration
+    let hovered: Bool
     @Environment(\.isEnabled) private var isEnabled
-    @State private var hovered = false
 
     var body: some View {
         configuration.label
             .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : hovered ? Color.hdr.inkStrong : Color.hdr.ink)
-            .padding(.vertical, 15)
-            .padding(.horizontal, 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(configuration.isPressed ? Color.hdr.surfaceActive : hovered ? Color.hdr.surfaceHover : .clear)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
             .contentShape(.rect)
-            .onHover { hovered = isEnabled && $0 }
-            .hdrAnimation(Motion.fast, value: hovered)
     }
 }
 

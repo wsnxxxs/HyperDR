@@ -80,8 +80,9 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(panel.groups(for: sdr).map(\.group) == [.hdr, .light, .color, .look], "no detail group outside RAW")
     let mixer = HSLBand.allCases.flatMap { band in HSLComponent.allCases.map { "hsl.\(band.rawValue).\($0.rawValue)" } }
     let grading = ColorGradingZone.allCases.flatMap { zone in HSLComponent.allCases.map { "grade.\(zone.rawValue).\($0.rawValue)" } } + ["grade.blending","grade.balance"]
-    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation"] + mixer + grading + ["effect.grain", "effect.halation"],
-            "grain and halation on every photo, without a look")
+    #expect(ids(sdr, .color) == ["color.warmth", "color.tint", "color.vibrance", "color.saturation"] + mixer + grading)
+    #expect(ids(sdr, .look) == ["look.lut", "look.film", "effect.grain", "effect.halation"],
+            "grain and halation on every photo, without a look, after the looks")
     #expect(ids(sdr, .hdr).contains("hdr.coverage"))
     #expect(!ids(sdr, .hdr).contains("hdr.sdrRolloff"))
 
@@ -128,10 +129,10 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 @Test func lookControlsAppearOnceALUTIsChosen() {
     var recipe = Recipe(inputDomain: .sdr)
-    #expect(ids(recipe, .look) == ["look.lut", "look.film"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "effect.grain", "effect.halation"])
     panel.set("look.lut", reference: "sha256:01", in: &recipe)
     #expect(recipe.look?.name == "Kodak 2383")
-    #expect(ids(recipe, .look) == ["look.lut", "look.enabled", "look.strength", "look.input", "look.output", "look.film"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.enabled", "look.strength", "look.input", "look.output", "look.film", "effect.grain", "effect.halation"])
     #expect(AdjustmentText.summary(panel.group(group: .look, in: recipe)!, locale: english) == "Kodak 2383")
     let input = panel.control("look.input", in: recipe)
     #expect(input?.options.contains { $0.id == "slog3-sgamut3cine" } == false, "S-Log3 input is RAW only")
@@ -141,7 +142,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 @Test func filmStrengthAppearsOnceAFilmIsChosen() throws {
     var recipe = Recipe(inputDomain: .sdr)
     panel.set(Recipe.filmID, option: "velvia100", in: &recipe)
-    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmExposure", "look.filmStrength", "look.filmAntihalation"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "look.filmExposure", "look.filmStrength", "look.filmAntihalation", "effect.grain", "effect.halation"])
     let film = try #require(panel.control(Recipe.filmID, in: recipe))
     let sections = AdjustmentText.optionSections(film)
     #expect(sections.allSatisfy { $0.family == nil }, "film stocks are not LUT spaces")
@@ -149,7 +150,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     #expect(sections[0].options.map(\.id) == ["none"])
     #expect(sections.flatMap { $0.options.map(\.id) } == Adjustments.filmStocks)
     panel.set(Recipe.filmID, option: "none", in: &recipe)
-    #expect(ids(recipe, .look) == ["look.lut", "look.film"])
+    #expect(ids(recipe, .look) == ["look.lut", "look.film", "effect.grain", "effect.halation"])
 }
 
 @Test func grainAndHalationWorkWithALUTAndWithoutALook() {
@@ -158,7 +159,7 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     panel.set("effect.halation", number: 25, in: &recipe)
     #expect(recipe.value(for: "effect.grain") == .number(40))
     panel.set("look.lut", reference: "sha256:01", in: &recipe)
-    #expect(ids(recipe, .color).suffix(2) == ["effect.grain", "effect.halation"], "a LUT leaves them alone")
+    #expect(ids(recipe, .look).suffix(2) == ["effect.grain", "effect.halation"], "a LUT leaves them alone")
     #expect(recipe.value(for: "effect.halation") == .number(25))
     panel.set("look.lut", reference: nil, in: &recipe)
     #expect(recipe.value(for: "effect.grain") == .number(40), "removing the look keeps them")
@@ -350,11 +351,12 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
 // MARK: Words
 
-@Test func theAdjustGroupsResetNamesWhatItResets() {
+@Test func theColorGroupsResetNamesWhatItResets() {
     let chinese = Locale(identifier: "zh-Hans")
-    #expect(DesignStrings.string("group.color", locale: chinese) == "调整")
-    #expect(AdjustmentText.undoName(.group(.color), locale: english) == "Reset Color, Grain and Halation")
-    #expect(AdjustmentText.undoName(.group(.color), locale: chinese) == "重置颜色、颗粒与光晕")
+    #expect(DesignStrings.string("group.color", locale: chinese) == "颜色")
+    #expect(AdjustmentText.undoName(.group(.color), locale: english) == "Reset Color")
+    #expect(AdjustmentText.undoName(.group(.color), locale: chinese) == "重置颜色")
+    #expect(AdjustmentText.undoName(.group(.look), locale: chinese) == "重置风格", "grain and halation go with the look")
     #expect(AdjustmentText.undoName(.group(.light), locale: chinese) == "重置光线")
     #expect(AdjustmentText.undoName(.all, locale: english) == "Reset All")
 }

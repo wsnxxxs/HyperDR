@@ -55,6 +55,22 @@ extension EnvironmentValues {
     /// The largest side a section's plot takes, for a host short of height
     /// (the iPhone's dock); nil lets the plot take the width.
     @Entry public var sectionPlotSide: CGFloat?
+    /// Which folding sections are open, when the host keeps the record (the
+    /// Mac inspector keeps it across photos, the crop pane and launches);
+    /// without it each section folds on its own.
+    @Entry public var openSections: Binding<Set<AdjustmentSections.Kind>>?
+}
+
+/// Where a section's open or folded state lives.
+enum SectionDisclosure {
+    /// Only a section that folds (a titled one, on the Mac) reads the host's
+    /// record; one that does not fold is always open.
+    static func binding(_ kind: AdjustmentSections.Kind, style: AdjustmentControlStyle, showsTitle: Bool,
+                        open: Binding<Set<AdjustmentSections.Kind>>?, own: Binding<Bool>) -> Binding<Bool> {
+        guard style == .pointer, showsTitle, let open else { return own }
+        return Binding(get: { open.wrappedValue.contains(kind) },
+                       set: { if $0 { open.wrappedValue.insert(kind) } else { open.wrappedValue.remove(kind) } })
+    }
 }
 
 /// How the curves, the colour mixer and the grading arrange themselves
@@ -115,9 +131,11 @@ enum SectionMetrics {
 
 /// A section's title row (controls-polish §2.1): on the Mac a disclosure with
 /// the title, a dot when anything in it is changed and, folded, a summary;
-/// then the section's tools (the eyedropper) and ↺, which resets the section
-/// and is there only when there is something to reset. On touch it does not
-/// fold, and the title can be left to the host (the iPad's sub-page names it).
+/// then the section's tools (the eyedropper), ↺, which resets the section and
+/// is there only when there is something to reset, and last the chevron, at
+/// the trailing edge as on the groups' headers. The whole title side folds
+/// the section. On touch it does not fold, and the title can be left to the
+/// host (the iPad's sub-page names it).
 struct SubsectionHeader<Tools: View>: View {
     let title: Text
     let style: AdjustmentControlStyle
@@ -135,10 +153,12 @@ struct SubsectionHeader<Tools: View>: View {
 
     private var touch: Bool { style == .touch }
 
+    /// The section folds here: a titled section on the Mac.
+    private var folds: Bool { !touch && showsTitle && isExpanded != nil }
+
     var body: some View {
         HStack(spacing: Space.s2) {
-            if showsTitle { titleButton }
-            Spacer(minLength: 0)
+            if showsTitle { titleButton } else { Spacer(minLength: 0) }
             tools
             if canReset ?? isChanged {
                 Button(action: reset) {
@@ -153,8 +173,17 @@ struct SubsectionHeader<Tools: View>: View {
                 .accessibilityLabel(resetLabel)
                 .transition(.opacity)
             }
+            if folds, let isExpanded {
+                Button { toggle(isExpanded) } label: {
+                    DisclosureChevron(isExpanded: isExpanded.wrappedValue, size: 9)
+                        .frame(width: 16, height: 22)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHidden(true)
+            }
         }
-        .frame(minHeight: touch ? 44 : 24)
+        .frame(minHeight: touch ? 44 : 28)
         // On the Mac a hairline sets a section apart from the group's own rows.
         .padding(.top, touch || !showsTitle ? 0 : Space.s2)
         .overlay(alignment: .top) {
@@ -163,15 +192,12 @@ struct SubsectionHeader<Tools: View>: View {
         .animation(.smooth(duration: 0.15), value: canReset ?? isChanged)
     }
 
+    private func toggle(_ isExpanded: Binding<Bool>) {
+        withHDRAnimation { isExpanded.wrappedValue.toggle() }
+    }
+
     @ViewBuilder private var titleButton: some View {
         let label = HStack(spacing: Space.s1) {
-            if !touch, isExpanded != nil {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.hdr.inkMuted)
-                    .rotationEffect(.degrees(isExpanded?.wrappedValue == true ? 90 : 0))
-                    .frame(width: 10)
-            }
             title
                 .font(touch ? .subheadline.weight(.semibold) : .system(size: TypeScale.Size.caption, weight: .semibold))
                 .foregroundStyle(Color.hdr.inkStrong)
@@ -186,18 +212,34 @@ struct SubsectionHeader<Tools: View>: View {
                     .foregroundStyle(Color.hdr.inkMuted)
                     .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
-        if let isExpanded, !touch {
-            Button {
-                withHDRAnimation { isExpanded.wrappedValue.toggle() }
-            } label: {
-                label.frame(minHeight: 24).contentShape(.rect)
+        if folds, let isExpanded {
+            Button { toggle(isExpanded) } label: {
+                label.frame(minHeight: 28).contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
             .accessibilityValue(Text(isExpanded.wrappedValue ? "design.group.expanded" : "design.group.collapsed", bundle: .module))
         } else {
             label.accessibilityAddTraits(.isHeader)
         }
+    }
+}
+
+/// The fold mark of a group or a section: pointing down when open, right
+/// when folded.
+struct DisclosureChevron: View {
+    let isExpanded: Bool
+    var size: CGFloat = 10
+
+    var body: some View {
+        Image(systemName: "chevron.down")
+            .font(.system(size: size, weight: .semibold))
+            .foregroundStyle(Color.hdr.inkMuted)
+            .rotationEffect(.degrees(isExpanded ? 0 : -90))
+            .hdrAnimation(value: isExpanded)
+            .accessibilityHidden(true)
     }
 }
 
@@ -232,7 +274,7 @@ struct SectionSegments: View {
 /// section itself. The Mac inspector and the iPad panel ask this instead of
 /// listing parameters by name.
 public enum AdjustmentSections {
-    public enum Kind: Sendable { case curves, mixer, grading }
+    public enum Kind: String, CaseIterable, Sendable { case curves, mixer, grading }
 
     /// The parameter that stands for each section: where the section is drawn.
     static func anchor(_ kind: Kind) -> String? {

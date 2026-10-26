@@ -62,10 +62,13 @@ public enum Adjustments {
     /// percent unit. AI keeps the model's own start.
     public static let automaticExpansionStart = 25.0
 
-    /// Physical effects share the adjustment group but are independent of colour looks.
+    /// Grain and halation: physical effects in the look group (user, 2026-10-26),
+    /// after its looks, on every photo with a film, a LUT or no look at all.
     public static let effectIDs = ["effect.grain", "effect.halation"]
 
-    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + grading + effects + look + detail
+    public static func isEffect(_ id: String) -> Bool { effectIDs.contains(id) }
+
+    public static let all: [ParameterDeclaration] = hdr + light + color + mixer + grading + look + effects + detail
 
     public static let byID: [String: ParameterDeclaration] =
         Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -201,9 +204,9 @@ public enum Adjustments {
     private static let effects: [ParameterDeclaration] = [
         // Zero bypasses the effect. One is the stock's own 35 mm model when a film
         // is selected, or the neutral 35 mm reference model without a film.
-        ParameterDeclaration(id: "effect.grain", group: .color, kind: .float, range: 0...200, step: 1,
+        ParameterDeclaration(id: "effect.grain", group: .look, kind: .float, range: 0...200, step: 1,
             default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
-        ParameterDeclaration(id: "effect.halation", group: .color, kind: .float, range: 0...200, step: 1,
+        ParameterDeclaration(id: "effect.halation", group: .look, kind: .float, range: 0...200, step: 1,
             default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero),
     ]
 

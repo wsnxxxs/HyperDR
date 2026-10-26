@@ -246,8 +246,9 @@ public struct AdjustmentPanel: Sendable {
     static let shownAfter: [(id: String, after: String)] = [("tone.dehaze", "tone.clarity")]
 
     /// The first control of a cluster the hosts set apart with a hairline or a
-    /// gap: clarity and dehaze after the tones.
-    public static func startsCluster(_ id: String) -> Bool { id == "tone.clarity" }
+    /// gap: clarity and dehaze after the tones, vibrance and saturation after
+    /// the white balance.
+    public static func startsCluster(_ id: String) -> Bool { id == "tone.clarity" || id == "color.vibrance" }
 
     static func displayed(_ controls: [AdjustmentControl]) -> [AdjustmentControl] {
         var shown = controls
@@ -437,8 +438,8 @@ public struct AdjustmentPanel: Sendable {
 
     /// Chooses a built-in film stock in one write, so it is one undo step:
     /// the stock (which removes a LUT), its exposure back on the meter and
-    /// its antihalation layer back on. Grain and halation are Adjust's
-    /// (`Adjustments.effectIDs`) and work on every photo; a stock put on a
+    /// its antihalation layer back on. Grain and halation follow the looks
+    /// in the same group (`Adjustments.effectIDs`) and work on every photo; a stock put on a
     /// photo whose grain and halation are untouched brings its own (100 %),
     /// and one replacing another stock leaves them as they are. "none" removes whichever look
     /// is on.

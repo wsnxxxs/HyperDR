@@ -9,20 +9,20 @@ enum EditorPane: Hashable {
     case frame
 }
 
-/// One tab of the dock: an adjustment group, or light and Adjust (the
-/// colour group, which also holds grain and halation) together as Adjust.
-/// They are used side by side, so one tab with all their rings keeps the tab
-/// bar short; the recipe's groups stay as they are.
+/// One tab of the dock: an adjustment group, or light and colour together
+/// as Adjust. They are used side by side, so one tab with all their rings
+/// keeps the tab bar short; the recipe's groups stay as they are.
 ///
-/// Style holds only the choice of look and its strength: a look changes
-/// colour. Grain and halation work on every photo with or without a look,
-/// so they sit in the colour group, after saturation. A film's exposure follows its
-/// meter (Adjust's exposure moves it) and its antihalation layer stays on.
+/// Style holds the choice of look, its strength, then grain and halation,
+/// which work on every photo with a film, a LUT or no look at all (user,
+/// 2026-10-26). A film's exposure follows its meter (Adjust's exposure moves
+/// it) and its antihalation layer stays on.
 struct DockGroup: Identifiable {
     /// The groups that share a tab, in display order.
     static let merged: [AdjustmentGroupID] = [.light, .color]
     /// What Style keeps of the look group.
-    static let lookControls: Set<String> = [Recipe.filmID, Recipe.lookID, "look.strength", "look.filmStrength"]
+    static let lookControls: Set<String> = Set([Recipe.filmID, Recipe.lookID, "look.strength", "look.filmStrength"]
+                                               + Adjustments.effectIDs)
 
     let states: [AdjustmentGroupState]
     var id: AdjustmentGroupID { states[0].group }
@@ -171,8 +171,9 @@ struct EditorTabs: View {
 /// - The look group chooses its look first: built-in (the film stocks) or
 ///   imported (the LUT library), as segments above the row; the row lists
 ///   that kind's looks before its strength ("None" first, the library tile
-///   last). One look at a time: choosing a film removes the LUT and the other
-///   way round. Its other controls are Adjust's or have none (`DockGroup`).
+///   last), then grain and halation, whichever kind is shown. One look at a
+///   time: choosing a film removes the LUT and the other way round. Its other
+///   controls have none (`DockGroup`).
 /// - Rings: empty at the default, clockwise for positive and anticlockwise for
 ///   negative; amber for HDR. Double-tap resets, a long press opens the menu.
 /// - Tapping the readout types an exact value.
@@ -686,10 +687,13 @@ private struct BarLayout {
     }
 
     /// The look group with only the shown kind's controls: the film's
-    /// (`look.film…`) under built-in, the LUT's under imported.
+    /// (`look.film…`) under built-in, the LUT's under imported; grain and
+    /// halation under both.
     func showing(_ kind: LookKind) -> BarLayout {
         guard isLook else { return self }
-        let belongs = { (control: AdjustmentControl) in control.id.hasPrefix("look.film") == (kind == .builtIn) }
+        let belongs = { (control: AdjustmentControl) in
+            Adjustments.isEffect(control.id) || control.id.hasPrefix("look.film") == (kind == .builtIn)
+        }
         var layout = self
         layout.rings = rings.filter(belongs)
         layout.switches = switches.filter(belongs)

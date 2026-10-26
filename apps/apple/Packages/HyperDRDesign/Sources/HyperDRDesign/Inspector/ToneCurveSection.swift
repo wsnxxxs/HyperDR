@@ -191,7 +191,9 @@ public struct ToneCurveSection: View {
     private let showsTitle: Bool
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
 
-    @State private var isExpanded: Bool
+    /// Open or folded while the host keeps no record of it (`openSections`).
+    @State private var ownExpanded: Bool
+    @Environment(\.openSections) private var openSections
     @State private var mode: Mode
     @State private var channel = CurveChannel.luma
     /// The version the luminance curve was last on, for coming back from a colour.
@@ -215,11 +217,19 @@ public struct ToneCurveSection: View {
         self.onEditingChanged = onEditingChanged
         let anyChanged = !control.isDefault
             || (ParametricCurveIDs.isDeclared && ParametricCurveIDs.all.contains { !(panel.control($0, in: recipe.wrappedValue)?.isDefault ?? true) })
-        _isExpanded = State(initialValue: style == .touch || !showsTitle || anyChanged)
+        _ownExpanded = State(initialValue: style == .touch || !showsTitle || anyChanged)
         // Open on the parameters when they are what was edited.
         let parametric = ParametricCurveIDs.amounts.contains { !(panel.control($0, in: recipe.wrappedValue)?.isDefault ?? true) }
         _mode = State(initialValue: parametric && control.isDefault ? .parameters : .points)
     }
+
+    /// Open or folded: the host's record when it keeps one (the Mac
+    /// inspector's), otherwise this section's own.
+    private var expansion: Binding<Bool> {
+        SectionDisclosure.binding(.curves, style: style, showsTitle: showsTitle, open: openSections, own: $ownExpanded)
+    }
+
+    private var isExpanded: Bool { expansion.wrappedValue }
 
     // MARK: State of the curves
 
@@ -322,6 +332,8 @@ public struct ToneCurveSection: View {
         .onChange(of: effectiveMode) { _, now in if now == .parameters, picking?.isActive == true { picking?.toggle() } }
         // The eyedropper belongs to the section on screen: a page or tool left ends the pick.
         .onDisappear { if picking?.isActive == true { picking?.toggle() } }
+        // Folding the section hides the eyedropper's button: it ends the pick too.
+        .onChange(of: isExpanded) { _, open in if !open, picking?.isActive == true { picking?.toggle() } }
     }
 
     /// The mode, and where the page names the section, its tools beside it.
@@ -502,7 +514,7 @@ public struct ToneCurveSection: View {
         SubsectionHeader(title: AdjustmentText.label(control.declaration), style: style, showsTitle: showsTitle,
                       isChanged: changedCount > 0,
                       canReset: !currentIsDefault, summary: SectionSummary.changes(changedCount),
-                      isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                      isExpanded: showsTitle && style == .pointer ? expansion : nil,
                       resetLabel: Text("design.curve.reset", bundle: .module), reset: reset) {
             if let picking, isExpanded {
                 PickToolButton.curve(isActive: picking.isActive, size: style == .touch ? 44 : 22) {

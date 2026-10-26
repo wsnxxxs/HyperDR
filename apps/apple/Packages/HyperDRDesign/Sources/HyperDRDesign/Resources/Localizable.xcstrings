@@ -1,6 +1,40 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.adjust.collapseAll" : {
+      "comment" : "Inspector command above the adjustment groups: fold every group.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapse All"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部收起"
+          }
+        }
+      }
+    },
+    "design.adjust.expandAll" : {
+      "comment" : "Inspector command above the adjustment groups, when every group is folded: open them all.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand All"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部展开"
+          }
+        }
+      }
+    },
     "design.lutExposure.autoNote" : {"comment": "Note under a Log LUT's exposure while it is on Auto: how the automatic value is measured.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Metered from the photo's brightness without the LUT"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "按不套 LUT 时的亮度自动测光"}}}},
     "design.look.spaces" : {"comment": "Row naming a LUT's input and output colour spaces, shown as two menus: input → output.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Spaces"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "空间"}}}},
     "design.clipping.shadows" : {"comment": "Canvas legend while the clipping display shows: the blue marks are shadows crushed to black.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Crushed black"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "死黑"}}}},
@@ -5512,18 +5546,18 @@
       }
     },
     "group.color" : {
-      "comment" : "Adjustment group title: the colour controls, then grain and halation (named as the iPhone's Adjust tab).",
+      "comment" : "Adjustment group title: white balance, vibrance and saturation, the colour mixer and the grading.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Adjust"
+            "value" : "Color"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "调整"
+            "value" : "颜色"
           }
         }
       }
@@ -5636,13 +5670,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reset Color, Grain and Halation"
+            "value" : "Reset Color"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重置颜色、颗粒与光晕"
+            "value" : "重置颜色"
           }
         }
       }
@@ -8273,23 +8307,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重置%@"
-          }
-        }
-      }
-    },
-    "undo.resetGroup.color" : {
-      "comment" : "Undo action name: the Adjust group (colour, grain and halation) reset; light is not.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset Color, Grain and Halation"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置颜色、颗粒与光晕"
           }
         }
       }

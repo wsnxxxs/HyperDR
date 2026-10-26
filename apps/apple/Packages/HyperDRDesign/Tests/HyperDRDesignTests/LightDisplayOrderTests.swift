@@ -10,4 +10,5 @@ import Testing
                     "tone.clarity", "tone.dehaze"])
     #expect(Adjustments.parameters(in: .light).map(\.id).firstIndex(of: "tone.dehaze") == 1)
     #expect(AdjustmentPanel.startsCluster("tone.clarity"))
+    #expect(AdjustmentPanel.startsCluster("color.vibrance"), "vibrance and saturation after the white balance")
 }

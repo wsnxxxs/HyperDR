@@ -140,7 +140,9 @@ struct ColorMixerLayout<Slider: View>: View {
     /// `mark` is the dot before a band's name in the by-attribute list.
     @ViewBuilder let slider: (_ id: String, _ title: Text, _ tint: Color, _ mark: Color?, _ gradient: [Color]?) -> Slider
 
-    @State private var isExpanded: Bool
+    /// Open or folded while the host keeps no record of it (`openSections`).
+    @State private var ownExpanded: Bool
+    @Environment(\.openSections) private var openSections
     @State private var arrangement: Arrangement
     @State private var attribute = MixerAttribute.hue
     @State private var band = MixerBand.red
@@ -158,8 +160,16 @@ struct ColorMixerLayout<Slider: View>: View {
         self.resetAll = resetAll
         self.slider = slider
         _arrangement = State(initialValue: initialArrangement)
-        _isExpanded = State(initialValue: style == .touch || !showsTitle || Self.ids.contains(where: isChanged))
+        _ownExpanded = State(initialValue: style == .touch || !showsTitle || Self.ids.contains(where: isChanged))
     }
+
+    /// Open or folded: the host's record when it keeps one (the Mac
+    /// inspector's), otherwise this section's own.
+    private var expansion: Binding<Bool> {
+        SectionDisclosure.binding(.mixer, style: style, showsTitle: showsTitle, open: openSections, own: $ownExpanded)
+    }
+
+    private var isExpanded: Bool { expansion.wrappedValue }
 
     static var ids: [String] { MixerBand.allCases.flatMap { band in MixerAttribute.allCases.map(band.id) } }
 
@@ -207,12 +217,14 @@ struct ColorMixerLayout<Slider: View>: View {
         }
         // And to the section on screen: a page or tool left ends the pick.
         .onDisappear { if picking?.isActive == true { picking?.toggle() } }
+        // Folding the section hides the eyedropper's button: it ends the pick too.
+        .onChange(of: isExpanded) { _, open in if !open, picking?.isActive == true { picking?.toggle() } }
     }
 
     private var header: some View {
         SubsectionHeader(title: Text("design.mixer.title", bundle: .module), style: style, showsTitle: showsTitle,
                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
-                         isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                         isExpanded: showsTitle && style == .pointer ? expansion : nil,
                          resetLabel: Text("design.mixer.reset", bundle: .module), reset: resetAll) {
             if let picking, isExpanded || !showsTitle {
                 PickToolButton.mixer(isActive: picking.isActive, size: style == .touch ? 44 : 22) {

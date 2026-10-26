@@ -274,7 +274,9 @@ struct ColorGradingLayout<Slider: View>: View {
     @ViewBuilder let slider: (_ id: String, _ title: Text?, _ gradient: [Color]?) -> Slider
 
     @State private var zone = WheelZone.midtones
-    @State private var isExpanded: Bool
+    /// Open or folded while the host keeps no record of it (`openSections`).
+    @State private var ownExpanded: Bool
+    @Environment(\.openSections) private var openSections
     @Environment(\.colorScheme) private var scheme
     @Environment(\.sectionLayout) private var layout
 
@@ -293,8 +295,16 @@ struct ColorGradingLayout<Slider: View>: View {
         self.wheelEditing = wheelEditing
         self.resetAll = resetAll
         self.slider = slider
-        _isExpanded = State(initialValue: style == .touch || !showsTitle || Self.ids.contains(where: isChanged))
+        _ownExpanded = State(initialValue: style == .touch || !showsTitle || Self.ids.contains(where: isChanged))
     }
+
+    /// Open or folded: the host's record when it keeps one (the Mac
+    /// inspector's), otherwise this section's own.
+    private var expansion: Binding<Bool> {
+        SectionDisclosure.binding(.grading, style: style, showsTitle: showsTitle, open: openSections, own: $ownExpanded)
+    }
+
+    private var isExpanded: Bool { expansion.wrappedValue }
 
     static var ids: [String] {
         WheelZone.allCases.flatMap { [$0.hueID, $0.saturationID, $0.luminanceID] }
@@ -356,7 +366,7 @@ struct ColorGradingLayout<Slider: View>: View {
     private var header: some View {
         SubsectionHeader(title: Text("design.grade.title", bundle: .module), style: style, showsTitle: showsTitle,
                          isChanged: anyChanged, summary: SectionSummary.changes(Self.ids.filter(isChanged).count),
-                         isExpanded: showsTitle && style == .pointer ? $isExpanded : nil,
+                         isExpanded: showsTitle && style == .pointer ? expansion : nil,
                          resetLabel: Text("design.grade.reset", bundle: .module), reset: resetAll) { EmptyView() }
     }
 

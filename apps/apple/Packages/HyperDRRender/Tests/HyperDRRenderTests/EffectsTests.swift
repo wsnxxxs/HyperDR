@@ -105,7 +105,7 @@ import Testing
     }
 
     @Test func declarationsAreIndependentAndOldIDsAreIgnored() throws {
-        #expect(Array(Adjustments.parameters(in: .color).suffix(2).map(\.id)) == Adjustments.effectIDs)
+        #expect(Array(Adjustments.parameters(in: .look).suffix(2).map(\.id)) == Adjustments.effectIDs)
         #expect(ParameterGroup.displayOrder == [.hdr, .light, .color, .look, .detail, .local])
         for domain in InputDomain.allCases {
             var recipe = Recipe(inputDomain: domain)
@@ -113,12 +113,12 @@ import Testing
             for id in Adjustments.effectIDs {
                 let declaration = try #require(Adjustments.declaration(id))
                 #expect(Adjustments.isVisible(declaration, in: recipe))
-                #expect(declaration.group == .color && declaration.range == 0...200)
+                #expect(declaration.group == .look && declaration.range == 0...200)
                 recipe.setValue(.number(100), for: id)
             }
             let edit = try RenderAdjustments(recipe: recipe)
             #expect(edit.effects.grain == 1 && edit.effects.halation == 1)
-            #expect(try RenderAdjustments(recipe: recipe, options: RenderOptions(bypassedGroups: [.color])).effects.isIdentity)
+            #expect(try RenderAdjustments(recipe: recipe, options: RenderOptions(bypassedGroups: [.look])).effects.isIdentity)
             #expect(!recipe.needsLookBaseline)
             recipe.setValue(.number(200), for: "look.filmGrain")
             recipe.setValue(.number(200), for: "look.filmHalation")

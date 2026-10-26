@@ -58,9 +58,19 @@ import HyperDRRender
         return WaveformData(columns: columns, counts: counts)
     }
 
+    /// Which groups and sections are open: the defaults, never what an
+    /// earlier run of the host left in its preferences.
+    private lazy var disclosure = Self.freshDisclosure()
+
+    private static func freshDisclosure() -> InspectorDisclosure {
+        let suite = "InspectorSnapshotTests"
+        UserDefaults().removePersistentDomain(forName: suite)
+        return InspectorDisclosure(defaults: UserDefaults(suiteName: suite)!)
+    }
+
     private func render(_ model: EditorModel, scheme: ColorScheme, locale: String,
                         session: ViewerSessionState) throws -> NSBitmapImageRep {
-        let root = InspectorContent(model: model)
+        let root = InspectorContent(model: model, disclosure: disclosure)
             .frame(width: Layout.inspectorWidth)
             .background(Color.hdr.surfacePanel)
             .fixedSize(horizontal: false, vertical: true)
@@ -149,6 +159,25 @@ import HyperDRRender
         let pictures = try snapshots("ai-predicting", model: model) { $0.isScopeExpanded = false }
         XCTAssertFalse(pictures.isEmpty)
         await (model.services as? FakeEditorServices)?.fakeRendering?.releasePredictions()
+        model.closeDocument()
+    }
+
+    /// Every group and every section open on a RAW photo, so the whole
+    /// column can be read in one picture: the groups' and sections' headers
+    /// with their chevrons at the trailing edge, Collapse All and Reset All
+    /// above them, and grain and halation at the end of Style.
+    func testEveryGroupOpen() async throws {
+        let model = await open(domain: .rawEDR)
+        disclosure.groups = Set(AdjustmentGroupID.displayOrder)
+        disclosure.sections = Set(AdjustmentSections.Kind.allCases)
+        var recipe = model.editor.recipe
+        recipe.setValue(.number(0.3), for: "tone.exposure")
+        recipe.setValue(.number(20), for: "hsl.red.saturation")
+        recipe.setValue(.number(40), for: "effect.grain")
+        model.editor.setRecipe(recipe)
+        let pictures = try snapshots("every-group-open", model: model) { _ in }
+        XCTAssertFalse(pictures.isEmpty)
+        disclosure = Self.freshDisclosure()
         model.closeDocument()
     }
 

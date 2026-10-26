@@ -56,10 +56,6 @@ public enum AdjustmentText {
     /// The undo action name of a reset ("Reset Light", "Reset All").
     public static func undoName(_ reset: AdjustmentReset, locale: Locale = .current) -> String {
         switch reset {
-        case .group(.color):
-            // Titled Adjust, the colour group holds colour, grain and halation,
-            // not light: "Reset Adjust" would read as every adjustment.
-            return DesignStrings.string("undo.resetGroup.color", bundle: .module, locale: locale)
         case .group(let group):
             return String(format: DesignStrings.string("undo.resetGroup %@", bundle: .module, locale: locale),
                           DesignStrings.string(group.labelKey, locale: locale))

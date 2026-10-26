@@ -13,12 +13,14 @@ public enum AdjustmentControlStyle: Sendable {
 /// the Mac's right-hand inspector and the iPad's sidebar. Everything in it
 /// comes from the declarations through `AdjustmentPanel`.
 ///
-/// - Groups collapse; HDR and Light start open, the others closed, and a
-///   collapsed group sums up what was changed in it.
-/// - HDR's header carries "Affects HDR only" and the HDR switch; turning it
-///   off hides the rest of the group.
-/// - A group with changes shows ↺, which resets the group; Reset All sits at
-///   the top.
+/// - Groups fold; HDR and Light start open, the others folded, and a folded
+///   group sums up what was changed in it. A host that passes `expanded`
+///   keeps which are open (the Mac keeps them across photos, the crop pane
+///   and launches); without it the inspector keeps its own.
+/// - HDR's header carries the HDR switch, and its first line says it affects
+///   HDR only; turning it off hides the rest of the group.
+/// - A group with changes shows ↺, which resets the group. Above the groups,
+///   Collapse All (Expand All when every group is folded) and Reset All.
 ///
 /// The recipe is the only state; `onEditingChanged` brackets drags for the
 /// host's undo and preview size, with the declaration being edited. A host
@@ -34,7 +36,9 @@ public struct AdjustmentInspector: View {
     private let onLUTLibrary: (() -> Void)?
     private let only: Set<AdjustmentGroupID>?
 
-    @State private var expanded: Set<AdjustmentGroupID>
+    /// Which groups are open while the host keeps no record of it.
+    @State private var ownExpanded: Set<AdjustmentGroupID>
+    private let hostExpanded: Binding<Set<AdjustmentGroupID>>?
     /// The control a note asked to bring into view, until the host has scrolled
     /// to it: the look section switches to the kind that holds it.
     @State private var revealing: String?
@@ -45,7 +49,7 @@ public struct AdjustmentInspector: View {
     /// tab's groups at a time, as the iPhone's dock does, and keeps Reset All
     /// in the toolbar's More menu instead of above them.
     public init(recipe: Binding<Recipe>, panel: AdjustmentPanel, style: AdjustmentControlStyle = .pointer,
-                only: Set<AdjustmentGroupID>? = nil,
+                only: Set<AdjustmentGroupID>? = nil, expanded: Binding<Set<AdjustmentGroupID>>? = nil,
                 onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in },
                 onReset: ((AdjustmentReset) -> Void)? = nil, onLUTLibrary: (() -> Void)? = nil) {
         _recipe = recipe
@@ -55,8 +59,14 @@ public struct AdjustmentInspector: View {
         self.onEditingChanged = onEditingChanged
         self.onReset = onReset
         self.onLUTLibrary = onLUTLibrary
-        _expanded = State(initialValue: only ?? [.hdr, .light])
+        _ownExpanded = State(initialValue: only ?? Self.initiallyExpanded)
+        hostExpanded = only == nil ? expanded : nil
     }
+
+    /// The groups open the first time: HDR and Light.
+    public static let initiallyExpanded: Set<AdjustmentGroupID> = [.hdr, .light]
+
+    private var expanded: Binding<Set<AdjustmentGroupID>> { hostExpanded ?? $ownExpanded }
 
     private func reset(_ reset: AdjustmentReset) {
         if let onReset { return onReset(reset) }
@@ -69,7 +79,7 @@ public struct AdjustmentInspector: View {
     public var body: some View {
         let groups = panel.groups(for: recipe).filter { only?.contains($0.group) ?? true }
         VStack(alignment: .leading, spacing: 0) {
-            if only == nil { resetAll(groups) }
+            if only == nil { commands(groups) }
             ForEach(groups) { state in
                 groupView(state)
             }
@@ -80,7 +90,7 @@ public struct AdjustmentInspector: View {
     /// Opens the group the control sits in, then lets the host scroll to it
     /// once the group has laid out.
     private func revealControl(_ id: String, host: @escaping (String) -> Void) {
-        if let group = Adjustments.declaration(id)?.group { expanded.insert(group) }
+        if let group = Adjustments.declaration(id)?.group { expanded.wrappedValue.insert(group) }
         revealing = id
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(150))
@@ -89,19 +99,38 @@ public struct AdjustmentInspector: View {
         }
     }
 
-    private func resetAll(_ groups: [AdjustmentGroupState]) -> some View {
-        HStack {
-            Spacer()
-            Button { reset(.all) } label: {
-                Text("design.adjust.resetAll", bundle: .module)
+    /// Collapse All (Expand All once every group is folded) and Reset All, on
+    /// one line above the groups.
+    private func commands(_ groups: [AdjustmentGroupState]) -> some View {
+        let anyOpen = groups.contains { expanded.wrappedValue.contains($0.group) }
+        let modified = groups.contains(where: \.isModified)
+        return HStack(spacing: Space.s3) {
+            Button {
+                withHDRAnimation {
+                    if anyOpen { expanded.wrappedValue.subtract(groups.map(\.group)) }
+                    else { expanded.wrappedValue.formUnion(groups.map(\.group)) }
+                }
+            } label: {
+                Label {
+                    Text(anyOpen ? "design.adjust.collapseAll" : "design.adjust.expandAll", bundle: .module)
+                } icon: {
+                    Image(systemName: anyOpen ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                }
             }
-            .buttonStyle(.plain)
-            .font(.system(size: TypeScale.Size.caption, weight: .medium))
-            .foregroundStyle(groups.contains(where: \.isModified) ? Color.hdr.accent : Color.hdr.inkDisabled)
-            .disabled(!groups.contains(where: \.isModified))
+            .buttonStyle(InspectorCommandStyle())
+            Spacer(minLength: 0)
+            Button { reset(.all) } label: {
+                Label {
+                    Text("design.adjust.resetAll", bundle: .module)
+                } icon: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+            }
+            .buttonStyle(InspectorCommandStyle(prominent: modified))
+            .disabled(!modified)
         }
         .padding(.horizontal, 20)
-        .frame(minHeight: style == .touch ? 44 : 32)
+        .frame(minHeight: style == .touch ? 44 : 30)
     }
 
     private func controls(_ state: AdjustmentGroupState) -> some View {
@@ -125,8 +154,9 @@ public struct AdjustmentInspector: View {
     }
 
     private func groupView(_ state: AdjustmentGroupState) -> some View {
-        let isExpanded = Binding(get: { expanded.contains(state.group) },
-                                 set: { if $0 { expanded.insert(state.group) } else { expanded.remove(state.group) } })
+        let expanded = self.expanded
+        let isExpanded = Binding(get: { expanded.wrappedValue.contains(state.group) },
+                                 set: { if $0 { expanded.wrappedValue.insert(state.group) } else { expanded.wrappedValue.remove(state.group) } })
         return ParameterGroup(AdjustmentText.group(state.group), systemImage: AdjustmentSymbols.group(state.group),
                               summary: isExpanded.wrappedValue ? nil : Text(verbatim: AdjustmentText.summary(state, locale: locale)),
                               isExpanded: isExpanded, collapsible: only == nil) {
@@ -146,6 +176,7 @@ public struct AdjustmentInspector: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.hdr.inkMuted)
+                    .help(Text("group.reset", bundle: .module))
                     .accessibilityLabel(Text("group.reset", bundle: .module))
                 }
                 if let toggle = state.headerToggle {
@@ -158,7 +189,44 @@ public struct AdjustmentInspector: View {
                     .fixedSize()
                 }
             }
-            .padding(.trailing, state.isModified || state.headerToggle != nil ? 20 : 0)
+        }
+    }
+}
+
+/// A command on the line above the groups: small, quiet until hovered; the
+/// prominent one (Reset All with something to reset) in the accent.
+private struct InspectorCommandStyle: ButtonStyle {
+    var prominent = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        InspectorCommandBody(configuration: configuration, prominent: prominent)
+    }
+}
+
+private struct InspectorCommandBody: View {
+    let configuration: ButtonStyleConfiguration
+    let prominent: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovered = false
+
+    var body: some View {
+        configuration.label
+            .labelStyle(InspectorCommandLabelStyle())
+            .font(.system(size: TypeScale.Size.caption, weight: .medium))
+            .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled
+                             : prominent ? Color.hdr.accent : hovered ? Color.hdr.inkStrong : Color.hdr.inkMuted)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .padding(.vertical, 4)
+            .contentShape(.rect)
+            .onHover { hovered = isEnabled && $0 }
+    }
+}
+
+private struct InspectorCommandLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) {
+            configuration.icon.font(.system(size: 10, weight: .semibold))
+            configuration.title
         }
     }
 }
@@ -448,8 +516,9 @@ extension AdjustmentText {
 /// The look group in the inspector: built-in films or imported LUTs, one at
 /// a time, each kind with its own row of looks shown on the photo and the
 /// controls that belong to it (the film's strength, exposure and
-/// antihalation layer; the LUT's strength and spaces). Grain and halation
-/// are Adjust's (the colour group's), for every photo.
+/// antihalation layer; the LUT's strength and spaces). Then, after a
+/// hairline and whichever kind is shown, grain and halation, which work on
+/// every photo: with a film, with a LUT or with no look at all.
 struct LookSection: View {
     @Binding var recipe: Recipe
     let state: AdjustmentGroupState
@@ -480,8 +549,11 @@ struct LookSection: View {
         let film = state.controls.first { $0.id == Recipe.filmID }
         let lut = state.controls.first { $0.id == Recipe.lookID }
         let filmControls = state.controls.filter { $0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.filmID }
+        let effects = state.controls.filter { Adjustments.isEffect($0.id) }
         // A Log LUT's exposure stands right under the LUT, before its strength and spaces.
-        let lutRest = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+        let lutRest = state.controls.filter {
+            !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID && !Adjustments.isEffect($0.id)
+        }
         let lutControls = lutRest.filter { $0.id == lutExposureID } + lutRest.filter { $0.id != lutExposureID }
         VStack(alignment: .leading, spacing: style == .touch ? Space.s2 : Space.s4) {
             ParameterSegmented(Text("look.kind", bundle: .module),
@@ -503,6 +575,10 @@ struct LookSection: View {
                     LookSpacesRow(recipe: $recipe, input: spaces.input, output: spaces.output, panel: panel, style: style)
                         .id(LookSpacesRow.inputID)
                 }
+            }
+            if !effects.isEmpty {
+                Rectangle().fill(Color.hdr.line).frame(height: 1)
+                rows(effects)
             }
         }
         .onChange(of: revealing) { chosen = Self.kind(revealing: revealing, current: kind) }

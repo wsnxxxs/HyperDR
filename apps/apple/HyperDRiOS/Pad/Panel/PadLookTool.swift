@@ -10,10 +10,11 @@ import SwiftUI
 ///
 /// - Films: choosing one puts its exposure back on the meter and its
 ///   antihalation layer back on, in the same undo step, as on the iPhone and
-///   the Mac. Its strength, exposure and antihalation layer follow the grid;
-///   grain and halation are the Adjust tool's, for every photo.
+///   the Mac. Its strength, exposure and antihalation layer follow the grid.
 /// - LUTs: the library's LUTs, then a tile that opens the library; the LUT's
 ///   strength and its input and output spaces follow the grid.
+/// - Grain and halation come last under either kind: they work on every
+///   photo, with a film, a LUT or no look at all.
 struct PadLookTool: View {
     @Binding var recipe: Recipe
     let panel: AdjustmentPanel
@@ -44,7 +45,10 @@ struct PadLookTool: View {
             let lut = state.controls.first { $0.id == Recipe.lookID }
             let filmControls = state.controls.filter { $0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.filmID }
             // A Log LUT's exposure stands right under the LUT, before its strength and spaces.
-            let lutRest = state.controls.filter { !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID }
+            let effects = state.controls.filter { Adjustments.isEffect($0.id) }
+            let lutRest = state.controls.filter {
+                !$0.id.hasPrefix(Recipe.filmID) && $0.id != Recipe.lookID && !Adjustments.isEffect($0.id)
+            }
             let lutControls = lutRest.filter { $0.id == FilmExposureNote.lutRowID } + lutRest.filter { $0.id != FilmExposureNote.lutRowID }
             VStack(alignment: .leading, spacing: 12) {
                 PadSegments(options: LookKind.allCases.map { PadSegments.Option(value: $0, label: Text($0.title)) },
@@ -75,6 +79,13 @@ struct PadLookTool: View {
                         panel.set(id, option: option, in: &recipe)
                     }
                     .id(LookSpacesRow.inputID)
+                }
+                if !effects.isEmpty {
+                    PadRows(columns: columns) {
+                        ForEach(effects) { control in
+                            row(control).id(control.id)
+                        }
+                    }
                 }
             }
             .onChange(of: revealing) { chosenKind = Self.kind(revealing: revealing, current: kind) }

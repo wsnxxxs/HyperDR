@@ -2,9 +2,11 @@ import SwiftUI
 import HyperDRDesign
 import HyperDRRecipe
 
-/// The trailing inspector: the scopes on top, then a decode warning when
-/// there is one, the AI status and the adjustment groups. Without a
-/// photograph it shows the three steps instead.
+/// The trailing inspector: the scopes on top, then the Adjust | Crop switch,
+/// a decode warning when there is one, the AI status and the adjustment
+/// groups (HDR, Light, Color, Style, Detail). Without a photograph it shows
+/// the three steps instead. Which groups and sections are open is
+/// `InspectorDisclosure`'s, so it survives the crop pane and other photos.
 ///
 /// The controls are generated from the recipe's declarations
 /// (`AdjustmentInspector`) and write the editor's recipe; the editor makes
@@ -38,6 +40,7 @@ struct InspectorView: View {
 struct InspectorContent: View {
     let model: EditorModel
     var window = EditorWindowState()
+    var disclosure = InspectorDisclosure.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,7 +57,7 @@ struct InspectorContent: View {
                                 .disabled(model.isEditingLocked)
                         } else {
                             AIStatusLine(editor: model.editor)
-                            Adjustments(model: model, window: window)
+                            Adjustments(model: model, window: window, disclosure: disclosure)
                                 .disabled(model.isEditingLocked)
                         }
                     }
@@ -161,6 +164,7 @@ private struct Welcome: View {
 private struct Adjustments: View {
     let model: EditorModel
     let window: EditorWindowState
+    let disclosure: InspectorDisclosure
 
     var body: some View {
         let editor = model.editor
@@ -174,6 +178,7 @@ private struct Adjustments: View {
                 luts: model.lutChoices, lookSpaces: model.lutSpaces,
                 lutPreviews: model.lookPreviews.images)),
             style: .pointer,
+            expanded: disclosure.groupsBinding,
             onEditingChanged: { editor.editingChanged($0, $1) },
             onReset: { reset in
                 switch reset {
@@ -182,6 +187,7 @@ private struct Adjustments: View {
                 }
             },
             onLUTLibrary: { window.showsLUTLibrary = true })
+        .environment(\.openSections, disclosure.sectionsBinding)
         .environment(\.lookPickerShown, model.lookPreviews.shown)
         .environment(\.whiteBalancePicking, model.whiteBalance.picking)
         .environment(\.curvePicking, model.curvePick.picking)

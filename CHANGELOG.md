@@ -3,6 +3,16 @@
 All notable user-visible changes to HyperDR are recorded here. The project uses
 semantic versioning; dates use ISO 8601.
 
+## 0.6.7 - 2026-10-27 (Apple pre-release)
+
+- RAW preview refinement keeps native detail when suspended renders complete.
+- Opening the Mac app loads services and history without reopening the last photo.
+- SDR exports skip unused RAW highlight baseline development and AI inference.
+- LUT thumbnails prepare and reuse the required RAW rendition, explain unavailable
+  Log inputs, and retry failed previews when the picker reopens.
+- Film exposure and captured HDR highlights are preserved through film and LUT
+  looks; Kodak still-negative stocks have a restrained warm-green balance.
+
 ## 0.6.6 - 2026-10-26 (Apple pre-release)
 
 - Mac inspector: Collapse All and Reset All at the top, every chevron at the

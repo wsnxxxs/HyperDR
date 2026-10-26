@@ -254,8 +254,11 @@ LUT's own: set in the library they change the look in use on that LUT, and chose
 the look they are recorded in the library (`Shared/Editor/LibraryLUTs.swift`). Import
 names spaces a file name declares (`LUTSpace.guess`); one file imported with a photo
 open becomes its look, and removing the LUT in use drops the look (undoable). The look
-pickers show each LUT on the photo (`LookPreviews`: small `keepsSource` renders that
-never develop the photo again, only while a picker is on screen). Log spaces
+pickers show each LUT on the photo (`LookPreviews`: small `keepsSource` renders,
+only while a picker is on screen). A missing RAW rendition is prepared before
+selection and reused through Render's bounded display/scene preview cache,
+without replacing the canvas source. Incompatible Log LUTs stay disabled with
+a RAW-original explanation; failed thumbnail batches retry when reopened. Log spaces
 (S-Log3 with S-Gamut3.Cine or S-Gamut3, V-Log, F-Log2, LogC3 EI800, LogC4, Canon
 Log 3) are RAW-only inputs; they enter the LUT without the P3 fit, and an active
 Log-input look develops the RAW scene-linear (`SourceOptions.sceneLinear`: boost 0,

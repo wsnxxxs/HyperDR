@@ -20,6 +20,19 @@ import Testing
         let data = try #require(bitmap.representation(using: .png, properties: [:]))
         try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("look-mac-\(name).png"))
     }
+    let unavailable = AdjustmentPanel(context: AdjustmentContext(luts: [lut], lookSpaces: [
+        lut.contentHash: AdjustmentLookSpaces(input: "slog3-sgamut3cine", output: "rec709")
+    ]))
+    let control = try #require(unavailable.control(Recipe.lookID, in: Recipe(inputDomain: .sdr)))
+    for language in ["en", "zh-Hans"] {
+        let picker = LookPicker(control: control, panel: unavailable, style: .pointer,
+            selection: .constant(""), onLibrary: {})
+            .padding(12).environment(\.locale, Locale(identifier: language))
+            .background(Color.hdr.surfacePanel)
+        let bitmap = try snapshot(picker, width: 300)
+        let data = try #require(bitmap.representation(using: .png, properties: [:]))
+        try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("look-unavailable-\(language).png"))
+    }
 }
 
 private struct LookHost: View {

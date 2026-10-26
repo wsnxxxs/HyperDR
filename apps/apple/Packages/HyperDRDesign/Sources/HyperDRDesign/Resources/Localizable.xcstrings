@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "design.lut.requiresRAW": {
+      "comment": "Explanation under imported looks when camera Log LUTs cannot be used with the current non-RAW photo.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimmed Log LUTs require a RAW original. For JPEG or HEIC, use a LUT made for the photo’s colour space."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "灰色的 Log LUT 需要 RAW 原片。JPEG、HEIC 照片请使用与照片色彩空间匹配的 LUT。"
+          }
+        }
+      }
+    },
     "design.adjust.collapseAll" : {
       "comment" : "Inspector command above the adjustment groups: fold every group.",
       "localizations" : {

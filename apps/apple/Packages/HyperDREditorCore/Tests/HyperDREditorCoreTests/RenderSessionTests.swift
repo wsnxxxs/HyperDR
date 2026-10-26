@@ -310,8 +310,8 @@ import UniformTypeIdentifiers
         #expect(try await render(log).modelGainPending == false)
     }
 
-    /// A LUT preview renders small from the open development and never loads
-    /// or develops the photo again; a Log look that would is refused.
+    /// Both display and Log looks preview before selection, without replacing
+    /// the canvas source. Their pixels match the subsequently selected look.
     @Test func aLookPreviewKeepsTheOpenSource() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
@@ -320,14 +320,18 @@ import UniformTypeIdentifiers
         let session = try RenderSession()
         let size = PixelSize(width: 64, height: 64)
         let source = try await session.open(url, previewSize: size)
+        _ = try await session.refinePreview(sourceID: source.id)
         let recipe = Recipe(inputDomain: source.domain)
         _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
         let reloads = Counter()
         await session.setBeforeReload { await reloads.add() }
         let lut = try ColorLUT(cube: "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
-        await session.installLUT(lut)
+        // Optional local reproduction with a user's private LUT; never bundled.
+        let supplied = ProcessInfo.processInfo.environment["HYPERDR_TEST_LUT"]
+        let testedLUT = try supplied.map { try ColorLUT(contentsOf: URL(fileURLWithPath: $0)) } ?? lut
+        await session.installLUT(testedLUT)
         var look = recipe
-        look.look = LUTReference(contentHash: lut.contentHash, name: "Identity")
+        look.look = LUTReference(contentHash: testedLUT.contentHash, name: "Test LUT")
         var preview = EditorRenderRequest(sourceID: source.id, recipe: look, size: PixelSize(width: 24, height: 16))
         preview.keepsSource = true
         let frame = try await session.render(preview)
@@ -336,18 +340,28 @@ import UniformTypeIdentifiers
         var log = look
         log.setValue(.string("slog3-sgamut3cine"), for: "look.input")
         preview.recipe = log
-        await #expect(throws: EditorRenderingError.needsDevelopment) { try await session.render(preview) }
-        #expect(await reloads.count == 0)
-        // Once the canvas develops Log, the same small request succeeds
-        // without reopening the source. Switching back reverses availability.
-        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: log, size: size))
-        _ = try await session.render(preview)
+        let beforeSelection = try await session.render(preview)
+        #expect(beforeSelection.planes.base.width == 24)
         #expect(await reloads.count == 1)
+        // The thumbnail did not replace the canvas's display development.
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
+        #expect(await reloads.count == 1)
+        // Selecting Log reuses the prepared rendition and produces the same pixels.
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: log, size: size))
+        let afterSelection = try await session.render(preview)
+        let beforePixels = RenderEngine.readPixels(beforeSelection.planes)
+        let afterPixels = RenderEngine.readPixels(afterSelection.planes)
+        let error = zip(beforePixels.baseRGBA, afterPixels.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        #expect(error < 1e-5)
+        #expect(await reloads.count == 2)
         preview.recipe = look
-        await #expect(throws: EditorRenderingError.needsDevelopment) { try await session.render(preview) }
+        _ = try await session.render(preview)
+        // Display thumbnails likewise leave the selected scene rendition intact.
+        _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: log, size: size))
+        #expect(await reloads.count == 3)
         _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
         _ = try await session.render(preview)
-        #expect(await reloads.count == 2)
+        #expect(await reloads.count == 4)
     }
 
     private actor Counter {

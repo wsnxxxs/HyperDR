@@ -985,9 +985,9 @@ import Observation
     }
 
     /// A small SDR render of `recipe` for a LUT preview, its long edge `side`
-    /// pixels: from the source the preview has open (`keepsSource`), with no
-    /// group bypassed. A recipe that needs another development throws
-    /// `needsDevelopment` rather than developing the photo again.
+    /// pixels, with no group bypassed. `keepsSource` preserves the canvas's
+    /// development; a different RAW rendition is prepared once and reused
+    /// across the picker without changing the edit or the canvas source.
     func lookPreview(_ recipe: Recipe, side: Int) async throws -> CGImage {
         guard let source else { throw EditorRenderingError.noSource }
         let native = (isEditingCrop ? Geometry.identity : recipe.geometry).outputSize(of: source.pixelSize)

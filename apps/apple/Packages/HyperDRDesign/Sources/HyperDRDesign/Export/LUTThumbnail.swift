@@ -52,3 +52,19 @@ extension EnvironmentValues {
     /// disappears, so the host renders LUT previews only while one is shown.
     @Entry public var lookPickerShown: @MainActor (Bool) -> Void = { _ in }
 }
+
+/// Explain unavailable camera Log LUTs beside the picker, before a selection.
+public struct LUTCompatibilityNote: View {
+    public init() {}
+
+    public var body: some View {
+        Label {
+            Text("design.lut.requiresRAW", bundle: .module)
+        } icon: {
+            Image(systemName: "info.circle")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}

@@ -244,6 +244,11 @@ import Observation
     private var luts: [String: ColorLUT] = [:]
     @ObservationIgnored private var viewport: CanvasViewport?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
+    private struct DetailRequest {
+        let original: Bool
+        let request: EditorRenderRequest
+    }
+    @ObservationIgnored private var detailRequests: [DetailRequest] = []
     @ObservationIgnored private var detailGeneration = 0
     /// Exports developing the photo with the memory the editor gave up
     /// (`yieldToExport`); renders wait until the last `resumeAfterExport`.
@@ -633,7 +638,7 @@ import Observation
         if isEditing {
             drag = (id, recipe)
             editingParameter = id
-            detailTask?.cancel()
+            cancelDetails()
         }
     }
 
@@ -786,7 +791,7 @@ import Observation
                 originalFailure = nil
             }
         }
-        detailTask?.cancel()
+        cancelDetails()
         if !isDragging { scheduleOriginalIfNeeded(size: size) }
         guard pacing == nil else { return }
         pacing = Task { [weak self, frameClock] in
@@ -1180,9 +1185,7 @@ import Observation
         exportYields += 1
         originalFlight?.task.cancel()
         originalFlight = nil
-        detailTask?.cancel()
-        detailTask = nil
-        detailGeneration += 1
+        cancelDetails()
         detailFrame = nil
         originalDetailFrame = nil
         modelTask?.cancel()
@@ -1210,23 +1213,24 @@ import Observation
     // MARK: - Canvas layers
 
     /// What the canvas shows, from the host on every pan, zoom, resize and
-    /// view change; nil when no photo is drawn. A detail no longer needed, or
-    /// one that no longer covers the visible part, is dropped at once; a new
-    /// one is asked for once the canvas is still.
+    /// view change; nil when no photo is drawn. Keep both renditions warm for
+    /// comparison, and retain overlapping sharp pixels while a pan fills in
+    /// the newly exposed part. The compositor clips each layer to its region.
     func setViewport(_ viewport: CanvasViewport?) {
         guard viewport != self.viewport else { return }
         self.viewport = viewport
-        if let detail = detailFrame, !keeps(detail, of: frame, showing: viewport?.showsEdited) { detailFrame = nil }
-        if let detail = originalDetailFrame, !keeps(detail, of: originalFrame, showing: viewport?.showsOriginal) {
+        if let detail = detailFrame, !keeps(detail, of: frame) { detailFrame = nil }
+        if let detail = originalDetailFrame, !keeps(detail, of: originalFrame) {
             originalDetailFrame = nil
         }
         scheduleDetails()
     }
 
-    private func keeps(_ detail: EditorFrame, of frame: EditorFrame?, showing: Bool?) -> Bool {
-        guard let viewport, showing == true, let frame, lacksPixels(frame, viewport),
+    private func keeps(_ detail: EditorFrame, of frame: EditorFrame?) -> Bool {
+        guard let viewport, let frame, lacksPixels(frame, viewport),
+              detail.request.rendersSame(as: frame.request),
               let region = detail.request.region else { return false }
-        return Self.covers(region, viewport.visible)
+        return region.intersects(viewport.visible)
     }
 
     /// Within half a pixel: the visible rect is fractional, regions are whole.
@@ -1245,19 +1249,30 @@ import Observation
     /// Asks for the details the viewport needs, after `detailIdle`, once the
     /// shown frames are final (no drag, nothing pending or rendering).
     private func scheduleDetails() {
-        detailTask?.cancel()
-        detailTask = nil
         // A detail develops the full-size source: never beside another
         // development (the original's comes back from its flight to here).
         guard !isYieldingToExport, !isRefiningPreview, frame?.isDraftPreview != true,
               let source, let viewport, !isDragging, pending == nil, pacing == nil,
-              inFlight == nil, originalFlight == nil, !viewport.visible.isEmpty else { return }
+              inFlight == nil, originalFlight == nil, !viewport.visible.isEmpty else {
+            cancelDetails()
+            return
+        }
         // No detail while the crop is edited: the canvas draws the photo turned and tilted.
-        guard !isEditingCrop else { return }
+        guard !isEditingCrop else { cancelDetails(); return }
         let photo = renderedGeometry.outputSize(of: source.pixelSize)
         let region = Self.detailRegion(visible: viewport.visible, source: photo)
-        func wanted(_ frame: EditorFrame?, _ detail: EditorFrame?, shown: Bool) -> EditorRenderRequest? {
-            guard shown, let frame, lacksPixels(frame, viewport) else { return nil }
+        // Identical renditions share the finished textures, including before
+        // the user has made an edit. No second decode or GPU pass is needed.
+        if originalDetailFrame == nil, let detail = detailFrame,
+           let originalFrame, detail.request.rendersSame(as: originalFrame.request) {
+            originalDetailFrame = detail
+        }
+        if detailFrame == nil, let detail = originalDetailFrame,
+           let frame, detail.request.rendersSame(as: frame.request) {
+            detailFrame = detail
+        }
+        func wanted(_ frame: EditorFrame?, _ detail: EditorFrame?) -> EditorRenderRequest? {
+            guard let frame, lacksPixels(frame, viewport) else { return nil }
             if let detail, detail.request.rendersSame(as: frame.request),
                let covered = detail.request.region, Self.covers(covered, viewport.visible) { return nil }
             var request = frame.request
@@ -1266,28 +1281,62 @@ import Observation
             request.isInteractive = false
             return request
         }
-        let original = wanted(originalFrame, originalDetailFrame, shown: viewport.showsOriginal)
-        let edited = wanted(frame, detailFrame, shown: viewport.showsEdited)
-        guard original != nil || edited != nil else { return }
-        detailGeneration += 1
+        let original = wanted(originalFrame, originalDetailFrame)
+        let edited = wanted(frame, detailFrame)
+        // Finish the visible rendition first, then prepare the comparison.
+        let order = viewport.showsEdited ? [(false, edited), (true, original)] : [(true, original), (false, edited)]
+        let requests = order.compactMap { isOriginal, request in
+            request.map { DetailRequest(original: isOriginal, request: $0) }
+        }
+        guard !requests.isEmpty else { cancelDetails(); return }
+        // A small pan, zoom or comparison switch must not restart a native
+        // development that already covers the new viewport.
+        if let detailTask, !detailTask.isCancelled,
+           requests.allSatisfy({ wanted in detailRequests.contains { running in
+               running.original == wanted.original && running.request.rendersSame(as: wanted.request)
+                   && running.request.size == wanted.request.size
+                   && running.request.region.map { Self.covers($0, viewport.visible) } == true
+           } }) { return }
+        cancelDetails()
+        detailRequests = requests
         let generation = detailGeneration
         let renderer = self.renderer, idle = detailIdle
         detailTask = Task { [weak self] in
+            defer {
+                if let self, self.detailGeneration == generation {
+                    self.detailTask = nil
+                    self.detailRequests = []
+                }
+            }
             try? await Task.sleep(for: idle)
-            for (isOriginal, request) in [(true, original), (false, edited)] {
+            for item in requests {
                 guard !Task.isCancelled else { return }
-                guard let request else { continue }
+                let request = item.request
                 let rendered: EditorFrame
-                do { rendered = try await renderer.render(request) } catch {
+                // The preceding rendition may have produced these exact pixels.
+                let shared = item.original ? self?.detailFrame : self?.originalDetailFrame
+                do {
+                    if let shared, shared.request.rendersSame(as: request), shared.request.region == request.region {
+                        rendered = shared
+                    } else {
+                        rendered = try await renderer.render(request)
+                    }
+                } catch {
                     if !Task.isCancelled { self?.noteFailure(error) }
                     return
                 }
                 guard let self, self.detailGeneration == generation, !Task.isCancelled else { return }
-                if isOriginal { self.originalDetailFrame = rendered } else { self.detailFrame = rendered }
+                if item.original { self.originalDetailFrame = rendered } else { self.detailFrame = rendered }
+                self.detailRequests.removeAll { $0.original == item.original }
             }
-            guard let self, self.detailGeneration == generation else { return }
-            self.detailTask = nil
         }
+    }
+
+    private func cancelDetails() {
+        detailTask?.cancel()
+        detailTask = nil
+        detailRequests = []
+        detailGeneration += 1
     }
 
     nonisolated static let detailExpansion = 0.25
@@ -1314,8 +1363,7 @@ import Observation
     }
 
     private func clearLayers() {
-        detailTask?.cancel()
-        detailTask = nil
+        cancelDetails()
         detailFrame = nil
         originalDetailFrame = nil
     }

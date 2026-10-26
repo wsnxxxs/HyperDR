@@ -283,10 +283,11 @@ extension RenderEngine {
         guard let selection = try await Self.decoderSelection(url) else { return RAWDecoderSelection() }
         guard let filter = CIRAWFilter(imageURL: selection.url) else { throw RenderError.cannotDecodeSource }
         let version = String(generation)
-        guard let supported = filter.supportedDecoderVersions.first(where: {
-            $0.rawValue == version || $0.rawValue == version + ".dng"
-        }) else { throw RenderError.unsupportedRAWDecoder(version) }
-        return RAWDecoderSelection(version: supported.rawValue, converterID: selection.converterID)
+        guard let supported = Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
+            generation: generation, prefersDNG: selection.converterID != nil) else {
+            throw RenderError.unsupportedRAWDecoder(version)
+        }
+        return RAWDecoderSelection(version: supported, converterID: selection.converterID)
     }
 
     /// New photos prefer generation 9, then 8 (including their DNG variants).
@@ -309,21 +310,31 @@ extension RenderEngine {
                                                              converterID: converterID),
                   let filter = CIRAWFilter(imageURL: converted) else { return nil }
             return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
-                                         systemDefault: filter.decoderVersion.rawValue, allowing9: false)
+                                         systemDefault: filter.decoderVersion.rawValue, allowing9: false, prefersDNG: true)
         }
         // Raster inputs have no RAW decoder, even with a converter registered.
         guard Self.isRAWSource(url, options: SourceOptions(kind: .automatic)),
               let selection = try? await Self.decoderSelection(url),
               let filter = Self.usableSelectionFilter(selection.url) ?? CIRAWFilter(imageURL: selection.url) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
-                                     systemDefault: filter.decoderVersion.rawValue, allowing9: false)
+                                     systemDefault: filter.decoderVersion.rawValue, allowing9: false,
+                                     prefersDNG: selection.converterID != nil)
+    }
+
+    /// System enumeration order differs across OS releases. A camera-specific
+    /// decoder takes precedence for originals (including native DNGs such as
+    /// Leica Q3); our converted DNGs deliberately use the generic matrix path.
+    nonisolated static func selectRAWDecoder(supported: [String], generation: Int,
+                                             prefersDNG: Bool = false) -> String? {
+        let camera = String(generation), dng = camera + ".dng"
+        return (prefersDNG ? [dng, camera] : [camera, dng]).first { supported.contains($0) }
     }
 
     nonisolated static func selectRAWDecoder(supported: [String], systemDefault: String,
-                                             allowing9: Bool = true) -> String? {
+                                             allowing9: Bool = true, prefersDNG: Bool = false) -> String? {
         let versions = supported.filter { !$0.isEmpty && $0 != CIRAWDecoderVersion.none.rawValue }
-        for generation in allowing9 ? ["9", "8"] : ["8"] {
-            if let version = versions.first(where: { $0.split(separator: ".").first == Substring(generation) }) {
+        for generation in allowing9 ? [9, 8] : [8] {
+            if let version = selectRAWDecoder(supported: versions, generation: generation, prefersDNG: prefersDNG) {
                 return version
             }
         }

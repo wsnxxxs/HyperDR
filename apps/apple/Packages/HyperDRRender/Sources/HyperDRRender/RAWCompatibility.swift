@@ -224,7 +224,7 @@ extension RenderEngine {
                   let converted = resolvedCompatibility(url, revision: revision, kind: .convertedDNG, converterID: id),
                   let filter = CIRAWFilter(imageURL: converted),
                   let fallback = selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
-                      systemDefault: filter.decoderVersion.rawValue, allowing9: false) else { throw RenderError.cannotDecodeSource }
+                      systemDefault: filter.decoderVersion.rawValue, allowing9: false, prefersDNG: true) else { throw RenderError.cannotDecodeSource }
             var options = options
             options.rawDecoderVersion = fallback
             let opened = try autoreleasepool { try Self.open(url, options: options, deferred: deferred, progress: progress) }
@@ -300,13 +300,12 @@ extension RenderEngine {
         guard let filter = CIRAWFilter(imageURL: url) else { throw RenderError.cannotDecodeSource }
         let supported = filter.supportedDecoderVersions.map(\.rawValue)
         if let requested {
-            let generation = requested.split(separator: ".").first
-            guard let version = supported.first(where: {
-                $0 == requested || $0.split(separator: ".").first == generation
-            }) else { throw RenderError.unsupportedRAWDecoder(requested) }
+            guard let generation = Int(requested.split(separator: ".").first ?? ""),
+                  let version = selectRAWDecoder(supported: supported, generation: generation, prefersDNG: true)
+            else { throw RenderError.unsupportedRAWDecoder(requested) }
             return version
         }
-        return selectRAWDecoder(supported: supported, systemDefault: filter.decoderVersion.rawValue)
+        return selectRAWDecoder(supported: supported, systemDefault: filter.decoderVersion.rawValue, prefersDNG: true)
     }
 
     /// Selection runs before the first open. If Apple has no usable filter,
@@ -332,7 +331,7 @@ extension RenderEngine {
     /// LibRaw chosen for a new photo: unpack it with the registered converter
     /// and develop the DNG with its own newest generation (9.dng, else 8.dng),
     /// so every camera's colour comes from the same generic matrix path. A DNG
-    /// original already takes that path and keeps Apple's preferred decoder.
+    /// original keeps the preferred decoder for that original file.
     /// Nil when LibRaw cannot read the camera; the caller chooses what follows.
     public func libRAWDecoderSelection(_ url: URL) async throws -> RAWDecoderSelection? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

@@ -608,7 +608,7 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(detail.request.size == PixelSize(width: 6000, height: 4000))
         #expect(detail.request.region == RecipeEditor.detailRegion(visible: zoomed.visible, source: detail.request.size))
         #expect(detail.request.region!.contains(zoomed.visible))
-        #expect(h.editor.shownOriginalDetail == nil)
+        #expect(h.editor.shownOriginalDetail != nil)
 
         // An edit drops the detail with the frame it belonged to; the new one follows the new frame.
         h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
@@ -694,7 +694,7 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.shownOriginalDetail != nil)
     }
 
-    @Test func noDetailWhileDraggingAndTheOriginalOnlyWhenShown() async throws {
+    @Test func noDetailWhileDraggingAndComparisonIsPreparedAfterwards() async throws {
         let h = Harness()
         try await h.open()
         let exposure = declaration("tone.exposure")
@@ -706,7 +706,7 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         h.editor.editingChanged(exposure, false)
         await h.editor.settle()
         #expect(h.editor.shownDetail != nil)
-        #expect(h.editor.shownOriginalDetail == nil)
+        #expect(h.editor.shownOriginalDetail != nil)
 
         var both = zoomed
         both.showsOriginal = true
@@ -714,6 +714,85 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         await h.editor.settle()
         let original = try #require(h.editor.shownOriginalDetail)
         #expect(original.request.recipe == h.editor.recipe.original)
+    }
+
+    @Test func comparisonSwitchesReuseBothSharpRenditions() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        await h.editor.settle()
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        let details = await h.fake.requests.filter { $0.region != nil }
+        #expect(details.count == 2)
+        #expect(details.first?.recipe == h.editor.recipe, "visible edit has priority over comparison preparation")
+        let edited = try #require(h.editor.shownDetail)
+        let original = try #require(h.editor.shownOriginalDetail)
+        let before = await h.fake.requests.count
+        for _ in 0..<3 {
+            var peek = zoomed
+            peek.showsEdited = false
+            peek.showsOriginal = true
+            h.editor.setViewport(peek)
+            #expect(h.editor.shownOriginalDetail?.request == original.request)
+            #expect(h.editor.shownDetail?.request == edited.request)
+            await h.editor.settle()
+            h.editor.setViewport(zoomed)
+            #expect(h.editor.shownDetail?.request == edited.request)
+            await h.editor.settle()
+        }
+        #expect(await h.fake.requests.count == before)
+    }
+
+    @Test func identicalRenditionsShareOneDetailRender() async throws {
+        let h = Harness()
+        try await h.open(.rawEDR)
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        #expect(h.editor.shownDetail != nil && h.editor.shownOriginalDetail != nil)
+        #expect(await h.fake.requests.filter { $0.region != nil }.count == 1)
+    }
+
+    @Test func aCoveredPanAndComparisonSwitchDoNotRestartPendingDetails() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        await h.editor.settle()
+        await h.fake.holdRenders()
+        h.editor.setViewport(zoomed)
+        while await h.fake.heldRenderCount == 0 { await Task.yield() }
+        let before = await h.fake.requests.count
+        var moved = zoomed
+        moved.visible.origin.x += 50
+        moved.showsEdited = false
+        moved.showsOriginal = true
+        h.editor.setViewport(moved)
+        for _ in 0..<10 { await Task.yield() }
+        #expect(await h.fake.requests.count == before)
+        #expect(await h.fake.cancelled.isEmpty)
+        await h.fake.releaseRenders()
+        await h.editor.settle()
+        #expect(h.editor.shownOriginalDetail?.request.region?.contains(moved.visible) == true)
+    }
+
+    @Test func anOverlappingPanKeepsExistingSharpPixelsUntilReplacement() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        let old = try #require(h.editor.shownDetail)
+        await h.fake.holdRenders()
+        var moved = zoomed
+        moved.visible.origin.x += 700
+        h.editor.setViewport(moved)
+        #expect(h.editor.shownDetail?.request == old.request)
+        while await h.fake.heldRenderCount == 0 { await Task.yield() }
+        await h.fake.releaseRenders()
+        await h.editor.settle()
+        #expect(h.editor.shownDetail?.request.region?.contains(moved.visible) == true)
+        #expect(h.editor.shownDetail?.request.region != old.request.region)
+        h.editor.setViewport(nil)
+        #expect(h.editor.shownDetail == nil && h.editor.shownOriginalDetail == nil)
     }
 
     @Test func onlyAnSDROnlyDragPreviewsSDR() async throws {

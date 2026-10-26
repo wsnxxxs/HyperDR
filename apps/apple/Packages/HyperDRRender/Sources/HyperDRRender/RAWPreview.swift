@@ -12,14 +12,12 @@ extension RenderEngine {
     /// temporary editable previews use this; native development stays below.
     func rasterizeDraftRAWPreview(_ image: CIImage, size: PixelSize, space: CGColorSpace) throws -> any MTLTexture {
         try validate(size)
-        let extent = image.extent
-        let preview = image.transformed(by: CGAffineTransform(
-            a: Double(size.width) / extent.width, b: 0, c: 0,
-            d: Double(size.height) / extent.height,
-            tx: -extent.minX * Double(size.width) / extent.width,
-            ty: -extent.minY * Double(size.height) / extent.height))
-            .cropped(to: CGRect(x: 0, y: 0, width: size.width, height: size.height))
-        return try rasterize(preview, space: space, opaque: true, raw: true)
+        // On macOS 15.5 a reduced RAW graph transformed directly into a Metal
+        // destination can return opaque black tiles (Canon CR2 -> 8.dng).
+        // Materialize bounded RGBAf bitmap cells before our own area sampling,
+        // as for the final preview. Keep the reduced demosaic for fast opening;
+        // never attach the final resize/vertical flip to the lazy RAW graph.
+        return try rasterizeRAWPreviews(image, sizes: [size], space: space)[0]
     }
 
     /// Decode each canonical native cell once, then integrate its owned pixels

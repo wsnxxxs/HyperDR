@@ -45,11 +45,16 @@ extension RenderEngine {
     /// scene-linear graph opens; it needs that endpoint's float32 size on disk.
     public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions(),
                                  stagingLookBaseline: Bool = false,
+                                 reusingAnalysis: Bool = false,
                                  allowsRAWCompatibilityFallback: Bool = true) async throws -> ExportSource {
         try Task.checkCancellation()
         let revision = try SourceRevision(url:url)
         var fullOptions = options; fullOptions.resolution = .full
         fullOptions.draftRAWPreview = false
+        // The editor already developed this exact fixed grid while refining
+        // its preview. Preserve only that bounded texture across cache clearing;
+        // opening a detail must not develop the entire RAW again for analysis.
+        let previousAnalysis = reusingAnalysis ? analysisSource : nil
         clearImageCaches()
         var staged: StagedLookBaseline?
         if stagingLookBaseline && fullOptions.sceneLinear {
@@ -71,7 +76,12 @@ extension RenderEngine {
         analysisOptions.resolution = Self.analysisResolution(native:size)
         clearImageCaches()
         let analysis: RenderSource
-        if opened.raw != nil && !fullOptions.sceneLinear {
+        let identity = sourceIdentity(url: url.standardizedFileURL, revision: revision, options: fullOptions)
+        let retained = reusingAnalysis ? retainedPreviewAnalysis(id: identity) : nil
+        if let cached = previousAnalysis?.id == identity ? previousAnalysis : retained,
+           !cached.isDraftRAWPreview {
+            analysis = cached
+        } else if opened.raw != nil && !fullOptions.sceneLinear {
             // The lazy export already owns a native RAW graph. Develop its fixed
             // analysis variant from that graph, retaining the native decode for
             // subsequent ROIs rather than developing and discarding a second one.

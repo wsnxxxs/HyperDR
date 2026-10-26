@@ -66,6 +66,9 @@ public actor RenderEngine {
     var filmMeterInputCache: (id: UUID, scene: RenderSource, target: Double)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
+    /// Editor-only, bounded raster snapshots: Apple display and scene-linear
+    /// developments of the same photo. No CIRAWFilter/native cell is retained.
+    private var previewVariants: [(key: SourceKey, source: RenderSource, analysis: RenderSource)] = []
     private var sourceFamily: (key: SourceKey, id: UUID)?
     var analysisSource: RenderSource?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?
@@ -128,6 +131,7 @@ public actor RenderEngine {
     }
 
     public func clearCaches() {
+        previewVariants.removeAll()
         modelPredictionCache.removeAll()
         modelPredictionOrder.removeAll()
         clearImageCaches()
@@ -155,19 +159,61 @@ public actor RenderEngine {
     }
 
     /// The caller owns any security scope needed to read this URL. No UI-thread I/O.
+    /// The editor opts into `retainingPreview`: keep at most the two native-developed
+    /// preview/analysis rasters for its display and scene-linear looks. Export uses
+    /// the default, and `clearCaches` releases these rasters before export starts.
     public func load(_ url: URL, options: SourceOptions = SourceOptions(), preparingAnalysis: Bool = false,
+                     retainingPreview: Bool = false,
                      allowsRAWCompatibilityFallback: Bool = true, retryNativeRAWDecoder: Bool = false,
                      progress: (@Sendable (SourceLoadPhase) -> Void)? = nil) async throws -> RenderSource {
+        do {
+            return try await loadSource(url, options: options, preparingAnalysis: preparingAnalysis,
+                retainingPreview: retainingPreview, allowsRAWCompatibilityFallback: allowsRAWCompatibilityFallback,
+                retryNativeRAWDecoder: retryNativeRAWDecoder, progress: progress)
+        } catch RenderError.cannotDecodeSource where options.draftRAWPreview {
+            // Some decoder/file combinations reject reduced bitmap regions.
+            // Retry native cells with the SAME recorded decoder/converter,
+            // including after a 9 -> 8 retry and on later RAW control edits.
+            // Cancellation, memory errors and CI task errors must propagate.
+            var native = options
+            native.draftRAWPreview = false
+            return try await loadSource(url, options: native, preparingAnalysis: preparingAnalysis,
+                retainingPreview: retainingPreview, allowsRAWCompatibilityFallback: allowsRAWCompatibilityFallback,
+                retryNativeRAWDecoder: retryNativeRAWDecoder, progress: progress)
+        }
+    }
+
+    private func loadSource(_ url: URL, options: SourceOptions, preparingAnalysis: Bool,
+                            retainingPreview: Bool, allowsRAWCompatibilityFallback: Bool,
+                            retryNativeRAWDecoder: Bool,
+                            progress: (@Sendable (SourceLoadPhase) -> Void)?) async throws -> RenderSource {
         try Task.checkCancellation()
         let revision = try SourceRevision(url:url)
         try Self.validateRecordedCompatibility(options)
         var options = options
         var key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
+        if retainingPreview {
+            let family = sourceIdentity(url: key.url, revision: revision, options: options, sceneLinear: false)
+            previewVariants.removeAll { $0.source.modelSourceID != family }
+        }
         // Forcing a conversion must not be satisfied by an earlier native
         // source cache entry with the same development options.
         if !Self.forcesRAWCompatibility, let cached = sourceCache[key] {
             if preparingAnalysis { _ = try fixedAnalysisSource(cached) }
+            if retainingPreview { try retainPreview(cached, key: key) }
             return cached
+        }
+        if retainingPreview, !Self.forcesRAWCompatibility,
+           let cached = previewVariants.first(where: {
+               $0.key.url == key.url && $0.key.revision == revision
+                   && ($0.key == key || $0.source.reusesRAWPreview(options: options))
+           }) {
+            var family = key
+            family.options.resolution = .full
+            sourceFamily = (family, cached.source.id)
+            sourceCache = [key: cached.source]
+            analysisSource = cached.analysis
+            return cached.source
         }
         let result = try await Self.openWithCompatibility(url, options: options,
             allowsFallback: allowsRAWCompatibilityFallback, retryNativeDecoder: retryNativeRAWDecoder,
@@ -210,6 +256,7 @@ public actor RenderEngine {
             // Retain full and the latest preview together, while bounding variant residency.
             sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
             sourceCache[key] = source
+            if retainingPreview { try retainPreview(source, key: key) }
             return source
         }
     }
@@ -236,6 +283,22 @@ public actor RenderEngine {
         sourceFamily = (family, source.id)
         sourceCache[key] = source
         analysisSource = analysis
+        try retainPreview(source, key: key)
+    }
+
+    private func retainPreview(_ source: RenderSource, key: SourceKey) throws {
+        guard source.domain == .rawEDR, !source.isDraftRAWPreview,
+              case .preview = key.options.resolution else { return }
+        let analysis = try fixedAnalysisSource(source)
+        previewVariants.removeAll {
+            $0.source.modelSourceID != source.modelSourceID
+                || $0.key.options.sceneLinear == key.options.sceneLinear
+        }
+        previewVariants.append((key, source, analysis))
+    }
+
+    func retainedPreviewAnalysis(id: UUID) -> RenderSource? {
+        previewVariants.first { $0.source.id == id }?.analysis
     }
 
     /// Stable analysis development for this asset/settings family, independent of
@@ -243,6 +306,10 @@ public actor RenderEngine {
     func fixedAnalysisSource(_ source: RenderSource) throws -> RenderSource {
         guard let origin = source.origin else { return source }
         if let cached = analysisSource, cached.id == source.id { return cached }
+        if let cached = retainedPreviewAnalysis(id: source.id) {
+            analysisSource = cached
+            return cached
+        }
         try origin.revision.validate(origin.url)
         var options = origin.options
         options.resolution = Self.analysisResolution(native:source.nativeSize)
@@ -268,6 +335,7 @@ public actor RenderEngine {
         guard source.domain == .rawEDR, source.origin?.options.sceneLinear == true,
               let origin = source.origin else { return try fixedAnalysisSource(source) }
         try origin.revision.validate(origin.url)
+        if let cached = retainedPreviewAnalysis(id: source.modelSourceID) { return cached }
         return try autoreleasepool {
             var options = origin.options
             options.sceneLinear = false
@@ -342,13 +410,23 @@ public actor RenderEngine {
         let zeroColourStockEffects = edit.film.stock != nil && edit.film.strength == 0 && !edit.effects.isIdentity
         guard source.domain == .rawEDR, (weight > 0 && weight < 1) || zeroColourStockEffects,
               let origin = source.origin, origin.options.sceneLinear else {
-            lookBaselineCache = nil
-            analysisLookBaselineCache = nil
+            // A thumbnail or a metering trial without a look must not evict
+            // the live partial-strength render's two bounded baseline textures.
             return source.texture
         }
         if let cached = cachedLookBaseline(source) { return cached }
         cacheLookBaseline(nil, for: source)
         try origin.revision.validate(origin.url)
+        if source.samplingRegion == CGRect(x: 0, y: 0, width: 1, height: 1),
+           let display = previewVariants.first(where: { $0.source.id == source.modelSourceID }) {
+            let candidates = [display.source, display.analysis]
+            if let match = candidates.first(where: {
+                $0.texture.width == source.texture.width && $0.texture.height == source.texture.height
+            }) {
+                cacheLookBaseline(match.texture, for: source)
+                return match.texture
+            }
+        }
         if let staged = source.stagedLookBaseline {
             // The same window the reopened graph below would develop, read from
             // the export's staged endpoint (same canonical cells, same pixels).

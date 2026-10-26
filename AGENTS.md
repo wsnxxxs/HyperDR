@@ -180,6 +180,25 @@ RAW opens progressively with an editable `CIRAWFilter.scaleFactor` preview
 for both the canvas and fixed analysis grid and swaps in the result without
 resetting edits or undo. Draft pixels never enter AI inference, detail ROI
 or export.
+Reduced RAW previews also materialize bounded RGBAf bitmap cells before Metal
+area sampling, avoiding opaque black tiles on macOS 15. A reduced decode that
+reports cannotDecodeSource retries native cells with the same recorded decoder
+and converter; the editor retains that effective choice for later edits.
+Native detail opening reuses an already prepared analysis grid only when its
+source/development identity matches and it contains no draft pixels. The editor
+prepares the visible detail before its comparison, retains one region per
+rendition across comparison switches, and keeps overlapping sharp pixels during
+a pan. Covered in-flight work is not restarted. Details are released when the
+preview suffices, on close and on export yield; native RAW cells are not retained. Measurements and
+limits: `apps/apple/Packages/HyperDREditorCore/PREVIEW_PERFORMANCE.md`.
+The editor retains at most two native-developed RAW preview/analysis raster pairs
+(Apple display and scene-linear) of the same photo/development. Look metering
+and partial-strength blending reuse the matching Apple rasters; changes to the
+file, decoder, geometry or RAW controls invalidate them, and export yield/close
+release them. This does not retain native decoder graphs or full-resolution cells.
+Look-picker thumbnails wait for the current canvas render and reuse a completed
+set when only the selected stock/LUT or excluded grain/halation changes; a different
+development or colour edit still refreshes it.
 Settings on Mac, iPhone and iPad offer Automatic, RAW 8 and RAW 9 for new
 photos; the Mac lists RAW 9 only when `RenderEngine.systemSupportsRAW9` (a
 synthetic 256 px DNG probed once lists `9.dng`; a stored RAW 9 reads as
@@ -190,7 +209,10 @@ the camera (`libRAWDecoderSelection`), develops the DNG with 9.dng (8.dng
 retried once, else 8.dng) and records `Recipe.rawCompatibility`; a DNG original
 opens as in Automatic, and a camera LibRaw cannot read opens as Automatic with
 `RAWDecoderFallback.libRAW`, noted in the inspector. Automatic selects decoder 9 when the system and file support it
-(including `9.dng`), otherwise decoder 8 (`8.dng` for DNG); cameras without
+(including `9.dng`), otherwise decoder 8; within a generation, original files
+prefer the camera-specific version (`8` / `9`) over the generic DNG version,
+regardless of system enumeration order, while converted DNGs prefer `.dng`.
+Cameras without
 either keep their supported older system default. Explicit RAW 8/9 requires
 that exact generation and reports an unavailable version without fallback.
 The exact version is stored in `Recipe.rawDecoderVersion`. In Automatic, a new

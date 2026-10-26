@@ -7,7 +7,7 @@ import HyperDRRecipe
 @testable import HyperDRRender
 
 final class RAWDecoderTests: XCTestCase {
-    func testGenerationPolicyPrefersEightEvenWhenSystemDefaultIsNineOrOlder() {
+    func testGenerationPolicyPrefersNewestSupportedAndRetriesEight() {
         for suffix in ["", ".dng"] {
             let v = { (n: Int) in String(n) + suffix }
             XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: [v(7), v(8)], systemDefault: v(7)), v(8))
@@ -18,6 +18,21 @@ final class RAWDecoderTests: XCTestCase {
             XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [v(10)], systemDefault: v(10)))
         }
         XCTAssertNil(RenderEngine.selectRAWDecoder(supported: [CIRAWDecoderVersion.none.rawValue, ""], systemDefault: ""))
+    }
+
+    func testCameraDecoderWinsRegardlessOfDNGEnumerationOrder() {
+        // Actual Q3/macOS 15.5 order: generic 8.dng precedes camera-specific 8.
+        let q3 = ["6.dng", "7.dng", "7", "8.dng", "8"]
+        XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: q3, systemDefault: "8"), "8")
+        for versions in [["8.dng", "8", "9.dng", "9"], ["9", "9.dng", "8", "8.dng"]] {
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, systemDefault: "8"), "9")
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, systemDefault: "9", allowing9: false), "8")
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, generation: 8), "8")
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, generation: 9), "9")
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, systemDefault: "8", prefersDNG: true), "9.dng")
+            XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: versions, generation: 8, prefersDNG: true), "8.dng")
+        }
+        XCTAssertEqual(RenderEngine.selectRAWDecoder(supported: ["7.dng", "8.dng"], systemDefault: "7.dng"), "8.dng")
     }
 
     func testInvalidNativeDimensionsAreDecodeFailuresInsteadOfGeometryTraps() throws {
@@ -71,9 +86,8 @@ final class RAWDecoderTests: XCTestCase {
             let filter = try XCTUnwrap(CIRAWFilter(imageURL: url))
             for generation in [8, 9] {
                 let version = String(generation)
-                let expected = filter.supportedDecoderVersions.first {
-                    $0.rawValue == version || $0.rawValue == version + ".dng"
-                }?.rawValue
+                let supported = filter.supportedDecoderVersions.map(\.rawValue)
+                let expected = [version, version + ".dng"].first { supported.contains($0) }
                 do {
                     let actual = try await engine.rawDecoder(url, generation: generation)
                     XCTAssertNotNil(expected, "Unsupported generation succeeded")
@@ -115,12 +129,12 @@ final class RAWDecoderTests: XCTestCase {
             let url = try fixture(name)
             let filter = try XCTUnwrap(CIRAWFilter(imageURL: url))
             let preferred = await engine.preferredRAWDecoder(url)
-            let expected = filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "9" }?.rawValue
-                ?? filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "8" }?.rawValue
+            let supported = filter.supportedDecoderVersions.map(\.rawValue)
+            let expected = ["9", "9.dng", "8", "8.dng"].first { supported.contains($0) }
                 ?? filter.decoderVersion.rawValue
             XCTAssertEqual(preferred, expected)
             let fallback = await engine.fallbackRAWDecoder(url)
-            XCTAssertEqual(fallback, filter.supportedDecoderVersions.first { $0.rawValue.split(separator: ".").first == "8" }?.rawValue
+            XCTAssertEqual(fallback, ["8", "8.dng"].first { supported.contains($0) }
                 ?? (filter.decoderVersion.rawValue.split(separator: ".").first == "9" ? nil : filter.decoderVersion.rawValue))
             let legacy = try Recipe.decode(Data("{\"inputDomain\":\"rawEDR\"}".utf8))
             XCTAssertNil(legacy.rawDecoderVersion)

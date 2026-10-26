@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import HyperDRRecipe
+import HyperDRRender
 import Observation
 
 /// What each look does to the open photo, for the look pickers: small SDR
@@ -39,6 +40,7 @@ import Observation
     private(set) var images: [String: CGImage] = [:]
 
     @ObservationIgnored private var wanted: LookPreviewInputs?
+    @ObservationIgnored private var completed: LookPreviewInputs?
     @ObservationIgnored private var imageSource: UUID?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Pickers on screen.
@@ -62,19 +64,28 @@ import Observation
         guard let source = editor.source else {
             stop()
             images = [:]
+            completed = nil
             return
         }
         if imageSource != source.id {
             images = [:]
+            completed = nil
             imageSource = source.id
         }
-        guard pickers > 0, !editor.isDragging else {
+        guard pickers > 0, !editor.isDragging, editor.frameIsCurrent,
+              !editor.isRefiningPreview, !editor.isYieldingToExport else {
             stop()
             return
         }
         let key = LookPreviewInputs(editor: editor, looks: looks)
+        // Selection and physical effects do not change the colour thumbnails.
+        // A completed set remains valid through those edits and picker reopens.
+        if key == completed { wanted = key; return }
         guard key != wanted else { return }
         wanted = key
+        // This batch replaces images incrementally. Once it starts, an older
+        // completed key cannot describe the possibly mixed set on screen.
+        completed = nil
         task?.cancel()
         let base = Self.base(editor.recipe)
         let films = Adjustments.filmStocks.dropFirst().map { (Self.filmKey($0), Self.recipe(base, film: $0)) }
@@ -84,7 +95,8 @@ import Observation
         task = Task { [weak self, weak editor] in
             try? await Task.sleep(for: .milliseconds(250))
             for (id, recipe) in jobs {
-                guard !Task.isCancelled, let editor, !editor.isDragging else { return }
+                guard !Task.isCancelled, let editor, !editor.isDragging,
+                      editor.frameIsCurrent, !editor.isYieldingToExport else { return }
                 let image = try? await editor.lookPreview(recipe, side: Self.side)
                 guard !Task.isCancelled, let self else { return }
                 images[id] = image
@@ -92,6 +104,8 @@ import Observation
             guard let self else { return }
             let kept = Set(jobs.map(\.0))
             images = images.filter { kept.contains($0.key) }
+            completed = key
+            task = nil
         }
     }
 
@@ -136,18 +150,29 @@ struct LookPreviewInputs: Equatable {
     let source: UUID?
     let recipe: Recipe
     let isDragging: Bool
+    let isCurrent: Bool
+    let isRefining: Bool
+    let isYielding: Bool
     // A completed canvas render signals that its development is available.
     // AI may finish without changing the recipe or request.
     let rendered: EditorRenderRequest?
+    let development: SourceOptions?
     let modelGainPending: Bool
     let aiStatus: RecipeEditor.AIStatus
     let looks: [LookPreviews.Look]
 
     init(editor: RecipeEditor, looks: [LookPreviews.Look]) {
         source = editor.source?.id
-        recipe = editor.recipe
+        recipe = LookPreviews.base(editor.recipe)
         isDragging = editor.isDragging
-        rendered = editor.frame?.request
+        isCurrent = editor.frameIsCurrent
+        isRefining = editor.isRefiningPreview
+        isYielding = editor.isYieldingToExport
+        var frame = editor.frame?.request
+        development = frame.flatMap { try? SourceOptions(recipe: $0.recipe, options: RenderOptions(bypassedGroups: $0.bypassedGroups)) }
+        if let request = frame { frame?.recipe = LookPreviews.base(request.recipe) }
+        frame?.isInteractive = false
+        rendered = frame
         modelGainPending = editor.isModelGainPending
         aiStatus = editor.aiStatus
         self.looks = looks

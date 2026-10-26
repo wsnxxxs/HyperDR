@@ -239,11 +239,13 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         defer { previews.shown(false) }
         try await Task.sleep(for: .milliseconds(600))
         let before = await fake.completed.filter(\.keepsSource).count
+        await fake.holdRenders()
         editor.chooseLook(reference, input: looks[0].input, output: looks[0].output)
         previews.update(editor, looks: looks)
-        try await Task.sleep(for: .milliseconds(600))
-        #expect(await fake.completed.filter(\.keepsSource).count > before,
-                "Changing only the active LUT must invalidate the preview key")
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(await fake.completed.filter(\.keepsSource).count == before,
+                "The canvas development must finish before picker work starts")
+        await fake.releaseRenders()
         await editor.settle()
         let afterChoice = await fake.completed.filter(\.keepsSource).count
         previews.update(editor, looks: looks)
@@ -267,10 +269,39 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         #expect(previews.images.isEmpty)
         await fake.releaseRenders()
         editor.editingChanged(try #require(Adjustments.declaration("tone.exposure")), false)
+        await editor.settle()
         previews.update(editor, looks: [])
         try await Task.sleep(for: .milliseconds(500))
         #expect(previews.images[LookPreviews.none] != nil)
         previews.shown(false)
+    }
+
+    @Test func choosingAStockAndChangingEffectsReuseCompletedColourThumbnails() async throws {
+        let (editor, fake) = try await openEditor()
+        let previews = LookPreviews()
+        previews.update(editor, looks: [])
+        previews.shown(true)
+        defer { previews.shown(false) }
+        try await Task.sleep(for: .milliseconds(600))
+        let before = await fake.completed.filter(\.keepsSource).count
+        #expect(before == Adjustments.filmStocks.count)
+        var recipe = editor.recipe
+        recipe.setValue(.string("portra400"), for: Recipe.filmID)
+        recipe.setValue(.number(100), for: "effect.grain")
+        editor.setRecipe(recipe)
+        previews.update(editor, looks: [])
+        await editor.settle()
+        previews.update(editor, looks: [])
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(await fake.completed.filter(\.keepsSource).count == before)
+        // Changes that really alter the colour thumbnails still refresh them.
+        recipe.setValue(.number(50), for: "look.filmStrength")
+        editor.setRecipe(recipe)
+        previews.update(editor, looks: [])
+        await editor.settle()
+        previews.update(editor, looks: [])
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(await fake.completed.filter(\.keepsSource).count > before)
     }
 }
 

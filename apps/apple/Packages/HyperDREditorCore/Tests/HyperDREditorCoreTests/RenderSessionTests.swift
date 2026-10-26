@@ -509,6 +509,93 @@ extension RenderSessionTests {
 
 // Explicit local benchmark; normal tests never depend on a user's photo.
 extension RenderSessionTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_LOOK_BENCHMARK_RAW"] != nil))
+    func rawLookBenchmark() async throws {
+        let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_LOOK_BENCHMARK_RAW"]!)
+        let session = try RenderSession()
+        let source = try await session.open(url, previewSize: PixelSize(width: 1280, height: 1280))
+        _ = try await session.refinePreview(sourceID: source.id)
+        let size = RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 1280)
+        var recipe = Recipe(inputDomain: source.domain, rawDecoderVersion: source.rawDecoderVersion)
+        let clock = ContinuousClock()
+        let lut = try ColorLUT(cube: "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
+        await session.installLUT(lut)
+        func render(_ name: String, _ value: Recipe) async throws {
+            let start = clock.now
+            _ = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: value, size: size, isCanvasPreview: true))
+            print("LOOK_BENCH stage=\(name) elapsed=\(start.duration(to: clock.now))")
+        }
+        try await render("neutral", recipe)
+        recipe.setValue(.string("portra400"), for: Recipe.filmID)
+        recipe.setValue(.number(100), for: "effect.grain")
+        recipe.setValue(.number(100), for: "effect.halation")
+        try await render("film_apply", recipe)
+        for strength in [80.0, 60, 40] {
+            recipe.setValue(.number(strength), for: "look.filmStrength")
+            try await render("film_strength_\(Int(strength))", recipe)
+        }
+        recipe.setValue(.number(0.5), for: "look.filmExposure")
+        try await render("film_exposure", recipe)
+        try await render("original", recipe.original)
+        try await render("film_after_original", recipe)
+        recipe.setValue(.string("pro400h"), for: Recipe.filmID)
+        try await render("film_switch", recipe)
+        recipe.setValue(nil, for: Recipe.filmID)
+        recipe.look = LUTReference(contentHash: lut.contentHash, name: "Benchmark")
+        recipe.setLookSpaces(input: "slog3-sgamut3cine", output: "srgb")
+        try await render("lut_apply", recipe)
+        for strength in [80.0, 60] {
+            recipe.setValue(.number(strength), for: "look.strength")
+            try await render("lut_strength_\(Int(strength))", recipe)
+        }
+        let referenceEngine = try RenderEngine()
+        let reference = try await referenceEngine.load(url, options: SourceOptions(recipe: recipe,
+            resolution: .preview(maximumSize: PixelSize(width: 1280, height: 1280))), preparingAnalysis: true)
+        let expected = RenderEngine.readPixels(try await referenceEngine.render(reference, recipe: recipe, lut: lut, size: size))
+        let actual = RenderEngine.readPixels(try await session.render(
+            EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size, isCanvasPreview: true)).planes)
+        #expect(actual.baseRGBA.count == expected.baseRGBA.count && actual.gain.count == expected.gain.count)
+        let baseError = zip(actual.baseRGBA, expected.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        let gainError = zip(actual.gain, expected.gain).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        print("LOOK_DIFF base=\(baseError) gain=\(gainError)")
+        #expect(baseError <= 0.00001 && gainError <= 0.00001)
+        await session.close()
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_DETAIL_BENCHMARK_RAW"] != nil))
+    func rawDetailBenchmark() async throws {
+        let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_DETAIL_BENCHMARK_RAW"]!)
+        let session = try RenderSession()
+        let source = try await session.open(url, previewSize: PixelSize(width: 1280, height: 1280))
+        _ = try await session.refinePreview(sourceID: source.id)
+        var recipe = Recipe(inputDomain: source.domain, rawDecoderVersion: source.rawDecoderVersion)
+        recipe.setValue(.number(0.5), for: "tone.exposure")
+        let size = source.pixelSize
+        let region = CGRect(x: size.width / 2 - 1024, y: size.height / 2 - 768, width: 2048, height: 1536)
+        let clock = ContinuousClock()
+        for run in 1...2 {
+            for (name, rendition) in [("edited", recipe), ("original", recipe.original)] {
+                let start = clock.now
+                let request = EditorRenderRequest(sourceID: source.id, recipe: rendition, size: size, region: region)
+                let frame = try await session.render(request)
+                print("DETAIL_BENCH run=\(run) rendition=\(name) elapsed=\(start.duration(to: clock.now)) pixels=\(frame.display.outputSize) region=\(region)")
+            }
+        }
+        // Compare the optimized editor with a fresh export engine, whose
+        // default path develops its own analysis rather than reusing it.
+        let referenceEngine = try RenderEngine()
+        let reference = try await referenceEngine.openExportSource(url, options: SourceOptions(recipe: recipe))
+        let tile = try await referenceEngine.materializeExportRegion(reference, outputSize: size, region: region)
+        let expected = RenderEngine.readPixels(try await referenceEngine.render(tile, recipe: recipe, size: size, region: region))
+        let actual = RenderEngine.readPixels(try await session.render(
+            EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size, region: region)).planes)
+        let baseError = zip(actual.baseRGBA, expected.baseRGBA).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        let gainError = zip(actual.gain, expected.gain).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+        print("DETAIL_DIFF base=\(baseError) gain=\(gainError)")
+        #expect(baseError <= 0.00001 && gainError <= 0.00001)
+        await session.close()
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_RAW"] != nil))
     func rawOpeningBenchmark() async throws {
         let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HYPERDR_OPEN_BENCHMARK_RAW"]!)
@@ -569,7 +656,8 @@ extension RenderSessionTests {
         await session.setBeforeReload { await reloads.add() }
         let frame = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size))
         #expect(await reloads.count == 0)
-        #expect(frame.isDraftPreview)
+        // A decoder may reject reduced bitmap regions and open natively.
+        #expect(frame.isDraftPreview == source.isDraftPreview)
         _ = try await session.refinePreview(sourceID: source.id)
         let refined = try await session.render(frame.request)
         #expect(!refined.isDraftPreview)

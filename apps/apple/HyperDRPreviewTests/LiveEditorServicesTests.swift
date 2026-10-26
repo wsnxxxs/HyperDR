@@ -42,6 +42,9 @@ import XCTest
         XCTAssertEqual(model.document?.pixelSize, PixelSize(width: 1600, height: 2400))
         XCTAssertLessThan(pair.base.height, 2400, "document dimensions must survive preview downsampling")
         model.viewMode = .original
+        // Ready means the edited frame can be used. Its independent original
+        // render may still be finishing; comparison must switch when it arrives.
+        await eventually(timeout: .seconds(15), "original JPEG frame") { model.referencePair != nil }
         XCTAssertEqual(model.canvasComposition?.mode, .original)
         let old = model.document
         let corrupt = root.appendingPathComponent("corrupt.jpg")

@@ -71,14 +71,18 @@ import XCTest
         XCTAssertNil(model.canvasComposition)
     }
 
-    func testOriginalDetailsAreDemandDrivenAndDraftsRenderNone() async throws {
+    func testComparisonDetailsStayReadyAndDraftsRenderNone() async throws {
         let (model, fake) = await opened()
         await eventually(timeout: .seconds(3)) { model.editedDetailPair != nil }
-        XCTAssertNil(model.originalDetailPair, "no original detail until the original is shown")
-        model.beginPeekOriginal()
         await eventually(timeout: .seconds(3)) { model.originalDetailPair != nil }
+        let beforeComparison = await detailRequests(fake).count
+        model.beginPeekOriginal()
+        XCTAssertNotNil(model.originalDetailPair, "comparison starts with native detail")
         model.endPeekOriginal()
-        XCTAssertNil(model.originalDetailPair, "a detail no longer shown is dropped")
+        XCTAssertNotNil(model.originalDetailPair, "comparison keeps its prepared detail")
+        XCTAssertNotNil(model.editedDetailPair, "releasing comparison keeps the edit sharp")
+        let afterComparison = await detailRequests(fake).count
+        XCTAssertEqual(afterComparison, beforeComparison)
         let exposure = try XCTUnwrap(Adjustments.declaration("tone.exposure"))
         model.editor.editingChanged(exposure, true)
         model.adjustRecipe(exposure.id, to: 0.9)

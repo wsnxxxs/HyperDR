@@ -182,20 +182,10 @@ actor RenderSession: EditorRendering {
         let source: RenderSource
         do {
             try await beforeOpenLoad?(options)
-            do {
-                source = try await engine.load(url, options: options, preparingAnalysis: true,
-                    allowsRAWCompatibilityFallback: restoring == nil,
-                    retryNativeRAWDecoder: restoring == nil && rawDecoderPreference == .automatic,
-                    progress: loadProgress)
-            } catch RenderError.cannotDecodeSource where options.draftRAWPreview {
-                // A camera may reject reduced development while native works.
-                // Keep its selected decoder before considering decoder fallback.
-                options.draftRAWPreview = false
-                source = try await engine.load(url, options: options, preparingAnalysis: true,
-                    allowsRAWCompatibilityFallback: restoring == nil,
-                    retryNativeRAWDecoder: restoring == nil && rawDecoderPreference == .automatic,
-                    progress: loadProgress)
-            }
+            source = try await engine.load(url, options: options, preparingAnalysis: true, retainingPreview: true,
+                allowsRAWCompatibilityFallback: restoring == nil,
+                retryNativeRAWDecoder: restoring == nil && rawDecoderPreference == .automatic,
+                progress: loadProgress)
         } catch {
             // A listed decoder can still fail in Apple's camera/system model.
             // Retry only a new photo's preferred 9 after a decode failure, once.
@@ -216,7 +206,7 @@ actor RenderSession: EditorRendering {
                 print("OPEN_RAW_DECODER_FALLBACK requested=\(requested) used=\(version)")
             }
             try await beforeOpenLoad?(options)
-            source = try await engine.load(url, options: options, preparingAnalysis: true,
+            source = try await engine.load(url, options: options, preparingAnalysis: true, retainingPreview: true,
                 allowsRAWCompatibilityFallback: restoring == nil, retryNativeRAWDecoder: false,
                 progress: loadProgress)
             fallback = RAWDecoderFallback(requested: requested, used: version)
@@ -324,6 +314,7 @@ actor RenderSession: EditorRendering {
     }
 
     private func prepare(_ request: EditorRenderRequest, needsLUT: Bool = true) async throws -> Prepared {
+        try Task.checkCancellation()
         guard var opened else { throw EditorRenderingError.noSource }
         let generation = self.generation
         guard opened.editor.id == request.sourceID, request.recipe.inputDomain == opened.editor.domain else {
@@ -363,6 +354,7 @@ actor RenderSession: EditorRendering {
                 opened.detailOptions = nil
                 self.opened = opened
                 opened.detail = try await engine.openExportSource(opened.editor.url, options: sourceOptions,
+                                                                  reusingAnalysis: true,
                                                                   allowsRAWCompatibilityFallback: false)
                 opened.detailOptions = sourceOptions
             }
@@ -396,7 +388,7 @@ actor RenderSession: EditorRendering {
         if let reload {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
-            let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true,
+            let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true, retainingPreview: true,
                                                allowsRAWCompatibilityFallback: false)
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
@@ -404,7 +396,16 @@ actor RenderSession: EditorRendering {
             try checkCurrent(generation)
             guard var current = self.opened else { throw EditorRenderingError.noSource }
             current.source = source
-            current.options = reload
+            var effective = reload
+            if source.domain == .rawEDR, reload.draftRAWPreview, !source.isDraftRAWPreview {
+                // A reduced decode fell back to native. Keep that actual choice
+                // so the next edit reuses its complete raster instead of trying
+                // the rejected draft again or scheduling a redundant refinement.
+                effective.draftRAWPreview = false
+                current.previewOptions.draftRAWPreview = false
+                current.editor.isDraftPreview = false
+            }
+            current.options = effective
             self.opened = current
             opened = current
         }

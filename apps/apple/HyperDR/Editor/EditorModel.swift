@@ -119,6 +119,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored var pendingExportToken: UUID?
     /// The recipe the model last mirrored.
     @ObservationIgnored private var mirroredRecipe: Recipe?
+    /// A drag changed the recipe; the export metadata follows when it ends.
+    @ObservationIgnored private var exportMetadataDeferred = false
     /// What the open photo told the model about itself.
     @ObservationIgnored var source = PhotoSource()
     let scopes = ScopeState()
@@ -731,6 +733,17 @@ import UniformTypeIdentifiers
             mirroredRecipe = recipe
             editGeneration &+= 1
             pendingExportToken = nil
+            // A drag writes on every pointer move: the export history is
+            // matched against its result once, when it ends.
+            if editor.isDragging {
+                exportMetadataTask?.cancel()
+                exportMetadataDeferred = true
+            } else {
+                refreshExportMetadata()
+            }
+        }
+        if exportMetadataDeferred, !editor.isDragging {
+            exportMetadataDeferred = false
             refreshExportMetadata()
         }
         let layers = [editor.shownDetail?.display.base, editor.shownOriginalDetail?.display.base]
@@ -780,7 +793,7 @@ import UniformTypeIdentifiers
             frameRevision &+= 1
             thumbnailFrameDidChange()
         }
-        let caughtUp = editor.frame?.request.recipe == recipe && editor.frame?.request.sourceID == source.id
+        let caughtUp = editor.frameIsCurrent
         if caughtUp { setRefreshing(false) } else if editor.renderFailure == nil { requestBusy() }
         if let failure = editor.renderFailure, failure != reportedFailure {
             reportedFailure = failure

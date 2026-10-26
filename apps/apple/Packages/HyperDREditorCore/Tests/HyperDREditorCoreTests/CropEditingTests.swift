@@ -41,6 +41,39 @@ import Testing
         #expect(final.allSatisfy { $0.recipe.geometry.angle == 12 && !$0.isInteractive })
         await editor.close()
     }
+    /// The crop pane renders the whole photo: its frame is current although the
+    /// recipe has a crop, so the host never waits for a render that will not come.
+    @Test func theWholePhotoIsCurrentWhileTheCropIsEdited() async throws {
+        let fake = FakeEditorRendering()
+        let editor = RecipeEditor(renderer: fake)
+        try await editor.open(URL(fileURLWithPath: "/tmp/crop-current.jpg"))
+        var recipe = editor.recipe
+        recipe.geometry.angle = 5
+        editor.setRecipe(recipe)
+        await editor.settle()
+        #expect(editor.frameIsCurrent)
+        editor.isEditingCrop = true
+        await editor.settle()
+        #expect(editor.frame?.request.recipe.geometry == .identity)
+        #expect(editor.frameIsCurrent)
+        editor.editingGeometry(true)
+        recipe.geometry.angle = 9
+        editor.setRecipe(recipe)
+        editor.editingGeometry(false)
+        await editor.settle()
+        #expect(editor.frameIsCurrent)
+        recipe.setValue(.number(0.5), for: "tone.exposure")
+        editor.setRecipe(recipe)
+        #expect(!editor.frameIsCurrent, "an edit of the photo itself waits for its render")
+        await editor.settle()
+        #expect(editor.frameIsCurrent)
+        editor.isEditingCrop = false
+        #expect(!editor.frameIsCurrent, "leaving the pane waits for the cropped render")
+        await editor.settle()
+        #expect(editor.frameIsCurrent)
+        await editor.close()
+    }
+
     @Test func closingCropCommitsAnOpenGestureAndMixedEditsStillRender() async throws {
         let fake = FakeEditorRendering()
         let editor = RecipeEditor(renderer: fake)

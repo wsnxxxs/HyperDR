@@ -49,6 +49,27 @@ struct CropLayout: Equatable {
         CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale, centre: centre, margin: margin)
     }
 
+    /// The same scale with the photo moved under the crop: the box stays where
+    /// it is on the canvas and the photo follows `geometry`'s crop.
+    func following(_ geometry: Geometry) -> CropLayout {
+        let from = self.geometry.rasterCropRect(for: photo).centre, to = geometry.rasterCropRect(for: photo).centre
+        return CropLayout(photo: photo, geometry: geometry, viewport: viewport, scale: scale,
+                          centre: GeometryPoint(x: centre.x + to.x - from.x, y: centre.y + to.y - from.y), margin: margin)
+    }
+
+    /// The geometry after the photo moved `translation` canvas points under
+    /// the crop box (the box moves the other way over the photo), stopped
+    /// where the photo ends; nil when it cannot move that way at all.
+    func movingPhoto(by translation: CGSize) -> (geometry: Geometry, stopped: Bool)? {
+        let start = geometry.cropRect(for: photo)
+        let delta = GeometryPoint(x: -Double(translation.width) / scale, y: -Double(translation.height) / scale)
+        let result = CropDrag.move.resolve(delta, to: start, ratio: nil, quad: geometry.quad(for: photo), minimum: 0)
+        guard abs(result.rect.centre.x - start.centre.x) > 0.01 || abs(result.rect.centre.y - start.centre.y) > 0.01
+        else { return nil }
+        let crop = CropRect(centre: result.rect.centre, size: result.rect.size, frame: frame)
+        return (geometry.settingCrop(crop, photo: photo), result.stopped)
+    }
+
     /// Where the pane settles for this geometry: its crop fitted and centred again.
     var fitted: CropLayout { CropLayout(photo: photo, geometry: geometry, viewport: viewport, margin: margin) }
 

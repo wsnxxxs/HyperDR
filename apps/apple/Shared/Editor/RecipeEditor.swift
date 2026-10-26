@@ -132,6 +132,15 @@ import Observation
     /// The geometry the canvas renders with.
     var renderedGeometry: Geometry { isEditingCrop ? .identity : recipe.geometry }
 
+    /// The canvas frame renders the recipe as it is now. In the crop pane the
+    /// frame has no geometry of its own, so the crop is left out of the comparison.
+    var frameIsCurrent: Bool {
+        guard let source, let frame, frame.request.sourceID == source.id else { return false }
+        var current = recipe
+        current.geometry = renderedGeometry
+        return frame.request.recipe == current
+    }
+
     /// The photo as it is exported: its size after the recipe's geometry.
     var photoSize: HyperDRRender.PixelSize? { source.map { recipe.geometry.outputSize(of: $0.pixelSize) } }
 

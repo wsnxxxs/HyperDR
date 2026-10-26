@@ -52,14 +52,14 @@ private func code(_ value: Double) -> Int {
 
     /// The double reference against spektrafilm's own per-pixel pipeline. The bundled
     /// chromaticity table is float16, worth at most a 10-bit code.
-    @Test func doubleReferenceMatchesSpektrafilm() throws {
+    @Test func physicalReferenceMatchesSpektrafilm() throws {
         let fixture = try reference()
         #expect(Set(fixture.outputs.keys) == Set(FilmStockID.allCases.map(\.rawValue)))
         for id in FilmStockID.allCases {
             let stock = try FilmStock.named(id), expected = try #require(fixture.outputs[id.rawValue])
             var worst = 0, linear = 0.0
             for (input, output) in zip(fixture.inputs, expected) {
-                let actual = stock.apply(SIMD3(input[0], input[1], input[2]))
+                let actual = stock.fromRaw(stock.filmRaw(SIMD3(input[0], input[1], input[2])))
                 for c in 0..<3 {
                     worst = max(worst, abs(code(actual[c]) - code(output[c])))
                     linear = max(linear, abs(actual[c] - output[c]))
@@ -252,7 +252,9 @@ private func code(_ value: Double) -> Int {
         var worst = 0, unscattered = 0
         for y in 0..<Int(region.height) { for x in 0..<Int(region.width) {
             let i = (y + Int(region.minY - around.minY)) * aw + x + Int(region.minX - around.minX)
-            let expected = DoubleReference.fitP3(film.fromRaw(scattered[i])), plain = DoubleReference.fitP3(film.fromRaw(raw[i]))
+            let scene = sample(Int(region.minX) + x, Int(region.minY) + y)
+            let expected = film.renderFromRaw(scattered[i], reference: scene)
+            let plain = film.renderFromRaw(raw[i], reference: scene)
             for c in 0..<3 {
                 let actual = code(Double(pixels.baseRGBA[(y * Int(region.width) + x) * 4 + c]))
                 worst = max(worst, abs(actual - code(expected[c]))); unscattered = max(unscattered, abs(actual - code(plain[c])))

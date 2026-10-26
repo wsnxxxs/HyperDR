@@ -33,7 +33,10 @@ import Testing
             raw.append(film.filmRaw(rgb * exp2(Double(edit.film.exposure ?? 0))))
         } }
         let scattered = film.scatter(raw, width: right - left, height: bottom - top, longEdge: max(width, height))
-        return DoubleReference.fitP3(film.fromRaw(scattered[(y - top) * (right - left) + x - left]))
+        var reference = DoubleReference.point(values[y * width + x], operation: .exposure,
+                                              value: Double(edit.tone.exposure), sdr: sdr)
+        reference = DoubleReference.point(reference, operation: .highlights, value: Double(edit.tone.highlights))
+        return film.renderFromRaw(scattered[(y - top) * (right - left) + x - left], reference: reference)
     }
 
     /// These ordinary SDR colours exposed a 2–4 code error in the half-float

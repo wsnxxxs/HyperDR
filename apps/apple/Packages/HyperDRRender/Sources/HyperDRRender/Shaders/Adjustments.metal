@@ -28,6 +28,34 @@ float3 colorLab(float3 rgb) {
 float3 colorPreserveY(float3 rgb,float target) {
     float y=lum(rgb); return y>1e-8f ? rgb*(target/y) : float3(target);
 }
+// Shared Portra-Endura balance. Smooth green dominance protects true yellow,
+// skin, sky and the stock's warm neutrals; only an excessive yellowward shift moves.
+float filmGreenWeight(float3 reference) {
+    float3 lab=colorLab(reference/max(1.f,lum(reference)));
+    float hue=atan2(lab.z,lab.y)*180.f/M_PI_F;if(hue<0) hue+=360.f;
+    float relative=length(lab.yz)/max(.001f,lab.x);
+    float dominance=(reference.g-max(reference.r,reference.b))/max(1e-6f,max(reference.r,max(reference.g,reference.b)));
+    return sm(100.f,116.f,hue)*(1-sm(165.f,185.f,hue))*sm(0.f,.08f,dominance)*sm(.015f,.06f,relative);
+}
+float3 filmBalanceGreens(float3 scanned,float3 reference,float amount) {
+    float3 source=colorLab(reference/max(1.f,lum(reference))),colour=colorLab(scanned);
+    float hue=atan2(colour.z,colour.y),difference=atan2(source.z,source.y)-hue;
+    float delta=atan2(sin(difference),cos(difference));
+    float turn=amount*max(0.f,delta)*sm(2.f*M_PI_F/180.f,6.f*M_PI_F/180.f,delta);
+    float y=lum(scanned);
+    if(turn<=1e-9f || y<=1e-8f || y>=1.f) return scanned;
+    float chroma=length(colour.yz);float2 ab=chroma*float2(cos(hue+turn),sin(hue+turn));
+    float3 full=colorPreserveY(labToRGB(colour.x,ab.x,ab.y),y);
+    if(all(full>=0.f) && all(full<=1.f)) return full;
+    float low=0,high=1;float3 best(y);
+    for(int i=0;i<16;i++) {
+        float mid=(low+high)*.5f;
+        float3 rgb=colorPreserveY(labToRGB(colour.x,ab.x*mid,ab.y*mid),y);
+        if(all(rgb>=0.f) && all(rgb<=1.f)) { low=mid;best=rgb; } else high=mid;
+    }
+    return best;
+}
+
 float3 colorVibrance(float3 rgb,float amount) {
     if(amount==0) return rgb;
     float y=lum(rgb),scale=max(1.f,y);
@@ -447,12 +475,16 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         float3 raw=exposed.w>0 ? exposed.xyz : filmRaw(filmScene*p.film.w,film,filmLUT);
         float3 rawWithGlow=p.halation.w>0 ? (raw+p.halation.xyz*glow)/(1+p.halation.xyz) : raw;
         float3 completed=fit(filmFromRaw(rawWithGlow,film,p.film.yz,site,grainKernel),1.f);
-        if(independentStock) {
-            // The colour rendition has no grain/halation. The complete physical
-            // stock delta is added after its colour crossfade, independently of t.
-            base=fit(filmFromRaw(raw,film,float2(0,p.film.z),site,grainKernel),1.f);
-            stockDelta=completed-base;
-        } else base=completed; // t=1 preserves the legacy stock path exactly.
+        float balance=film.format.y>0 ? film.format.y*filmGreenWeight(filmScene) : 0;
+        if(independentStock || balance>0) {
+            bool physical=p.film.y>0 || p.halation.w>0;
+            float3 plain=physical ? fit(filmFromRaw(raw,film,float2(0,p.film.z),site,grainKernel),1.f) : completed;
+            float3 balanced=balance>0 ? filmBalanceGreens(plain,filmScene,balance) : plain;
+            // Keep the physical RGB delta, including red glow and coloured grain,
+            // outside the palette correction and the colour-strength crossfade.
+            if(independentStock) { base=balanced;stockDelta=completed-plain; }
+            else base=any(balanced!=plain) ? fit(balanced+(completed-plain),1.f) : completed;
+        } else base=completed;
     }
     if(p.flags.y) {
         base=applyLUT(base,p,cube,table);

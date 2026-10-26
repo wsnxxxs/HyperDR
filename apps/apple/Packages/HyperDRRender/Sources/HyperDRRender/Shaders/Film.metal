@@ -3,7 +3,7 @@
 // tables are illuminant × sensitivity (printing) and illuminant × observer (viewing).
 // levels: slide exposure scale, scanner slope and offset on Y. grain: the density under the
 // particles (grain's floor is its negative) and, in w, the scan's blur in pixels. format.x:
-// the film format in millimetres. Grain tables: each sublayer's variance ×
+// the film format in millimetres; format.y: shared-paper green balance. Grain tables: each sublayer's variance ×
 // area and third cumulant × area², and its dye clouds (µm).
 struct FilmData {
     float4 p3ToReference[3], couplers[3], xyzToP3[3];

@@ -249,6 +249,16 @@ float32 file (16 B/native pixel of free space, else `insufficientStorage`) befor
 the scene graph opens; bands read it back with the same pixels. The editor yields
 while an export runs (`RecipeEditor.yieldToExport`: the shown and original frames
 stay, its graph, detail and caches go) and develops the same variant again after.
+Kodak still-negative looks sharing `kodak_portra_endura` use a restrained green
+balance after the physical scan (Portra 160/400/800 and pushes, Ektar 100, Gold 200,
+Ultramax 400). User decision, 2026-10-26: reduce excessive yellow-green while
+preserving film character and the colour relationships of the whole picture.
+Smooth scene-hue/green-dominance membership partially relieves a material
+warm-green shift; it retains mild warmth, scan luminance and chroma (subject to
+P3 fitting). Other colours and print chains keep their rendition. Coloured grain
+and halation keep their physical RGB delta. This is a rendering policy, not a
+claim that the shared paper's measured data is wrong; physical resources and
+`fromRaw` reference comparisons remain separate. No new full-image cache is used.
 Film renders taller than 1024 rows run in 256-row bands (same pixels, one band of
 scatter workspace). PQ/HLG AVIF exports write from rows like HEIC.
 AI gain always infers from the Apple-boost development (`RenderSource.modelSourceID`),

@@ -636,7 +636,7 @@ struct ExportMemoryPlanTests {
         #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)
         recipe.setValue(.string("portra400"), for: Recipe.filmID)
         let full = ExportEditFacts(recipe: recipe, peakStops: 3)
-        #expect(full.usesFilm && !full.needsLookBaseline)
+        #expect(full.usesFilm && full.needsLookBaseline)
         recipe.setValue(.number(40), for: "look.filmStrength")
         let partial = ExportEditFacts(recipe: recipe, peakStops: 3)
         #expect(partial.usesFilm && partial.needsLookBaseline)

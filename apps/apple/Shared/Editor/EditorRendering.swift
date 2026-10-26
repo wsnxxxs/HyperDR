@@ -40,6 +40,7 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
               rawDecoderPreference: RAWDecoderPreference,
               progress: @escaping @Sendable (EditorOpeningStage) async -> Void) async throws -> EditorSource
+    func matchCameraPreview(sourceID: UUID) async throws -> EditorSource?
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image?
     /// Replaces an editable RAW draft with native-area preview pixels, preserving source identity.
     func refinePreview(sourceID: UUID) async throws -> EditorSource?
@@ -136,6 +137,7 @@ nonisolated struct EditorSource: Equatable, Sendable {
     var hasAlpha = false
     var isDraftPreview = false
     var rawDecoderVersion: String? = nil
+    var rawExposureBias: Double? = nil
     var rawDecoderFallback: RAWDecoderFallback? = nil
     /// Nil when Apple's native decoder developed the source directly.
     var sourceCompatibility: SourceCompatibility? = nil
@@ -216,6 +218,7 @@ extension Recipe {
         // The same crop, so the two line up.
         var original = Recipe(inputDomain: inputDomain, rawDecoderVersion: rawDecoderVersion,
                               rawCompatibility: rawCompatibility, rawEmbeddedPreview: rawEmbeddedPreview,
+                              rawExposureBias: rawExposureBias,
                               geometry: geometry)
         if inputDomain == .sdr { original.setValue(.bool(false), for: "hdr.enabled") }
         for declaration in Adjustments.all where declaration.cost == .redevelop {
@@ -271,6 +274,7 @@ extension EditorRendering {
     }
 
     func refinePreview(sourceID: UUID) async throws -> EditorSource? { nil }
+    func matchCameraPreview(sourceID: UUID) async throws -> EditorSource? { nil }
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?, restoring: Recipe?,
               rawDecoderPreference: RAWDecoderPreference,

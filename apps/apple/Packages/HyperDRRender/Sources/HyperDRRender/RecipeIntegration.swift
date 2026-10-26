@@ -152,6 +152,9 @@ extension SourceOptions {
         self.init(rawResolution:rawResolution, resolution:resolution,
                   sceneLinear:Self.sceneLinearDevelopment(recipe:recipe,options:options))
         rawDecoderVersion = recipe.rawDecoderVersion
+        let bias = recipe.rawExposureBias ?? 0
+        guard bias.isFinite, abs(bias) <= 5 else { throw RenderError.invalidAdjustment }
+        rawExposureBias = Float(bias)
         rawCompatibility = recipe.rawCompatibility
         rawEmbeddedPreview = recipe.rawEmbeddedPreview
         geometry = recipe.geometry

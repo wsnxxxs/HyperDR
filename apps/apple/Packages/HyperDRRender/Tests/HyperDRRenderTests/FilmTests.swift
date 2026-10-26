@@ -52,14 +52,14 @@ private func code(_ value: Double) -> Int {
 
     /// The double reference against spektrafilm's own per-pixel pipeline. The bundled
     /// chromaticity table is float16, worth at most a 10-bit code.
-    @Test func doubleReferenceMatchesSpektrafilm() throws {
+    @Test func physicalReferenceMatchesSpektrafilm() throws {
         let fixture = try reference()
         #expect(Set(fixture.outputs.keys) == Set(FilmStockID.allCases.map(\.rawValue)))
         for id in FilmStockID.allCases {
             let stock = try FilmStock.named(id), expected = try #require(fixture.outputs[id.rawValue])
             var worst = 0, linear = 0.0
             for (input, output) in zip(fixture.inputs, expected) {
-                let actual = stock.apply(SIMD3(input[0], input[1], input[2]))
+                let actual = stock.fromRaw(stock.filmRaw(SIMD3(input[0], input[1], input[2])))
                 for c in 0..<3 {
                     worst = max(worst, abs(code(actual[c]) - code(output[c])))
                     linear = max(linear, abs(actual[c] - output[c]))
@@ -109,11 +109,19 @@ private func code(_ value: Double) -> Int {
                         let expected = DoubleReference.prepare(value, settings: edit, sdr: isSDR)
                         for c in 0..<3 { worst = max(worst, abs(code(Double(pixels.baseRGBA[i * 4 + c])) - code(expected.base[c]))) }
                         if !isSDR { for c in 0..<3 {
-                            gain = max(gain, abs(Double(pixels.gain[i*pixels.gainChannelCount+(pixels.gainChannelCount == 1 ? 0 : c)]) - expected.gains[c]))
+                            let actualGain = Double(pixels.gain[i*pixels.gainChannelCount+(pixels.gainChannelCount == 1 ? 0 : c)])
+                            let actual = Double(pixels.baseRGBA[i*4+c])*exp2(actualGain)
+                            let endpoint = expected.base[c]*exp2(expected.gains[c])
+                            #expect(abs(actual-endpoint) < 0.00002*max(1,endpoint))
+                            // Gain has no observable meaning on a black channel;
+                            // CI can leave a sub-code conversion residue there.
+                            if expected.base[c] > 1e-6 {
+                                gain = max(gain, abs(actualGain - expected.gains[c]))
+                            }
                         } }
                     }
                     #expect(worst <= 1, "\(id.rawValue) at \(strength), sdr \(isSDR): \(worst) codes from the double reference")
-                    #expect(gain < 1e-4)
+                    #expect(gain < 1e-4, "\(id.rawValue) at \(strength), sdr \(isSDR): gain error \(gain)")
                 }
             }
         }
@@ -252,7 +260,9 @@ private func code(_ value: Double) -> Int {
         var worst = 0, unscattered = 0
         for y in 0..<Int(region.height) { for x in 0..<Int(region.width) {
             let i = (y + Int(region.minY - around.minY)) * aw + x + Int(region.minX - around.minX)
-            let expected = DoubleReference.fitP3(film.fromRaw(scattered[i])), plain = DoubleReference.fitP3(film.fromRaw(raw[i]))
+            let scene = sample(Int(region.minX) + x, Int(region.minY) + y)
+            let expected = film.renderFromRaw(scattered[i], reference: scene)
+            let plain = film.renderFromRaw(raw[i], reference: scene)
             for c in 0..<3 {
                 let actual = code(Double(pixels.baseRGBA[(y * Int(region.width) + x) * 4 + c]))
                 worst = max(worst, abs(actual - code(expected[c]))); unscattered = max(unscattered, abs(actual - code(plain[c])))
@@ -417,15 +427,20 @@ private func code(_ value: Double) -> Int {
         #expect(zip(banded.gain, whole.gain).allSatisfy { $0.bitPattern == $1.bitPattern })
     }
 
-    /// An SDR-to-SDR look: the gain of an HDR source is kept.
-    @Test func filmKeepsTheGain() async throws {
+    /// A darker print must not dim the actual captured highlight.
+    @Test func filmKeepsCapturedHighlightBrightness() async throws {
         let engine = try RenderEngine()
         let source = try await engine.source(image: bitmap([SIMD3(2.4, 1.6, 0.8), SIMD3(0.3, 0.2, 0.1)]), domain: .hdr)
         let original = RenderEngine.readPixels(try await engine.render(source, adjustments: RenderAdjustments()))
         var edit = RenderAdjustments()
         edit.film.stock = .portra400
         let filmed = RenderEngine.readPixels(try await engine.render(source, adjustments: edit))
-        #expect(filmed.gain == original.gain)
+        func y(_ p: PlanePixels) -> Double {
+            DoubleReference.luma(SIMD3((0..<3).map { c in
+                Double(p.baseRGBA[c])*exp2(Double(p.gain[c < p.gainChannelCount ? c : 0]))
+            }))
+        }
+        #expect(abs(y(filmed)/y(original)-1) < 0.02)
         #expect(filmed.baseRGBA != original.baseRGBA)
         edit.film.strength = 0
         #expect(RenderEngine.readPixels(try await engine.render(source, adjustments: edit)).baseRGBA == original.baseRGBA)

@@ -437,8 +437,9 @@ public struct AdjustmentPanel: Sendable {
     public static let filmEffectSeed = 100.0
 
     /// Chooses a built-in film stock in one write, so it is one undo step:
-    /// the stock (which removes a LUT), its exposure back on the meter and
-    /// its antihalation layer back on. Grain and halation follow the looks
+    /// the stock (which removes a LUT) and its antihalation layer back on. A
+    /// stock put on a photo without one starts its exposure on the meter; one
+    /// replacing another keeps a manual exposure. Grain and halation follow the looks
     /// in the same group (`Adjustments.effectIDs`) and work on every photo; a stock put on a
     /// photo whose grain and halation are untouched brings its own (100 %),
     /// and one replacing another stock leaves them as they are. "none" removes whichever look
@@ -452,7 +453,7 @@ public struct AdjustmentPanel: Sendable {
         let hadFilm = (recipe.conditionValue(Recipe.filmID)?.stringValue ?? "none") != "none"
         set(Recipe.filmID, option: stock, in: &recipe)
         guard recipe.conditionValue(Recipe.filmID)?.stringValue == stock else { return }
-        setAutomatic(Recipe.filmExposureID, in: &recipe)
+        if !hadFilm { setAutomatic(Recipe.filmExposureID, in: &recipe) }
         reset(Recipe.filmAntihalationID, in: &recipe)
         let effects = Adjustments.effectIDs
         if !hadFilm, effects.allSatisfy({ recipe.isDefault($0) }) {

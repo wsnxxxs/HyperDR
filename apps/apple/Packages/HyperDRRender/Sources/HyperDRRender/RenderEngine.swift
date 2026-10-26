@@ -22,6 +22,7 @@ func sourceIdentity(url: URL, revision: SourceRevision, options: SourceOptions, 
         options.rawDecoderVersion ?? "system-default", options.rawCompatibility ?? "native",
         String(options.rawEmbeddedPreview), String(options.embeddedPreviewOrientation ?? -1),
         number(r.temperature),number(r.tint),number(r.luminanceNR),number(r.colorNR),number(r.sharpness)]
+        + (options.rawExposureBias == 0 ? [] : ["cameraExposure", number(options.rawExposureBias)])
         // Only a geometry that does something is named, so other ids are unchanged.
         + (options.geometry.isIdentity ? [] : [(try? Recipe(geometry: options.geometry).jsonString()) ?? "geometry"])
     let data = try! JSONSerialization.data(withJSONObject:fields)
@@ -406,12 +407,11 @@ public actor RenderEngine {
             cacheLookBaseline(texture, for: source)
             return texture
         }
-        let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
-        let zeroColourStockEffects = edit.film.stock != nil && edit.film.strength == 0 && !edit.effects.isIdentity
-        guard source.domain == .rawEDR, (weight > 0 && weight < 1) || zeroColourStockEffects,
+        guard source.domain == .rawEDR, edit.needsRAWLookBaseline,
               let origin = source.origin, origin.options.sceneLinear else {
-            // A thumbnail or a metering trial without a look must not evict
-            // the live partial-strength render's two bounded baseline textures.
+            // Thumbnails and detached meter trials must not evict the live
+            // preview/analysis HDR references. Cache entries have render
+            // identities and are released with the source family.
             return source.texture
         }
         if let cached = cachedLookBaseline(source) { return cached }

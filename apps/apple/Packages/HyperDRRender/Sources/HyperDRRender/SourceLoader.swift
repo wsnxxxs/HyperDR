@@ -398,7 +398,10 @@ extension RenderEngine {
         // it is still cleared so the record matches the scene-linear development.
         filter.boostAmount = options.sceneLinear ? 0 : 1
         if options.sceneLinear { filter.boostShadowAmount = 0 }
-        filter.exposure = 0
+        guard options.rawExposureBias.isFinite, abs(options.rawExposureBias) <= 5 else {
+            throw RenderError.invalidAdjustment
+        }
+        filter.exposure = options.sceneLinear ? 0 : options.rawExposureBias
         filter.extendedDynamicRangeAmount = 1
         // Extended linear P3 can carry colours outside P3 as signed components.
         // Preserve them through the Log/film input transform; fit at the output.

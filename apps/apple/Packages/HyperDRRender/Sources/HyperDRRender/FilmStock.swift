@@ -13,7 +13,8 @@ public enum FilmStockID: String, CaseIterable, Hashable, Sendable {
 }
 
 /// Film emulation. The film exposes the scene before the HDR split (highlights reach
-/// its shoulder) and its print becomes the SDR base; the gain is retained (L1).
+/// its shoulder) and its print becomes the SDR base. Captured highlight luminance
+/// is preserved separately from the print's tone compression.
 public struct FilmAdjustments: Hashable, Sendable {
     public var stock: FilmStockID?
     public var strength: Float = RenderParameter.defaultNumber("look.filmStrength")
@@ -114,13 +115,67 @@ public struct FilmStock: Sendable {
 
     public typealias RGB = SIMD3<Double>
 
-    /// The full film, print and viewing chain for one linear-P3 colour.
-    /// `halation` is the halation map's film exposure at this pixel and its per-channel
-    /// strength; without it there is no halation.
+    /// Apply the same restrained green balance to still negatives sharing Portra
+    /// Endura. This rendering choice leaves their physical calibration separate.
+    var greenBalance: Double { resource.print == "kodak_portra_endura" ? 0.7 : 0 }
+
+    /// The stock rendition, with a gentle shared-paper green balance. Physical
+    /// grain/halation are added as an RGB delta after the colour correction.
     public func apply(_ rgb: RGB, grain site: FilmGrainSite? = nil, halation: (glow: RGB, strength: RGB)? = nil) -> RGB {
-        var raw = filmRaw(rgb)
-        if let halation { raw = (raw + halation.strength * halation.glow) / (1 + halation.strength) }
-        return fromRaw(raw, grain: site)
+        renderFromRaw(filmRaw(rgb), reference: rgb, grain: site, halation: halation)
+    }
+
+    /// Reuses a scattered exposure; reference is the edited scene at this pixel.
+    public func renderFromRaw(_ raw: RGB, reference: RGB, grain site: FilmGrainSite? = nil,
+                              halation: (glow: RGB, strength: RGB)? = nil) -> RGB {
+        let exposed = halation.map { (raw + $0.strength * $0.glow) / (1 + $0.strength) } ?? raw
+        let completed = DoubleReference.fitP3(fromRaw(exposed, grain: site))
+        let amount = greenBalance > 0 ? greenBalance * Self.greenWeight(reference) : 0
+        guard amount > 0 else { return completed }
+        let physical = (site?.amount ?? 0) > 0 || halation != nil
+        let plain = physical ? DoubleReference.fitP3(fromRaw(raw)) : completed
+        let balanced = Self.balanceGreens(plain, reference: reference, amount: amount)
+        return balanced == plain ? completed : DoubleReference.fitP3(balanced + (completed - plain))
+    }
+
+    /// Smooth membership, including green dominance, protects true yellows and
+    /// the surrounding palette. Neutral colours and cyan/blue never enter it.
+    static func greenWeight(_ reference: RGB) -> Double {
+        let lab = DoubleReference.oklab(reference / max(1, DoubleReference.luma(reference)))
+        var hue = atan2(lab.z, lab.y) * 180 / Double.pi
+        if hue < 0 { hue += 360 }
+        let relative = hypot(lab.y, lab.z) / max(0.001, lab.x)
+        let dominance = (reference.y - max(reference.x, reference.z)) / max(1e-6, reference.max())
+        return DoubleReference.smoothStep(100, 116, hue) * (1 - DoubleReference.smoothStep(165, 185, hue))
+            * DoubleReference.smoothStep(0, 0.08, dominance) * DoubleReference.smoothStep(0.015, 0.06, relative)
+    }
+
+    /// Only relieve a material yellowward shift in greens. Keep 30% of that
+    /// shift, all mild warmth, luminance and relative chroma. A radial P3 fit
+    /// reduces chroma only where the gentler hue needs room in the gamut.
+    static func balanceGreens(_ scanned: RGB, reference: RGB, amount: Double) -> RGB {
+        let source = DoubleReference.oklab(reference / max(1, DoubleReference.luma(reference)))
+        let colour = DoubleReference.oklab(scanned)
+        let hue = atan2(colour.z, colour.y)
+        let delta = atan2(sin(atan2(source.z, source.y) - hue), cos(atan2(source.z, source.y) - hue))
+        let turn = amount * max(0, delta) * DoubleReference.smoothStep(2 * Double.pi / 180, 6 * Double.pi / 180, delta)
+        guard turn > 1e-9 else { return scanned }
+        let y = DoubleReference.luma(scanned)
+        guard y > 1e-8 && y < 1 else { return scanned }
+        let chroma = hypot(colour.y, colour.z)
+        let a = chroma * cos(hue + turn), b = chroma * sin(hue + turn)
+        func candidate(_ strength: Double) -> RGB {
+            DoubleReference.preserveLuminance(DoubleReference.oklabRGB(RGB(colour.x, a * strength, b * strength)), target: y)
+        }
+        func fits(_ rgb: RGB) -> Bool { rgb.min() >= 0 && rgb.max() <= 1 }
+        let full = candidate(1)
+        if fits(full) { return full }
+        var low = 0.0, high = 1.0, best = RGB(repeating: y)
+        for _ in 0..<16 {
+            let mid = (low + high) / 2, rgb = candidate(mid)
+            if fits(rgb) { low = mid; best = rgb } else { high = mid }
+        }
+        return best
     }
 
     /// From film exposure on: development, grain, print and viewing.
@@ -498,7 +553,7 @@ public struct FilmStock: Sendable {
                           Float(resource.printing?.exposureScale ?? 1), Float(film.spectralLUT.size)))
         rows.append(SIMD4(Float(film.exposureScale), Float(scan.levels[0]), Float(scan.levels[1]), 0))
         rows.append(row(film.grain.densityMinimum, film.grain.blur))
-        rows.append(SIMD4(Float(film.grain.filmFormatMillimetres), 0, 0, 0))
+        rows.append(SIMD4(Float(film.grain.filmFormatMillimetres), Float(greenBalance), 0, 0))
         rows += film.densityCurves.map { row($0) } + film.densityCurvesBeforeCouplers.map { row($0) }
         rows += (resource.printing?.densityCurves ?? film.densityCurves).map { row($0) }
         rows += film.channelDensity.indices.map { row(film.channelDensity[$0], film.baseDensity[$0]) }
@@ -599,6 +654,7 @@ struct FilmResource: Decodable, Sendable {
         let levels: [Double]
     }
     let schema, id, name, attribution: String
+    let print: String?
     let filming: Filming
     let printing: Printing?
     let scanning: Scanning

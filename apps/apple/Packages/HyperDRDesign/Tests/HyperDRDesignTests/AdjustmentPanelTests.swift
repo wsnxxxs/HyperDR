@@ -177,8 +177,10 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
 
     // Another stock keeps what the photo has, even no grain at all.
     panel.set("effect.grain", number: 0, in: &recipe)
+    panel.set(Recipe.filmExposureID, number: 2.7, in: &recipe)
     panel.chooseFilm("velvia100", in: &recipe)
     #expect(recipe.isDefault("effect.grain") && recipe.value(for: "effect.halation") == .number(100))
+    #expect(recipe.value(for: Recipe.filmExposureID) == .number(2.7), "another stock keeps a manual exposure")
 
     // Effects already set are never overwritten by a stock.
     var set = Recipe(inputDomain: .sdr)
@@ -189,6 +191,8 @@ private func ids(_ recipe: Recipe, _ group: AdjustmentGroupID) -> [String] {
     panel.chooseFilm("none", in: &recipe)
     #expect(recipe.conditionValue(Recipe.filmID) == .string("none"))
     #expect(recipe.value(for: "effect.halation") == .number(100), "no look still has its effects")
+    panel.chooseFilm("portra160", in: &recipe)
+    #expect(recipe.isDefault(Recipe.filmExposureID), "a stock after none starts on the meter again")
 }
 
 @Test func choosingALUTStartsItsSpacesFromTheLibrary() {

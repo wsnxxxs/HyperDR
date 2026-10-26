@@ -2,10 +2,10 @@ import CoreImage
 import Foundation
 import Metal
 
-/// The Apple display development of a RAW, staged for a partial scene look.
+/// The Apple display development of a RAW, staged for a scene look.
 ///
-/// A film or Log look between 0 and 100 % mixes the scene-linear development
-/// with Apple's display development of the same photo (`lookBaseline`). An
+/// Film and SDR-output Log looks preserve captured HDR from Apple's display
+/// development at every strength; partial looks also crossfade to it. An
 /// export reading bands would otherwise open the RAW again for every band,
 /// each time with its own native decoder storage beside the scene-linear
 /// graph's. Staging develops the whole endpoint once, in the canonical native

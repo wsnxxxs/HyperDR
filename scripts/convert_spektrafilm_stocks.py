@@ -100,7 +100,23 @@ def params_for(film: str, print_profile: str | None, grain: bool = False):
     params.io.output_cctf_encoding = False
     params.io.output_gamut_compress = dataclasses.replace(params.io.output_gamut_compress, algorithm="off")
     params.io.scan_film = print_profile is None
-    return digest_params(params)
+    params = digest_params(params)
+    if film == "kodak_portra_400":
+        # E-4050's red/green-sensitive flanks differ from the upstream profile.
+        # Replace only the traced intervals, keeping upstream channel scaling,
+        # tails, blue sensitivity, dyes, couplers and density curves unchanged.
+        data = json.loads((ROOT / "scripts/data/portra400-e4050-sensitivity.json").read_text())
+        grid = np.asarray(data["wavelengths"], dtype=float)
+        wavelength = np.arange(380, 781, 5.0)
+        sensitivity = np.array(params.film.data.log_sensitivity, dtype=float, copy=True)
+        for channel, key in enumerate(("cyan", "magenta")):
+            curve = np.asarray([np.nan if value is None else value for value in data[key]])
+            valid = np.isfinite(curve)
+            offset = np.nanmax(curve) - np.nanmax(sensitivity[:, channel])
+            traced = (wavelength >= grid[valid].min()) & (wavelength <= grid[valid].max())
+            sensitivity[traced, channel] = np.interp(wavelength[traced], grid[valid], curve[valid]) - offset
+        params.film.data.log_sensitivity = sensitivity
+    return params
 
 
 def linear_matrix(function) -> np.ndarray:
@@ -165,7 +181,8 @@ def convert(identifier: str, film_name: str, print_name: str | None) -> tuple[di
         "name": film.info.name,
         "film": film_name,
         "print": print_name,
-        "attribution": ATTRIBUTION,
+        "attribution": ATTRIBUTION + (" Portra 400 red/green sensitivity corrected from Kodak E-4050; "
+            "see scripts/data/portra400-e4050-sensitivity.json." if identifier == "portra400" else ""),
         "filming": {
             "type": film.info.type,
             "p3ToReference": rows(p3_to_reference),
@@ -364,6 +381,8 @@ def reference_inputs() -> np.ndarray:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="only report the reference spread, write nothing")
+    parser.add_argument("--stock", choices=[stock for stock, _ in STOCKS], action="append",
+                        help="regenerate only these stocks and their reference entries")
     arguments = parser.parse_args()
 
     inputs = reference_inputs()
@@ -376,10 +395,19 @@ def main() -> None:
                "inputs": rows(inputs), "outputs": {}, "grain": {}, "halation": {},
                "scatter": scatter_reference("kodak_portra_400")}
     RESOURCES.mkdir(parents=True, exist_ok=True)
-    if not arguments.check:
+    if arguments.stock:
+        fixture = json.loads(FIXTURE.read_text())
+        if "portra400" in arguments.stock:
+            fixture["scatter"] = scatter_reference("kodak_portra_400")
+    correction_note = " Portra 400 red/green sensitivity follows Kodak E-4050."
+    if correction_note not in fixture["note"]:
+        fixture["note"] += correction_note
+    if not arguments.check and not arguments.stock:
         for old in list(RESOURCES.glob("*.json")) + list(RESOURCES.glob("*.spectral")):
             old.unlink()
     for identifier, film_name in STOCKS:
+        if arguments.stock and identifier not in arguments.stock:
+            continue
         print_name = print_profile_for(film_name)
         resource, pipeline, tc_lut = convert(identifier, film_name, print_name)
         output = pipeline.process(inputs[None, :, :])[0]

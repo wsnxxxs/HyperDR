@@ -31,6 +31,28 @@ import XCTest
         model.closeDocument()
     }
 
+    func testCameraBrightnessSettingPersistsAndFeedsOnlyNewPhotos() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let renderer = try XCTUnwrap(services.fakeRendering)
+        await renderer.configure { $0.defaultPhoto.domain = .rawEDR; $0.cameraExposureBias = 0.4 }
+        let model = EditorModel(services: services)
+        XCTAssertFalse(model.preferences.value.matchesCameraPreview)
+        var preferences = model.preferences.value
+        preferences.matchesCameraPreview = true
+        model.updatePreferences(preferences)
+        XCTAssertTrue(Preferences.load(from: services.preferences).matchesCameraPreview)
+        model.open([URL(fileURLWithPath: "/tmp/camera-brightness.dng")])
+        await eventually { model.document?.phase == .ready }
+        XCTAssertEqual(model.editor.recipe.rawExposureBias, 0.4)
+        let recipe = model.editor.recipe
+        preferences.matchesCameraPreview = false
+        model.updatePreferences(preferences)
+        XCTAssertEqual(model.editor.recipe, recipe)
+        model.resetPreferences()
+        XCTAssertFalse(RAWBrightnessPreference.load(from: services.preferences))
+        model.closeDocument()
+    }
+
     func testLegacyPreferencesAndInvalidChoicesKeepAutomatic() {
         let name = "RAWDecoderSettingsTests-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: name)!

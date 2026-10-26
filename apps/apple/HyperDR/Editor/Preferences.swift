@@ -6,6 +6,7 @@ nonisolated struct Preferences: Equatable {
     enum SaveMode: String { case ask, folder }
     enum InitialView: String { case edited, original }
     var rawDecoder: RAWDecoderPreference = .automatic
+    var matchesCameraPreview = false
     var histogramRGB = false
     var highlightZebra = false
     var shadowZebra = false
@@ -21,6 +22,7 @@ nonisolated struct Preferences: Equatable {
     static func load(from defaults: UserDefaults, supportsRAW9: Bool = RenderEngine.systemSupportsRAW9) -> Self {
         var result = Self()
         result.rawDecoder = .load(from: defaults)
+        result.matchesCameraPreview = RAWBrightnessPreference.load(from: defaults)
         if result.rawDecoder == .raw9, !supportsRAW9 { result.rawDecoder = .automatic }
         guard let d = defaults.dictionary(forKey: key) else { return result }
         result.histogramRGB = d["histogramRGB"] as? Bool ?? false
@@ -46,6 +48,7 @@ nonisolated struct Preferences: Equatable {
     }
     func save(to defaults: UserDefaults) {
         rawDecoder.save(to: defaults)
+        RAWBrightnessPreference.save(matchesCameraPreview, to: defaults)
         defaults.set(["histogramRGB": histogramRGB, "highlightZebra": highlightZebra,
             "shadowZebra": shadowZebra, "rememberOutput": rememberOutput,
             "initialView": initialView.rawValue, "saveMode": saveMode.rawValue,

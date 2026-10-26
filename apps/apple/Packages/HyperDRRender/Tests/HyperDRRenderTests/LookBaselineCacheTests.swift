@@ -38,7 +38,7 @@ private extension RenderEngine {
         let cached = await engine.baselineIdentities
         let rendered = try #require(cached.rendered), analysed = try #require(cached.analysed)
         #expect(rendered != analysed)
-        for strength in [41.0, 75] {
+        for strength in [41.0, 75, 100] {
             let planes = try await engine.render(source, recipe: recipe(strength))
             let reused = await engine.baselineIdentities
             #expect(reused.rendered == rendered, "\(strength)%: rendered baseline")
@@ -50,5 +50,11 @@ private extension RenderEngine {
             #expect(actual.baseRGBA == expected.baseRGBA, "\(strength)%: base")
             #expect(actual.gain == expected.gain, "\(strength)%: gain")
         }
+        var nextStock = recipe(100)
+        nextStock.setValue(.string("gold200"), for: Recipe.filmID)
+        _ = try await engine.render(source, recipe: nextStock)
+        let afterMetering = await engine.baselineIdentities
+        #expect(afterMetering.rendered == rendered)
+        #expect(afterMetering.analysed == analysed, "meter trials must not redevelop the HDR reference")
     }
 }

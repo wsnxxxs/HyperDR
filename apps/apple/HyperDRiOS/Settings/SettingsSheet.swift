@@ -55,7 +55,9 @@ struct SettingsSheet: View {
             List {
                 Section { identity }
                 RAWDecoderSettings(selection: Binding(get: { session.rawDecoderPreference },
-                                                      set: { session.rawDecoderPreference = $0 }))
+                                                      set: { session.rawDecoderPreference = $0 }),
+                                                      matchesCameraPreview: Binding(get: { session.matchesCameraPreview },
+                                                          set: { session.matchesCameraPreview = $0 }))
                 if let editor = session.editor {
                     Section("ios.settings.editing") {
                         NavigationLink {
@@ -110,7 +112,9 @@ struct SettingsSheet: View {
                     case .rawDevelopment:
                         List {
                             RAWDecoderSettings(selection: Binding(get: { session.rawDecoderPreference },
-                                                                  set: { session.rawDecoderPreference = $0 }))
+                                                                  set: { session.rawDecoderPreference = $0 }),
+                                                      matchesCameraPreview: Binding(get: { session.matchesCameraPreview },
+                                                          set: { session.matchesCameraPreview = $0 }))
                         }
                         .navigationTitle(Text("ios.settings.rawDevelopment"))
                     case .luts:

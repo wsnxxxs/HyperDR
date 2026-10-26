@@ -42,7 +42,7 @@ endpoint. Four changes:
    every grid cell for its thumbnail). Cells are predicted independently, so
    bytes and seam codes may differ from a whole-plane AVIF. Encoding this RAW
    takes about 27 s against 10–16 s for HEIC.
-2. **A partial RAW scene look's Apple endpoint is staged once per export**
+2. **A RAW scene look's Apple endpoint is staged once per export**
    (`StagedLookBaseline`). Before the scene graph opens, the export develops the
    endpoint in the canonical cells into an anonymous float32 file (16 B/native
    pixel plus 256 MiB of free space, reserved first; otherwise
@@ -298,8 +298,9 @@ from the frozen recipe by RecipeExportService. The row estimate reserves a secon
 24 B/native-pixel decoder allowance; whole-plane fallback also charges its source
 texture. The conservative GPU tile bound includes one extra RGBAf source texture.
 The usual 110MP/4 GiB estimate below applies to a single development, **not** to
-a partial scene look. Zero/full strength and ordinary display-space LUTs keep the
-single-development allowance. No new physical-device timing or memory claim is
+RAW film/SDR-output scene looks or other partial scene looks. Zero strength
+without stock effects and ordinary display-space LUTs keep the single-development
+allowance. No new physical-device timing or memory claim is
 made for this path.
 
 ## Render-owned export bounds
@@ -377,7 +378,7 @@ canonical cells do not use adaptive splitting.
 
 Single-cell workspace uses the existing bounded ROI working-set allowance;
 there is no additional completed-cell reservation. The **24 B/native-pixel +
-512 MiB** decoder/work reservation, the second native allowance for partial RAW
+512 MiB** decoder/work reservation, the second native allowance for RAW display
 looks, film workspace and the 20% available-memory reserve remain in place.
 These are conservative allocation estimates, not device-memory measurements.
 Performance and validation status are summarized at the start of this document.
@@ -640,3 +641,29 @@ counts base/auxiliary component files plus their assembled result; native HEIC
 counts its compressed sample picture(s) plus the final container. ImageIO
 Adaptive writes one destination from in-memory pictures. AVIF's row path keeps
 its sample spool plus result; whole-plane AVIF assembles in memory.
+
+
+## Captured HDR through display looks — 2026-10-26
+
+Full-strength RAW film and Log-to-SDR looks now use the Apple display development
+as their captured HDR reference as well. Previously only partial strength (and
+zero-colour physical effects) retained it; full Log-to-SDR LUTs recomputed gain
+from their bounded output and lost HDR, while a dark print multiplied down the
+captured highlight brightness. Colour remains the physical print/LUT rendition;
+highlight luminance is protected separately and fades in below reference white.
+It cannot demand more captured headroom than the unstyled reference. HDR-output
+LUT transforms remain explicit. SDR pixels do not change when HDR is toggled.
+
+`Recipe.needsLookBaseline` now stages/prices full RAW film and full Log-to-SDR
+looks too, preserving the existing two-development allowance and 16 B/native
+pixel staging requirement. Preview and analysis retain their bounded Apple
+rasters; metering detached tiny textures does not evict them. No extra full-size
+raster is retained. The staged decoder still closes before scene development.
+No new physical-device timing or memory claim is made here.
+
+Stock grain/halation are independent RGB deltas at full as well as partial colour
+strength. Physical effects use an offset-aware RGB gain pair and cap only actual
+HDR overflow at the selected ceiling. The row estimator already reserves RGB gain.
+
+Private reproduction and measurements are in
+`docs/reviews/look-hdr-2026-10-26/RESULTS.md` (ignored).

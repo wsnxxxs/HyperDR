@@ -101,8 +101,9 @@ private func licensedRAW() -> URL {
     @Test func filmTilesCarryTheScatterHalo() async throws {
         let engine = try RenderEngine()
         let size = PixelSize(width:3000,height:300)
+        // A non-green checker isolates scatter support from the stock's green balance.
         let image = CIFilter(name:"CICheckerboardGenerator",parameters:["inputCenter":CIVector(x:0,y:0),
-            "inputColor0":CIColor(red:0.9,green:0.8,blue:0.7),"inputColor1":CIColor(red:0.05,green:0.06,blue:0.04),
+            "inputColor0":CIColor(red:0.9,green:0.8,blue:0.7),"inputColor1":CIColor(red:0.05,green:0.04,blue:0.06),
             "inputWidth":5,"inputSharpness":1])!.outputImage!.cropped(to:CGRect(x:0,y:0,width:size.width,height:size.height))
         let analysis = try await engine.source(image:image,domain:.sdr)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("film-halo-\(UUID())")
@@ -131,7 +132,8 @@ private func licensedRAW() -> URL {
         for region in [CGRect(x:1003,y:101,width:300,height:80),CGRect(x:0,y:0,width:200,height:50),CGRect(x:2900,y:250,width:100,height:50)] {
             #expect(try await difference(region,halo:halo) == 0,"\(region)")
         }
-        #expect(try await difference(CGRect(x:1003,y:101,width:300,height:80),halo:0) > 0.01)
+        let missingHalo = try await difference(CGRect(x:1003,y:101,width:300,height:80),halo:0)
+        #expect(missingHalo > 0.01)
         // Export tiles leave room for the halo within the source tile limit.
         let tile = await engine.exportTileSize(lazy,request:ExportRenderRequest(photoSize:size,capabilities:streamCaps),halo:halo)
         #expect(tile.width + 2*halo + 6 <= PreparedExportRows.maximumSourceTileSize.width)

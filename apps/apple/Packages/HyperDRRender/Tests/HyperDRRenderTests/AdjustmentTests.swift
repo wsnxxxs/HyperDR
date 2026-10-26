@@ -442,19 +442,14 @@ private func wideHalf() -> String {
         let result = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         let reference = values.map { DoubleReference.prepare($0,settings:edit,sdr:false) }
         compare(result,reference)
-        // L1 properties use the GPU's unedited pair, independently of the CPU grade.
-        #expect(result.gain == original.gain)
         #expect(result.baseRGBA[0] != original.baseRGBA[0])
-        for i in values.indices {
-            for c in 0..<3 {
-                let oldHDR = Double(original.baseRGBA[i*4+c])*exp2(Double(original.gain[i]))
-                let newHDR = Double(result.baseRGBA[i*4+c])*exp2(Double(result.gain[i]))
-                #expect(abs(newHDR/Double(result.baseRGBA[i*4+c])-oldHDR/Double(original.baseRGBA[i*4+c])) < 0.000001)
-            }
+        func peak(_ p: PlanePixels, _ i: Int) -> Double {
+            (0..<3).map { c in Double(p.baseRGBA[4*i+c])*exp2(Double(p.gain[i*p.gainChannelCount+(p.gainChannelCount == 1 ? 0 : c)])) }.max()!
         }
+        #expect(peak(result,0) > 1)
         edit.look.strength = 1
         let fullStrength = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
-        #expect(fullStrength.gain == original.gain)
+        #expect(abs(peak(fullStrength,0)-peak(original,0)) < 0.00001)
         edit.look.strength = 0
         let bypassed = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         compare(bypassed,values.map { DoubleReference.sourceHDRSplit($0) })

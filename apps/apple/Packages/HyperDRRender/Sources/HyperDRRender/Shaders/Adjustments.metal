@@ -28,6 +28,34 @@ float3 colorLab(float3 rgb) {
 float3 colorPreserveY(float3 rgb,float target) {
     float y=lum(rgb); return y>1e-8f ? rgb*(target/y) : float3(target);
 }
+// Shared Portra-Endura balance. Smooth green dominance protects true yellow,
+// skin, sky and the stock's warm neutrals; only an excessive yellowward shift moves.
+float filmGreenWeight(float3 reference) {
+    float3 lab=colorLab(reference/max(1.f,lum(reference)));
+    float hue=atan2(lab.z,lab.y)*180.f/M_PI_F;if(hue<0) hue+=360.f;
+    float relative=length(lab.yz)/max(.001f,lab.x);
+    float dominance=(reference.g-max(reference.r,reference.b))/max(1e-6f,max(reference.r,max(reference.g,reference.b)));
+    return sm(100.f,116.f,hue)*(1-sm(165.f,185.f,hue))*sm(0.f,.08f,dominance)*sm(.015f,.06f,relative);
+}
+float3 filmBalanceGreens(float3 scanned,float3 reference,float amount) {
+    float3 source=colorLab(reference/max(1.f,lum(reference))),colour=colorLab(scanned);
+    float hue=atan2(colour.z,colour.y),difference=atan2(source.z,source.y)-hue;
+    float delta=atan2(sin(difference),cos(difference));
+    float turn=amount*max(0.f,delta)*sm(2.f*M_PI_F/180.f,6.f*M_PI_F/180.f,delta);
+    float y=lum(scanned);
+    if(turn<=1e-9f || y<=1e-8f || y>=1.f) return scanned;
+    float chroma=length(colour.yz);float2 ab=chroma*float2(cos(hue+turn),sin(hue+turn));
+    float3 full=colorPreserveY(labToRGB(colour.x,ab.x,ab.y),y);
+    if(all(full>=0.f) && all(full<=1.f)) return full;
+    float low=0,high=1;float3 best(y);
+    for(int i=0;i<16;i++) {
+        float mid=(low+high)*.5f;
+        float3 rgb=colorPreserveY(labToRGB(colour.x,ab.x*mid,ab.y*mid),y);
+        if(all(rgb>=0.f) && all(rgb<=1.f)) { low=mid;best=rgb; } else high=mid;
+    }
+    return best;
+}
+
 float3 colorVibrance(float3 rgb,float amount) {
     if(amount==0) return rgb;
     float y=lum(rgb),scale=max(1.f,y);
@@ -333,8 +361,18 @@ float3 lutSample(float3 rgb,constant GraphUniform& p, texture3d<float,access::re
 float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
     if(p.color.y==0) return rgb;
     float3 changed=lutDecode(lutSample(lutEncode(rgb*p.lutExposure.x,p.lutInfo.z),p,cube,table),p.lutInfo.w);
-    changed=fit(changed,p.flags.y && (p.lutInfo.w<=2 || p.lutInfo.w==20) ? 1.f : max(1.f,maximum(changed)));
+    changed=fit(changed,(p.lutInfo.w<=2 || p.lutInfo.w==20) ? 1.f : max(1.f,maximum(changed)));
     return changed;
+}
+// Protect the captured highlight luminance from a bounded print/SDR LUT.
+// Fade in below reference white so the HDR endpoint stays continuous; shadows
+// and midtones retain the look's tone. This is a point operation, with no glow.
+float3 lookHDREndpoint(float3 styledHDR,float3 referenceHDR) {
+    float weight=sm(.5f,1.f,maximum(referenceHDR)),y=lum(styledHDR);
+    float target=mix(y,lum(referenceHDR),weight);
+    // A changed hue must not demand more captured headroom than the source.
+    target=min(target,y*max(1.f,maximum(referenceHDR))/max(maximum(styledHDR),1e-30f));
+    return y>1e-8f ? styledHDR*(target/y) : styledHDR;
 }
 struct WorkingPair { float3 base; float3 gain; float alpha; };
 float curveEncode(float y) { return y<=.0031308f ? 12.92f*y : 1.055f*pow(y,1.f/2.4f)-.055f; }
@@ -442,17 +480,21 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : sdrWhitesGain(rgb,pixel,p,cube,table,uv);
     float3 base=fit(rgb*exp2(-g),1.f);
     float3 stockDelta=0;
-    bool independentStock=p.effects.w>0 && p.film.x<1 && (p.film.y>0 || p.halation.w>0);
+    bool independentStock=p.effects.w>0 && (p.film.y>0 || p.halation.w>0);
     if(p.effects.w>0) {
         float3 raw=exposed.w>0 ? exposed.xyz : filmRaw(filmScene*p.film.w,film,filmLUT);
         float3 rawWithGlow=p.halation.w>0 ? (raw+p.halation.xyz*glow)/(1+p.halation.xyz) : raw;
         float3 completed=fit(filmFromRaw(rawWithGlow,film,p.film.yz,site,grainKernel),1.f);
-        if(independentStock) {
-            // The colour rendition has no grain/halation. The complete physical
-            // stock delta is added after its colour crossfade, independently of t.
-            base=fit(filmFromRaw(raw,film,float2(0,p.film.z),site,grainKernel),1.f);
-            stockDelta=completed-base;
-        } else base=completed; // t=1 preserves the legacy stock path exactly.
+        float balance=film.format.y>0 ? film.format.y*filmGreenWeight(filmScene) : 0;
+        if(independentStock || balance>0) {
+            bool physical=p.film.y>0 || p.halation.w>0;
+            float3 plain=physical ? fit(filmFromRaw(raw,film,float2(0,p.film.z),site,grainKernel),1.f) : completed;
+            float3 balanced=balance>0 ? filmBalanceGreens(plain,filmScene,balance) : plain;
+            // Keep the physical RGB delta, including red glow and coloured grain,
+            // outside the palette correction and the colour-strength crossfade.
+            if(independentStock) { base=balanced;stockDelta=completed-plain; }
+            else base=any(balanced!=plain) ? fit(balanced+(completed-plain),1.f) : completed;
+        } else base=completed;
     }
     if(p.flags.y) {
         base=applyLUT(base,p,cube,table);
@@ -464,6 +506,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
     }
     float3 gain=g;
     float weight=(p.flags.y || p.flags.z) ? p.color.y : p.film.x;
+    bool boundedLook=p.effects.w>0 || ((p.flags.y || p.flags.z) && (p.lutInfo.w<=2 || p.lutInfo.w==20));
     if(p.flags.x==3) {
         // An imported gain map already defines an SDR rendition. Re-splitting
         // its HDR maximum on the first nonzero edit destroys that rendition.
@@ -477,6 +520,7 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
             styledHDR=max(float3(0),(base+offset)*(neutralHDR+offset)/(neutralBase+offset)-offset);
             if(p.lutInfo.w>2 && p.lutInfo.w!=20) base=fit(base/ max(1.f,maximum(base)),1.f);
         }
+        if(boundedLook) styledHDR=lookHDREndpoint(styledHDR,neutralHDR);
         float3 hdr=weight>0 ? mix(neutralHDR,styledHDR,weight) : neutralHDR;
         base=weight>0 ? mix(neutralBase,base,weight) : neutralBase;
         if(independentStock) {
@@ -486,13 +530,24 @@ WorkingPair preparePair(float4 pixel,float4 baseline,constant GraphUniform& p,te
         gain=log2((max(hdr,0.f)+offset)/(base+offset));
         return {base,gain,pixel.a};
     }
+    bool partial=(weight>0 && weight<1) || (p.effects.w>0 && weight==0);
     float3 renderedHDR=base*exp2(g);
-    if((weight>0 && weight<1) || (p.effects.w>0 && weight==0)) {
+    float3 oldBase=0,oldHDR=0;float oldGain=0;
+    if(boundedLook || partial) {
         float3 original=graphScene(baseline,p,cube,table,false,true,uv,true,false,true);
         original=fit(original,max(1.f,maximum(original)));
-        float oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table,uv);
-        float3 oldBase=fit(original*exp2(-oldGain),1.f);
-        float3 hdr=mix(oldBase*exp2(oldGain),base*exp2(g),weight);
+        oldGain=p.flags.x!=0 ? log2(max(1.f,maximum(original))) : sdrWhitesGain(original,baseline,p,cube,table,uv);
+        oldBase=fit(original*exp2(-oldGain),1.f);
+        oldHDR=oldBase*exp2(oldGain);
+        if(boundedLook) {
+            renderedHDR=p.flags.x!=0 ? lookHDREndpoint(base*exp2(oldGain),oldHDR) : base*exp2(oldGain);
+            float y=lum(base);
+            g=y>1e-8f ? log2(max(lum(renderedHDR)/y,1e-30f)) : 0;
+            gain=g;
+        }
+    }
+    if(partial) {
+        float3 hdr=mix(oldHDR,renderedHDR,weight);
         renderedHDR=hdr;
         base=mix(oldBase,base,weight);
         // The two endpoints can have different HDR ratios and colours. Retain
@@ -727,8 +782,8 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     }
     float limit=exp2(p.color.z);
     float peak=maximum(hdr), mapped=softPeak(peak,limit,p.hdr.w!=0 || ((p.light.z!=0 || p.toneSpatialInfo.w!=0) && peak>limit));
-    bool physical=p.effects.x>0 || p.effects.y>0;
-    // A newly enabled generic effect must not trigger the shoulder below its
+    bool physical=p.effects.x>0 || p.effects.y>0 || p.film.y>0 || p.halation.w>0;
+    // A newly enabled physical effect must not trigger the shoulder below its
     // legal ceiling. Cap only its actual overflow, continuously at that ceiling.
     if(!p.hdr.w && physical && peak>limit) mapped=limit;
     if(peak>0 && mapped!=peak) {

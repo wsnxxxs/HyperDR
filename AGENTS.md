@@ -221,6 +221,16 @@ the system default is itself 9, and records the successful version.
 The preference does not reopen the current photo or rewrite saved recipes.
 Saved recipes never downgrade. Old recipes without this field keep the system
 default. An unavailable recorded version blocks decoding/export.
+Settings also offer “Match RAW brightness to camera preview” on Mac, iPhone
+and iPad (user, 2026-10-26), off by default and only for newly opened RAWs.
+`RenderEngine.cameraPreviewExposure` meters bounded reduced developments once;
+`Recipe.rawExposureBias` freezes the resulting display-development exposure for
+preview, refinement, ROI, comparison and export. A restored recipe never remeters.
+Scene-linear film/Log input ignores that bias; its Apple display baseline keeps it.
+Film and Log LUT Auto target a usable embedded camera preview's centre-weighted
+log median, otherwise the neutral development; previews over 2.5 EV away are
+ignored. Both exposure controls span −5…5 EV. Switching film stocks preserves
+manual film exposure; selecting a film after no film starts on Auto again.
 All RAW developments use an extended-linear sRGB CIContext, converting to extended
 linear P3 at output: decoder 9 loses red with a P3/Rec.2020 working context.
 Preview, ROI, look baseline and AI input share the recorded decoder. RecipeExportService prepares lazy
@@ -254,13 +264,30 @@ group, which is titled Color again): after the looks on every platform, shown wi
 film, a LUT or no look at all, and reset with Style; with a built-in film they use that stock's model, and a stock put on a photo whose
 effects are untouched brings its own 100 % (`AdjustmentPanel.chooseFilm`). Strength mixes the completed neutral/style SDR and HDR renditions in
 linear light; RGB gain preserves both, so HDR-only controls never move the base.
-Partial RAW Log/film looks also develop the Apple display endpoint, at preview/ROI
-size, with both decoder allowances priced by `Recipe.needsLookBaseline` in export.
+Film and SDR-output LUTs preserve captured highlight luminance separately from
+print/LUT tone compression (2026-10-26). Below reference white the protection
+fades in smoothly; it never asks for more captured headroom than the source.
+Explicit HDR-output LUTs retain their declared transform. Stock grain/halation
+keep their independent RGB delta at every colour strength, including 100 %;
+physical effects cannot overflow the selected HDR ceiling.
+RAW film and SDR-output Log looks also develop the Apple display endpoint at
+full strength for captured HDR; other partial scene looks need it for crossfading.
+Both decoder allowances are priced by `Recipe.needsLookBaseline` in export.
 An export stages that endpoint once, in the canonical RAW cells, into an anonymous
 float32 file (16 B/native pixel of free space, else `insufficientStorage`) before
 the scene graph opens; bands read it back with the same pixels. The editor yields
 while an export runs (`RecipeEditor.yieldToExport`: the shown and original frames
 stay, its graph, detail and caches go) and develops the same variant again after.
+Kodak still-negative looks sharing `kodak_portra_endura` use a restrained green
+balance after the physical scan (Portra 160/400/800 and pushes, Ektar 100, Gold 200,
+Ultramax 400). User decision, 2026-10-26: reduce excessive yellow-green while
+preserving film character and the colour relationships of the whole picture.
+Smooth scene-hue/green-dominance membership partially relieves a material
+warm-green shift; it retains mild warmth, scan luminance and chroma (subject to
+P3 fitting). Other colours and print chains keep their rendition. Coloured grain
+and halation keep their physical RGB delta. This is a rendering policy, not a
+claim that the shared paper's measured data is wrong; physical resources and
+`fromRaw` reference comparisons remain separate. No new full-image cache is used.
 Film renders taller than 1024 rows run in 256-row bands (same pixels, one band of
 scatter workspace). PQ/HLG AVIF exports write from rows like HEIC.
 AI gain always infers from the Apple-boost development (`RenderSource.modelSourceID`),

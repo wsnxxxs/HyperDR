@@ -1,415 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "ios.section.resetGrading" : {
-      "comment" : "iPhone grading page: VoiceOver name of the reset button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset Grading"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置分级"
-          }
-        }
-      }
-    },
-    "ios.section.resetMixer" : {
-      "comment" : "iPhone mixer page: VoiceOver name of the reset button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset Mixer"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置混色器"
-          }
-        }
-      }
-    },
-    "ios.section.openHint" : {
-      "comment" : "iPhone dock: VoiceOver hint on a section tile (curve, mixer, grading).",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Opens its page"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开它的专页"
-          }
-        }
-      }
-    },
-    "ios.section.back" : {
-      "comment" : "iPhone dock: VoiceOver name of the button that leaves a section's page for the rings.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Back"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返回"
-          }
-        }
-      }
-    },
-    "ios.section.grading" : {
-      "comment" : "iPhone dock: the colour grading's tile in the Adjust rings and its page's title.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Grading"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "分级"
-          }
-        }
-      }
-    },
-    "ios.section.mixer" : {
-      "comment" : "iPhone dock: the colour mixer's tile in the Adjust rings and its page's title.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mixer"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "混色器"
-          }
-        }
-      }
-    },
-    "ios.section.curve" : {
-      "comment" : "iPhone dock: the tone curve's tile in the Adjust rings and its page's title.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Curve"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "曲线"
-          }
-        }
-      }
-    },
-    "ipad.page.next" : {
-      "comment" : "iPad Studio: keyboard command (⌘]) for the tool's next page.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Next Page"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下一页"
-          }
-        }
-      }
-    },
-    "ipad.page.previous" : {
-      "comment" : "iPad Studio: keyboard command (⌘[) for the tool's previous page.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Previous Page"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上一页"
-          }
-        }
-      }
-    },
-    "ipad.page.changed" : {
-      "comment" : "VoiceOver value of a tool page that holds changes.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Changed"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已更改"
-          }
-        }
-      }
-    },
-    "ipad.page.grading" : {
-      "comment" : "iPad Studio: the colour tool's page holding the colour grading wheels.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Grading"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "分级"
-          }
-        }
-      }
-    },
-    "ipad.page.mixer" : {
-      "comment" : "iPad Studio: the colour tool's page holding the colour mixer.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mixer"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "混色器"
-          }
-        }
-      }
-    },
-    "ipad.page.curve" : {
-      "comment" : "iPad Studio: the light tool's page holding the tone curve.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Curve"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "曲线"
-          }
-        }
-      }
-    },
-    "ipad.page.basic" : {
-      "comment" : "iPad Studio: the page of a tool with its own rows (as opposed to its curve, mixer or grading).",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Basic"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "基本"
-          }
-        }
-      }
-    },
-    "ios.export.error.storage" : {
-      "comment" : "Export failure: the export's temporary files need more free storage than the device has.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not enough free storage to export this photo. Free up some space and try again."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可用存储空间不足，无法导出这张照片。请腾出一些空间后重试。"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDevelopment" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW Development"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 开发"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDeveloper" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Developer"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开发器"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDeveloper.automatic" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Automatic (Prefer RAW 9)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动（优先 RAW 9）"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDeveloper.eight" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 8"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 8"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDeveloper.nine" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 9"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 9"
-          }
-        }
-      }
-    },
-    "ios.settings.rawDeveloper.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Applies to RAW photos opened next. The current photo and saved edits keep their recorded developer. An unavailable selected version prevents opening; Automatic can fall back to RAW 8."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "适用于之后打开的 RAW 照片。当前照片和已保存的编辑会保留所记录的开发器。所选版本不可用时将无法打开照片；自动模式可回退至 RAW 8。"
-          }
-        }
-      }
-    },
-    "ios.error.rawUnsupported" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Can’t open this RAW. This camera is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法打开这个 RAW：这台相机比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
-          }
-        }
-      }
-    },
-    "ios.error.rawUnsupported.model %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Can’t open this RAW. The %@ is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法打开这个 RAW：%@ 比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
-          }
-        }
-      }
-    },
-    "ios.error.rawDecoderUnavailable %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW developer %@ is unavailable for this photo on this system. Choose Automatic or another developer in Settings."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前系统无法为这张照片提供 RAW 开发器 %@。请在设置中选择自动或其他开发器。"
-          }
-        }
-      }
-    },
     "choice.colorGamut.p3" : {
       "comment" : "Copied from the Mac catalogue.",
       "extractionState" : "manual",
@@ -572,6 +163,108 @@
         }
       }
     },
+    "enc.hdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · HDR · for raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · HDR · 适合 RAW 编辑器"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Half float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "半精度浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位 HDR TIFF"
+          }
+        }
+      }
+    },
     "enc.hlg.hint" : {
       "comment" : "Copied from the Mac catalogue.",
       "extractionState" : "manual",
@@ -680,6 +373,40 @@
         }
       }
     },
+    "enc.sdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · SDR · for raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · SDR · 适合 RAW 编辑器"
+          }
+        }
+      }
+    },
+    "enc.sdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 DNG"
+          }
+        }
+      }
+    },
     "enc.sdr-jpeg.hint" : {
       "comment" : "Copied from the Mac catalogue.",
       "extractionState" : "manual",
@@ -748,142 +475,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "16 位 TIFF"
-          }
-        }
-      }
-    },
-    "enc.hdr-tiff-16.hint" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Half float · linear HDR"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "半精度浮点 · 线性 HDR"
-          }
-        }
-      }
-    },
-    "enc.hdr-tiff-16.label" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16-bit HDR TIFF"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16 位 HDR TIFF"
-          }
-        }
-      }
-    },
-    "enc.hdr-tiff-32.hint" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Float · linear HDR"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "浮点 · 线性 HDR"
-          }
-        }
-      }
-    },
-    "enc.hdr-tiff-32.label" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "32-bit HDR TIFF"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "32 位 HDR TIFF"
-          }
-        }
-      }
-    },
-    "enc.sdr-dng.hint" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Linear raw · SDR · for raw editors"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "线性 RAW · SDR · 适合 RAW 编辑器"
-          }
-        }
-      }
-    },
-    "enc.sdr-dng.label" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16-bit DNG"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16 位 DNG"
-          }
-        }
-      }
-    },
-    "enc.hdr-dng.hint" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Linear raw · HDR · for raw editors"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "线性 RAW · HDR · 适合 RAW 编辑器"
-          }
-        }
-      }
-    },
-    "enc.hdr-dng.label" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR DNG"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR DNG"
           }
         }
       }
@@ -1068,6 +659,23 @@
         }
       }
     },
+    "ios.ai.notIncluded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This build doesn’t include the AI model. Use Expand for HDR highlights."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本未附带 AI 模型，可使用“扩展”生成 HDR 高光。"
+          }
+        }
+      }
+    },
     "ios.ai.unavailable" : {
       "comment" : "Why the AI options of the HDR source are disabled.",
       "extractionState" : "manual",
@@ -1082,23 +690,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台设备无法运行 AI 模型，AI 高光不可用。"
-          }
-        }
-      }
-    },
-    "ios.ai.notIncluded" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This build doesn’t include the AI model. Use Expand for HDR highlights."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此版本未附带 AI 模型，可使用“扩展”生成 HDR 高光。"
           }
         }
       }
@@ -1221,6 +812,142 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "对比"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility mode · no lens correction"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容模式 · 无镜头校正"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This system doesn’t support this camera yet, so the RAW was converted before developing. It is still a full RAW edit, but there is no lens correction and colors use a generic matrix."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统暂不支持这台相机，已先转换 RAW 再显影。仍是完整的 RAW 编辑，但没有镜头校正，色彩使用通用矩阵。"
+          }
+        }
+      }
+    },
+    "ios.compat.dng.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility Mode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容模式"
+          }
+        }
+      }
+    },
+    "ios.compat.menu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW Compatibility"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 兼容性"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.export" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This export comes from the RAW’s embedded JPEG preview, not a RAW development: quality and dynamic range are limited and the size may be smaller than the original. Update the system, or convert to DNG with Adobe DNG Converter first, for a full result."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次导出基于 RAW 内嵌的 JPEG 预览，并非 RAW 显影：画质和动态范围受限，尺寸可能比原片小。想要完整效果，请更新系统，或先用 Adobe DNG Converter 转成 DNG。"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JPEG preview, not a RAW development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JPEG 预览，不是 RAW 显影"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This system can’t decode this RAW, so HyperDR opened the JPEG preview embedded in the file. Image quality and dynamic range are limited, and the size may be smaller than the original. Update the system, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统无法解码这个 RAW，HyperDR 打开的是文件里内嵌的 JPEG 预览：画质和动态范围受限，尺寸也可能比原片小。建议更新系统，或先用 Adobe DNG Converter 转换成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "ios.compat.preview.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a RAW Development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 RAW 显影"
           }
         }
       }
@@ -1480,6 +1207,57 @@
         }
       }
     },
+    "ios.error.rawDecoderUnavailable %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW developer %@ is unavailable for this photo on this system. Choose Automatic or another developer in Settings."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前系统无法为这张照片提供 RAW 开发器 %@。请在设置中选择自动或其他开发器。"
+          }
+        }
+      }
+    },
+    "ios.error.rawUnsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. This camera is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：这台相机比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
+    "ios.error.rawUnsupported.model %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this RAW. The %@ is newer than this system supports, and HyperDR’s own conversion couldn’t read it either. Update iOS or iPadOS, or convert the file to DNG with Adobe DNG Converter and open that instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 RAW：%@ 比当前系统支持的更新，HyperDR 自带的转换也读不了。请更新 iOS / iPadOS，或先用 Adobe DNG Converter 转成 DNG 再打开。"
+          }
+        }
+      }
+    },
     "ios.error.sourceChanged" : {
       "comment" : "Shown over the canvas when the open photo's file changed on disk after it was opened.",
       "extractionState" : "manual",
@@ -1566,6 +1344,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没能存储到文件。导出的版本还在，可以再试一次。"
+          }
+        }
+      }
+    },
+    "ios.export.depth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color Depth"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色彩深度"
+          }
+        }
+      }
+    },
+    "ios.export.depth.16" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位/通道"
+          }
+        }
+      }
+    },
+    "ios.export.depth.32" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位/通道"
           }
         }
       }
@@ -1714,74 +1543,6 @@
         }
       }
     },
-    "ios.export.hdrOutput" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR Output"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR 输出"
-          }
-        }
-      }
-    },
-    "ios.export.depth" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Color Depth"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "色彩深度"
-          }
-        }
-      }
-    },
-    "ios.export.depth.16" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16 bits/channel"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "16 位/通道"
-          }
-        }
-      }
-    },
-    "ios.export.depth.32" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "32 bits/channel"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "32 位/通道"
-          }
-        }
-      }
-    },
     "ios.export.error.busy" : {
       "comment" : "Export failure.",
       "extractionState" : "manual",
@@ -1872,6 +1633,24 @@
         }
       }
     },
+    "ios.export.error.storage" : {
+      "comment" : "Export failure: the export's temporary files need more free storage than the device has.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enough free storage to export this photo. Free up some space and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用存储空间不足，无法导出这张照片。请腾出一些空间后重试。"
+          }
+        }
+      }
+    },
     "ios.export.error.verification" : {
       "comment" : "Export failure.",
       "extractionState" : "manual",
@@ -1926,6 +1705,23 @@
         }
       }
     },
+    "ios.export.family.dng" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 编辑"
+          }
+        }
+      }
+    },
     "ios.export.family.heic" : {
       "comment" : "Export strip: under the HEIC tile, what it is good for.",
       "extractionState" : "manual",
@@ -1976,23 +1772,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无损"
-          }
-        }
-      }
-    },
-    "ios.export.family.dng" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Raw editors"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 编辑"
           }
         }
       }
@@ -2064,6 +1843,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用途"
+          }
+        }
+      }
+    },
+    "ios.export.hdrOutput" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR Output"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 输出"
           }
         }
       }
@@ -2647,6 +2443,222 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文字"
+          }
+        }
+      }
+    },
+    "ios.frame.font" : {
+      "comment" : "Frame caption: heading of the typeface choices.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typeface"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "字体"
+          }
+        }
+      }
+    },
+    "ios.frame.font.import" : {
+      "comment" : "Frame caption: imports a .ttf/.otf font file.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Font…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入字体…"
+          }
+        }
+      }
+    },
+    "ios.frame.font.importFailed" : {
+      "comment" : "Frame caption: a font file could not be imported.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t import this font."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入这个字体。"
+          }
+        }
+      }
+    },
+    "ios.frame.font.monospaced" : {
+      "comment" : "Frame caption typeface: SF Mono.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monospaced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等宽"
+          }
+        }
+      }
+    },
+    "ios.frame.font.remove" : {
+      "comment" : "Frame caption: removes an imported font.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
+    "ios.frame.font.removeNamed %@" : {
+      "comment" : "Frame caption: removes an imported font, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除 %@"
+          }
+        }
+      }
+    },
+    "ios.frame.font.rounded" : {
+      "comment" : "Frame caption typeface: SF Pro Rounded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rounded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "圆体"
+          }
+        }
+      }
+    },
+    "ios.frame.font.serif" : {
+      "comment" : "Frame caption typeface: New York.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serif"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "衬线"
+          }
+        }
+      }
+    },
+    "ios.frame.font.signature" : {
+      "comment" : "Frame caption: the typeface of the signature.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "署名"
+          }
+        }
+      }
+    },
+    "ios.frame.font.system" : {
+      "comment" : "Frame caption typeface: SF Pro.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统"
+          }
+        }
+      }
+    },
+    "ios.frame.font.text" : {
+      "comment" : "Frame caption: the typeface of the exposure, camera and date lines.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caption"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字"
+          }
+        }
+      }
+    },
+    "ios.frame.font.unavailable %@" : {
+      "comment" : "Frame caption: a typeface that is not on this device, by family name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (missing)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（缺失）"
           }
         }
       }
@@ -3516,142 +3528,6 @@
         }
       }
     },
-    "ios.compat.menu" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW Compatibility"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RAW 兼容性"
-          }
-        }
-      }
-    },
-    "ios.compat.dng.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Compatibility Mode"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "兼容模式"
-          }
-        }
-      }
-    },
-    "ios.compat.dng.message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This system doesn’t support this camera yet, so the RAW was converted before developing. It is still a full RAW edit, but there is no lens correction and colors use a generic matrix."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前系统暂不支持这台相机，已先转换 RAW 再显影。仍是完整的 RAW 编辑，但没有镜头校正，色彩使用通用矩阵。"
-          }
-        }
-      }
-    },
-    "ios.compat.dng.line" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Compatibility mode · no lens correction"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "兼容模式 · 无镜头校正"
-          }
-        }
-      }
-    },
-    "ios.compat.preview.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not a RAW Development"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这不是 RAW 显影"
-          }
-        }
-      }
-    },
-    "ios.compat.preview.message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This system can’t decode this RAW, so HyperDR opened the JPEG preview embedded in the file. Image quality and dynamic range are limited, and the size may be smaller than the original. Update the system, or convert the file to DNG with Adobe DNG Converter and open that instead."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前系统无法解码这个 RAW，HyperDR 打开的是文件里内嵌的 JPEG 预览：画质和动态范围受限，尺寸也可能比原片小。建议更新系统，或先用 Adobe DNG Converter 转换成 DNG 再打开。"
-          }
-        }
-      }
-    },
-    "ios.compat.preview.line" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "JPEG preview, not a RAW development"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "JPEG 预览，不是 RAW 显影"
-          }
-        }
-      }
-    },
-    "ios.compat.preview.export" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This export comes from the RAW’s embedded JPEG preview, not a RAW development: quality and dynamic range are limited and the size may be smaller than the original. Update the system, or convert to DNG with Adobe DNG Converter first, for a full result."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这次导出基于 RAW 内嵌的 JPEG 预览，并非 RAW 显影：画质和动态范围受限，尺寸可能比原片小。想要完整效果，请更新系统，或先用 Adobe DNG Converter 转成 DNG。"
-          }
-        }
-      }
-    },
     "ios.menu.choosePhoto" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3866,6 +3742,125 @@
         }
       }
     },
+    "ios.section.back" : {
+      "comment" : "iPhone dock: VoiceOver name of the button that leaves a section's page for the rings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回"
+          }
+        }
+      }
+    },
+    "ios.section.curve" : {
+      "comment" : "iPhone dock: the tone curve's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Curve"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "曲线"
+          }
+        }
+      }
+    },
+    "ios.section.grading" : {
+      "comment" : "iPhone dock: the colour grading's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分级"
+          }
+        }
+      }
+    },
+    "ios.section.mixer" : {
+      "comment" : "iPhone dock: the colour mixer's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "混色器"
+          }
+        }
+      }
+    },
+    "ios.section.openHint" : {
+      "comment" : "iPhone dock: VoiceOver hint on a section tile (curve, mixer, grading).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens its page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开它的专页"
+          }
+        }
+      }
+    },
+    "ios.section.resetGrading" : {
+      "comment" : "iPhone grading page: VoiceOver name of the reset button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置分级"
+          }
+        }
+      }
+    },
+    "ios.section.resetMixer" : {
+      "comment" : "iPhone mixer page: VoiceOver name of the reset button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置混色器"
+          }
+        }
+      }
+    },
     "ios.settings.about" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4073,6 +4068,140 @@
         }
       }
     },
+    "ios.settings.rawBrightness" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Match RAW brightness to camera preview"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 亮度对齐相机预览"
+          }
+        }
+      }
+    },
+    "ios.settings.rawBrightness.note" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For new RAW photos only. Matches overall brightness when a usable embedded preview is available; keeps RAW colour and detail. Saved edits keep their brightness."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于新打开的 RAW。有可用内嵌预览时匹配整体亮度，保留 RAW 的颜色与细节。已有编辑保持原有亮度。"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDeveloper" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发器"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDeveloper.automatic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic (Prefer RAW 9)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动（优先 RAW 9）"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDeveloper.eight" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 8"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 8"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDeveloper.nine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 9"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 9"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDeveloper.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to RAW photos opened next. The current photo and saved edits keep their recorded developer. An unavailable selected version prevents opening; Automatic can fall back to RAW 8."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于之后打开的 RAW 照片。当前照片和已保存的编辑会保留所记录的开发器。所选版本不可用时将无法打开照片；自动模式可回退至 RAW 8。"
+          }
+        }
+      }
+    },
+    "ios.settings.rawDevelopment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW Development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 开发"
+          }
+        }
+      }
+    },
     "ios.settings.tagline" : {
       "comment" : "Settings: the line under the app's name.",
       "extractionState" : "manual",
@@ -4251,6 +4380,24 @@
         }
       }
     },
+    "ipad.curve.pickHint" : {
+      "comment" : "Over the canvas while the curve eyedropper is on: how to pick.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press a point of the photo and drag up or down"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住照片上的一点，上下拖动"
+          }
+        }
+      }
+    },
     "ipad.hdr.subtitle" : {
       "comment" : "Studio panel: under the HDR tool's title.",
       "extractionState" : "manual",
@@ -4413,6 +4560,143 @@
         }
       }
     },
+    "ipad.mixer.pickHint" : {
+      "comment" : "Over the canvas while the colour mixer eyedropper is on: how to pick.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press a colour of the photo and drag up or down"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住照片上的颜色，上下拖动"
+          }
+        }
+      }
+    },
+    "ipad.page.basic" : {
+      "comment" : "iPad Studio: the page of a tool with its own rows (as opposed to its curve, mixer or grading).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basic"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基本"
+          }
+        }
+      }
+    },
+    "ipad.page.changed" : {
+      "comment" : "VoiceOver value of a tool page that holds changes.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已更改"
+          }
+        }
+      }
+    },
+    "ipad.page.curve" : {
+      "comment" : "iPad Studio: the light tool's page holding the tone curve.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Curve"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "曲线"
+          }
+        }
+      }
+    },
+    "ipad.page.grading" : {
+      "comment" : "iPad Studio: the colour tool's page holding the colour grading wheels.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分级"
+          }
+        }
+      }
+    },
+    "ipad.page.mixer" : {
+      "comment" : "iPad Studio: the colour tool's page holding the colour mixer.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "混色器"
+          }
+        }
+      }
+    },
+    "ipad.page.next" : {
+      "comment" : "iPad Studio: keyboard command (⌘]) for the tool's next page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一页"
+          }
+        }
+      }
+    },
+    "ipad.page.previous" : {
+      "comment" : "iPad Studio: keyboard command (⌘[) for the tool's previous page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一页"
+          }
+        }
+      }
+    },
     "ipad.settings.diagnostics" : {
       "comment" : "iPad settings: the diagnostics section.",
       "extractionState" : "manual",
@@ -4467,42 +4751,6 @@
         }
       }
     },
-    "ipad.curve.pickHint" : {
-      "comment" : "Over the canvas while the curve eyedropper is on: how to pick.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Press a point of the photo and drag up or down"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按住照片上的一点，上下拖动"
-          }
-        }
-      }
-    },
-    "ipad.mixer.pickHint" : {
-      "comment" : "Over the canvas while the colour mixer eyedropper is on: how to pick.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Press a colour of the photo and drag up or down"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按住照片上的颜色，上下拖动"
-          }
-        }
-      }
-    },
     "ipad.zoom" : {
       "comment" : "Canvas bar: the zoom button's accessibility name.",
       "extractionState" : "manual",
@@ -4535,222 +4783,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "适合"
-          }
-        }
-      }
-    },
-    "ios.frame.font" : {
-      "comment" : "Frame caption: heading of the typeface choices.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Typeface"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "字体"
-          }
-        }
-      }
-    },
-    "ios.frame.font.text" : {
-      "comment" : "Frame caption: the typeface of the exposure, camera and date lines.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Caption"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "文字"
-          }
-        }
-      }
-    },
-    "ios.frame.font.signature" : {
-      "comment" : "Frame caption: the typeface of the signature.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Signature"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "署名"
-          }
-        }
-      }
-    },
-    "ios.frame.font.import" : {
-      "comment" : "Frame caption: imports a .ttf/.otf font file.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import Font…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导入字体…"
-          }
-        }
-      }
-    },
-    "ios.frame.font.importFailed" : {
-      "comment" : "Frame caption: a font file could not be imported.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn’t import this font."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法导入这个字体。"
-          }
-        }
-      }
-    },
-    "ios.frame.font.unavailable %@" : {
-      "comment" : "Frame caption: a typeface that is not on this device, by family name.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ (missing)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@（缺失）"
-          }
-        }
-      }
-    },
-    "ios.frame.font.system" : {
-      "comment" : "Frame caption typeface: SF Pro.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "System"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统"
-          }
-        }
-      }
-    },
-    "ios.frame.font.serif" : {
-      "comment" : "Frame caption typeface: New York.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Serif"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "衬线"
-          }
-        }
-      }
-    },
-    "ios.frame.font.rounded" : {
-      "comment" : "Frame caption typeface: SF Pro Rounded.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rounded"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "圆体"
-          }
-        }
-      }
-    },
-    "ios.frame.font.monospaced" : {
-      "comment" : "Frame caption typeface: SF Mono.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Monospaced"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等宽"
-          }
-        }
-      }
-    },
-    "ios.frame.font.remove" : {
-      "comment" : "Frame caption: removes an imported font.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除"
-          }
-        }
-      }
-    },
-    "ios.frame.font.removeNamed %@" : {
-      "comment" : "Frame caption: removes an imported font, by family name.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除 %@"
           }
         }
       }

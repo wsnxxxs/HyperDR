@@ -39,7 +39,7 @@ import Testing
         for strength in [0.0, 1, 100] {
             recipe.setValue(.number(strength), for: "look.filmStrength")
             #expect(try SourceOptions(recipe: recipe).sceneLinear)
-            #expect(recipe.needsLookBaseline == (strength < 100))
+            #expect(recipe.needsLookBaseline)
             let actualPlanes = try await render(recipe), actual = RenderEngine.readPixels(actualPlanes), actualHDR = hdr(actualPlanes)
             var neutral = recipe
             for id in Adjustments.effectIDs { neutral.setValue(.number(0), for: id) }
@@ -156,7 +156,7 @@ import Testing
         let apple = try await engine.load(url,options: SourceOptions(recipe: zero,resolution: resolution))
         let original = RenderEngine.readPixels(try await engine.render(apple,recipe: zero,lut: lut))
         let scene = try await engine.load(url,options: SourceOptions(recipe: recipe,resolution: resolution))
-        // Prime the spatial cache at 100%, where no Apple baseline is selected.
+        // Prime both spatial guides at 100%; partial strength must reuse the same reference.
         let styled = RenderEngine.readPixels(try await engine.render(scene,recipe: recipe,lut: lut))
         recipe.setValue(.number(1),for: "look.strength")
         let partial = RenderEngine.readPixels(try await engine.render(scene,recipe: recipe,lut: lut))

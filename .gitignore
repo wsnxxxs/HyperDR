@@ -72,3 +72,5 @@ __pycache__/
 
 # SwiftPM build output of the Swift packages.
 apps/apple/Packages/*/.build/
+# Third-party LUTs bundled only for local testing; never commit or publish them.
+/apps/apple/Shared/LUT/Bundled/

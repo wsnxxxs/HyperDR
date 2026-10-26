@@ -94,6 +94,7 @@ import os
             guard !stopped else { kit.stop(); return }
             self.kit = kit
             RenderEngine.registerRAWCompatibilityConverter(kit.rawCompatibility)
+            await BundledLUTs.install(into: kit.luts)
             setEngine(.ready(version: Engine.version))
         } catch {
             setEngine(.failed(UserFacingError(code: "engine_unavailable",

@@ -2,14 +2,17 @@ import Foundation
 
 /// The developer for newly opened RAW photos. A saved recipe always keeps its
 /// recorded decoder, including nil for a legacy recipe's system default.
+/// `libRAW` unpacks every camera with LibRaw and develops the DNG it writes,
+/// so colour comes from one generic matrix path rather than Apple's per-camera
+/// tuning; the recipe records the converter and reopens through it.
 nonisolated enum RAWDecoderPreference: String, CaseIterable, Equatable, Sendable {
-    case automatic, raw8, raw9
+    case automatic, raw8, raw9, libRAW = "libraw"
 
     static let key = "HyperDRRAWDecoderPreferenceV1"
 
     var generation: Int? {
         switch self {
-        case .automatic: nil
+        case .automatic, .libRAW: nil
         case .raw8: 8
         case .raw9: 9
         }

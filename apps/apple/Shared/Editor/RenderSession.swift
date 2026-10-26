@@ -133,12 +133,29 @@ actor RenderSession: EditorRendering {
         let clock = ContinuousClock()
         let began = clock.now
         var options = try SourceOptions(recipe: restoring ?? Recipe(), resolution: resolution)
+        // LibRaw converts only a RAW that is not already a DNG. Anything else,
+        // and a camera LibRaw cannot read, opens as Automatic would.
+        var rawDecoderPreference = rawDecoderPreference
+        var libRAWDeclined = false
+        if restoring == nil, rawDecoderPreference == .libRAW {
+            let selection = try await engine.libRAWDecoderSelection(url)
+            if let selection, selection.converterID != nil {
+                options.rawDecoderVersion = selection.version
+                options.rawCompatibility = selection.converterID
+            } else {
+                if selection == nil {
+                    EditorLog.notice("LibRaw cannot read this camera; opening with Apple's decoder")
+                    libRAWDeclined = true
+                }
+                rawDecoderPreference = .automatic
+            }
+        }
         if restoring == nil {
             if let generation = rawDecoderPreference.generation {
                 let selection = try await engine.rawDecoderSelection(url, generation: generation)
                 options.rawDecoderVersion = selection.version
                 options.rawCompatibility = selection.converterID
-            } else {
+            } else if rawDecoderPreference == .automatic {
                 options.rawDecoderVersion = await engine.preferredRAWDecoder(url)
             }
         }
@@ -184,11 +201,14 @@ actor RenderSession: EditorRendering {
             // Retry only a new photo's preferred 9 after a decode failure, once.
             // Recorded versions, cancellation, memory/GPU errors and changed files
             // retain their original failure semantics.
-            guard restoring == nil, rawDecoderPreference == .automatic,
+            // LibRaw's DNG retries 8.dng on the same conversion.
+            let converterID = rawDecoderPreference == .libRAW ? options.rawCompatibility : nil
+            guard restoring == nil, rawDecoderPreference == .automatic || converterID != nil,
                   case RenderError.cannotDecodeSource = error,
                   let requested = options.rawDecoderVersion,
                   requested.split(separator: ".").first == "9",
-                  let version = await engine.fallbackRAWDecoder(url), version != requested else { throw error }
+                  let version = await engine.fallbackRAWDecoder(url, converterID: converterID),
+                  version != requested else { throw error }
             try Task.checkCancellation()
             guard try FileRevision(url) == revision else { throw RenderError.sourceChanged }
             options.rawDecoderVersion = version
@@ -201,6 +221,10 @@ actor RenderSession: EditorRendering {
                 progress: loadProgress)
             fallback = RAWDecoderFallback(requested: requested, used: version)
             EditorLog.notice("RAW decoder \(requested) could not decode; reopened with \(version)")
+        }
+        if libRAWDeclined {
+            fallback = RAWDecoderFallback(requested: RAWDecoderFallback.libRAW,
+                                          used: source.rawSettings?.decoderVersion ?? "none")
         }
         let developed = clock.now
         await progress(.preparingPreview)
@@ -218,7 +242,9 @@ actor RenderSession: EditorRendering {
                                   isDraftPreview: source.isDraftRAWPreview,
                                   rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback,
                                   sourceCompatibility: source.sourceCompatibility,
-                                  rawCompatibility: source.rawCompatibility)
+                                  rawCompatibility: source.rawCompatibility,
+                                  rawCompatibilityByChoice: source.sourceCompatibility == .convertedDNG
+                                      && !RenderEngine.forcesRAWCompatibility && RenderEngine.systemDevelops(url))
         var effectiveOptions = options
         if let openedOptions = source.sourceOptions {
             // RenderSource.origin keeps the full-resolution family key. Copy

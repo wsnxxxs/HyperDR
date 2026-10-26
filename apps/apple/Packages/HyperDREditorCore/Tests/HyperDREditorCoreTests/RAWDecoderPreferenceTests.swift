@@ -9,7 +9,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         #expect(RAWDecoderPreference.load(from: defaults) == .automatic)
-        let invalidChoices: [Any] = ["", "raw10", "9.dng", 9, ["choice": "raw8"]]
+        let invalidChoices: [Any] = ["", "raw10", "9.dng", "libRAW", 9, ["choice": "raw8"]]
         for invalid in invalidChoices {
             defaults.set(invalid, forKey: RAWDecoderPreference.key)
             #expect(RAWDecoderPreference.load(from: defaults) == .automatic)

@@ -31,6 +31,32 @@ final class RAWCompatibilityIntegrationTests: XCTestCase {
         try await exercise(fixture())
     }
 
+    /// LibRaw chosen in Settings: a camera Apple develops is still converted
+    /// by the real LibRaw, without the debug force flag.
+    func testLibRAWChoiceConvertsASupportedCamera() async throws {
+        let url = fixture()
+        XCTAssertTrue(RenderEngine.systemDevelops(url))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raw-compat-libraw-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
+                                             cacheDirectory: root.appendingPathComponent("cache"))
+        let engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
+        RenderEngine.registerRAWCompatibilityConverter(RAWCompatibilityConverter(engine: engine, configuration: configuration))
+        let render = try RenderEngine()
+        let selected = try await render.libRAWDecoderSelection(url)
+        let selection = try XCTUnwrap(selected)
+        XCTAssertEqual(selection.converterID, Engine.rawConverterID)
+        let version = try XCTUnwrap(selection.version)
+        XCTAssertEqual(version, RenderEngine.systemSupportsRAW9 ? "9.dng" : "8.dng")
+        var options = SourceOptions(resolution: .preview(maximumSize: PixelSize(width: 512, height: 512)))
+        options.rawDecoderVersion = version
+        options.rawCompatibility = selection.converterID
+        let source = try await render.load(url, options: options)
+        XCTAssertEqual(source.domain, .rawEDR)
+        XCTAssertEqual(source.sourceCompatibility, .convertedDNG)
+        XCTAssertEqual(source.rawSettings?.decoderVersion, version)
+    }
+
     /// Opt-in hands-on run against the user's A7 V file; normal test runs never
     /// depend on personal photos. HYPERDR_OPEN_TIMINGS adds stage attribution.
     func testA7VForcedConversionOpensAndExports() async throws {

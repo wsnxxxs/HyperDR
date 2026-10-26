@@ -48,7 +48,7 @@ struct InspectorContent: View {
                     VStack(alignment: .leading, spacing: 0) {
                         PaneSwitch(model: model)
                         DecodeWarning(document: document)
-                        CompatibilityNotice(compatibility: model.editor.sourceCompatibility)
+                        CompatibilityNotice(compatibility: model.editor.sourceCompatibility, source: model.editor.source)
                         if model.isCropping {
                             Crop(model: model)
                                 .disabled(model.isEditingLocked)

@@ -301,7 +301,16 @@ extension RenderEngine {
     }
 
     /// Retry generation 8 explicitly: the system default may itself be 9.
-    public func fallbackRAWDecoder(_ url: URL) async -> String? {
+    /// With `converterID`, the retry is on that converter's DNG of `url`.
+    public func fallbackRAWDecoder(_ url: URL, converterID: String? = nil) async -> String? {
+        if let converterID {
+            guard let revision = try? SourceRevision(url: url),
+                  let converted = Self.resolvedCompatibility(url, revision: revision, kind: .convertedDNG,
+                                                             converterID: converterID),
+                  let filter = CIRAWFilter(imageURL: converted) else { return nil }
+            return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),
+                                         systemDefault: filter.decoderVersion.rawValue, allowing9: false)
+        }
         guard let selection = try? await Self.decoderSelection(url),
               let filter = Self.usableSelectionFilter(selection.url) ?? CIRAWFilter(imageURL: selection.url) else { return nil }
         return Self.selectRAWDecoder(supported: filter.supportedDecoderVersions.map(\.rawValue),

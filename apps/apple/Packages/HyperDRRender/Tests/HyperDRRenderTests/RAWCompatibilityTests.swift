@@ -118,6 +118,60 @@ final class RAWCompatibilityTests: XCTestCase {
         XCTAssertEqual(source.rawSettings?.decoderVersion, "8.dng")
     }
 
+    func testSystemDecoderProbeReportsGenerations() {
+        let generations = RenderEngine.systemRAWDecoderGenerations
+        XCTAssertTrue(generations.contains(8), "\(generations)")
+        XCTAssertEqual(RenderEngine.systemSupportsRAW9, generations.contains(9))
+    }
+
+    func testLibRAWSelectionConvertsACameraTheSystemSupports() async throws {
+        let url = try fixture()
+        XCTAssertTrue(RenderEngine.systemDevelops(url))
+        let dng = try fixture(named: "canon-eos-5d-iii-lossy.dng")
+        let converter = CompatibilityConverter(dng: dng, preview: nil)
+        RenderEngine.registerRAWCompatibilityConverter(converter)
+        let engine = try RenderEngine()
+        let selected = try await engine.libRAWDecoderSelection(url)
+        let selection = try XCTUnwrap(selected)
+        XCTAssertEqual(selection.converterID, converter.converterID)
+        let version = try XCTUnwrap(selection.version)
+        XCTAssertTrue(version.hasSuffix(".dng"), version)
+        let listed = try XCTUnwrap(CIRAWFilter(imageURL: dng)).supportedDecoderVersions.map(\.rawValue)
+        XCTAssertEqual(version, listed.contains("9.dng") ? "9.dng" : "8.dng")
+
+        var options = SourceOptions(resolution: .preview(maximumSize: PixelSize(width: 128, height: 128)))
+        options.rawDecoderVersion = selection.version
+        options.rawCompatibility = selection.converterID
+        let source = try await engine.load(url, options: options)
+        XCTAssertEqual(source.sourceCompatibility, .convertedDNG)
+        XCTAssertEqual(source.rawSettings?.decoderVersion, version)
+        let fallback = await engine.fallbackRAWDecoder(url, converterID: converter.converterID)
+        XCTAssertEqual(fallback, "8.dng")
+    }
+
+    func testLibRAWSelectionLeavesUnreadableCamerasAndDNGOriginalsToTheCaller() async throws {
+        let url = try fixture()
+        let unreadable = CompatibilityConverter(dng: nil, preview: nil, camera: "Sony ILCE-7S")
+        RenderEngine.registerRAWCompatibilityConverter(unreadable)
+        let engine = try RenderEngine()
+        let none = try await engine.libRAWDecoderSelection(url)
+        XCTAssertNil(none)
+        XCTAssertEqual(unreadable.extractions, 0)
+
+        let dng = try fixture(named: "canon-eos-5d-iii-lossy.dng")
+        let converter = CompatibilityConverter(dng: dng, preview: nil)
+        RenderEngine.registerRAWCompatibilityConverter(converter)
+        let original = try await engine.libRAWDecoderSelection(dng)
+        XCTAssertNil(original?.converterID)
+        let preferred = await engine.preferredRAWDecoder(dng)
+        XCTAssertEqual(original?.version, preferred)
+        XCTAssertEqual(converter.conversions, 0)
+
+        let raster = try jpeg()
+        let rasterSelection = try await engine.libRAWDecoderSelection(raster)
+        XCTAssertEqual(rasterSelection, RAWDecoderSelection())
+    }
+
     func testNativeDecodeDoesNotInvokeRegisteredConverter() async throws {
         let url = try fixture()
         let converter = CompatibilityConverter(dng: url, preview: nil)

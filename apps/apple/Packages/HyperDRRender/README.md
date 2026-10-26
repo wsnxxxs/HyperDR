@@ -50,13 +50,15 @@ the base. Zero strength is exactly the neutral endpoint; one is the full look.
 
 RAW Log and film input use boost 0, boostShadow 0, file baseline exposure, and
 **no early gamut mapping**. Signed extended-linear-P3 values survive until the
-look's input transform, with fitting at the output boundary. For partial strength,
-`lookBaseline` independently develops the Apple display endpoint with the same
-RAW settings and sampling window. Only the latest preview/ROI baseline texture
-is cached; export admission reserves both decoders via `Recipe.needsLookBaseline`.
-This costs an extra development at partial strength. Full strength, zero and
-non-scene looks do not allocate a second RAW development. AI continues using its
-separate Apple-boost identity.
+look's input transform, with fitting at the output boundary. `lookBaseline`
+independently develops the Apple display endpoint with the same RAW settings and
+sampling window for partial strength, zero-colour stock effects, and full-strength
+film/SDR-output Log looks delivering HDR. Full-strength SDR output skips that
+development, staging file and readback. Export admission and storage checks use
+`Recipe.needsLookBaseline(includesHDR:)` with the resolved output, including the
+HDR switch. The analysis cache distinguishes whether this reference is needed,
+so switching back to HDR restores the correct statistics. AI keeps its separate
+Apple-boost identity when needed; SDR-only exports do not infer unused AI gain.
 
 `RenderEngine` is an actor. Cancellation is checked around decode, GPU submission and stripes.
 System decode and submitted GPU work finish before cancellation is reported; cancelled results

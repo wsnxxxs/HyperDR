@@ -73,6 +73,22 @@ result arrives. A different RAW development (including a scene-linear look)
 cannot reuse another development's analysis. No real 110MP RAW or physical
 iOS-device performance/memory measurements were made for this change.
 
+## Draft handoff correctness (2026-10-26)
+
+A suspended draft reload could finish after native refinement and replace the
+source with reduced-decode pixels while the preview options already said native.
+Reloads now re-check quality both before decoding and after the engine returns;
+if refinement won, they re-plan using native pixels. Detail completion merges
+only its detail fields, preserving the current canvas tier and development.
+No-op refinement no longer constructs another render engine.
+
+The regression test holds requests before a reload, after decoding, and before
+detail preparation. All three finish with a native canvas; SDR base and HDR gain
+match an independent native development within the existing float tolerances
+(1e-6 and 1e-5 respectively). The old code reproduced a late draft frame.
+This removes redundant draft work without reducing preview resolution, changing
+sampling or adding another image cache. No general speedup is claimed.
+
 ## Film and LUT follow-up (2026-10-26)
 
 The editor now retains the already-developed Apple display and scene-linear

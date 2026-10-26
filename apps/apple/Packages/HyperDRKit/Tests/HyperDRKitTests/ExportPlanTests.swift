@@ -631,6 +631,31 @@ struct ExportMemoryPlanTests {
         #expect(!constrained.blockers.isEmpty)
     }
 
+    @Test func SDRBaselineAdmissionUsesTheResolvedOutput() {
+        let size = ExportPixelSize(width: 9504, height: 6336)
+        for hdr in [false, true] {
+            for encoding in [ExportEncoding.sdrJPEG, .sdrTIFF, .sdrDNG, .adaptive, .isoGainMapJPEG, .hlg, .avifPq, .hdrTIFF16] {
+                for strength in [0.0, 40, 100] {
+                    let recipe = Recipe(inputDomain: .rawEDR, values: [Recipe.filmID: .string("portra400"),
+                        "look.filmStrength": .number(strength), "effect.grain": .number(100),
+                        "effect.halation": .number(100), "hdr.enabled": .bool(hdr)])
+                    var input = request(.custom(.init(encoding: encoding)), source: source(.rawEDR, size: size))
+                    input.edit = ExportEditFacts(recipe: recipe, peakStops: 3)
+                    let plan = ExportPlanner.plan(input, budget: FixedExportMemoryBudget(bytes: 16 << 30))
+                    #expect(plan.includesHDR == (hdr && !encoding.isSDR))
+                    let needed = recipe.needsLookBaseline(includesHDR: plan.includesHDR)
+                    #expect(needed == (strength < 100 || plan.includesHDR))
+                    input.edit.needsLookBaseline = false; input.edit.needsSDRLookBaseline = false
+                    let single = ExportPlanner.plan(input, budget: FixedExportMemoryBudget(bytes: 16 << 30))
+                    #expect(plan.memory.estimate.decode - single.memory.estimate.decode == (needed ? size.pixels * (plan.memory.usesRowInput ? 24 : 40) : 0))
+                    let staged = ExportStorage.requiredBytes(plan: plan, source: input.source, needsLookBaseline: needed)
+                    let unstaged = ExportStorage.requiredBytes(plan: plan, source: input.source, needsLookBaseline: false)
+                    #expect(staged - unstaged == (needed ? size.pixels * 16 : 0))
+                }
+            }
+        }
+    }
+
     @Test func recipeFactsReserveOnlyAnActiveFilm() {
         var recipe = Recipe(inputDomain: .rawEDR)
         #expect(!ExportEditFacts(recipe: recipe, peakStops: 3).usesFilm)

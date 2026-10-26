@@ -17,9 +17,9 @@ extension RenderEngine {
     public func resolvedAutomatic(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
                                   modelGain: ModelGainPrediction? = nil,
                                   options: RenderOptions = RenderOptions(),
-                                  includingSet: Bool = false) throws -> [String:Double] {
+                                  includingSet: Bool = false, includesHDR: Bool = true) throws -> [String:Double] {
         guard source.domain == recipe.inputDomain else { throw RenderError.invalidAdjustment }
-        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options,includesHDR:includesHDR)
         edit.hdr.modelGain = modelGain
         if includingSet {
             edit.hdr.range = nil

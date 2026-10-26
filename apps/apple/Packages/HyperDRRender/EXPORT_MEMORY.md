@@ -541,13 +541,15 @@ full-image noise texture. Both effects run in 256-row bands when the region is
 taller than 1024 rows. Zero amounts allocate no generic effect workspace.
 Generic effects require no extra decoder or staged Apple endpoint. A selected
 stock with nonzero grain/halation continues to require scene-linear RAW and
-scatter even at zero stock colour strength. Below 100 % colour strength it also
-requires the Apple display baseline, including exactly 0 %, so `needsLookBaseline`
-and Kit's `usesFilm` charge both developments and the existing scatter workspace.
-The independent stock effect is the difference of its complete and effect-free
-outputs: one extra `filmFromRaw` per pixel at partial/zero colour strength, held
-in shader registers without another full-resolution texture. At 100 % colour
-strength the old complete-stock path is evaluated once.
+scatter even at zero stock colour strength. Since 2026-10-26 it also requires the
+Apple display baseline at every colour strength, 100 % included (captured HDR
+below), so `needsLookBaseline` and Kit's `usesFilm` charge both developments and
+the existing scatter workspace. The independent stock effect is the difference
+of its complete and effect-free outputs: one extra `filmFromRaw` per pixel
+whenever grain or halation is nonzero, at any colour strength, held in shader
+registers without another full-resolution texture. Only a stock without grain or
+halation evaluates `filmFromRaw` once; the Kodak green balance reuses the
+effect-free output instead of adding another.
 
 
 ### Single render pass for HDR row packaging (2026-10-25)
@@ -667,3 +669,69 @@ HDR overflow at the selected ceiling. The row estimator already reserves RGB gai
 
 Private reproduction and measurements are in
 `docs/reviews/look-hdr-2026-10-26/RESULTS.md` (ignored).
+
+### Full-strength film export cost on the Mac — 2026-10-26
+
+`scripts/bench_export_memory.swift`, Release, one fresh process per case, no
+editor: `DSC01468.ARW` (9504 × 6336, RAW 9), Portra 400 at 100 %, film exposure
+0, range 2 stops, quality 90, `HYPERDR_BENCH_BUDGET_BYTES=4294967296`. "Before"
+is a65f711e with bd5165c6 reverted (its baseline guard restored by hand), so it
+differs only in the captured-HDR change; "after" is a65f711e. Grain/halation 100 %
+is what choosing a stock on an untouched photo applies; the script itself leaves
+them at 0, so a local copy set both through an environment variable.
+
+| Case | Before s | After s | Before peak MiB | After peak MiB | Kit estimate MiB |
+|---|---:|---:|---:|---:|---:|
+| HEIC HLG, grain/halation 0 | 12.8 | 33.3 | 1243 | 1292 | 2122 → 3500 |
+| AVIF PQ, grain/halation 0 | 20.1 | 40.6 | 1244 | 1292 | 2142 → 3520 |
+| HEIC HLG, grain/halation 100 % (two runs) | 12.6 / 13.0 | 32.0 / 32.7 | 1244 / 1253 | 1313 / 1315 | 2122 → 3500 |
+| AVIF PQ, grain/halation 100 % (two runs) | 23.4 / 24.5 | 42.6 / 44.4 | 1254 / 1252 | 1317 / 1315 | 2142 → 3520 |
+
+Every export verified, and the peak stays far under 2,000,000,000 B (1907.3 MiB);
+memory rises only 50–70 MiB. Time rises by about 20 s per export (HEIC 2.5×, AVIF
+1.8×), all of it in three stages: developing 3 → 12.5–13 s (staging the Apple
+endpoint in native cells), rendering 4.7 → 12 s (each band evaluates the baseline
+scene as well) and read 2 → 4.7 s (reading the staged file back). Encoding and
+verification do not change. The staged file needs 963,526,656 B of free space
+plus the 256 MiB reserve. With the bench's default 2 GB budget both versions are
+blocked (`export_memory_exceeded`): the estimate already exceeded it before this
+change and grows by 1378 MiB for the second development allowance, while the
+measured peak grows by under 70 MiB. These Mac figures are not comparable to the
+2026-10-24 table above, which measured a real editor's phases with an
+older pipeline. Not measured on iPhone or iPad, nor with a 110MP RAW.
+
+### Skip unused RAW references for SDR output — 2026-10-27
+
+Full-strength film and SDR-output Log looks now skip the Apple display endpoint
+when the final output is SDR, either by format or by the HDR switch. Partial
+strength and zero-colour stock effects retain it for the SDR crossfade. Recipe,
+Kit memory/storage admission, staging, automatic resolution and band rendering
+share that output intent. The analysis key includes the RAW reference requirement
+so returning to HDR cannot reuse SDR-only statistics. SDR exports also skip AI
+gain inference; Adaptive HEIC with HDR off no longer requests a gain plane or
+whole-photo gain summary. The frozen recipe in export history is unchanged.
+
+Release on the same 61MP RAW above, Portra 400, film exposure 0, grain/halation
+100%, quality 90, range 2, 4 GiB admission budget, no editor; fresh process per
+case, comparing the previous a65f711e binary to this working tree:
+
+| SDR JPEG at 100%, HDR off | Before | After |
+|---|---:|---:|
+| Export seconds | 29.89 | 11.08 |
+| Peak footprint MiB | 1356.5 | 1314.2 |
+| Kit estimate MiB | 3421.3 | 2043.0 |
+| RAW baseline staging bytes | 963,526,656 | 0 |
+
+Both JPEGs decode to identical pixels (maximum 8-bit code error 0); only two ICC
+creation-timestamp bytes differ. At 40% the staging/estimate remains unchanged
+and decoded pixels are identical. The HLG 100% control exports are byte-identical.
+An SDR-format/HDR-on run also produces identical pixels and the same reduced
+estimate, but took 21.28 s; partial/HDR timing also varied substantially. These
+single runs establish the eliminated work, not a stable speedup across devices.
+No new device/110MP claim or reduced native decoder cap is made.
+
+`scripts/bench_export_memory.swift` now accepts `HYPERDR_BENCH_EFFECTS=100` and
+`HYPERDR_BENCH_HDR=0/1` and reports the effective export baseline requirement.
+All measurements and comparisons: `docs/reviews/sdr-look-export-2026-10-27/RESULTS.md`
+(ignored). Recipe's 39 and Kit's 237 tests pass, as do staged RAW 8/9 baseline,
+SDR/HDR look, geometry, effects and export regressions; the Mac app builds.

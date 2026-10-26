@@ -302,6 +302,27 @@ private extension ParameterDefault {
     #expect(!recipe.needsLookBaseline)
 }
 
+@Test func RAWLookBaselineFollowsOutputAndKeepsPartialSDR() {
+    let look = LUTReference(contentHash: "sha256:01", name: "Log")
+    for film in [false, true] {
+        for strength in [0.0, 40, 100] {
+            for effects in [0.0, 100] {
+                var recipe = Recipe(inputDomain: .rawEDR, look: film ? nil : look,
+                    values: ["look.input": .string("logc4-awg4"), "look.output": .string("rec709")])
+                if film { recipe.setValue(.string("portra400"), for: Recipe.filmID) }
+                recipe.setValue(.number(strength), for: film ? "look.filmStrength" : "look.strength")
+                recipe.setValue(.number(effects), for: "effect.grain")
+                recipe.setValue(.number(effects), for: "effect.halation")
+                let active = strength > 0 || (film && effects > 0)
+                #expect(recipe.needsLookBaseline == active)
+                #expect(recipe.needsLookBaseline(includesHDR: false) == (active && strength < 100))
+                recipe.setValue(.bool(false), for: "hdr.enabled")
+                #expect(recipe.needsLookBaseline == (active && strength < 100))
+            }
+        }
+    }
+}
+
 @Test func rawDecoderVersionIsOptionalSourceMetadata() throws {
     let legacy = try Recipe.decode(Data("{\"version\":1,\"inputDomain\":\"rawEDR\"}".utf8))
     #expect(legacy.rawDecoderVersion == nil)

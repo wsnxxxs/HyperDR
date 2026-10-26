@@ -3,8 +3,8 @@ import XCTest
 import HyperDRKit
 @testable import HyperDR
 
-/// What the editor says after launch: the photo came back without its
-/// adjustments, or it could not be found (parity batch 7 §2).
+/// Launch stays empty even when the session store remembers a photo.
+/// Notice views also remain covered independently of launch policy.
 @MainActor final class RestoreNoticeTests: XCTestCase {
     private let remembered = URL(fileURLWithPath: "/tmp/DSC04127.jpg")
 
@@ -14,44 +14,17 @@ import HyperDRKit
         return s
     }
 
-    func testAReopenedPhotoSaysSoOnceItsFirstFrameAndHistoryAreIn() async throws {
+    func testRememberedPhotoDoesNotOpenOrAnnounceItselfAtLaunch() async {
         let s = services(.none)
         s.restoreResult = .restored(s.placeholder(for: remembered))
         let m = EditorModel(services: s)
         m.launch()
-        await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
-        XCTAssertEqual(m.restoreNotice, .reopened(hasHistory: false))
-        XCTAssertEqual(m.canvasNotice, .restored(hasHistory: false))
-        XCTAssertEqual(m.document?.phase, .ready)
-    }
-
-    func testTheSentenceMentionsExportHistoryOnlyWhenThereIsSome() async throws {
-        let s = services(.none)
-        s.restoreResult = .restored(s.placeholder(for: remembered))
-        let m = EditorModel(services: s)
-        let key: RecipeExportSnapshot? = nil
-        s.historyByURL[remembered] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
-                                   result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            recipeSnapshot: key, options: m.exportChoices)]
-        m.launch()
-        await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
-        XCTAssertEqual(m.restoreNotice, .reopened(hasHistory: true))
-    }
-
-    func testTheFirstEditAndDismissalClearTheNotice() async {
-        let s = services(.none)
-        s.restoreResult = .restored(s.placeholder(for: remembered))
-        let m = EditorModel(services: s)
-        m.launch()
-        await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
-        m.adjustRecipe("tone.exposure", to: 1.2)
+        await settle()
+        XCTAssertNil(m.document)
+        XCTAssertNil(m.photo)
         XCTAssertNil(m.restoreNotice)
-        let other = EditorModel(services: s)
-        other.launch()
-        await eventually(timeout: .seconds(10)) { other.restoreNotice != nil }
-        other.dismissRestoreNotice()
-        XCTAssertNil(other.restoreNotice); XCTAssertNil(other.canvasNotice)
+        XCTAssertNil(m.canvasNotice)
+        XCTAssertNil(m.alert)
     }
 
     func testAnOrdinaryOpenSaysNothing() async {
@@ -63,23 +36,16 @@ import HyperDRKit
         XCTAssertNil(m.restoreNotice)
     }
 
-    func testAMissingPhotoIsExplainedInPlaceNotInADialog() async {
-        let s = services(.unavailable(UserFacingError(code: "source_missing"), name: "DSC04127.ARW"))
-        let m = EditorModel(services: s)
-        m.launch()
-        await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
-        XCTAssertEqual(m.restoreNotice, .missing(name: "DSC04127.ARW"))
-        XCTAssertNil(m.alert); XCTAssertNil(m.canvasNotice)
-        m.open([remembered])
-        XCTAssertNil(m.restoreNotice, "opening any photo clears it")
-    }
-
-    func testOtherRestoreFailuresKeepTheirAlert() async {
-        let s = services(.unavailable(UserFacingError(code: "decode_failed"), name: "a.jpg"))
-        let m = EditorModel(services: s)
-        m.launch()
-        await eventually(timeout: .seconds(10)) { m.alert != nil }
-        XCTAssertEqual(m.alert?.code, "decode_failed"); XCTAssertNil(m.restoreNotice)
+    func testAnUnavailableRememberedPhotoDoesNotInterruptLaunch() async {
+        for code in ["source_missing", "session_expired", "decode_failed"] {
+            let s = services(.unavailable(UserFacingError(code: code), name: "DSC04127.ARW"))
+            let m = EditorModel(services: s)
+            m.launch()
+            await settle()
+            XCTAssertNil(m.document)
+            XCTAssertNil(m.restoreNotice)
+            XCTAssertNil(m.alert)
+        }
     }
 
     func testNoPhotoAndNoNoticeWhenNothingWasRemembered() async {
@@ -126,22 +92,6 @@ import HyperDRKit
         XCTAssertEqual(spoken.count, 1)
         XCTAssertEqual(spoken.first?.1, false, "a plain announcement")
         XCTAssertTrue(spoken.first?.0.hasPrefix("Reopened your last photo.") == true)
-    }
-
-    func testTheMissingPhotoIsAnnouncedOnceByTheModelAndNotAgainWhenTheViewIsRebuilt() async throws {
-        let saved = NoticeAnnouncement.deliver
-        defer { NoticeAnnouncement.deliver = saved }
-        var spoken: [(String, Bool)] = []
-        NoticeAnnouncement.deliver = { spoken.append(($0, $1)) }
-        let s = services(.unavailable(UserFacingError(code: "source_missing"), name: "DSC04127.ARW"))
-        let m = EditorModel(services: s)
-        m.launch()
-        await eventually { m.restoreNotice != nil }
-        XCTAssertEqual(spoken.count, 1)
-        XCTAssertEqual(spoken.first?.1, true)
-        XCTAssertEqual(spoken.first?.0, RestoreMissingNotice.announcement(name: "DSC04127.ARW", locale: .current))
-        for _ in 0..<2 { try await mount(RestoreMissingNotice(name: "DSC04127.ARW") {}) { false } }
-        XCTAssertEqual(spoken.count, 1, "showing the note again says nothing more")
     }
 
     func testTheMissingNoteWithoutANameIsTheUnnamedSentence() {

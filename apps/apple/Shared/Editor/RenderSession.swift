@@ -47,6 +47,9 @@ actor RenderSession: EditorRendering {
     private var beforeReload: (@Sendable () async -> Void)?
 
     func setBeforeReload(_ hook: (@Sendable () async -> Void)?) { beforeReload = hook }
+    /// Tests: a completed load may resume after a native-preview handoff.
+    private var afterPreviewLoad: (@Sendable () async -> Void)?
+    func setAfterPreviewLoad(_ hook: (@Sendable () async -> Void)?) { afterPreviewLoad = hook }
     /// Fault injection for the initial load, independent of a platform RAW model.
     private var beforeOpenLoad: (@Sendable (SourceOptions) async throws -> Void)?
     func setBeforeOpenLoad(_ hook: (@Sendable (SourceOptions) async throws -> Void)?) { beforeOpenLoad = hook }
@@ -284,7 +287,7 @@ actor RenderSession: EditorRendering {
     func refinePreview(sourceID: UUID) async throws -> EditorSource? {
         // Native RAW development is synchronous on its engine. A separate engine
         // leaves the editor's engine free for draft renders while this runs.
-        let refiner = try await Task.detached(priority: .utility) { try RenderEngine() }.value
+        var refiner: RenderEngine?
         let generation = self.generation
         while true {
             try Task.checkCancellation()
@@ -292,6 +295,10 @@ actor RenderSession: EditorRendering {
             guard let initial = opened, initial.editor.id == sourceID else { throw EditorRenderingError.staleSource }
             guard initial.editor.domain == .rawEDR, initial.previewOptions.draftRAWPreview else { return initial.editor }
             guard initial.source != nil else { return nil }
+            if refiner == nil {
+                refiner = try await Task.detached(priority: .utility) { try RenderEngine() }.value
+            }
+            guard let refiner else { return nil }
             var options = initial.previewOptions
             options.draftRAWPreview = false
             guard try FileRevision(initial.editor.url) == initial.revision else { throw EditorRenderingError.sourceChanged }
@@ -310,6 +317,7 @@ actor RenderSession: EditorRendering {
             try Task.checkCancellation()
             try checkCurrent(generation)
             guard var latest = opened else { throw EditorRenderingError.noSource }
+            guard latest.source != nil else { return nil }
             guard latest.previewOptions == initial.previewOptions else { continue }
             latest.source = source // drops the draft immediately
             latest.options = options
@@ -372,7 +380,10 @@ actor RenderSession: EditorRendering {
         if let region = request.region {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
+            try Task.checkCancellation()
             try checkCurrent(generation)
+            guard let current = self.opened else { throw EditorRenderingError.noSource }
+            opened = current
             if opened.detail == nil || opened.detailOptions != sourceOptions {
                 // Release the previous RAW development before opening another;
                 // retaining both native decoder graphs doubles the input cache.
@@ -389,7 +400,12 @@ actor RenderSession: EditorRendering {
             let tile = try await engine.materializeExportRegion(opened.detail!, outputSize: request.size, region: region, halo: halo)
             try Task.checkCancellation()
             try checkCurrent(generation)
-            self.opened = opened
+            // Keep preview quality and canvas options published while the detail
+            // was materializing. Its old snapshot must not undo refinement.
+            guard var current = self.opened else { throw EditorRenderingError.noSource }
+            current.detail = opened.detail
+            current.detailOptions = opened.detailOptions
+            self.opened = current
             return Prepared(source: tile, lut: lut,
                             modelGain: request.usesModelGain ? prediction(for: recipe, source: tile) : nil,
                             options: options, generation: generation)
@@ -413,14 +429,27 @@ actor RenderSession: EditorRendering {
         if reload == nil, opened.source == nil { reload = opened.options }
         if let reload {
             await beforeReload?()
+            try Task.checkCancellation()
+            try checkCurrent(generation)
+            if reload.draftRAWPreview, self.opened?.previewOptions.draftRAWPreview == false {
+                // Refinement won while this request waited. Re-plan with native
+                // pixels before paying for another reduced decode.
+                return try await prepare(request, needsLUT: needsLUT)
+            }
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
             let source = try await engine.load(opened.editor.url, options: reload, preparingAnalysis: true, retainingPreview: true,
                                                allowsRAWCompatibilityFallback: false)
+            await afterPreviewLoad?()
             // Before writing anything back: cancelled, or another photo (or
             // none) opened while this one loaded.
             try Task.checkCancellation()
             try checkCurrent(generation)
             guard var current = self.opened else { throw EditorRenderingError.noSource }
+            if source.isDraftRAWPreview, !current.previewOptions.draftRAWPreview {
+                // The engine await also permits refinement to finish. Never
+                // install a late draft beneath a completed native quality flag.
+                return try await prepare(request, needsLUT: needsLUT)
+            }
             current.source = source
             var effective = reload
             if source.domain == .rawEDR, reload.draftRAWPreview, !source.isDraftRAWPreview {

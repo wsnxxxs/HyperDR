@@ -18,7 +18,11 @@ For native area N, canvas width W and callback height R:
 - Decoder/work allowance D = 24N + 512 MiB, once. This is empirical, from the
   Render measurements, not a universal Apple decoder cap. Sensor area is used
   if larger than the developed raster. Reducing the output does not shrink N.
-  Partial RAW scene looks reserve a second 24N decoder allowance; the fixed
+  RAW scene looks reserve a second 24N decoder allowance for SDR crossfades
+  (including zero-colour stock effects), or for captured HDR at full strength.
+  Full-strength SDR exports, including the HDR switch being off, do not stage or
+  reserve this endpoint. The final encoding drives both admission and rendering;
+  a single-layer HDR encoding still needs it. The fixed
   512 MiB work allowance is still charged once. Single-cell RAW scratch is
   covered there; no completed-cell cache or separate cache surcharge remains.
 - Retained LUT/caption/specification resources are added in every stage.

@@ -852,6 +852,57 @@ extension RenderSessionTests {
 }
 
 extension RenderSessionTests {
+    @Test(arguments: ["beforeLoad", "afterLoad", "detail"])
+    func aSuspendedDraftReloadCannotUndoNativeRefinement(suspension: String) async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ARW")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW"), to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession()
+        let source = try await session.open(url, previewSize: .init(width: 1280, height: 1280))
+        #expect(source.isDraftPreview)
+        let recipe = Recipe(inputDomain: .rawEDR, rawDecoderVersion: source.rawDecoderVersion)
+        var changed = recipe
+        changed.setValue(.number(80), for: "develop.sharpness")
+        var request = EditorRenderRequest(sourceID: source.id, recipe: changed, size: .init(width: 512, height: 512))
+        if suspension == "detail" {
+            request.size = source.pixelSize
+            request.region = CGRect(x: 0, y: 0, width: 128, height: 128)
+        }
+        let gate = Gate()
+        if suspension == "afterLoad" {
+            await session.setAfterPreviewLoad { await gate.wait() }
+        } else {
+            await session.setBeforeReload { await gate.wait() }
+        }
+        let flight = Task { [request] in try await session.render(request) }
+        await gate.reached()
+        let refined = try await session.refinePreview(sourceID: source.id)
+        #expect(refined?.isDraftPreview == false)
+        await session.setBeforeReload(nil)
+        await session.setAfterPreviewLoad(nil)
+        await gate.open()
+        let late = try await flight.value
+        #expect(!late.isDraftPreview, "An old reload must adopt the completed native preview tier")
+        let next = try await session.render(request)
+        #expect(!next.isDraftPreview, "Later renders must never reuse the stale draft")
+        var canvas = EditorRenderRequest(sourceID: source.id, recipe: changed,
+            size: RecipeEditor.previewSize(source: source.pixelSize, canvasSide: 1280))
+        canvas.isCanvasPreview = true
+        let shown = try await session.render(canvas)
+        #expect(!shown.isDraftPreview, "A detail request must preserve the native canvas tier")
+        let referenceEngine = try RenderEngine()
+        let native = try await referenceEngine.load(url,
+            options: SourceOptions(recipe: changed, resolution: .preview(maximumSize: .init(width: 1280, height: 1280))),
+            preparingAnalysis: true)
+        let reference = try await referenceEngine.render(native, recipe: changed, size: canvas.size)
+        let actual = RenderEngine.readPixels(shown.planes), expected = RenderEngine.readPixels(reference)
+        #expect(zip(actual.baseRGBA, expected.baseRGBA).allSatisfy { abs($0 - $1) <= 0.000001 })
+        #expect(zip(actual.gain, expected.gain).allSatisfy { abs($0 - $1) <= 0.00001 })
+        await session.close()
+    }
+
     @Test func scopesCannotShrinkTheCanvasRefinementOrReloadItAfterHandoff() async throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 { root.deleteLastPathComponent() }

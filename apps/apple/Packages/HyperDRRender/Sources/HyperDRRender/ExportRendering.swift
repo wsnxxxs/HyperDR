@@ -122,12 +122,13 @@ extension RenderEngine: ExportStripeRendering {
         if let limit = request.ceilingStops {
             guard limit.isFinite, limit >= 0.5, limit <= 4 else { throw RenderError.invalidAdjustment }
         }
-        var edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,includesHDR:request.includesGain)
         edit.hdr.modelGain = modelGain
         if edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel {
             guard let modelGain, modelGain.sourceID == source.modelSourceID else { throw RenderError.aiNotAvailable }
         }
-        var automatic = try resolvedAutomatic(source,recipe:recipe,lut:lut,modelGain:modelGain)
+        var automatic = try resolvedAutomatic(source,recipe:recipe,lut:lut,modelGain:modelGain,
+                                               includesHDR:request.includesGain)
 #if DEBUG || HYPERDR_FILM_PROFILE
         RenderPipelineDiagnostics.phase("export.automaticResolved", device: device)
 #endif

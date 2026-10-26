@@ -4,6 +4,8 @@
 // Optional environment: HYPERDR_BENCH_QUALITY (90),
 // HYPERDR_BENCH_BUDGET_BYTES (2000000000), HYPERDR_BENCH_RANGE_STOPS (2;
 // use "auto" for the default recipe). under2GB always uses decimal 2 GB.
+// HYPERDR_BENCH_EFFECTS sets grain and halation in recipe percent (default 0).
+// HYPERDR_BENCH_HDR overrides the HDR switch (0/1; default off for SDR formats).
 // The 2 GB gate is decimal bytes, not 2 GiB. This is not a device guarantee:
 // run the same recipe on iPhone to validate Apple's device decoder as well.
 import Foundation
@@ -47,13 +49,19 @@ private func footprint() -> (current: UInt64, peak: UInt64) {
         if raw { recipe.rawDecoderVersion = await render.preferredRAWDecoder(input) }
         let range = ProcessInfo.processInfo.environment["HYPERDR_BENCH_RANGE_STOPS"] ?? "2"
         if let stops = Double(range) { recipe.setValue(.number(stops), for: "hdr.range") }
-        if encoding.isSDR { recipe.setValue(.bool(false), for: "hdr.enabled") }
+        let hdrEnabled = ProcessInfo.processInfo.environment["HYPERDR_BENCH_HDR"]
+            .map { $0 != "0" } ?? !encoding.isSDR
+        recipe.setValue(.bool(hdrEnabled), for: "hdr.enabled")
         let strength = args.count > 4 ? Double(args[4]) : nil
         if let strength {
             recipe.setValue(.string("portra400"), for: Recipe.filmID)
             recipe.setValue(.number(strength), for: "look.filmStrength")
             recipe.setValue(.number(0), for: Recipe.filmExposureID)
-            // Keep default grain/scatter/halation: do not benchmark a cheapened look.
+            // Recipe defaults are zero; choosing a stock in the UI applies 100 %.
+            if let effects = ProcessInfo.processInfo.environment["HYPERDR_BENCH_EFFECTS"].flatMap(Double.init) {
+                recipe.setValue(.number(effects), for: "effect.grain")
+                recipe.setValue(.number(effects), for: "effect.halation")
+            }
         }
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("export-memory-\(UUID())")
         defer { try? FileManager.default.removeItem(at: temp) }
@@ -93,6 +101,8 @@ private func footprint() -> (current: UInt64, peak: UInt64) {
         let record: [String: Any] = [
             "encoding": encoding.rawValue, "quality": quality, "budgetBytes": cap, "width": size.width, "height": size.height,
             "filmStrength": strength as Any? ?? "none", "rangeStops": range, "liveEditor": editor != nil,
+            "hdrEnabled": hdrEnabled, "needsLookBaseline": recipe.needsLookBaseline(includesHDR: plan.includesHDR),
+            "effects": ProcessInfo.processInfo.environment["HYPERDR_BENCH_EFFECTS"] ?? "0",
             "decoder": recipe.rawDecoderVersion ?? "none", "verified": result.verified,
             "usesRowInput": report.usesRowInput ?? false, "estimateBytes": plan.memory.estimate.peak,
             "startFootprintBytes": before.current, "peakFootprintBytes": after.peak,

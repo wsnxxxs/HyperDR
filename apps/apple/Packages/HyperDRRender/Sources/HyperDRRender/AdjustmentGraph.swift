@@ -40,6 +40,7 @@ struct AnalysisKey: Equatable {
     let film: FilmAdjustments
     let halation: Float
     let stockProcessing: Bool
+    let rawLookBaseline: Bool
     let start, coverage: Float
 }
 
@@ -226,12 +227,14 @@ extension RenderEngine {
     }
 
     /// Fixed-scale statistics and masks are shared by preview and export. Changing
-    /// strength, range, enabled or rolloff does not invalidate upstream analysis.
+    /// HDR strength, range and rolloff do not invalidate upstream analysis.
+    /// The HDR switch does when it changes a RAW look's reference development.
     public func analysis(_ source: RenderSource, adjustments edit: RenderAdjustments = RenderAdjustments()) throws -> SpatialAnalysis {
         try Task.checkCancellation()
         try edit.validate(domain:source.domain)
         let source = try fixedAnalysisSource(source)
         let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look, film: edit.film, halation: edit.effects.halation, stockProcessing: edit.usesFilmProcessing,
+                              rawLookBaseline: source.domain == .rawEDR && edit.needsRAWLookBaseline,
                               start: edit.hdr.expansionStart ?? RenderParameter.expansionStart, coverage: edit.hdr.coverage)
         if let cached = analysisCache, cached.key == key { return cached.result }
         analysisCache = nil

@@ -801,6 +801,26 @@ struct RecipeExportEnvironment {
         #expect(manual.resolved.ceilingStops == 1)
     }
 
+    @Test func SDRExportDoesNotInferOrRequireTheAIModel() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        var recipe = Recipe(); recipe.setHDRSource(.ai)
+        recipe.setValue(.number(35), for: "hdr.sdrRolloff")
+        let service = env.realService(prediction: { _, _ in
+            Issue.record("SDR export requested an unused HDR model")
+            throw RecipeExportError.missingModel
+        })
+        for encoding in [ExportEncoding.sdrJPEG, .sdrTIFF] {
+            let result = try await service.export(session: env.session.id,
+                snapshot: env.snapshot(recipe: recipe, modelID: "unavailable-model"), request: env.request(encoding))
+            #expect(result.verified && result.resolved.modelIdentity == nil)
+            #expect(result.resolved.snapshot.recipe == recipe)
+        }
+        recipe.setValue(.bool(false), for: "hdr.enabled")
+        let result = try await service.export(session: env.session.id,
+            snapshot: env.snapshot(recipe: recipe), request: env.request(.adaptive))
+        #expect(result.verified && result.resolved.modelIdentity == nil)
+    }
+
     @Test func aiIsAwaitedAndFailureDoesNotFallBack() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         var recipe = Recipe(); recipe.setHDRSource(.ai)
@@ -815,10 +835,10 @@ struct RecipeExportEnvironment {
             #expect(model == "research-cnn-v1")
             return .init(sourceID: source.id, modelID: "test-v1", gain: texture)
         })
-        _ = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.sdrJPEG))
+        _ = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.isoGainMapJPEG))
         let failing = env.service(prediction: { _, _ in throw RecipeExportError.missingModel })
         await #expect(throws: RecipeExportError.missingModel) {
-            _ = try await failing.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.sdrJPEG))
+            _ = try await failing.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.isoGainMapJPEG))
         }
         #expect(await env.sessions.exports(for: env.session.id).count == 1)
     }

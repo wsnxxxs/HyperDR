@@ -213,7 +213,6 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var engineObserver: Task<Void, Never>?
     @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var didLaunch = false
-    @ObservationIgnored private var canRestoreAtLaunch = true
     @ObservationIgnored private var busyTask: Task<Void, Never>?
     @ObservationIgnored var renderOutstanding = false
     /// The last render failure already reported.
@@ -369,7 +368,6 @@ import UniformTypeIdentifiers
             pendingPhotoSwitch = PhotoSwitchRequest(kind: .open(url), displayName: url.lastPathComponent)
             return
         }
-        canRestoreAtLaunch = false
         isRestoring = false
         prepareForPhotoSwitch()
         beginOpen(urls, replacedName: replacedName)
@@ -379,47 +377,16 @@ import UniformTypeIdentifiers
         guard !didLaunch else { return }
         didLaunch = true
         Task { [weak self] in await self?.loadExportServices() }
-        isRestoring = canRestoreAtLaunch && document == nil && photo == nil && openRollback == nil
-        syncControls()
-        let ticket = generation
-        let openedAt = services.openClock.now
-        if isRestoring { startCameraSupportDeadline(openedAt: openedAt, ticket: ticket) }
-        launchTask = Task { [weak self, services] in
-            defer {
-                if self?.generation == ticket {
-                    self?.cameraSupportTask?.cancel()
-                    self?.isRestoring = false
-                    self?.syncControls()
-                }
-            }
+        // Start services and load export history, but only an explicit open may
+        // start decoding a photo. Finder opens can arrive during startup.
+        launchTask = Task { [services] in
             await services.start()
-            guard let self, !Task.isCancelled, generation == ticket,
-                  canRestoreAtLaunch, document == nil, openRollback == nil, photo == nil else { return }
-            let result = await services.restoreLast()
-            guard !Task.isCancelled, generation == ticket, canRestoreAtLaunch,
-                  document == nil, openRollback == nil, photo == nil else {
-                if case .restored(let photo) = result { await services.close(photo) }
-                return
-            }
-            switch result {
-            case .none: break
-            case .unavailable(let error, let name):
-                // The photo is gone: say so where the picker is, not in a
-                // dialog nobody asked for. Other failures keep the alert.
-                if error.code == "source_missing" || error.code == "session_expired" {
-                    restoreNotice = .missing(name: name)
-                    // Once, here: a view that is rebuilt later must not read it again.
-                    NoticeAnnouncement.post(RestoreMissingNotice.announcement(name: name, locale: .current), highPriority: true)
-                }
-                else { alert = error }
-            case .restored(let photo): beginOpen([photo.url], restored: photo, openedAt: openedAt)
-            }
         }
     }
 
     func report(openFailure error: any Error) { alert = UserFacingError.importFailure(error) }
 
-    private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil, openedAt: Duration? = nil, replacedName: String? = nil) {
+    private func beginOpen(_ urls: [URL], replacedName: String? = nil) {
         isRestoring = false
         clearRestoreNotice()
         if case .failed(let error) = engine {
@@ -455,14 +422,12 @@ import UniformTypeIdentifiers
         alert = nil
         syncControls()
 
-        startCameraSupportDeadline(openedAt: openedAt ?? services.openClock.now, ticket: ticket)
+        startCameraSupportDeadline(openedAt: services.openClock.now, ticket: ticket)
         operation = Task { [weak self, services] in
             guard let self else { return }
             var candidate: EditorPhoto?
             do {
-                let opened: EditorPhoto
-                if let restored { opened = restored }
-                else { opened = try await services.open(url) }
+                let opened = try await services.open(url)
                 candidate = opened
                 try Task.checkCancellation()
                 guard generation == ticket else { await services.close(opened); return }
@@ -499,7 +464,6 @@ import UniformTypeIdentifiers
                 editorChanged()
                 startCaptureFacts(opened)
                 applyInitialPreferences()
-                if restored != nil { armRestoreNotice() }
                 if let replacedName { sourceReplacedNotice = replacedName }
                 // The frame's look carries over; being on does not: each photo
                 // opens without a frame until it is turned on for it.
@@ -549,7 +513,6 @@ import UniformTypeIdentifiers
     func cancelOpen() {
         guard canCancelOpen else { return }
         let previous = openRollback
-        canRestoreAtLaunch = false
         isRestoring = false
         launchTask?.cancel()
         launchTask = nil
@@ -595,7 +558,6 @@ import UniformTypeIdentifiers
             return
         }
         prepareForPhotoSwitch()
-        canRestoreAtLaunch = false
         isRestoring = false
         generation += 1
         cameraSupportTask?.cancel()

@@ -2,6 +2,7 @@ import CoreImage
 import Foundation
 import HyperDRRecipe
 import Testing
+import Synchronization
 @testable import HyperDRRender
 
 private func sameBits(_ actual: [Float], _ expected: [Float], _ label: String) {
@@ -11,6 +12,10 @@ private func sameBits(_ actual: [Float], _ expected: [Float], _ label: String) {
 }
 
 private extension RenderEngine {
+    func usesSceneAsLookBaseline(_ source: RenderSource, edit: RenderAdjustments) throws -> Bool {
+        try lookBaseline(source, edit: edit) === source.texture
+    }
+
     func stagedBaselinePixels(_ source: RenderSource, edit: RenderAdjustments) throws -> [Float] {
         Self.readTexture(try lookBaseline(source, edit: edit))
     }
@@ -94,6 +99,58 @@ private extension RenderEngine {
                 let expected = try a.read(y: y, count: count), actual = try b.read(y: y, count: count)
                 sameBits(actual.baseRGB, expected.baseRGB, "\(name) RAW \(decoder) rows \(y) base")
                 sameBits(actual.gain, expected.gain, "\(name) RAW \(decoder) rows \(y) gain")
+            }
+        }
+    }
+
+    @Test func SDROutputSkipsFullStrengthBaselineWithoutChangingPixels() async throws {
+        let (directory, file) = try fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = try RenderEngine()
+        let decoder = try #require(await engine.rawDecoder(file, generation: 9))
+        let lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        for film in [true, false] {
+            var recipe = Recipe(inputDomain: .rawEDR,
+                look: film ? nil : LUTReference(contentHash: lut.contentHash, name: "Log"),
+                values: ["look.input": .string("slog3-sgamut3cine"), "look.output": .string("rec709"),
+                    "look.exposure": .number(0), "look.filmExposure": .number(0),
+                    "effect.grain": .number(100), "effect.halation": .number(100),
+                    "tone.dehaze": .number(20), "tone.clarity": .number(15),
+                    "hdr.sdrRolloff": .number(35)], rawDecoderVersion: decoder)
+            if film { recipe.setValue(.string("portra400"), for: Recipe.filmID) }
+            let selectedLUT = film ? nil : lut
+            let source = try await engine.load(file, options: SourceOptions(recipe: recipe,
+                resolution: .preview(maximumSize: .init(width: 96, height: 96))))
+            for strength in [100.0, 40, 0] {
+                recipe.setValue(.number(strength), for: film ? "look.filmStrength" : "look.strength")
+                let reference = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: selectedLUT))
+                let expected = stride(from: 0, to: reference.baseRGBA.count, by: 4).flatMap {
+                    Array(reference.baseRGBA[$0..<$0+3])
+                }
+                for hdr in [true, false] {
+                    var exported = recipe; exported.setValue(.bool(hdr), for: "hdr.enabled")
+                    let edit = try RenderAdjustments(recipe: exported, lut: selectedLUT, includesHDR: false)
+                    let needed = exported.needsLookBaseline(includesHDR: false)
+                    #expect(edit.needsRAWLookBaseline == needed)
+                    #expect(try await engine.usesSceneAsLookBaseline(source, edit: edit) == !needed)
+                    let pixels = Mutex<[Float]>([])
+                    let report = try await engine.renderExportStripes(source, recipe: exported, lut: selectedLUT,
+                        request: .init(photoSize: source.size, includesGain: false,
+                            capabilities: .init(supportsThreeChannelGain: true)), rows: 17,
+                        prepare: { #expect($0.gain == nil) }, consume: { stripe in
+                            #expect(stripe.gain.isEmpty)
+                            pixels.withLock { $0 += stripe.baseRGB }
+                        })
+                    #expect(report.gain == nil)
+                    let actual = pixels.withLock { $0 }
+                    #expect(actual.count == expected.count)
+                    let error = zip(actual, expected).reduce(Float(0)) { max($0, abs($1.0 - $1.1)) }
+                    #expect(error < 0.00003, "film=\(film) strength=\(strength) HDR switch=\(hdr), SDR error=\(error)")
+                }
+                // A preceding SDR analysis must not poison the next HDR render.
+                let restored = RenderEngine.readPixels(try await engine.render(source, recipe: recipe, lut: selectedLUT))
+                sameBits(restored.baseRGBA, reference.baseRGBA, "restored HDR base")
+                sameBits(restored.gain, reference.gain, "restored HDR gain")
             }
         }
     }

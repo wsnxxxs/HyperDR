@@ -65,7 +65,9 @@ private struct RecipeValues {
 extension RenderAdjustments {
     /// Resolve declared recipe units once. The caller resolves recipe.look by its
     /// content hash; an active LUT must match that reference. Bookmarks stay outside Render.
-    public init(recipe: Recipe, lut: ColorLUT? = nil, options: RenderOptions = RenderOptions()) throws {
+    /// SDR export disables gain work while preserving SDR controls such as rolloff.
+    public init(recipe: Recipe, lut: ColorLUT? = nil, options: RenderOptions = RenderOptions(),
+                includesHDR: Bool = true) throws {
         self.init()
         let values = RecipeValues(recipe:recipe,options:options)
         tone.exposure = try values.number("tone.exposure")
@@ -119,6 +121,7 @@ extension RenderAdjustments {
         color.gradingBlending = try values.number("grade.blending")
         color.gradingBalance = try values.number("grade.balance")
         hdr.enabled = try values.bool("hdr.enabled")
+        hdr.enabled = hdr.enabled && includesHDR
         if options.bypassedGroups.contains(.hdr) { hdr.enabled = false }
         hdr.source = options.bypassedGroups.contains(.hdr) ? nil : recipe.hdrSource
         hdr.strength = try values.number("hdr.strength")

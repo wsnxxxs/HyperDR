@@ -67,8 +67,11 @@ import XCTest
         defer { restoredServices.stop() }
         let restoredModel = EditorModel(services: restoredServices)
         restoredModel.launch()
-        await eventually(timeout: .seconds(15), "remembered JPEG") { restoredModel.document?.phase == .ready }
-        XCTAssertEqual(restoredModel.document?.name, source.lastPathComponent)
+        await restoredServices.start()
+        await settle()
+        XCTAssertNil(restoredModel.document, "A remembered photo must not decode at launch")
+        XCTAssertNil(restoredModel.canvasComposition)
+        await openReady(restoredModel, source)
         XCTAssertNotNil(restoredModel.canvasComposition)
         restoredModel.closeDocument()
         await settle()

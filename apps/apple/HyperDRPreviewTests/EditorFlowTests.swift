@@ -129,16 +129,16 @@ import XCTest
         model.closeDocument()
     }
 
-    func testFinderOpenReplacesPendingRestoreAndClosesItsResult() async {
+    func testLaunchStartsOnceWithoutRestoringAndFinderCanOpen() async {
         let services = ScriptedEditorServices()
         services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
-        await eventually { services.restoreWaiter != nil }
+        await eventually { services.startsCompleted == 1 }
+        XCTAssertNil(services.restoreWaiter)
+        XCTAssertNil(model.document)
+        XCTAssertFalse(model.isRestoring)
         await opened(model, services, url: b)
-        services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: a)))
-        services.restoreWaiter = nil
-        await eventually { services.closed.contains { $0.url == self.a } }
         XCTAssertEqual(model.document?.name, "b.jpg")
         model.launch()
         XCTAssertEqual(services.starts, 1)
@@ -331,38 +331,18 @@ extension EditorFlowTests {
     }
 }
 extension EditorFlowTests {
-    func testOpenCommandIsLockedWhileRestoreWaitsButFinderCanReplaceIt() async {
-        let services = ScriptedEditorServices()
-        services.usesRestoreGate = true
-        let model = EditorModel(services:services)
-        model.launch()
-        XCTAssertFalse(model.canOpenDocument)
-        await eventually(timeout:.seconds(2)) { services.restoreWaiter != nil }
-        XCTAssertTrue(model.isRestoring)
-        XCTAssertFalse(model.canOpenDocument)
-        await opened(model,services,url:b)
-        XCTAssertFalse(model.isRestoring)
-        XCTAssertTrue(model.canOpenDocument)
-        services.restoreWaiter?.resume(returning:.restored(services.placeholder(for:a)))
-        services.restoreWaiter = nil
-        await eventually(timeout:.seconds(2)) { services.closed.contains { $0.url == self.a } }
-        XCTAssertEqual(model.document?.name,"b.jpg")
-        model.closeDocument()
-    }
-}
-
-extension EditorFlowTests {
-    func testReviewerOpeningCommandIsLockedWhileRestorationIsSuspended() async {
+    func testLaunchLeavesOpenAvailableWithoutStartingPhotoWork() async {
         let services = ScriptedEditorServices()
         services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
-        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
-        XCTAssertTrue(model.isEditingLocked)
-        XCTAssertFalse(model.canOpenDocument, "§2.12 restore must disable the Open command before the photo exists")
-        services.restoreWaiter?.resume(returning: .none)
-        services.restoreWaiter = nil
-        model.closeDocument()
+        await eventually { services.startsCompleted == 1 }
+        XCTAssertTrue(model.canOpenDocument)
+        XCTAssertFalse(model.isEditingLocked)
+        XCTAssertFalse(model.canCancelOpen)
+        XCTAssertNil(services.restoreWaiter)
+        let opened = await services.scripted.fake.opened
+        XCTAssertTrue(opened.isEmpty)
     }
 }
 

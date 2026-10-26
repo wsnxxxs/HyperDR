@@ -285,14 +285,18 @@ extension Adjustments {
 }
 
 extension Recipe {
-    /// Scene looks retain Apple's display endpoint for captured HDR, including
-    /// full-strength SDR output. Export stages and prices that development too.
-    public var needsLookBaseline: Bool {
+    /// The preview needs the display endpoint for crossfading or captured HDR.
+    public var needsLookBaseline: Bool { needsLookBaseline(includesHDR: true) }
+
+    /// Full-strength scene looks need Apple's endpoint only when delivering HDR.
+    /// Partial strength (including zero-colour stock effects) still mixes its SDR.
+    public func needsLookBaseline(includesHDR: Bool) -> Bool {
         guard inputDomain == .rawEDR else { return false }
+        let hdr = includesHDR && conditionValue("hdr.enabled")?.boolValue != false
         if let stock = conditionValue(Self.filmID)?.stringValue, stock != "none" {
             let strength = conditionValue("look.filmStrength")?.numberValue ?? 0
             let effects = Adjustments.effectIDs.contains { (conditionValue($0)?.numberValue ?? 0) > 0 }
-            if strength > 0 || effects { return true }
+            if strength > 0 || effects { return strength < 100 || hdr }
         }
         guard look != nil, conditionValue("look.enabled")?.boolValue == true,
               let strength = conditionValue("look.strength")?.numberValue, strength > 0,
@@ -300,6 +304,6 @@ extension Recipe {
               Adjustments.declaration("look.input")?.options.first(where: { $0.id == space })?.domains == [.rawEDR]
         else { return false }
         let output = conditionValue("look.output")?.stringValue ?? "srgb"
-        return strength < 100 || ["srgb", "p3", "rec709", "rec2020"].contains(output)
+        return strength < 100 || (hdr && ["srgb", "p3", "rec709", "rec2020"].contains(output))
     }
 }

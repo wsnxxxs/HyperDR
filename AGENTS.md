@@ -180,6 +180,10 @@ RAW opens progressively with an editable `CIRAWFilter.scaleFactor` preview
 for both the canvas and fixed analysis grid and swaps in the result without
 resetting edits or undo. Draft pixels never enter AI inference, detail ROI
 or export.
+Native preview promotion is monotonic for an open photo: suspended draft loads
+re-plan after the handoff, and detail completions merge only their own state.
+Launch initializes services and export history without reopening the last photo
+(user, 2026-10-26); photos open only through an explicit user action.
 Reduced RAW previews also materialize bounded RGBAf bitmap cells before Metal
 area sampling, avoiding opaque black tiles on macOS 15. A reduced decode that
 reports cannotDecodeSource retries native cells with the same recorded decoder
@@ -272,7 +276,11 @@ keep their independent RGB delta at every colour strength, including 100 %;
 physical effects cannot overflow the selected HDR ceiling.
 RAW film and SDR-output Log looks also develop the Apple display endpoint at
 full strength for captured HDR; other partial scene looks need it for crossfading.
-Both decoder allowances are priced by `Recipe.needsLookBaseline` in export.
+Full-strength SDR exports (SDR format or HDR switched off) skip that endpoint;
+partial strength and zero-colour stock effects still need it. Export staging,
+storage and decoder allowances use `Recipe.needsLookBaseline(includesHDR:)` with
+the resolved output. SDR exports skip unused AI inference. Analysis cache identity
+includes the RAW baseline requirement so returning to HDR restores its statistics.
 An export stages that endpoint once, in the canonical RAW cells, into an anonymous
 float32 file (16 B/native pixel of free space, else `insufficientStorage`) before
 the scene graph opens; bands read it back with the same pixels. The editor yields

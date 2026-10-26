@@ -180,62 +180,18 @@ import XCTest
         XCTAssertEqual(summary.colorSource, "raw")
     }
 
-    func testCancelWhileLaunchRestoreIsStillSuspended() async {
-        let services = holding(); services.usesRestoreGate = true
-        let model = EditorModel(services: services)
-        model.launch()
-        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
-        XCTAssertTrue(model.isRestoring)
-        XCTAssertTrue(model.canCancelOpen)
-        model.cancelOpen()
-        XCTAssertFalse(model.isRestoring)
-        XCTAssertFalse(model.canCancelOpen)
-        XCTAssertTrue(model.canOpenDocument)
-        XCTAssertNil(model.document); XCTAssertNil(model.alert)
-        services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: raw)))
-        services.restoreWaiter = nil
-        await eventually(timeout: .seconds(3)) { services.closed.contains { $0.url == self.raw } }
-        let opened = await services.scripted.fake.opened
-        XCTAssertFalse(opened.contains(raw), "the renderer never opened it")
-        XCTAssertNil(model.document); XCTAssertNil(model.alert)
-    }
-
-    func testCancelRestoreAllowsImmediateOpenAndClosesLateCandidate() async {
-        let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = holding(clock); services.usesRestoreGate = true
-        let model = EditorModel(services: services)
-        model.launch()
-        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil && clock.deadlines.count == 1 }
-        model.cancelOpen()
-        await ready(model, services, jpeg)
-        let current = model.document
-        services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: raw)))
-        services.restoreWaiter = nil
-        await eventually(timeout: .seconds(3)) { services.closed.contains { $0.url == self.raw } }
-        clock.advance(to: .seconds(2))
-        await eventually(timeout: .seconds(3)) { clock.resumed == 2 }
-        XCTAssertEqual(model.document, current)
-        XCTAssertFalse(model.canCancelOpen)
-        XCTAssertFalse(model.isRestoring)
-        let opened = await services.scripted.fake.opened
-        XCTAssertFalse(opened.contains(raw)); XCTAssertNil(model.alert)
-        XCTAssertFalse(services.closed.contains { $0.url == self.jpeg })
-    }
-
-    func testCancelWhileStartupIsSuspendedSkipsRestoreAndAllowsOpen() async {
+    func testSuspendedStartupAllowsExplicitOpenWithoutRestore() async {
         let services = holding(); services.usesRestoreGate = true
         var startWaiter: CheckedContinuation<Void, Never>?
         services.startHandler = { await withCheckedContinuation { startWaiter = $0 } }
         let model = EditorModel(services: services)
         model.launch()
         await eventually(timeout: .seconds(3)) { startWaiter != nil }
-        XCTAssertTrue(model.canCancelOpen)
-        model.cancelOpen()
+        XCTAssertFalse(model.canCancelOpen)
         XCTAssertTrue(model.canOpenDocument)
         await ready(model, services, jpeg)
         let current = model.document
-        // The gate ignores cancellation. The post-start generation guard runs
-        // on this actor before the completion counter can be observed here.
+        // Completing startup must leave the explicitly opened photo alone.
         startWaiter?.resume(); startWaiter = nil
         await eventually(timeout: .seconds(3)) { services.startsCompleted == 1 }
         model.launch()
@@ -245,19 +201,18 @@ import XCTest
         XCTAssertFalse(model.isRestoring); XCTAssertNil(model.alert)
     }
 
-    func testLaunchRestoreUsesOpeningDeadline() async {
+    func testLaunchDoesNotStartACameraSupportDeadline() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
         let services = holding(clock); services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
-        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil && clock.deadlines.count == 1 }
-        XCTAssertNil(model.document, "Unknown restore format must not publish a RAW placeholder")
+        await eventually { services.startsCompleted == 1 }
         clock.advance(to: .seconds(2))
-        services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: raw))); services.restoreWaiter = nil
-        await eventually(timeout: .seconds(3)) { model.document?.isPreparingCameraSupport == true }
-        XCTAssertEqual(clock.deadlines, [.milliseconds(1500)])
-        model.cancelOpen()
-        XCTAssertNil(model.document); XCTAssertNil(model.alert)
+        XCTAssertTrue(clock.deadlines.isEmpty)
+        XCTAssertNil(services.restoreWaiter)
+        XCTAssertNil(model.document)
+        XCTAssertFalse(model.canCancelOpen)
+        XCTAssertFalse(model.isRestoringSlowly)
     }
 
     func testStructuredUnsupportedVariantsAndUnreadableRemainDistinct() {

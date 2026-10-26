@@ -86,15 +86,19 @@ public struct ExportEditFacts: Sendable, Hashable {
     /// The resolved `hdr.range` in stops. "Auto" is resolved before planning:
     /// for `hdr` and `dual` sources it is never below the source's own headroom.
     public var peakStops: Double
-    /// A partial Log/film look also develops the Apple display endpoint.
+    /// The look's Apple display endpoint when the output includes HDR.
     public var needsLookBaseline: Bool
+    /// Crossfades need the endpoint even when exporting only SDR.
+    public var needsSDRLookBaseline: Bool
     /// An active film also retains three float32 exposure/scatter textures per tile.
     public var usesFilm: Bool
 
-    public init(hdrEnabled: Bool = true, peakStops: Double, needsLookBaseline: Bool = false, usesFilm: Bool = false) {
+    public init(hdrEnabled: Bool = true, peakStops: Double, needsLookBaseline: Bool = false, usesFilm: Bool = false,
+                needsSDRLookBaseline: Bool? = nil) {
         self.hdrEnabled = hdrEnabled
         self.peakStops = peakStops
         self.needsLookBaseline = needsLookBaseline
+        self.needsSDRLookBaseline = needsSDRLookBaseline ?? needsLookBaseline
         self.usesFilm = usesFilm
     }
 
@@ -105,7 +109,12 @@ public struct ExportEditFacts: Sendable, Hashable {
         let effects = Adjustments.effectIDs.contains { (recipe.conditionValue($0)?.numberValue ?? 0) > 0 }
         self.init(hdrEnabled: recipe.conditionValue("hdr.enabled")?.boolValue ?? true,
                   peakStops: peakStops, needsLookBaseline: recipe.needsLookBaseline,
-                  usesFilm: film != nil && film != "none" && (strength > 0 || effects))
+                  usesFilm: film != nil && film != "none" && (strength > 0 || effects),
+                  needsSDRLookBaseline: recipe.needsLookBaseline(includesHDR: false))
+    }
+
+    public func needsLookBaseline(includesHDR: Bool) -> Bool {
+        includesHDR && hdrEnabled ? needsLookBaseline : needsSDRLookBaseline
     }
 }
 
@@ -181,6 +190,8 @@ public struct ExportPlan: Sendable, Hashable {
     /// group switched off.
     public let peakStops: Double?
     public let gainMap: GainMapPlan
+    /// Gain is also needed by single-layer HDR encodings, not just gain maps.
+    public var includesHDR: Bool { peakStops != nil }
     /// False only for the two publishing destinations.
     public let keepLocation: Bool
     public let memory: ExportMemoryPlan
@@ -507,7 +518,8 @@ public enum ExportPlanner {
             isFramed: request.frame.isFramed, baseBitDepth: baseBitDepth, writeRows: rows,
             retainedBytes: request.resources.bytes, allowsRowInput: request.allowsRowInput,
             quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality,
-            needsLookBaseline: request.edit.needsLookBaseline, usesFilm: request.edit.usesFilm))
+            needsLookBaseline: request.edit.needsLookBaseline(includesHDR: request.edit.hdrEnabled && encoding.needsGainPlane),
+            usesFilm: request.edit.usesFilm))
     }
 
     /// Search estimates only, freezing the measured budget and writer choices.

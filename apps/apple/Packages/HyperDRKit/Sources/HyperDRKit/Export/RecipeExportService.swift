@@ -120,7 +120,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 frozenLUT = retained
                 actualRequest.resources.lutValueCount = retained.values.count
             } else if frozenLUT != nil { throw RecipeExportError.invalidSnapshot }
-            let adjustments = try RenderAdjustments(recipe: snapshot.recipe, lut: frozenLUT)
+            let adjustments = try RenderAdjustments(recipe: snapshot.recipe, lut: frozenLUT, includesHDR: plan.includesHDR)
             let frozenFrame = try await sessions.resolveFrame(snapshot.frame, for: session)
             actualRequest.resources.frameOverlayBytes = frozenFrame?.caption?.png.count ?? 0
             if let caption = frozenFrame?.caption {
@@ -135,8 +135,9 @@ public actor RecipeExportService: RecipeExportServicing {
                 }
             }
             storageDirectory = await sessions.exportStorageDirectory
+            let needsLookBaseline = snapshot.recipe.needsLookBaseline(includesHDR: plan.includesHDR)
             storageRequired = ExportStorage.requiredBytes(plan: plan, source: actualRequest.source,
-                needsLookBaseline: snapshot.recipe.needsLookBaseline)
+                needsLookBaseline: needsLookBaseline)
             // RAW baseline uses tmp; the package replay/staging lives beside the
             // retained result. Check the joint demand on both volumes before any
             // development (the usual app layout puts them on the same volume).
@@ -148,13 +149,13 @@ public actor RecipeExportService: RecipeExportServicing {
             var lazySource: HyperDRRender.ExportSource?
             var source: RenderSource
             if actualRequest.allowsRowInput {
-                // A partial RAW film/Log look develops Apple's endpoint once into
-                // a staged file, instead of a second decoder for every band.
+                // Crossfades and HDR scene looks develop Apple's endpoint once.
+                // Full-strength SDR looks do not allocate or read a staged file.
                 let lazy: HyperDRRender.ExportSource
                 do {
                     lazy = try await renderEngine.openExportSource(photo.sourceURL,
                         options: SourceOptions(recipe: snapshot.recipe, resolution: .full),
-                        stagingLookBaseline: snapshot.recipe.needsLookBaseline,
+                        stagingLookBaseline: needsLookBaseline,
                         allowsRAWCompatibilityFallback: false)
                 } catch RenderError.insufficientStorage(let required, let available) {
                     throw RecipeExportError.insufficientStorage(requiredBytes: required, availableBytes: available)
@@ -206,7 +207,7 @@ public actor RecipeExportService: RecipeExportServicing {
             // UI readouts can precede prediction and are only estimates. Resolve
             // the frozen Recipe with the actual model before imposing a ceiling.
             let automatic = try await renderEngine.resolvedAutomatic(source, recipe: snapshot.recipe,
-                                                                      lut: frozenLUT, modelGain: model)
+                lut: frozenLUT, modelGain: model, includesHDR: plan.includesHDR)
             guard let naturalRange = adjustments.hdr.range.map(Double.init) ?? automatic["hdr.range"],
                   naturalRange.isFinite, naturalRange >= 0 else { throw RecipeExportError.invalidSnapshot }
             actualRequest.edit.peakStops = naturalRange
@@ -249,7 +250,7 @@ public actor RecipeExportService: RecipeExportServicing {
             let renderRequest = ExportRenderRequest(
                 photoSize: .init(width: plan.photoSize.width, height: plan.photoSize.height),
                 ceilingStops: plan.peakStops.map(Float.init), gamut: renderGamut(plan.gamut),
-                includesGain: plan.gainMap.writesGainMap || plan.encoding.needsGainPlane,
+                includesGain: plan.includesHDR,
                 capabilities: .init(supportsThreeChannelGain: caps.supportsThreeChannelGain,
                                     supportsSignedGain: caps.supportsSignedGain,
                                     requiresGainMaximumHeadroom: caps.requiresGainMaximumHeadroom),
@@ -267,7 +268,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 }
                 actualRenderRows = plan.memory.renderRows
                 storageRequired = ExportStorage.requiredBytes(plan: plan, source: actualRequest.source,
-                    needsLookBaseline: snapshot.recipe.needsLookBaseline, baselineAllocated: true)
+                    needsLookBaseline: needsLookBaseline, baselineAllocated: true)
                 try ExportStorage.check(required: storageRequired,
                     available: try ExportStorage.availableBytes(at: storageDirectory))
                 emit(.rendering)

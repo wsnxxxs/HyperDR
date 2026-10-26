@@ -441,6 +441,7 @@ import UniformTypeIdentifiers
         let ticket = generation
         let encoding = preferences.value.rememberOutput ? runEncoding : "adaptive"
         let rawDecoderPreference = preferences.value.rawDecoder
+        let matchesCameraPreview = preferences.value.matchesCameraPreview
         var previous = openRollback ?? OpenSnapshot(document: document, photo: photo,
             reference: hasReferenceFrame, edited: hasEditedFrame, viewMode: selectedMode,
             transform: canvas.transform, display: display, editedGainWeight: editedGainWeight,
@@ -471,7 +472,8 @@ import UniformTypeIdentifiers
                 document?.isPreparingCameraSupport = preparing
                 document?.isOpeningSlowly = slow
                 do {
-                    try await editor.open(opened.url, rawDecoderPreference: rawDecoderPreference)
+                    try await editor.open(opened.url, rawDecoderPreference: rawDecoderPreference,
+                                          matchesCameraPreview: matchesCameraPreview)
                 } catch let error as UserFacingError { throw error } catch is CancellationError {
                     throw CancellationError()
                 } catch let error as RenderError {

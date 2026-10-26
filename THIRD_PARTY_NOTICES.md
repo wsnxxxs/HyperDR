@@ -54,7 +54,11 @@ Kodak Portra Endura, Fujifilm Crystal Archive Type II and Kodak 2383 print
 profiles with `scripts/convert_spektrafilm_stocks.py` (spectral
 upsampling baked per film, illuminants, neutral print filters, scanner levels
 and fitted curves resolved, grain variance and halation parameters tabulated); the converted data in `HyperDRRender/Resources/Film` remains
-CC BY-SA 4.0. No spektrafilm code is included. Stock names are trademarks of
+CC BY-SA 4.0. Portra 400's red- and green-sensitive curves were corrected
+against Kodak's E-4050 spectral-sensitivity graph
+(https://business.kodakmoments.com/sites/default/files/files/products/portra400-techpub-e4050.pdf);
+the digitized samples and their source are in
+`scripts/data/portra400-e4050-sensitivity.json`. No spektrafilm code is included. Stock names are trademarks of
 their owners and only name the look's reference.
 
 Model inference uses Core ML in HyperDRRender. Training and ONNX export tools

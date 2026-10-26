@@ -41,6 +41,8 @@ actor FakeEditorRendering: EditorRendering {
     var renderErrorForRequest: (@Sendable (EditorRenderRequest) -> EditorRenderingError?)?
     /// Thrown by every open while set.
     var openError: EditorRenderingError?
+    var cameraExposureBias: Double?
+    private(set) var cameraCalibrationCount = 0
     var refinementError: EditorRenderingError?
     private(set) var refinementCount = 0
 
@@ -173,6 +175,14 @@ actor FakeEditorRendering: EditorRendering {
                                   isDraftPreview: photo.isDraftPreview,
                                   sourceCompatibility: photo.sourceCompatibility,
                                   rawCompatibility: photo.rawCompatibility)
+        current = source
+        return source
+    }
+
+    func matchCameraPreview(sourceID: UUID) async throws -> EditorSource? {
+        guard var source = current, source.id == sourceID else { throw CancellationError() }
+        cameraCalibrationCount += 1
+        source.rawExposureBias = cameraExposureBias
         current = source
         return source
     }

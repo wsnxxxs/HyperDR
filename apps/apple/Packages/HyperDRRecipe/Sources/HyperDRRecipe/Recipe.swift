@@ -53,13 +53,16 @@ public struct Recipe: Equatable, Sendable {
     public static let hdrSourceID = "hdr.source"
     public static let lookID = "look.lut"
     public static let filmID = "look.film"
-    /// The film's exposure (Auto meters the photo) and its antihalation layer,
-    /// which choosing a stock puts back to their defaults.
+    /// Auto meters the film exposure; switching stocks keeps manual exposure.
+    /// Choosing a stock resets its antihalation layer.
     public static let filmExposureID = "look.filmExposure"
     public static let filmAntihalationID = "look.filmAntihalation"
 
     /// Exact CIRAWFilter version (including `.dng`). Nil preserves legacy system defaults.
     public var rawDecoderVersion: String?
+    /// Camera-preview brightness calibration, frozen when this photo opens.
+    /// Applies only to Apple display development, never scene-linear film/Log.
+    public var rawExposureBias: Double?
     /// LibRaw/DNG converter id for a source Apple could not develop. Once
     /// recorded, reopening requires this exact converter, like the RAW decoder.
     public var rawCompatibility: String?
@@ -86,9 +89,10 @@ public struct Recipe: Equatable, Sendable {
     public init(version: Int = Recipe.currentVersion, inputDomain: InputDomain = .sdr,
                 hdrSource: HDRSource? = nil, look: LUTReference? = nil,
                 values: [String: ParameterValue] = [:], rawDecoderVersion: String? = nil,
-                rawCompatibility: String? = nil, rawEmbeddedPreview: Bool = false,
+                rawCompatibility: String? = nil, rawEmbeddedPreview: Bool = false, rawExposureBias: Double? = nil,
                 geometry: Geometry = .identity) {
         self.rawDecoderVersion = rawDecoderVersion
+        self.rawExposureBias = rawExposureBias
         self.rawCompatibility = rawCompatibility
         self.rawEmbeddedPreview = rawEmbeddedPreview
         self.geometry = geometry
@@ -205,7 +209,7 @@ public struct Recipe: Equatable, Sendable {
 
 extension Recipe: Codable {
     private enum CodingKeys: String, CodingKey {
-        case version, inputDomain, hdrSource, look, values, rawDecoderVersion, rawCompatibility, rawEmbeddedPreview, geometry
+        case version, inputDomain, hdrSource, look, values, rawDecoderVersion, rawCompatibility, rawEmbeddedPreview, rawExposureBias, geometry
     }
 
     public init(from decoder: any Decoder) throws {
@@ -219,11 +223,13 @@ extension Recipe: Codable {
                   rawDecoderVersion: try container.decodeIfPresent(String.self, forKey: .rawDecoderVersion),
                   rawCompatibility: try container.decodeIfPresent(String.self, forKey: .rawCompatibility),
                   rawEmbeddedPreview: try container.decodeIfPresent(Bool.self, forKey: .rawEmbeddedPreview) ?? false,
+                  rawExposureBias: try container.decodeIfPresent(Double.self, forKey: .rawExposureBias),
                   geometry: try container.decodeIfPresent(Geometry.self, forKey: .geometry) ?? .identity)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(rawExposureBias, forKey: .rawExposureBias)
         try container.encodeIfPresent(rawDecoderVersion, forKey: .rawDecoderVersion)
         try container.encodeIfPresent(rawCompatibility, forKey: .rawCompatibility)
         if rawEmbeddedPreview { try container.encode(true, forKey: .rawEmbeddedPreview) }

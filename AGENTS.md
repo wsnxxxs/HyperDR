@@ -199,6 +199,16 @@ the system default is itself 9, and records the successful version.
 The preference does not reopen the current photo or rewrite saved recipes.
 Saved recipes never downgrade. Old recipes without this field keep the system
 default. An unavailable recorded version blocks decoding/export.
+Settings also offer “Match RAW brightness to camera preview” on Mac, iPhone
+and iPad (user, 2026-10-26), off by default and only for newly opened RAWs.
+`RenderEngine.cameraPreviewExposure` meters bounded reduced developments once;
+`Recipe.rawExposureBias` freezes the resulting display-development exposure for
+preview, refinement, ROI, comparison and export. A restored recipe never remeters.
+Scene-linear film/Log input ignores that bias; its Apple display baseline keeps it.
+Film and Log LUT Auto target a usable embedded camera preview's centre-weighted
+log median, otherwise the neutral development; previews over 2.5 EV away are
+ignored. Both exposure controls span −5…5 EV. Switching film stocks preserves
+manual film exposure; selecting a film after no film starts on Auto again.
 All RAW developments use an extended-linear sRGB CIContext, converting to extended
 linear P3 at output: decoder 9 loses red with a P3/Rec.2020 working context.
 Preview, ROI, look baseline and AI input share the recorded decoder. RecipeExportService prepares lazy

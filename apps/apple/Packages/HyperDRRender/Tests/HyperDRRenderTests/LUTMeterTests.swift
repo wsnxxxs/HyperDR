@@ -55,10 +55,18 @@ import Testing
         let samples = ["DSC01468.ARW", "DSC03078-A7M5.ARW"]
         var results = "sample,stock,oldExposure,newExposure,neutralMedian,oldMedian,newMedian,oldDeltaEV,newDeltaEV\n"
         func median(_ pixels: PlanePixels) -> Double {
-            let values = stride(from: 0, to: pixels.baseRGBA.count, by: 4).map { i in
-                Double(pixels.baseRGBA[i])*0.2289746 + Double(pixels.baseRGBA[i+1])*0.6917385 + Double(pixels.baseRGBA[i+2])*0.0792869
-            }.sorted()
-            return values[values.count/2]
+            let w = pixels.size.width, h = pixels.size.height, edge = Double(max(w, h))
+            let samples = (0..<h).flatMap { y in (0..<w).map { x -> (Double, Double) in
+                let i = (y*w+x)*4
+                let value = max(1e-6, Double(pixels.baseRGBA[i])*0.2289746 + Double(pixels.baseRGBA[i+1])*0.6917385 + Double(pixels.baseRGBA[i+2])*0.0792869)
+                let dx = (Double(x)/Double(w)-0.5)*Double(w)/edge
+                let dy = (Double(y)/Double(h)-0.5)*Double(h)/edge
+                return (value, 0.5 + 0.5*exp(-(dx*dx+dy*dy)/0.08))
+            }}.sorted { $0.0 < $1.0 }
+            let half = samples.reduce(0) { $0 + $1.1 }/2
+            var sum = 0.0
+            for (value, weight) in samples { sum += weight; if sum >= half { return value } }
+            return samples.last!.0
         }
         func write(_ pixels: PlanePixels, _ name: String) throws {
             let image = CIImage(bitmapData: pixels.baseRGBA.withUnsafeBytes { Data($0) }, bytesPerRow: pixels.size.width*16,
@@ -76,7 +84,9 @@ import Testing
             let bound = SourceResolution.preview(maximumSize: PixelSize(width: 1024, height: 1024))
             let neutral = try await engine.load(file, options: SourceOptions(resolution: bound))
             let neutralPixels = RenderEngine.readPixels(try await engine.render(neutral, recipe: Recipe(inputDomain: .rawEDR)))
-            let baseline = median(neutralPixels)
+            let developed = median(neutralPixels)
+            let preview = RenderEngine.cameraPreviewBrightness(file)
+            let baseline = preview.flatMap { RenderEngine.acceptsCameraPreview($0, developed: log2(developed)) ? exp2($0) : nil } ?? developed
             try write(neutralPixels, sample+"-neutral")
             var options = SourceOptions(resolution: bound); options.sceneLinear = true
             let scene = try await engine.load(file, options: options)

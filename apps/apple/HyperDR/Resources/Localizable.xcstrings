@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.rawBrightness" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Match RAW brightness to camera preview"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 亮度对齐相机预览"
+          }
+        }
+      }
+    },
+    "settings.rawBrightness.note" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For new RAW photos only. Matches overall brightness when a usable embedded preview is available; keeps RAW colour and detail. Saved edits keep their brightness."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于新打开的 RAW。有可用内嵌预览时匹配整体亮度，保留 RAW 的颜色与细节。已有编辑保持原有亮度。"
+          }
+        }
+      }
+    },
     "choice.lutInput.flog-fgamut" : {
       "extractionState" : "manual",
       "localizations" : {

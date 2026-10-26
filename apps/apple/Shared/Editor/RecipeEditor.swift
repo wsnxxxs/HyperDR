@@ -281,7 +281,8 @@ import Observation
     /// `rawDecoderPreference` selects only a new photo's developer; restoring
     /// a recipe keeps its recorded decoder, including a legacy system default.
     func open(_ url: URL, restoring: Recipe? = nil,
-              rawDecoderPreference: RAWDecoderPreference = .automatic) async throws {
+              rawDecoderPreference: RAWDecoderPreference = .automatic,
+              matchesCameraPreview: Bool = false) async throws {
         // A caller cancelled before it got here must not supersede a newer open.
         try Task.checkCancellation()
         cancelUpright(clearCache: true)
@@ -341,9 +342,13 @@ import Observation
             }
         }
         opening = task
-        let opened: EditorSource
+        var opened: EditorSource
         do {
             opened = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            if restoring == nil, matchesCameraPreview, opened.domain == .rawEDR,
+               let calibrated = try await renderer.matchCameraPreview(sourceID: opened.id) {
+                opened = calibrated
+            }
         } catch {
             if !(error is CancellationError) { EditorLog.error("Open failed: \(EditorLog.describe(error))") }
             throw error
@@ -368,7 +373,8 @@ import Observation
         } else {
             recipe = Recipe(inputDomain: opened.domain, rawDecoderVersion: opened.rawDecoderVersion,
                             rawCompatibility: opened.rawCompatibility,
-                            rawEmbeddedPreview: opened.sourceCompatibility == .embeddedPreview)
+                            rawEmbeddedPreview: opened.sourceCompatibility == .embeddedPreview,
+                            rawExposureBias: opened.rawExposureBias)
         }
         if restoring == nil || historyURL != url { undo.clear() }
         historyURL = url

@@ -326,6 +326,8 @@ public struct SourceOptions: Hashable, Sendable {
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     /// Nil leaves CIRAWFilter on its legacy system default. Recorded versions must be supported.
     public var rawDecoderVersion: String? = nil
+    /// Fixed camera-preview calibration, applied only outside scene-linear looks.
+    public var rawExposureBias: Float = 0
     /// Recorded LibRaw converter id. It is also the source-cache key.
     public var rawCompatibility: String? = nil
     /// An embedded JPEG replaces the RAW as an SDR photo.

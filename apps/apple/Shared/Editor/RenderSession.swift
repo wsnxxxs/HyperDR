@@ -110,6 +110,30 @@ actor RenderSession: EditorRendering {
         return try await engine.clippingMask(frame.display, range: range, hdrEnabled: enabled)
     }
 
+    func matchCameraPreview(sourceID: UUID) async throws -> EditorSource? {
+        let generation = self.generation
+        guard var current = opened, current.editor.id == sourceID, let source = current.source,
+              let bias = try await engine.cameraPreviewExposure(source) else { return nil }
+        try Task.checkCancellation()
+        try checkCurrent(generation)
+        guard opened?.editor.id == sourceID else { throw CancellationError() }
+        guard try FileRevision(current.editor.url) == current.revision else { throw RenderError.sourceChanged }
+        var options = current.previewOptions
+        options.rawExposureBias = bias
+        let calibrated = try await engine.load(current.editor.url, options: options, preparingAnalysis: true,
+                                                allowsRAWCompatibilityFallback: false)
+        let report = try await engine.sourceReport(calibrated)
+        try Task.checkCancellation()
+        try checkCurrent(generation)
+        guard opened?.editor.id == sourceID else { throw CancellationError() }
+        current.source = calibrated
+        current.options = options; current.previewOptions = options
+        current.editor.rawExposureBias = bias == 0 ? nil : Double(bias)
+        current.editor.sourceValues = report.sourceValues
+        opened = current
+        return current.editor
+    }
+
     func openingPreview(_ url: URL) async -> EmbeddedPreview.Image? {
         await EmbeddedPreview.read(url)
     }
@@ -240,7 +264,9 @@ actor RenderSession: EditorRendering {
                                   capabilities: Self.capabilities(report.capabilities),
                                   hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url),
                                   isDraftPreview: source.isDraftRAWPreview,
-                                  rawDecoderVersion: source.rawSettings?.decoderVersion, rawDecoderFallback: fallback,
+                                  rawDecoderVersion: source.rawSettings?.decoderVersion,
+                                  rawExposureBias: source.sourceOptions.map { Double($0.rawExposureBias) }.flatMap { $0 == 0 ? nil : $0 },
+                                  rawDecoderFallback: fallback,
                                   sourceCompatibility: source.sourceCompatibility,
                                   rawCompatibility: source.rawCompatibility,
                                   rawCompatibilityByChoice: source.sourceCompatibility == .convertedDNG

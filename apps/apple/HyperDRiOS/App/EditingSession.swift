@@ -72,6 +72,12 @@ import SwiftUI
             rawDecoderPreference.save(to: defaults)
         }
     }
+    var matchesCameraPreview: Bool {
+        didSet {
+            guard matchesCameraPreview != oldValue else { return }
+            RAWBrightnessPreference.save(matchesCameraPreview, to: defaults)
+        }
+    }
     @ObservationIgnored private let defaults: UserDefaults
 
     /// The frame chosen for exports. Its look is kept across launches as on
@@ -120,6 +126,7 @@ import SwiftUI
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         rawDecoderPreference = .load(from: defaults)
+        matchesCameraPreview = RAWBrightnessPreference.load(from: defaults)
         editor = (try? RenderSession()).map { RecipeEditor(renderer: $0) }
         editor?.undo.actionName = Self.undoName
         whiteBalance.pick = { [editor] point in
@@ -203,7 +210,10 @@ import SwiftUI
     // MARK: - Opening
 
     /// Other iPad scenes share the default, while keeping their open recipes.
-    func refreshRAWDecoderPreference() { rawDecoderPreference = .load(from: defaults) }
+    func refreshRAWDecoderPreference() {
+        rawDecoderPreference = .load(from: defaults)
+        matchesCameraPreview = RAWBrightnessPreference.load(from: defaults)
+    }
 
     /// Every way of opening a photo comes here. Not while an export runs:
     /// opening the next photo removes this one's copy and session. Export
@@ -224,14 +234,15 @@ import SwiftUI
         load?.cancel()
         refreshRAWDecoderPreference()
         let rawDecoderPreference = self.rawDecoderPreference
-        load = Task { await self.load(source, id: id, rawDecoderPreference: rawDecoderPreference) }
+        let matchesCameraPreview = self.matchesCameraPreview
+        load = Task { await self.load(source, id: id, rawDecoderPreference: rawDecoderPreference, matchesCameraPreview: matchesCameraPreview) }
     }
 
     /// Copies the original into our own file (library: as a file, `.current`
     /// keeps HEIC, DNG and gain maps; Files: inside its security scope) and
     /// opens it. The previous photo stays on screen until the new one is
     /// ready, and its copy is removed once the new one is open.
-    private func load(_ source: Source, id: UUID, rawDecoderPreference: RAWDecoderPreference) async {
+    private func load(_ source: Source, id: UUID, rawDecoderPreference: RAWDecoderPreference, matchesCameraPreview: Bool) async {
         // Whatever happens below, this request no longer holds export closed.
         defer { exports.photoRequestEnded(id) }
         // An export that started meanwhile keeps its photo: drop the request.
@@ -264,7 +275,7 @@ import SwiftUI
             exports.photoOpening(imported.url)
             await exports.prepareRAWCompatibility()
             try Task.checkCancellation()
-            try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference)
+            try await editor.open(imported.url, rawDecoderPreference: rawDecoderPreference, matchesCameraPreview: matchesCameraPreview)
             photo?.discard()
             photo = imported
             // The frame's look carries over; being on does not: each photo

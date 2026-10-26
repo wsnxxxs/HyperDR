@@ -303,7 +303,7 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.strength", group: .look, kind: .float, range: 0...100, step: 1,
             default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isSet("look.lut")),
-        ParameterDeclaration(id: "look.exposure", group: .look, kind: .floatOrAuto, range: -4...4, step: 0.01,
+        ParameterDeclaration(id: "look.exposure", group: .look, kind: .floatOrAuto, range: -5...5, step: 0.01,
             default: .auto, format: .ev, scale: .direct,
             visibleWhen: .all([.isSet("look.lut"), .isOneOf("look.input", Array(logLookSpaces))])),
         ParameterDeclaration(id: "look.input", group: .look, kind: .choice,
@@ -322,8 +322,8 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.film", group: .look, kind: .choice,
             default: .constant(.string("none")),
             options: filmStocks.map { ParameterOption($0, of: "look.film") }),
-        // Auto matches the original display brightness through the selected stock.
-        ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -3...3, step: 0.1,
+        // Auto matches the camera's rendition (a RAW's embedded preview, else the unedited development) through the stock.
+        ParameterDeclaration(id: "look.filmExposure", group: .look, kind: .floatOrAuto, range: -5...5, step: 0.1,
             default: .auto, format: .ev, scale: .direct,
             visibleWhen: .isOneOf("look.film", Array(filmStocks.dropFirst()))),
         ParameterDeclaration(id: "look.filmStrength", group: .look, kind: .float, range: 0...100, step: 1,

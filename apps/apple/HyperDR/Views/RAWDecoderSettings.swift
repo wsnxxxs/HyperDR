@@ -5,6 +5,7 @@ import SwiftUI
 /// RAW 9 is listed only where this system has it; LibRaw is always offered.
 struct RAWDecoderSettings: View {
     @Binding var selection: RAWDecoderPreference
+    @Binding var matchesCameraPreview: Bool
     var offersRAW9 = RenderEngine.systemSupportsRAW9
 
     var body: some View {
@@ -19,11 +20,13 @@ struct RAWDecoderSettings: View {
                 Divider()
                 Text("settings.rawDeveloper.libraw").tag(RAWDecoderPreference.libRAW)
             }
+            Toggle("settings.rawBrightness", isOn: $matchesCameraPreview)
         } header: {
             Text("settings.rawDevelopment")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(offersRAW9 ? "settings.rawDeveloper.note" : "settings.rawDeveloper.noteWithoutNine")
+                Text("settings.rawBrightness.note")
                 if selection == .libRAW {
                     Text("settings.rawDeveloper.libraw.note")
                 }

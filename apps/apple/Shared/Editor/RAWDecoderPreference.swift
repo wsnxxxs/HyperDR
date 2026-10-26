@@ -26,3 +26,10 @@ nonisolated enum RAWDecoderPreference: String, CaseIterable, Equatable, Sendable
         defaults.set(rawValue, forKey: Self.key)
     }
 }
+
+/// Only new photos use this default; saved recipes keep their calibration.
+nonisolated enum RAWBrightnessPreference {
+    static let key = "HyperDRRAWCameraBrightnessV1"
+    static func load(from defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: key) }
+    static func save(_ enabled: Bool, to defaults: UserDefaults = .standard) { defaults.set(enabled, forKey: key) }
+}

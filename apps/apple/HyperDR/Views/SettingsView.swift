@@ -60,7 +60,9 @@ private struct GeneralSettings: View {
                 Text("settings.immediate").font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
             }
             RAWDecoderSettings(selection: Binding(get: { model.preferences.value.rawDecoder },
-                                                  set: { decoder in change(model) { $0.rawDecoder = decoder } }))
+                                                  set: { decoder in change(model) { $0.rawDecoder = decoder } }),
+                               matchesCameraPreview: Binding(get: { model.preferences.value.matchesCameraPreview },
+                                   set: { enabled in change(model) { $0.matchesCameraPreview = enabled } }))
         }
         .formStyle(.grouped)
     }

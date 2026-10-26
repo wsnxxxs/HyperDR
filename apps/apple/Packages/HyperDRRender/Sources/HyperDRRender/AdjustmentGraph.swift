@@ -210,7 +210,7 @@ extension RenderEngine {
             region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero,inputRegion:sourceSampling(source.texture,source.samplingRegion),
             film: filmUniform(source, edit.film, grain: edit.effects.grain, active: edit.usesFilmProcessing, size: size),
             pair: SIMD4(source.domain == .dual ? editedPairOffset(source)
-                        : (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1) ? 1 / 64 : 0), 0, 0, 0),
+                        : (!edit.effects.isIdentity ? 1 / 64 : 0), 0, 0, 0),
             effects: SIMD4(edit.film.stock == nil ? edit.effects.grain : 0,
                            edit.film.stock == nil ? edit.effects.halation : 0,
                            referenceArea, edit.usesFilmProcessing ? 1 : 0),
@@ -466,7 +466,7 @@ extension RenderEngine {
         let modelOffset = model == nil ? 0 : (edit.hdr.modelGain?.reconstructionOffset ?? 0)
         let partialLUT = !edit.look.isIdentity && edit.look.strength < 1
         let partialFilm = !edit.film.isIdentity && edit.film.strength < 1
-        let rgbGain = modelOffset > 0 || source.domain == .dual || !edit.tone.curveSDR.isIdentity || (partialLUT && !(edit.look.input.isSDR && edit.look.output.isSDR)) || partialFilm || (!edit.effects.isIdentity && (edit.film.stock == nil || edit.film.strength < 1))
+        let rgbGain = modelOffset > 0 || source.domain == .dual || !edit.tone.curveSDR.isIdentity || partialLUT || partialFilm || !edit.effects.isIdentity
         let gain = try context.texture(width: base.width, height: base.height, format: rgbGain ? .rgba32Float : .r32Float)
 #if DEBUG || HYPERDR_FILM_PROFILE
         context.diagnosticPhase("graphRegion.outputsAllocated", width: base.width, height: base.height)

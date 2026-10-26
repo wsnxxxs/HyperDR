@@ -242,8 +242,15 @@ group, which is titled Color again): after the looks on every platform, shown wi
 film, a LUT or no look at all, and reset with Style; with a built-in film they use that stock's model, and a stock put on a photo whose
 effects are untouched brings its own 100 % (`AdjustmentPanel.chooseFilm`). Strength mixes the completed neutral/style SDR and HDR renditions in
 linear light; RGB gain preserves both, so HDR-only controls never move the base.
-Partial RAW Log/film looks also develop the Apple display endpoint, at preview/ROI
-size, with both decoder allowances priced by `Recipe.needsLookBaseline` in export.
+Film and SDR-output LUTs preserve captured highlight luminance separately from
+print/LUT tone compression (2026-10-26). Below reference white the protection
+fades in smoothly; it never asks for more captured headroom than the source.
+Explicit HDR-output LUTs retain their declared transform. Stock grain/halation
+keep their independent RGB delta at every colour strength, including 100 %;
+physical effects cannot overflow the selected HDR ceiling.
+RAW film and SDR-output Log looks also develop the Apple display endpoint at
+full strength for captured HDR; other partial scene looks need it for crossfading.
+Both decoder allowances are priced by `Recipe.needsLookBaseline` in export.
 An export stages that endpoint once, in the canonical RAW cells, into an anonymous
 float32 file (16 B/native pixel of free space, else `insufficientStorage`) before
 the scene graph opens; bands read it back with the same pixels. The editor yields

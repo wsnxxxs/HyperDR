@@ -100,6 +100,12 @@ public struct RenderAdjustments: Hashable, Sendable {
     /// Stock physics stays active even when its colour crossfade is zero.
     var usesFilmProcessing: Bool { film.stock != nil && (film.strength > 0 || !effects.isIdentity) }
 
+    /// Scene looks keep Apple's display development for captured HDR, even at
+    /// full strength. Explicit HDR-output LUTs only need it for the crossfade.
+    var needsRAWLookBaseline: Bool {
+        usesFilmProcessing || (!look.isIdentity && (look.strength < 1 || look.output.isSDR))
+    }
+
     public func sourceHalo(size: PixelSize) -> Int {
         usesFilmProcessing ? film.sourceHalo(size: size) : 0
     }

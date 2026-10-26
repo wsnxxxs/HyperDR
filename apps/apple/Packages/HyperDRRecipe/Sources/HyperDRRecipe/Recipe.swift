@@ -285,21 +285,21 @@ extension Adjustments {
 }
 
 extension Recipe {
-    /// Partial scene looks render the Apple display development as their neutral
-    /// endpoint. Export admission must price that second RAW decoder as well.
+    /// Scene looks retain Apple's display endpoint for captured HDR, including
+    /// full-strength SDR output. Export stages and prices that development too.
     public var needsLookBaseline: Bool {
         guard inputDomain == .rawEDR else { return false }
-        func partial(_ id: String) -> Bool {
-            guard let value = conditionValue(id)?.numberValue else { return false }
-            return value > 0 && value < 100
-        }
         if let stock = conditionValue(Self.filmID)?.stringValue, stock != "none" {
             let strength = conditionValue("look.filmStrength")?.numberValue ?? 0
             let effects = Adjustments.effectIDs.contains { (conditionValue($0)?.numberValue ?? 0) > 0 }
-            if partial("look.filmStrength") || (strength == 0 && effects) { return true }
+            if strength > 0 || effects { return true }
         }
-        guard look != nil, conditionValue("look.enabled")?.boolValue == true, partial("look.strength"),
-              let space = conditionValue("look.input")?.stringValue else { return false }
-        return Adjustments.declaration("look.input")?.options.first { $0.id == space }?.domains == [.rawEDR]
+        guard look != nil, conditionValue("look.enabled")?.boolValue == true,
+              let strength = conditionValue("look.strength")?.numberValue, strength > 0,
+              let space = conditionValue("look.input")?.stringValue,
+              Adjustments.declaration("look.input")?.options.first(where: { $0.id == space })?.domains == [.rawEDR]
+        else { return false }
+        let output = conditionValue("look.output")?.stringValue ?? "srgb"
+        return strength < 100 || ["srgb", "p3", "rec709", "rec2020"].contains(output)
     }
 }

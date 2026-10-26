@@ -4,7 +4,7 @@ import HyperDRRecipe
 
 struct ToneSpatialKey: Equatable {
     var source: UUID
-    // The Apple baseline replaces the scene texture only at partial RAW strength.
+    // The Apple HDR reference is also used by full-strength RAW display looks.
     var baseline: ObjectIdentifier
     var tone: ToneAdjustments
     var color: ColorAdjustments

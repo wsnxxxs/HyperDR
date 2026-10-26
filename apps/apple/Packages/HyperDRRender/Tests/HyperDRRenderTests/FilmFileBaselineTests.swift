@@ -212,8 +212,8 @@ private extension RenderEngine {
                 "RAW partial film lost its distinct Apple display endpoint")
         for strength in [0.0, 100] {
             let endpoint = fileFilmRecipe(.rawEDR, strength: strength)
-            #expect(!endpoint.needsLookBaseline)
-            #expect(try await engine.fileFilmBaseline(scene, edit: RenderAdjustments(recipe: endpoint)).reusedInput)
+            #expect(endpoint.needsLookBaseline == (strength > 0))
+            #expect(try await engine.fileFilmBaseline(scene, edit: RenderAdjustments(recipe: endpoint)).reusedInput == (strength == 0))
         }
         options.sceneLinear = true
         let lazy = try await engine.openExportSource(file, options: options)

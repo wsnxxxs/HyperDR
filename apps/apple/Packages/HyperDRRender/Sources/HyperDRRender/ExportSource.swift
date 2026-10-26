@@ -31,7 +31,7 @@ public struct ExportSource: @unchecked Sendable {
     let url: URL
     let revision: SourceRevision
     var stagedLookBaseline: StagedLookBaseline? = nil
-    /// Whether a partial scene look's Apple endpoint was developed once into
+    /// Whether the scene look's Apple endpoint was developed once into
     /// a staged file, so no band opens a second RAW decoder.
     public var stagesLookBaseline: Bool { stagedLookBaseline != nil }
 }
@@ -40,7 +40,7 @@ extension RenderEngine {
     /// Opens full-quality system graphs/native decoder storage and materializes
     /// only the fixed analysis texture. Drops pixel caches, retaining four AI grids.
     /// Use an export engine if the editor must keep its preview caches warm.
-    /// `stagingLookBaseline` (a partial RAW film or Log look) first develops
+    /// `stagingLookBaseline` (a RAW film or SDR-output Log look, or a partial scene look) first develops
     /// Apple's endpoint into a staged file (`StagedLookBaseline`), before the
     /// scene-linear graph opens; it needs that endpoint's float32 size on disk.
     public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions(),

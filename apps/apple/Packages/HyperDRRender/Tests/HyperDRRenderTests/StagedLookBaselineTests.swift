@@ -76,6 +76,14 @@ private extension RenderEngine {
                                                                               size: size, region: region))
                 sameBits(actual.baseRGBA, expected.baseRGBA, label + " base")
                 sameBits(actual.gain, expected.gain, label + " gain")
+                var full = recipe
+                full.setValue(.number(100), for: recipe.look == nil ? "look.filmStrength" : "look.strength")
+                let fullExpected = RenderEngine.readPixels(try await reopening.render(a, recipe: full, lut: recipeLUT,
+                    size: size, region: region))
+                let fullActual = RenderEngine.readPixels(try await staging.render(b, recipe: full, lut: recipeLUT,
+                    size: size, region: region))
+                sameBits(fullActual.baseRGBA, fullExpected.baseRGBA, label + " full-strength base")
+                sameBits(fullActual.gain, fullExpected.gain, label + " full-strength gain")
             }
             // Finished rows through the export band reader, at native size.
             let request = ExportRenderRequest(photoSize: size, capabilities: .init(supportsThreeChannelGain: true))
@@ -90,11 +98,11 @@ private extension RenderEngine {
         }
     }
 
-    @Test func fullStrengthAndZeroStrengthNeedNoStagedEndpoint() throws {
+    @Test func fullStrengthNeedsHDRReferenceAndInactiveZeroDoesNot() throws {
         for strength in [0.0, 100.0] {
             let recipe = Recipe(inputDomain: .rawEDR,
                 values: ["look.film": .string("portra400"), "look.filmStrength": .number(strength)])
-            #expect(!recipe.needsLookBaseline)
+            #expect(recipe.needsLookBaseline == (strength > 0))
         }
     }
 }

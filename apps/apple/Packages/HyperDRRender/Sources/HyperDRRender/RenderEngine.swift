@@ -339,12 +339,11 @@ public actor RenderEngine {
             cacheLookBaseline(texture, for: source)
             return texture
         }
-        let weight = !edit.look.isIdentity ? edit.look.strength : edit.film.isIdentity ? 0 : edit.film.strength
-        let zeroColourStockEffects = edit.film.stock != nil && edit.film.strength == 0 && !edit.effects.isIdentity
-        guard source.domain == .rawEDR, (weight > 0 && weight < 1) || zeroColourStockEffects,
+        guard source.domain == .rawEDR, edit.needsRAWLookBaseline,
               let origin = source.origin, origin.options.sceneLinear else {
-            lookBaselineCache = nil
-            analysisLookBaselineCache = nil
+            // Meter trials use detached tiny textures. Their pass-through must
+            // not evict the live preview/analysis HDR references. Cache entries
+            // have render identities and are released with the source family.
             return source.texture
         }
         if let cached = cachedLookBaseline(source) { return cached }

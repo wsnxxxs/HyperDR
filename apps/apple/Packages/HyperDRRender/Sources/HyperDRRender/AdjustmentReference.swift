@@ -305,7 +305,7 @@ extension DoubleReference {
     public static func look(_ rgb: RGB, settings: LookAdjustments) -> RGB {
         guard !settings.isIdentity, let lut = settings.lut else { return rgb }
         let mapped = decodeLUT(sampleLUT(encodeLUT(rgb * (settings.input.isLog ? exp2(Double(settings.exposure ?? 0)) : 1),space:settings.input),lut:lut),space:settings.output)
-        let upper = settings.input.isSDR && settings.output.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z)
+        let upper = settings.output.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z)
         let fitted = fitP3(mapped,upper:upper)
         return rgb+(fitted-rgb)*Double(settings.strength)
     }
@@ -321,7 +321,7 @@ extension DoubleReference {
         if weight > 0 && weight < 1 {
             var full = settings
             if !full.look.isIdentity { full.look.strength = 1 } else { full.film.strength = 1 }
-            let styled = prepare(source, settings: full, sdr: sdr, grain: grain,spatial: spatial,air: air)
+            let styled = prepare(source, settings: full, sdr: sdr, grain: grain,baseline: baseline,spatial: spatial,air: air,baselineAir: baselineAir)
             var plain = settings; plain.look.lut = nil; plain.film.stock = nil
             let baselineSpatial = spatial.map { SIMD4($0.w,$0.z,$0.z,$0.w) }
             let original = prepare(baseline ?? source, settings: plain, sdr: sdr,spatial: baselineSpatial,air: baselineAir ?? air)
@@ -379,6 +379,18 @@ extension DoubleReference {
                 g = log2(max(1,hdr.x,hdr.y,hdr.z))
                 base = fitP3(hdr*exp2(-g))
             }
+        }
+        if !settings.film.isIdentity || (active && settings.look.output.isSDR) {
+            var plain = settings; plain.look.lut = nil; plain.film.stock = nil
+            let referenceSpatial = baseline == nil ? spatial : spatial.map { SIMD4($0.w,$0.z,$0.z,$0.w) }
+            let reference = prepare(baseline ?? source, settings: plain, sdr: sdr,
+                spatial: referenceSpatial, air: baselineAir ?? air)
+            let hdr = RGB(reference.base.x*exp2(reference.gains.x), reference.base.y*exp2(reference.gains.y), reference.base.z*exp2(reference.gains.z))
+            let y = luma(base), captured = y*exp2(reference.gains.x)
+            let weight = sdr ? 0 : smoothStep(0.5, 1, hdr.max())
+            let desired = captured + (luma(hdr)-captured)*weight
+            let target = min(desired, y*max(1,hdr.max())/max(base.max(),1e-30))
+            if y > 1e-8 { g = log2(max(target/y, 1e-30)) } else { g = 0 }
         }
         return Split(base:base,gain:g)
     }

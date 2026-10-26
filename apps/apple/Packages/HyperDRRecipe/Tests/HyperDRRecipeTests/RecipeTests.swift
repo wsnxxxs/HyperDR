@@ -271,11 +271,14 @@ private extension ParameterDefault {
     #expect(try Recipe.decode(recipe.encoded()) == recipe)
 }
 
-@Test func onlyPartialRAWSceneLooksNeedTheSecondDevelopment() {
+@Test func RAWSceneSDRLooksNeedTheirCapturedHDRReferenceAtEveryStrength() {
     let look = LUTReference(contentHash: "sha256:01", name: "Log")
     var recipe = Recipe(inputDomain: .rawEDR, look: look, values: [
         "look.input": .string("logc4-awg4"), "look.output": .string("rec709")])
+    #expect(recipe.needsLookBaseline)
+    recipe.setValue(.string("pq"), for: "look.output")
     #expect(!recipe.needsLookBaseline)
+    recipe.setValue(.string("rec709"), for: "look.output")
     recipe.setValue(.number(40), for: "look.strength")
     #expect(recipe.needsLookBaseline)
     recipe.setValue(.bool(false), for: "look.enabled")

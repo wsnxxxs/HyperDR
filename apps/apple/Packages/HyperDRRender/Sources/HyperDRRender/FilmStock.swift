@@ -13,7 +13,8 @@ public enum FilmStockID: String, CaseIterable, Hashable, Sendable {
 }
 
 /// Film emulation. The film exposes the scene before the HDR split (highlights reach
-/// its shoulder) and its print becomes the SDR base; the gain is retained (L1).
+/// its shoulder) and its print becomes the SDR base. Captured highlight luminance
+/// is preserved separately from the print's tone compression.
 public struct FilmAdjustments: Hashable, Sendable {
     public var stock: FilmStockID?
     public var strength: Float = RenderParameter.defaultNumber("look.filmStrength")

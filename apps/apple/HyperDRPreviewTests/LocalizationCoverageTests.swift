@@ -80,8 +80,11 @@ final class LocalizationCoverageTests: XCTestCase {
     func testEveryExportFormatHasItsCardText() throws {
         let catalogue = try catalogue()
         let formats = ExportEncoding.allCases.map(\.rawValue)
-        XCTAssertEqual(Set(formats), ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"])
+        XCTAssertEqual(Set(formats), ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff",
+                                      "sdr-dng", "hdr-tiff-16", "hdr-tiff-32", "hdr-dng"])
         assertTranslated(formats.flatMap { ["enc.\($0).label", "enc.\($0).hint", "enc.\($0).detail"] }, in: catalogue)
+        // The lossless group's cards stand for families, so they have a label and a hint.
+        assertTranslated(LosslessFamily.allCases.flatMap { ["enc.\($0.cardID).label", "enc.\($0.cardID).hint"] }, in: catalogue)
         assertTranslated(Self.unavailableReasons.flatMap { ["export.unavailable.short.\($0)", "export.unavailable.full.\($0) %@"] },
                          in: catalogue)
         // The option's own name and the card's are one word.
@@ -103,8 +106,8 @@ final class LocalizationCoverageTests: XCTestCase {
                 if parts.count != 2 || !Self.captureFields.contains(parts[1]) { orphans.append(key) }
             case "enc":
                 // enc.<id>.label | .hint | .detail (ids contain dashes, not dots)
-                guard parts.count == 3, ExportEncoding(rawValue: parts[1]) != nil,
-                      ["label", "hint", "detail"].contains(parts[2]) else {
+                guard parts.count == 3, (ExportEncoding(rawValue: parts[1]) != nil && ["label", "hint", "detail"].contains(parts[2]))
+                        || (LosslessFamily(cardID: parts[1]) != nil && ["label", "hint"].contains(parts[2])) else {
                     orphans.append(key)
                     continue
                 }

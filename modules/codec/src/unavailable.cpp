@@ -42,6 +42,7 @@ std::string raw_extract_preview(const std::filesystem::path&, const std::filesys
 
 void write_sdr_jpeg_rows(const EncodingRows&,const PhotoMetadata&,int,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming JPEG");}
 void write_sdr_tiff_rows(const EncodingRows&,const PhotoMetadata&,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming TIFF");}
+void write_lossless_rows(const EncodingRows&,const LinearHdrGain*,const PhotoMetadata&,OutputEncoding,ColorGamut,const std::filesystem::path&){fail_without_codecs("lossless TIFF/DNG");}
 void write_gain_map_jpeg_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,const PhotoMetadata&,int,bool,const std::filesystem::path&){fail_without_codecs("streaming ISO JPEG");}
 void write_adaptive_heic(const GainMapResult&,const PhotoMetadata&,int,int,const std::filesystem::path&){fail_without_codecs("HEIC");}
 void write_hdr_heic(const PhotoRenditions&,const PhotoMetadata&,int,HdrEncoding,const std::filesystem::path&){fail_without_codecs("HEIC");}

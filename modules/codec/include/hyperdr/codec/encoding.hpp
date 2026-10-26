@@ -30,12 +30,32 @@ enum class OutputEncoding {
   SdrJpeg,
   // Lossless 16-bit TIFF, Display P3 by default or sRGB.
   SdrTiff,
+  // Lossless linear DNG (LinearRaw), 16-bit unsigned: the SDR rendition.
+  SdrDng,
+  // The reconstructed HDR rendition itself, linear: IEEE float samples with SDR
+  // white at 1.0 and highlights above it, 16-bit (half) or 32-bit TIFF.
+  HdrTiff16,
+  HdrTiff32,
+  // The same rendition as a 16-bit LinearRaw DNG, scaled under the white level
+  // and raised again by BaselineExposure. Apple's raw engine reads no float DNG.
+  HdrDng,
 };
 
 using HdrEncoding = OutputEncoding;  // Source compatibility for existing clients.
 
 [[nodiscard]] constexpr bool is_sdr_encoding(OutputEncoding e) {
-  return e == OutputEncoding::SdrJpeg || e == OutputEncoding::SdrTiff;
+  return e == OutputEncoding::SdrJpeg || e == OutputEncoding::SdrTiff || e == OutputEncoding::SdrDng;
+}
+// Linear samples of the HDR rendition itself: no gain map, no transfer curve.
+[[nodiscard]] constexpr bool is_linear_hdr_encoding(OutputEncoding e) {
+  return e == OutputEncoding::HdrTiff16 || e == OutputEncoding::HdrTiff32 || e == OutputEncoding::HdrDng;
+}
+[[nodiscard]] constexpr bool is_dng_encoding(OutputEncoding e) {
+  return e == OutputEncoding::SdrDng || e == OutputEncoding::HdrDng;
+}
+// TIFF and DNG: every sample written as rendered, without lossy coding.
+[[nodiscard]] constexpr bool is_lossless_encoding(OutputEncoding e) {
+  return e == OutputEncoding::SdrTiff || is_dng_encoding(e) || is_linear_hdr_encoding(e);
 }
 [[nodiscard]] constexpr bool is_gain_map_encoding(OutputEncoding e) { return e == OutputEncoding::Adaptive || e == OutputEncoding::IsoGainMapJpeg; }
 

@@ -21,6 +21,9 @@ public struct SystemExportVerification: Sendable, Codable, Equatable {
 enum ExportVerification {
     static func system(_ url: URL, plan: ExportPlan, gainMetadata: ExportGainMetadata? = nil) throws -> SystemExportVerification {
         try Task.checkCancellation()
+        if plan.encoding.isDNG || plan.encoding.isLinearHDR {
+            return try autoreleasepool { try lossless(url, plan: plan, gainMetadata: gainMetadata) }
+        }
         return try autoreleasepool {
             guard let source = CGImageSourceCreateWithURL(url as CFURL,
                         [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -175,6 +178,84 @@ enum ExportVerification {
             orientation: 1, auxiliaryGain: hasGain, hdrReadable: hdr,
             verifiedHeadroomStops: hdr && (checksGain || !plan.gainMap.writesGainMap) ? [log2(Double(headroom))] : [],
             profileName: properties[kCGImagePropertyProfileName] as? String)
+    }
+}
+
+extension ExportVerification {
+    /// ImageIO takes a DNG for a raw image only above about 128 pixels a side
+    /// (2026-10-26, macOS 27); a smaller one is a TIFF it cannot decode.
+    static let smallestDevelopedDNGSide = 192
+
+    /// The DNG and float TIFF files. A float TIFF states no content headroom
+    /// (ImageIO reads 0), so its HDR is checked as samples; a DNG is checked
+    /// by the raw engine that develops it, including the BaselineExposure that
+    /// carries an HDR DNG's headroom. The engine has read every row back first.
+    fileprivate static func lossless(_ url: URL, plan: ExportPlan,
+                                     gainMetadata: ExportGainMetadata?) throws -> SystemExportVerification {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            throw RecipeExportError.verificationFailed("imageio_readback")
+        }
+        let hdr = plan.peakStops != nil
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
+        if plan.encoding.isDNG {
+            guard CGImageSourceGetType(source) as String? == "com.adobe.raw-image" else {
+                guard max(plan.size.width, plan.size.height) < smallestDevelopedDNGSide else {
+                    throw RecipeExportError.verificationFailed("dng_not_raw")
+                }
+                return .init(width: plan.size.width, height: plan.size.height, bitDepth: plan.baseBitDepth,
+                             orientation: 1, auxiliaryGain: false, hdrReadable: false,
+                             verifiedHeadroomStops: [], profileName: nil)
+            }
+            guard let filter = CIRAWFilter(imageURL: url),
+                  Int(filter.nativeSize.width) == plan.size.width, Int(filter.nativeSize.height) == plan.size.height else {
+                throw RecipeExportError.verificationFailed("dng_develop")
+            }
+            let baseline = Double(filter.baselineExposure)
+            let expected = hdr ? Double(gainMetadata?.alternateHeadroom ?? 0) : 0
+            guard abs(baseline - expected) < 0.001 else {
+                throw RecipeExportError.verificationFailed("dng_baseline_exposure")
+            }
+            filter.scaleFactor = Float(min(1, 64 / Double(max(plan.size.width, plan.size.height))))
+            guard let image = filter.outputImage else { throw RecipeExportError.verificationFailed("dng_develop") }
+            try requireFiniteSamples(image)
+            return .init(width: plan.size.width, height: plan.size.height, bitDepth: plan.baseBitDepth,
+                         orientation: 1, auxiliaryGain: false, hdrReadable: hdr,
+                         verifiedHeadroomStops: hdr ? [baseline] : [], profileName: filter.properties[kCGImagePropertyProfileName as String] as? String)
+        }
+        guard props[kCGImagePropertyPixelWidth] as? Int == plan.size.width,
+              props[kCGImagePropertyPixelHeight] as? Int == plan.size.height,
+              (props[kCGImagePropertyOrientation] as? Int ?? 1) == 1,
+              props[kCGImagePropertyDepth] as? Int == plan.baseBitDepth,
+              props[kCGImagePropertyIsFloat] as? Bool == true else {
+            throw RecipeExportError.verificationFailed("imageio_float_tiff")
+        }
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false, kCGImageSourceShouldAllowFloat: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 256]
+        guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw RecipeExportError.verificationFailed("imageio_readback")
+        }
+        try requireFiniteSamples(CIImage(cgImage: decoded))
+        return .init(width: plan.size.width, height: plan.size.height, bitDepth: plan.baseBitDepth,
+                     orientation: 1, auxiliaryGain: false, hdrReadable: hdr, verifiedHeadroomStops: [],
+                     profileName: props[kCGImagePropertyProfileName] as? String)
+    }
+
+    /// At most 64 pixels a side, as extended linear Display P3: every sample a number.
+    private static func requireFiniteSamples(_ image: CIImage) throws {
+        guard image.extent.width > 0, image.extent.height > 0, image.extent.width.isFinite else {
+            throw RecipeExportError.verificationFailed("system_hdr_extent")
+        }
+        let scale = min(1, 64 / max(image.extent.width, image.extent.height))
+        let small = image.transformed(by: .init(scaleX: scale, y: scale))
+        let w = max(1, Int(small.extent.width)), h = max(1, Int(small.extent.height))
+        var samples = [Float](repeating: 0, count: w * h * 4)
+        samples.withUnsafeMutableBytes {
+            CIContext(options: [.cacheIntermediates: false]).render(small, toBitmap: $0.baseAddress!, rowBytes: w * 16,
+                bounds: CGRect(x: small.extent.minX, y: small.extent.minY, width: CGFloat(w), height: CGFloat(h)),
+                format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3))
+        }
+        guard samples.allSatisfy(\.isFinite) else { throw RecipeExportError.verificationFailed("system_hdr_decode") }
+        try Task.checkCancellation()
     }
 }
 

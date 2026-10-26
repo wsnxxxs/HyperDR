@@ -249,7 +249,7 @@ public actor RecipeExportService: RecipeExportServicing {
             let renderRequest = ExportRenderRequest(
                 photoSize: .init(width: plan.photoSize.width, height: plan.photoSize.height),
                 ceilingStops: plan.peakStops.map(Float.init), gamut: renderGamut(plan.gamut),
-                includesGain: plan.gainMap.writesGainMap || plan.encoding.isBT2100,
+                includesGain: plan.gainMap.writesGainMap || plan.encoding.needsGainPlane,
                 capabilities: .init(supportsThreeChannelGain: caps.supportsThreeChannelGain,
                                     supportsSignedGain: caps.supportsSignedGain,
                                     requiresGainMaximumHeadroom: caps.requiresGainMaximumHeadroom),
@@ -297,7 +297,7 @@ public actor RecipeExportService: RecipeExportServicing {
                     gainChannels: report.gain?.channelCount ?? 0, gainMetadata: metadata, rows: plan.memory.renderRows,
                     to: file, options: .init(format: plan.encoding.rawValue, quality: plan.quality,
                         depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
-                        gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
+                        gamut: plan.encoding.isSDR || plan.encoding.isLossless ? plan.gamut.rawValue : nil, verify: true,
                         presentationFrame: report.presentationFrame, framePhoto: framePhoto, exif: try photoMetadata.nativeExif()),
                     read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) },
                     progress: { phase, done, total in bridge.cell(phase, done: done, total: total) })
@@ -399,7 +399,7 @@ public actor RecipeExportService: RecipeExportServicing {
                         gainMetadata: metadata, to: file,
                         options: .init(format: plan.encoding.rawValue, quality: plan.quality,
                                        depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
-                                       gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
+                                       gamut: plan.encoding.isSDR || plan.encoding.isLossless ? plan.gamut.rawValue : nil, verify: true,
                                        presentationFrame: report.presentationFrame, framePhoto: framePhoto, exif: try photoMetadata.nativeExif()))
                     guard packaged.verified else { throw RecipeExportError.verificationFailed("package_unverified") }
                     guard (packaged.gain?.clippedSamples ?? 0) == 0 else {
@@ -532,7 +532,8 @@ public actor RecipeExportService: RecipeExportServicing {
         case .adaptive, .pq, .hlg: "heic"
         case .avifPq, .avifHlg: "avif"
         case .sdrJPEG, .isoGainMapJPEG: "jpg"
-        case .sdrTIFF: "tif"
+        case .sdrTIFF, .hdrTIFF16, .hdrTIFF32: "tif"
+        case .sdrDNG, .hdrDNG: "dng"
         }
     }
 }

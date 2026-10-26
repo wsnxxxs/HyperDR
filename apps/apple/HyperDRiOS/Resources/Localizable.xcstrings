@@ -1,20 +1,244 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "ios.section.resetGrading" : {"comment": "iPhone grading page: VoiceOver name of the reset button.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reset Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重置分级"}}}},
-    "ios.section.resetMixer" : {"comment": "iPhone mixer page: VoiceOver name of the reset button.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reset Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重置混色器"}}}},
-    "ios.section.openHint" : {"comment": "iPhone dock: VoiceOver hint on a section tile (curve, mixer, grading).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Opens its page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "打开它的专页"}}}},
-    "ios.section.back" : {"comment": "iPhone dock: VoiceOver name of the button that leaves a section's page for the rings.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Back"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "返回"}}}},
-    "ios.section.grading" : {"comment": "iPhone dock: the colour grading's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "分级"}}}},
-    "ios.section.mixer" : {"comment": "iPhone dock: the colour mixer's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "混色器"}}}},
-    "ios.section.curve" : {"comment": "iPhone dock: the tone curve's tile in the Adjust rings and its page's title.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Curve"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "曲线"}}}},
-    "ipad.page.next" : {"comment": "iPad Studio: keyboard command (⌘]) for the tool's next page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Next Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "下一页"}}}},
-    "ipad.page.previous" : {"comment": "iPad Studio: keyboard command (⌘[) for the tool's previous page.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Previous Page"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上一页"}}}},
-    "ipad.page.changed" : {"comment": "VoiceOver value of a tool page that holds changes.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Changed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "已更改"}}}},
-    "ipad.page.grading" : {"comment": "iPad Studio: the colour tool's page holding the colour grading wheels.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Grading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "分级"}}}},
-    "ipad.page.mixer" : {"comment": "iPad Studio: the colour tool's page holding the colour mixer.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Mixer"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "混色器"}}}},
-    "ipad.page.curve" : {"comment": "iPad Studio: the light tool's page holding the tone curve.", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Curve"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "曲线"}}}},
-    "ipad.page.basic" : {"comment": "iPad Studio: the page of a tool with its own rows (as opposed to its curve, mixer or grading).", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Basic"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "基本"}}}},
+    "ios.section.resetGrading" : {
+      "comment" : "iPhone grading page: VoiceOver name of the reset button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置分级"
+          }
+        }
+      }
+    },
+    "ios.section.resetMixer" : {
+      "comment" : "iPhone mixer page: VoiceOver name of the reset button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置混色器"
+          }
+        }
+      }
+    },
+    "ios.section.openHint" : {
+      "comment" : "iPhone dock: VoiceOver hint on a section tile (curve, mixer, grading).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens its page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开它的专页"
+          }
+        }
+      }
+    },
+    "ios.section.back" : {
+      "comment" : "iPhone dock: VoiceOver name of the button that leaves a section's page for the rings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回"
+          }
+        }
+      }
+    },
+    "ios.section.grading" : {
+      "comment" : "iPhone dock: the colour grading's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分级"
+          }
+        }
+      }
+    },
+    "ios.section.mixer" : {
+      "comment" : "iPhone dock: the colour mixer's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "混色器"
+          }
+        }
+      }
+    },
+    "ios.section.curve" : {
+      "comment" : "iPhone dock: the tone curve's tile in the Adjust rings and its page's title.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Curve"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "曲线"
+          }
+        }
+      }
+    },
+    "ipad.page.next" : {
+      "comment" : "iPad Studio: keyboard command (⌘]) for the tool's next page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一页"
+          }
+        }
+      }
+    },
+    "ipad.page.previous" : {
+      "comment" : "iPad Studio: keyboard command (⌘[) for the tool's previous page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一页"
+          }
+        }
+      }
+    },
+    "ipad.page.changed" : {
+      "comment" : "VoiceOver value of a tool page that holds changes.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已更改"
+          }
+        }
+      }
+    },
+    "ipad.page.grading" : {
+      "comment" : "iPad Studio: the colour tool's page holding the colour grading wheels.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分级"
+          }
+        }
+      }
+    },
+    "ipad.page.mixer" : {
+      "comment" : "iPad Studio: the colour tool's page holding the colour mixer.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "混色器"
+          }
+        }
+      }
+    },
+    "ipad.page.curve" : {
+      "comment" : "iPad Studio: the light tool's page holding the tone curve.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Curve"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "曲线"
+          }
+        }
+      }
+    },
+    "ipad.page.basic" : {
+      "comment" : "iPad Studio: the page of a tool with its own rows (as opposed to its curve, mixer or grading).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basic"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基本"
+          }
+        }
+      }
+    },
     "ios.export.error.storage" : {
       "comment" : "Export failure: the export's temporary files need more free storage than the device has.",
       "extractionState" : "manual",
@@ -524,6 +748,142 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "16 位 TIFF"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Half float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "半精度浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "enc.sdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · SDR · for raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · SDR · 适合 RAW 编辑器"
+          }
+        }
+      }
+    },
+    "enc.sdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 DNG"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · HDR · for raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · HDR · 适合 RAW 编辑器"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
           }
         }
       }
@@ -1354,6 +1714,74 @@
         }
       }
     },
+    "ios.export.hdrOutput" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR Output"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 输出"
+          }
+        }
+      }
+    },
+    "ios.export.depth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color Depth"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色彩深度"
+          }
+        }
+      }
+    },
+    "ios.export.depth.16" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位/通道"
+          }
+        }
+      }
+    },
+    "ios.export.depth.32" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位/通道"
+          }
+        }
+      }
+    },
     "ios.export.error.busy" : {
       "comment" : "Export failure.",
       "extractionState" : "manual",
@@ -1548,6 +1976,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无损"
+          }
+        }
+      }
+    },
+    "ios.export.family.dng" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 编辑"
           }
         }
       }

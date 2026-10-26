@@ -153,8 +153,9 @@ struct ExportCustomPlanTests {
         #expect(plan.library == nil)
         let ceiling = min(9, encoding.ceilingStops)
         #expect(plan.peakStops == (encoding.isSDR ? nil : ceiling))
-        // A single-rendition source keeps Main 8; BT.2100 formats are 10-bit.
-        #expect(plan.baseBitDepth == (encoding.isBT2100 ? 10 : encoding == .sdrTIFF ? 16 : 8))
+        // A single-rendition source keeps Main 8; BT.2100 formats are 10-bit;
+        // the lossless files keep their own depth.
+        #expect(plan.baseBitDepth == encoding.losslessBitDepth ?? (encoding.isBT2100 ? 10 : 8))
     }
 
     @Test func everyEncodingPicksTheWriterOfThePipelineTable() {
@@ -167,12 +168,39 @@ struct ExportCustomPlanTests {
             .avifHlg: (.libavif, .onlyEncoder),
             .sdrJPEG: (.inHouse, .noComparison),
             .sdrTIFF: (.inHouse, .noComparison),
+            .sdrDNG: (.inHouse, .noComparison),
+            .hdrTIFF16: (.inHouse, .noComparison),
+            .hdrTIFF32: (.inHouse, .noComparison),
+            .hdrDNG: (.inHouse, .noComparison),
         ]
         for (encoding, writer) in expected {
             let plan = plan(request(.custom(CustomExportFormat(encoding: encoding, gamut: .srgb, quality: 90))))
             #expect(plan.writer == writer.0, "\(encoding)")
             #expect(plan.writerReason == writer.1, "\(encoding)")
         }
+    }
+
+    /// The lossless group: the HDR TIFF and DNG carry the HDR version with its
+    /// peak, become their SDR files when the HDR group is off, and keep the
+    /// page's colour space, Rec. 2020 included.
+    @Test func losslessFilesFollowTheHDRSwitchAndKeepTheirSpace() {
+        for (hdr, sdr) in [(ExportEncoding.hdrTIFF16, ExportEncoding.sdrTIFF), (.hdrTIFF32, .sdrTIFF), (.hdrDNG, .sdrDNG)] {
+            let on = plan(request(.custom(CustomExportFormat(encoding: hdr, gamut: .rec2020, quality: 90)), peakStops: 3))
+            #expect(on.encoding == hdr && on.gamut == .rec2020 && on.peakStops == 3)
+            #expect(on.baseBitDepth == (hdr == .hdrTIFF32 ? 32 : 16))
+            #expect(on.notices.isEmpty && on.blockers.isEmpty)
+            let off = plan(request(.custom(CustomExportFormat(encoding: hdr, gamut: .rec2020, quality: 90)), hdrEnabled: false))
+            #expect(off.encoding == sdr && off.peakStops == nil && off.baseBitDepth == 16)
+            #expect(off.notices == [.sdrVersion])
+            // The SDR TIFF offers sRGB and P3; a DNG keeps Rec. 2020.
+            #expect(off.gamut == (sdr == .sdrDNG ? .rec2020 : .p3))
+        }
+        // A float TIFF has no ceiling an edit reaches; the 16-bit DNG stops at 6.
+        #expect(plan(request(.custom(.init(encoding: .hdrTIFF32)), peakStops: 7)).peakStops == 7)
+        #expect(plan(request(.custom(.init(encoding: .hdrDNG)), peakStops: 7)).peakStops == 6)
+        #expect(ExportEncoding.sdrTIFF.hdrCounterpart(tiffDepth: 32) == .hdrTIFF32)
+        #expect(ExportEncoding.hdrTIFF32.hdrCounterpart(tiffDepth: 16) == .hdrTIFF16)
+        #expect(ExportEncoding.sdrDNG.hdrCounterpart(tiffDepth: 32) == .hdrDNG)
     }
 
     @Test func anHDRRenditionMovesTheAdaptivePairToOurWriter() {
@@ -952,8 +980,9 @@ struct ExportPlanGapTests {
         for encoding in ExportEncoding.allCases {
             let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: false))
             #expect(value.blockers.contains { $0.code == "hdrOff" } == encoding.isBT2100)
-            #expect(value.notices.contains(.sdrVersion) == encoding.writesGainMap)
+            #expect(value.notices.contains(.sdrVersion) == (encoding.writesGainMap || encoding.isLinearHDR))
             if encoding == .isoGainMapJPEG { #expect(value.encoding == .sdrJPEG) }
+            if encoding.isLinearHDR { #expect(value.encoding == encoding.sdrCounterpart && value.peakStops == nil) }
             if encoding == .adaptive { #expect(value.baseBitDepth == 8 && !value.gainMap.writesGainMap) }
         }
     }

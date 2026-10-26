@@ -18,6 +18,11 @@ if(HYPERDR_WITH_CODECS)
   target_link_libraries(capi_package_rows_test PRIVATE HyperDR::capi_static HyperDR::app avif)
   set_target_properties(capi_package_rows_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
   add_test(NAME capi_package_rows_test COMMAND capi_package_rows_test)
+  find_package(TIFF REQUIRED)
+  add_executable(capi_package_lossless_test package_lossless_test.cpp)
+  target_link_libraries(capi_package_lossless_test PRIVATE HyperDR::capi_static HyperDR::app TIFF::TIFF)
+  set_target_properties(capi_package_lossless_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  add_test(NAME capi_package_lossless_test COMMAND capi_package_lossless_test)
   add_executable(capi_package_test package_test.c)
   set_target_properties(capi_package_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF

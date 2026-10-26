@@ -32,11 +32,14 @@ struct ExportStorage {
             return width * height * bytesPerPixel + 2048
         }
         switch plan.encoding {
-        case .sdrTIFF:
-            // One RGB16/Deflate staged file, no component or sample spool.
+        case .sdrTIFF, .hdrTIFF16, .hdrTIFF32:
+            // One RGB16/RGB32 Deflate staged file, no component or sample spool.
             // Allow 0.1% for Deflate/strip overhead, plus tags and metadata.
-            let raw = pixels * 6
+            let raw = pixels * 3 * Int64(plan.encoding.losslessBitDepth ?? 16) / 8
             return raw + (raw + 999) / 1000 + metadata
+        case .sdrDNG, .hdrDNG:
+            // Uncompressed 16-bit LinearRaw, streamed into one staged file.
+            return pixels * 6 + metadata
         case .sdrJPEG:
             // One streamed 4:2:0 JPEG, no second disk copy.
             return jpeg(mcu: 16, bytesPerPixel: 3) + metadata

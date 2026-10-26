@@ -109,8 +109,10 @@ public struct RecipeExportResult: Sendable {
         evidence?.packageJSON.flatMap { try? JSONDecoder().decode(PackageReport.self, from: $0) }
     }
     /// Written headroom, from the package metadata (system reader for ImageIO).
+    /// A linear HDR file stores no gain: it is the pair's alternate rendition.
     public var peakStops: Double? {
         guard resolved.ceilingStops != nil else { return nil }
+        if resolved.encoding.isLinearHDR { return resolved.gain.map { Double($0.alternateHeadroom) } }
         return package?.gain?.alternateHeadroom ?? evidence?.system.verifiedHeadroomStops.max()
     }
     public var verified: Bool {

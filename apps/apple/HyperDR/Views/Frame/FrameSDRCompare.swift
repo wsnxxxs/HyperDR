@@ -95,10 +95,10 @@ import HyperDRDesign
 }
 
 extension EditorModel {
-    /// Whether the export being previewed has an HDR part to compare: not
-    /// colour-only, a range above zero, and an edit to show.
+    /// Whether the export being previewed has an HDR part to compare: an HDR
+    /// format, a range above zero, and an edit to show.
     var frameCompareHasHDR: Bool {
-        hasEditedFrame && workflow != .colorOnly && outputCeilingStops > 0
+        hasEditedFrame && exportChoices.writesHDR && outputCeilingStops > 0
     }
 }
 

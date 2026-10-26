@@ -106,6 +106,7 @@ private struct ExportSettingsView: View {
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
+            if let family = model.losslessFamily { losslessSetting(family) }
             Divider()
             // Kit's notes on what this format writes (the peak's ceiling,
             // an SDR version, a transparency fill).
@@ -123,9 +124,14 @@ private struct ExportSettingsView: View {
     // MARK: Formats
 
     private var selection: Binding<String> {
-        Binding(get: { model.export.encodingID }, set: { id in
-            model.selectEncoding(id)
+        Binding(get: { ExportPresentation.cardID(encoding: model.export.encodingID) }, set: { id in
+            model.selectEncoding(encodingID(card: id))
         })
+    }
+
+    /// A lossless card picks its file with the HDR output it keeps.
+    private func encodingID(card id: String) -> String {
+        LosslessFamily(cardID: id).map { model.losslessEncoding($0).rawValue } ?? id
     }
 
     private func encodingKey(_ part: String) -> String { "enc.\(model.export.encodingID).\(part)" }
@@ -134,7 +140,7 @@ private struct ExportSettingsView: View {
         ids.map { id in
             let labelKey = "enc.\(id).label", hintKey = "enc.\(id).hint"
             let name = AppStrings.string(labelKey, locale: locale)
-            let reason = model.export.encodingAvailability[id] ?? nil
+            let reason = model.export.encodingAvailability[encodingID(card: id)] ?? nil
             return FormatCardItem(
                 id: id, name: Text(LocalizedStringKey(labelKey)),
                 detail: Text(LocalizedStringKey(hintKey)),
@@ -143,21 +149,60 @@ private struct ExportSettingsView: View {
         }
     }
 
+    // MARK: Lossless
+
+    /// Photoshop's "HDR Output" and colour depth for the TIFF and DNG cards:
+    /// HDR writes the HDR version itself, linear; off writes the SDR version.
+    /// Only an HDR TIFF has a depth to choose; the rest are 16 bits.
+    private func losslessSetting(_ family: LosslessFamily) -> some View {
+        let hdr = model.exportChoices.writesHDR
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            Toggle(isOn: Binding(get: { hdr }, set: { model.setLosslessHDR($0) })) {
+                Text("export.lossless.hdr").font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(hdrUnavailable(family))
+            HStack(spacing: Space.s3) {
+                Text("export.lossless.depth").font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
+                if family == .tiff && hdr {
+                    Picker(selection: Binding(get: { model.exportChoices.tiffDepth }, set: { model.setTIFFDepth($0) })) {
+                        ForEach([16, 32], id: \.self) { Text(LocalizedStringKey(ExportPresentation.depthKey($0))).tag($0) }
+                    } label: {
+                        Text("export.lossless.depth")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                } else {
+                    Text(LocalizedStringKey(ExportPresentation.depthKey(16)))
+                        .font(Font.hdr.body)
+                        .foregroundStyle(Color.hdr.inkMuted)
+                }
+            }
+        }
+    }
+
+    /// The HDR form of a card cannot be chosen where the engine lacks it.
+    private func hdrUnavailable(_ family: LosslessFamily) -> Bool {
+        let id = family.encoding(hdr: true, tiffDepth: model.exportChoices.tiffDepth).rawValue
+        return !model.exportChoices.writesHDR && (model.export.encodingAvailability[id] ?? nil) != nil
+    }
+
     // MARK: Colour
 
     @ViewBuilder private var colorSetting: some View {
+        let choices = ExportEncoding(rawValue: model.export.encodingID)?.gamutChoices ?? []
         VStack(alignment: .leading, spacing: Space.s2) {
             Text("export.color")
                 .font(Font.hdr.control)
                 .foregroundStyle(Color.hdr.ink)
-            if model.workflow == .colorOnly {
+            if !choices.isEmpty {
                 ParameterSegmented("export.color", selection: Binding(get: { model.export.outputGamut },
                                                                      set: { model.setOutputGamut($0) }),
-                                   choices: [SegmentedChoice("choice.outputGamut.srgb", value: "srgb"),
-                                             SegmentedChoice("choice.outputGamut.p3", value: "p3")],
+                                   choices: choices.map { SegmentedChoice(LocalizedStringKey("choice.outputGamut.\($0.rawValue)"),
+                                                                          value: $0.rawValue) },
                                    size: .small)
             } else {
-                // An HDR format fixes its gamut: P3 for a gain map, Rec. 2020 for BT.2100.
+                // The other HDR formats fix their gamut: P3 for a gain map, Rec. 2020 for BT.2100.
                 Text(LocalizedStringKey(model.export.gamut.labelKey))
                     .font(Font.hdr.body)
                     .foregroundStyle(Color.hdr.inkMuted)
@@ -322,7 +367,7 @@ private struct ExportSummaryColumn: View {
     }
 
     private var processing: Text {
-        if model.workflow == .colorOnly { return Text("export.summary.colorOnly") }
+        if !model.exportChoices.writesHDR { return Text("export.summary.colorOnly") }
         let source = model.editor.recipe.hdrSource
         if source.usesModel, let option = Adjustments.declaration(Recipe.hdrSourceID)?.options.first(where: { $0.id == source.rawValue }) {
             return Text("export.summary.hdrAI \(AdjustmentText.option(option))")

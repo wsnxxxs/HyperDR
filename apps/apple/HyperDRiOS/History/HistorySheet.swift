@@ -292,7 +292,7 @@ private struct HistoryDetail: View {
             } label: {
                 Text(verbatim: "HDR")
             }
-            if resolved.encoding != .sdrTIFF {
+            if !resolved.encoding.isLossless {
                 LabeledContent { Text(verbatim: String(resolved.quality)).monospacedDigit() } label: {
                     Text("ios.export.qualityLabel")
                 }

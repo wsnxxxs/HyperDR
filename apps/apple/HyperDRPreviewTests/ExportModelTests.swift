@@ -366,6 +366,28 @@ import HyperDRRender
         let folder=URL(fileURLWithPath:"/tmp/kept-folder");await m.setExportFolder(folder)
         m.resetPreferences();XCTAssertEqual(m.preferences.exportFolder.label,"kept-folder")
     }
+    /// The lossless cards: a card keeps the HDR output of the file already
+    /// chosen, HDR output off writes the SDR file without leaving the HDR
+    /// panel, and the TIFF depth survives a turn through SDR.
+    func testLosslessCardsSwitchHDROutputAndDepth() async {
+        let (m,_)=await ready()
+        XCTAssertEqual(m.losslessEncoding(.tiff),.hdrTIFF16,"from an HDR format, HDR output starts on")
+        m.selectEncoding(m.losslessEncoding(.tiff).rawValue)
+        XCTAssertEqual(m.exportChoices.encoding,"hdr-tiff-16");XCTAssertNil(m.exportQuality)
+        m.setTIFFDepth(32);XCTAssertEqual(m.exportChoices.encoding,"hdr-tiff-32")
+        m.setOutputGamut("rec2020");XCTAssertEqual(m.export.gamut,.rec2020)
+        m.setLosslessHDR(false)
+        XCTAssertEqual(m.exportChoices.encoding,"sdr-tiff");XCTAssertEqual(m.workflow,.hdr)
+        XCTAssertFalse(m.exportChoices.writesHDR);XCTAssertEqual(m.export.gamut,.p3,"an SDR TIFF has no Rec. 2020")
+        m.selectEncoding(m.losslessEncoding(.dng).rawValue)
+        XCTAssertEqual(m.exportChoices.encoding,"sdr-dng","the DNG card keeps HDR output off")
+        m.setLosslessHDR(true);XCTAssertEqual(m.exportChoices.encoding,"hdr-dng")
+        m.selectEncoding(m.losslessEncoding(.tiff).rawValue)
+        XCTAssertEqual(m.exportChoices.encoding,"hdr-tiff-32","the depth is kept")
+        XCTAssertEqual(m.exportChoices.customFormat.gamut,.rec2020)
+        m.selectEncoding("sdr-jpeg");XCTAssertEqual(m.workflow,.colorOnly)
+        XCTAssertEqual(m.losslessEncoding(.dng),.sdrDNG,"from the SDR JPEG, HDR output starts off")
+    }
     func testStaleHistoryResponseCannotReplaceTheNewPhotoHistory() async {
         let (m,s)=await ready();let gate=ExportModelGate();var resumed=false
         s.metadataHandler={ await gate.wait(); resumed=true }

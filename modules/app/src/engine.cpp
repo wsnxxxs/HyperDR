@@ -58,7 +58,8 @@ std::string Engine::capabilities() const {
       .member("reason", caps.reason).end_object().begin_array("encodings");
   for (auto encoding : {OutputEncoding::Adaptive, OutputEncoding::IsoGainMapJpeg, OutputEncoding::Pq,
       OutputEncoding::Hlg, OutputEncoding::AvifPq, OutputEncoding::AvifHlg,
-      OutputEncoding::SdrJpeg, OutputEncoding::SdrTiff}) {
+      OutputEncoding::SdrJpeg, OutputEncoding::SdrTiff, OutputEncoding::SdrDng,
+      OutputEncoding::HdrTiff16, OutputEncoding::HdrTiff32, OutputEncoding::HdrDng}) {
     const bool hevc = encoding == OutputEncoding::Adaptive || encoding == OutputEncoding::Pq || encoding == OutputEncoding::Hlg;
     const auto reason = !kCodecsAvailable ? std::string("codecs_unavailable")
         : hevc ? app::detail::encoder_failure(caps, encoding != OutputEncoding::Adaptive) : std::string{};

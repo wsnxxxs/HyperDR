@@ -154,7 +154,55 @@ struct RecipeExportEnvironment {
         #expect(sdr.verified)
         #expect(ordinary.packageJSON == nil && ordinary.firstReaderJSON != nil)
         #expect(!ordinary.system.auxiliaryGain && !ordinary.system.hdrReadable)
-        #expect(await env.sessions.exports(for: env.session.id).count == 9)
+        #expect(await env.sessions.exports(for: env.session.id).count == ExportEncoding.allCases.count + 1)
+    }
+
+    /// The HDR TIFF holds the HDR version itself: samples above SDR white, the
+    /// same through the pull writer and whole planes, half floats within their
+    /// precision of single ones. The DNG files are the same bytes either way.
+    @Test func losslessHDRFilesHoldTheHDRVersion() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let service = env.realService()
+        var recipe = Recipe()
+        recipe.setValue(.number(0.5), for: "tone.exposure")
+        recipe.setValue(.number(2), for: "hdr.range")
+        func samples(_ url: URL) throws -> [Float] {
+            let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+            let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldAllowFloat: true] as CFDictionary))
+            #expect(image.bitmapInfo.contains(.floatComponents))
+            let w = image.width, h = image.height
+            var values = [Float](repeating: 0, count: w * h * 4)
+            let context = try #require(CGContext(data: &values, width: w, height: h, bitsPerComponent: 32, bytesPerRow: w * 16,
+                space: CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue
+                    | CGBitmapInfo.byteOrder32Little.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return values
+        }
+        var results: [ExportEncoding: [Float]] = [:]
+        for encoding in [ExportEncoding.hdrTIFF32, .hdrTIFF16, .hdrDNG, .sdrDNG] {
+            var request = env.request(encoding)
+            let streamed = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe), request: request)
+            request.allowsRowInput = false
+            let whole = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe), request: request)
+            #expect(streamed.resolved.usesRowInput == true && whole.resolved.usesRowInput == false)
+            #expect(streamed.verified && whole.verified)
+            #expect((streamed.peakStops != nil) == encoding.isLinearHDR)
+            #expect(streamed.file.pathExtension == (encoding.isDNG ? "dng" : "tif"))
+            let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: streamed.record.reportJSON)
+            #expect(!evidence.system.auxiliaryGain && evidence.system.bitDepth == encoding.losslessBitDepth)
+            if encoding.isDNG {
+                // The Exif date is the source's, so nothing in the file depends on the run.
+                #expect(try Data(contentsOf: streamed.file) == Data(contentsOf: whole.file))
+            } else {
+                let values = try samples(streamed.file)
+                #expect(try values == samples(whole.file))
+                results[encoding] = values
+            }
+        }
+        let single = try #require(results[.hdrTIFF32]), half = try #require(results[.hdrTIFF16])
+        #expect(single.max()! > 1.05) // highlights above SDR white survive
+        #expect(zip(single, half).allSatisfy { abs($0 - $1) <= abs($0) * 1e-3 + 1e-4 })
     }
 
     /// The crop pane's geometry: the export is the cropped photo, at the size
@@ -310,7 +358,7 @@ struct RecipeExportEnvironment {
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(await env.sessions.exportThumbnail(env.session.id, export: result.record.id) != nil)
         }
-        #expect(await env.sessions.exports(for: env.session.id).count == 8)
+        #expect(await env.sessions.exports(for: env.session.id).count == ExportEncoding.allCases.count)
     }
 
     /// Run each height in a fresh process. This isolates the Kit bridge/writer;

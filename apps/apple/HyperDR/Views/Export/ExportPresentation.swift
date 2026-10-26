@@ -19,16 +19,25 @@ enum ExportPresentation {
     }
 
     /// The card groups: HDR enhancement shows six formats in two groups,
-    /// colour-only the two SDR ones (§3.2).
+    /// colour-only the SDR JPEG (§3.2), and both end with the lossless group,
+    /// whose TIFF and DNG cards switch their HDR output themselves.
     static func groups(for workflow: Workflow) -> [FormatGroup] {
+        let lossless = FormatGroup(titleKey: "export.group.lossless", ids: LosslessFamily.allCases.map(\.cardID))
         switch workflow {
         case .hdr:
-            [FormatGroup(titleKey: "export.group.anyScreen", ids: ["adaptive", "iso-gainmap-jpeg"]),
-             FormatGroup(titleKey: "export.group.hdrOnly", ids: ["pq", "hlg", "avif-pq", "avif-hlg"])]
+            return [FormatGroup(titleKey: "export.group.anyScreen", ids: ["adaptive", "iso-gainmap-jpeg"]),
+                    FormatGroup(titleKey: "export.group.hdrOnly", ids: ["pq", "hlg", "avif-pq", "avif-hlg"]), lossless]
         case .colorOnly:
-            [FormatGroup(titleKey: "export.group.format", ids: ["sdr-jpeg", "sdr-tiff"])]
+            return [FormatGroup(titleKey: "export.group.format", ids: ["sdr-jpeg"]), lossless]
         }
     }
+
+    /// The card a format belongs to: its own, or its lossless family's.
+    static func cardID(encoding: String) -> String { LosslessFamily(encoding: encoding)?.cardID ?? encoding }
+
+    /// The lossless settings' depth line: "16 bits/channel", or the menu's two
+    /// choices for an HDR TIFF.
+    static func depthKey(_ depth: Int) -> String { depth == 32 ? "export.lossless.depth.32" : "export.lossless.depth.16" }
 
     /// Which of the four HEVC reasons (§3.3) a model reason key stands for;
     /// anything else is the generic one.

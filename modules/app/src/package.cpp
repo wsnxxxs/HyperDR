@@ -345,6 +345,26 @@ ColorGamut resolved_gamut(const PackageRequest& request) {
                                     ? ColorGamut::kSrgb : ColorGamut::kDisplayP3);
 }
 
+// Only the DNG and float formats write Rec. 2020 primaries; the SDR JPEG and
+// TIFF writers take sRGB or Display P3, and the HDR formats fix their own.
+void validate_gamut(const PackageRequest& request) {
+  if (request.gamut == ColorGamut::kRec2020 && !is_dng_encoding(request.encoding) &&
+      !is_linear_hdr_encoding(request.encoding))
+    throw std::invalid_argument("Rec. 2020 is written only by the DNG and float TIFF formats");
+}
+
+// What the lossless writer needs to rebuild the HDR rendition from the pair.
+LinearHdrGain linear_hdr_gain(const PackageGain& gain, EncodingRows rows) {
+  LinearHdrGain out{std::move(rows)};
+  for (unsigned c = 0; c < 3; ++c) {
+    const unsigned source = gain.plane.channels == 1 ? 0 : c;
+    out.base_offset[c] = gain.base_offset[source];
+    out.alternate_offset[c] = gain.alternate_offset[source];
+  }
+  out.headroom_stops = gain.alternate_headroom;
+  return out;
+}
+
 // E5 read back rather than assumed: the mat outside the photograph must carry no
 // gain, and the only way to know is to decode the file that was just written --
 // the staging file, before anything is published to the caller's path.
@@ -522,6 +542,8 @@ void publish_package(const PackageRequest& request,const std::filesystem::path& 
 std::string verification_name(OutputEncoding encoding) {
   if (encoding == OutputEncoding::SdrJpeg) return "sdr-jpeg";
   if (encoding == OutputEncoding::SdrTiff) return "sdr-tiff";
+  if (is_dng_encoding(encoding)) return "dng";
+  if (is_linear_hdr_encoding(encoding)) return "float-tiff";
   if (encoding == OutputEncoding::IsoGainMapJpeg) return "iso-gainmap-jpeg";
   if (is_avif_encoding(encoding)) return "avif";
   return encoding == OutputEncoding::Adaptive ? "heic-gain-map" : "heic-bt2100";
@@ -544,6 +566,8 @@ std::string package_report(const PackageRequest& request,const std::optional<Qua
       // The colour space the written samples are in: a BT.2100 rendition is
       // Rec.2020 and carries no ICC profile of its own.
       .member("icc", bt2100_output ? "rec2020"
+                         : is_dng_encoding(encoding) || is_linear_hdr_encoding(encoding)
+                               ? std::string("linear-") + color_gamut_name(resolved_gamut(request))
                          : is_sdr_encoding(encoding) && resolved_gamut(request) == ColorGamut::kSrgb
                                ? "srgb" : "display-p3")
       .end_object();
@@ -587,6 +611,11 @@ std::string package_image(const PackageRequest& request) {
   const auto encoding = request.encoding;
   const bool gain_map_output = is_gain_map_encoding(encoding);
   const bool bt2100_output = is_bt2100_encoding(encoding);
+  const bool linear_output = is_linear_hdr_encoding(encoding);
+  validate_gamut(request);
+  if (linear_output && request.gain == nullptr)
+    throw UnsupportedFormat(std::string(hdr_encoding_name(encoding)) +
+                            " has no HDR rendition without a gain plane");
   if (gain_map_output && request.gain == nullptr)
     throw UnsupportedFormat(std::string(hdr_encoding_name(encoding)) +
                             " needs a gain plane; this request supplied only an SDR base");
@@ -658,8 +687,10 @@ std::string package_image(const PackageRequest& request) {
 
   check_cancelled();
   const bool heic = encoding == OutputEncoding::Adaptive || encoding == OutputEncoding::Pq || encoding == OutputEncoding::Hlg;
+  // HEIC and the DNG/float writers write a file of their own, not bytes.
+  const bool lossless_file = is_dng_encoding(encoding) || linear_output;
   std::optional<StagingFile> heic_staging;
-  if (heic) heic_staging.emplace(reserve_staging_beside(request.output));
+  if (heic || lossless_file) heic_staging.emplace(reserve_staging_beside(request.output));
   std::vector<std::uint8_t> bytes;
   switch (encoding) {
     case OutputEncoding::SdrJpeg: {
@@ -701,6 +732,31 @@ std::string package_image(const PackageRequest& request) {
       renditions.stats.headroom_stops = gain->alternate_headroom;
       if (heic) write_hdr_heic(renditions,photo,request.quality,encoding,heic_staging->path);
       else bytes = encode_avif(renditions, photo, request.quality, encoding);
+      break;
+    }
+    case OutputEncoding::SdrDng:
+    case OutputEncoding::HdrTiff16:
+    case OutputEncoding::HdrTiff32:
+    case OutputEncoding::HdrDng: {
+      const auto stride = std::size_t(base.width) * 3;
+      const EncodingRows base_rows{base.width, base.height, 3, [&](std::uint32_t y, std::span<float> out) {
+        std::copy_n(base.pixels.data() + std::size_t(y) * stride, stride, out.data());
+      }};
+      std::optional<LinearHdrGain> hdr;
+      FloatImage stops;
+      if (linear_output) {
+        stops = copy_plane(request.gain->plane, "gain");
+        if (stops.channels != 1 && stops.channels != 3)
+          throw std::invalid_argument("gain plane must have one or three channels");
+        validate_offsets(*request.gain, stops.channels, request.presentation_frame);
+        const auto gain_stride = std::size_t(stops.width) * stops.channels;
+        hdr = linear_hdr_gain(*request.gain, {stops.width, stops.height, stops.channels,
+            [&](std::uint32_t y, std::span<float> out) {
+              std::copy_n(stops.pixels.data() + std::size_t(y) * gain_stride, gain_stride, out.data());
+            }});
+      }
+      write_lossless_rows(base_rows, hdr ? &*hdr : nullptr, photo, encoding, resolved_gamut(request),
+                          heic_staging->path);
       break;
     }
   }
@@ -748,7 +804,12 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     throw std::invalid_argument("streaming package needs dimensions, output, reader and 1..4096 rows");
   const auto width=request.sdr->width,height=request.sdr->height;
   const auto channels=request.gain?request.gain->plane.channels:0;
-  const bool needs_gain=is_gain_map_encoding(request.encoding)||is_bt2100_encoding(request.encoding);
+  const bool linear_hdr=is_linear_hdr_encoding(request.encoding);
+  const bool needs_gain=is_gain_map_encoding(request.encoding)||is_bt2100_encoding(request.encoding)||linear_hdr;
+  // The float writers rebuild the HDR rendition from the stops themselves: no
+  // codebook, so no scan and no replay.
+  const bool codebook=needs_gain&&!linear_hdr;
+  validate_gamut(request);
   if(!width||!height||request.sdr->channels!=3)throw std::invalid_argument("streaming base must be nonempty RGB");
   if(request.quality<0||request.quality>100 || (request.encoding==OutputEncoding::Adaptive?
       (request.depth!=8&&request.depth!=10):request.depth!=8))throw std::invalid_argument("invalid package quality or depth");
@@ -771,7 +832,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   if(stride>std::numeric_limits<std::size_t>::max()/std::min(rows,height)/sizeof(float))throw std::invalid_argument("streaming band dimensions overflow");
   std::vector<float> base(stride*std::min(rows,height)),grid(gstride*std::min(rows,height));
   std::unique_ptr<PackageRowSpool> spool;
-  if(needs_gain) spool=std::make_unique<PackageRowSpool>(request.output,
+  if(codebook) spool=std::make_unique<PackageRowSpool>(request.output,
       std::uint64_t(width)*height*(3+channels)*sizeof(float));
   bool replay=false;
   unsigned cached=height;
@@ -794,7 +855,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   };
   std::optional<QuantizedGain> gain;
   bool all_zero_gain=false;
-  if(needs_gain) {
+  if(codebook) {
     const std::uint64_t total=std::uint64_t(width)*height*channels;
     const auto count=std::min<std::uint64_t>(total,65536);
     std::vector<float> samples; samples.reserve(count);
@@ -841,6 +902,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
       out[i]=code;
     }
   }};
+  EncodingRows stops{width,height,channels,[&](unsigned y,std::span<float> out) {
+    fetch(y);std::copy_n(grid.data()+std::size_t(y-cached)*gstride,gstride,out.data());
+  }};
   PhotoMetadata photo;
   if(request.exif&&request.exif_size)photo=read_exif(request.exif,request.exif_size).metadata;
   photo.orientation=1;
@@ -849,6 +913,13 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   switch(request.encoding) {
     case OutputEncoding::SdrJpeg:write_sdr_jpeg_rows(base_rows,photo,request.quality,resolved_gamut(request),staged.path);break;
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
+    case OutputEncoding::SdrDng:write_lossless_rows(base_rows,nullptr,photo,request.encoding,resolved_gamut(request),staged.path);break;
+    case OutputEncoding::HdrTiff16:
+    case OutputEncoding::HdrTiff32:
+    case OutputEncoding::HdrDng: {
+      const auto hdr=linear_hdr_gain(*request.gain,stops);
+      write_lossless_rows(base_rows,&hdr,photo,request.encoding,resolved_gamut(request),staged.path);break;
+    }
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
     case OutputEncoding::AvifPq:
     case OutputEncoding::AvifHlg:

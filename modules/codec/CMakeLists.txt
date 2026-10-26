@@ -19,6 +19,7 @@ if(HYPERDR_WITH_CODECS)
     src/raster_decoder.cpp
     src/heif_decoder.cpp
     src/tiff_codec.cpp
+    src/lossless_codec.cpp
     src/raw_compat.cpp
     src/raw_ciraw.mm
     src/gain_map_jpeg_imageio.mm

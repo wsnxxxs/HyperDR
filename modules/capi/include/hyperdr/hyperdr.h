@@ -97,7 +97,12 @@ HYPERDR_API int hyperdr_raw_extract_preview(hyperdr_engine*, const char* raw_pat
  * - Gain is stored by "adaptive" (one channel) and "iso-gainmap-jpeg" (one or
  *   three). The BT.2100 formats ("pq", "hlg", "avif-pq", "avif-hlg")
  *   reconstruct an HDR rendition from the pair and store no gain map. The SDR
- *   formats ("sdr-jpeg", "sdr-tiff") store none and ignore the gain plane.
+ *   formats ("sdr-jpeg", "sdr-tiff", "sdr-dng") store none and ignore the gain
+ *   plane. The lossless HDR formats store that rendition itself, linear, with
+ *   SDR white at 1.0: "hdr-tiff-16" and "hdr-tiff-32" as half or single IEEE
+ *   floats, "hdr-dng" as a 16-bit LinearRaw DNG divided by 2^alternate_headroom
+ *   with BaselineExposure set to alternate_headroom. "sdr-dng" is the base as
+ *   a 16-bit LinearRaw DNG.
  *   A combination a writer cannot represent is refused with the
  *   "unsupported_format" code rather than being approximated.
  *   "adaptive" writes ISO 21496-1's Apple form, which declares alternate
@@ -159,9 +164,9 @@ typedef struct hyperdr_package_request {
   const char* output_path;    /* UTF-8; required */
   const char* format;         /* UTF-8 canonical name; required */
   /* Optional JSON object: quality (0..100), depth (8 or 10, Adaptive base),
-   * gamut ("srgb" or "p3", SDR output
-   * only), verify (default true), overwrite (default false). Unknown keys are
-   * rejected as invalid_options. */
+   * gamut ("srgb" or "p3" for SDR output; "rec2020" too for the DNG and float
+   * TIFF formats), verify (default true), overwrite (default false). Unknown
+   * keys are rejected as invalid_options. */
   const char* parameters_json;
   const hyperdr_package_plane* sdr; /* required */
   const hyperdr_package_gain* gain; /* optional */
@@ -189,7 +194,8 @@ HYPERDR_API int hyperdr_package(hyperdr_engine*, const hyperdr_package_request* 
 
 /* Row entry points introduced in ABI 4; retained unchanged in ABI 5.
  * Supported: SDR JPEG/TIFF, ISO gain-map JPEG, Adaptive/PQ/HLG HEIC,
- * and PQ/HLG AVIF. AVIF stages 10-bit RGB (6 bytes/canvas pixel) and compressed
+ * PQ/HLG AVIF, and the DNG and float TIFF formats, which write each row as it
+ * arrives (no spool). AVIF stages 10-bit RGB (6 bytes/canvas pixel) and compressed
  * AV1 samples on disk beside the output. At most one 1024x1024 4:4:4 cell and
  * one encoder context (up to 4 threads) are resident beside a cell verifier.
  * AVIF cells are independently predicted, so bytes/codes may differ at seams.

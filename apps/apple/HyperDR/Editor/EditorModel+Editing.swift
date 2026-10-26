@@ -51,9 +51,9 @@ extension EditorModel {
     /// The processing mode of the export: colour-only or HDR, from its encoding.
     var workflow: Workflow { exportChoices.workflow }
 
-    /// The export's quality as its summary shows it; nil for TIFF.
+    /// The export's quality as its summary shows it; nil for TIFF and DNG.
     var exportQuality: Double? {
-        exportChoices.encoding == "sdr-tiff" ? nil : exportChoices.quality
+        ExportEncoding(rawValue: exportChoices.encoding)?.isLossless == true ? nil : exportChoices.quality
     }
 
     func setExportQuality(_ value: Double) {

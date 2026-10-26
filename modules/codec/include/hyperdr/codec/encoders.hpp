@@ -160,6 +160,19 @@ void write_sdr_jpeg_rows(const EncodingRows&, const PhotoMetadata&, int quality,
                          ColorGamut, const std::filesystem::path&);
 void write_sdr_tiff_rows(const EncodingRows&, const PhotoMetadata&, ColorGamut,
                          const std::filesystem::path&);
+// The HDR rendition of a gain-map pair at its full headroom, per row:
+// (base + base_offset) * 2^gain - alternate_offset, with `gain` in decoded
+// log2 stops (one or three channels).
+struct LinearHdrGain {
+  EncodingRows gain;
+  std::array<float, 3> base_offset{}, alternate_offset{};
+  float headroom_stops{};
+};
+// SdrDng (16-bit LinearRaw of the base) and the HDR renditions (HdrTiff16/32
+// as float, HdrDng as scaled 16-bit LinearRaw; these need `hdr`), in sRGB,
+// Display P3 or Rec. 2020 primaries.
+void write_lossless_rows(const EncodingRows& base, const LinearHdrGain* hdr, const PhotoMetadata&,
+                         OutputEncoding, ColorGamut, const std::filesystem::path&);
 void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& codes,
     const GainMapMetadata&, const PhotoMetadata&, int quality, bool frame,
     const std::filesystem::path&);

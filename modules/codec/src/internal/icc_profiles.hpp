@@ -48,4 +48,31 @@ inline std::vector<std::uint8_t> display_p3_profile(bool linear = false) {
   return data;
 }
 
+// A matrix/TRC profile with a linear curve for sRGB, Display P3 or Rec.2020
+// primaries (D65). Float files use it: their samples are linear light, with
+// SDR white at 1.0 and HDR highlights above it.
+inline std::vector<std::uint8_t> linear_rgb_profile(double red_x, double red_y, double green_x,
+                                                    double green_y, double blue_x, double blue_y,
+                                                    const char* description) {
+  cmsCIExyY white{0.3127, 0.3290, 1.0};
+  cmsCIExyYTRIPLE primaries{{red_x, red_y, 1.0}, {green_x, green_y, 1.0}, {blue_x, blue_y, 1.0}};
+  cmsToneCurve* curve = cmsBuildGamma(nullptr, 1.0);
+  if (!curve) throw std::runtime_error("cannot build a linear tone curve");
+  cmsToneCurve* curves[]{curve, curve, curve};
+  cmsHPROFILE profile = cmsCreateRGBProfile(&white, &primaries, curves);
+  cmsFreeToneCurve(curve);
+  if (!profile) throw std::runtime_error("cannot create a linear ICC profile");
+  cmsMLU* text = cmsMLUalloc(nullptr, 1);
+  if (text && cmsMLUsetASCII(text, "en", "US", description))
+    cmsWriteTag(profile, cmsSigProfileDescriptionTag, text);
+  if (text) cmsMLUfree(text);
+  cmsUInt32Number size = 0;
+  if (!cmsSaveProfileToMem(profile, nullptr, &size) || size == 0) { cmsCloseProfile(profile); throw std::runtime_error("cannot size ICC profile"); }
+  std::vector<std::uint8_t> data(size);
+  if (!cmsSaveProfileToMem(profile, data.data(), &size)) { cmsCloseProfile(profile); throw std::runtime_error("cannot serialize ICC profile"); }
+  cmsCloseProfile(profile);
+  data.resize(size);
+  return data;
+}
+
 }  // namespace hyperdr::codec

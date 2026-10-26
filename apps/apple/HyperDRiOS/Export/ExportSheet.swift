@@ -211,20 +211,22 @@ struct ExportSheet: View {
 
     // MARK: Settings
 
-    /// Only what applies: the encoding when the format has more than one,
-    /// the colour space when it is free (SDR, F2), the size, the quality
-    /// (not TIFF), and the frame.
+    /// Only what applies: the encoding when the format has more than one (for
+    /// TIFF and DNG, HDR output and the depth), the colour space when it is
+    /// free (F2), the size, the quality (not TIFF or DNG), and the frame.
     private func settings(_ format: CustomExportFormat, _ plan: ExportPlan?) -> some View {
         let family = ExportFamily(format.encoding)
         return VStack(spacing: 0) {
-            if family.encodings.count > 1 {
+            if family.isLossless {
+                losslessRows(format, family, plan)
+            } else if family.encodings.count > 1 {
                 encodingRow(format, family, plan)
                 Divider().padding(.leading, Space.s4)
             }
-            if format.encoding.isSDR, plan?.gamutIsFixedByFormat == false {
+            if !format.encoding.gamutChoices.isEmpty, plan?.gamutIsFixedByFormat == false {
                 menuRow(Text("ios.export.gamut"), value: Text(LocalizedStringKey(format.gamut.labelKey))) {
                     Picker(selection: Binding(get: { format.gamut }, set: { gamut in model.edit(from: plan) { $0.gamut = gamut } })) {
-                        ForEach([ExportColorGamut.srgb, .p3], id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
+                        ForEach(format.encoding.gamutChoices, id: \.self) { Text(LocalizedStringKey($0.labelKey)).tag($0) }
                     } label: {
                         Text("ios.export.gamut")
                     }
@@ -232,7 +234,7 @@ struct ExportSheet: View {
                 Divider().padding(.leading, Space.s4)
             }
             sizeRow(format, plan)
-            if format.encoding != .sdrTIFF {
+            if !format.encoding.isLossless {
                 Divider().padding(.leading, Space.s4)
                 menuRow(Text("ios.export.qualityLabel"), value: Text(verbatim: String(format.quality))) {
                     Picker(selection: Binding(get: { format.quality }, set: { quality in model.edit(from: plan) { $0.quality = quality } })) {
@@ -249,6 +251,53 @@ struct ExportSheet: View {
         }
         .background(Color.primary.opacity(0.06), in: .rect(cornerRadius: 22, style: .continuous))
         .padding(.horizontal, Space.s4)
+    }
+
+    /// Photoshop's "HDR Output" and colour depth: HDR writes the HDR version
+    /// itself, linear; off writes the SDR version. Only an HDR TIFF has a depth
+    /// to choose; the rest are 16 bits per channel.
+    @ViewBuilder
+    private func losslessRows(_ format: CustomExportFormat, _ family: ExportFamily, _ plan: ExportPlan?) -> some View {
+        let hdr = format.encoding.isLinearHDR
+        let hdrEncoding = format.encoding.hdrCounterpart(tiffDepth: model.tiffDepth)
+        let reason = hdr ? nil : model.unavailableReason(hdrEncoding, editor)
+        Toggle(isOn: Binding(get: { hdr }, set: { model.setHDROutput($0, from: plan) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ios.export.hdrOutput")
+                if let reason { Text(verbatim: reason.phrase.text(locale: locale)).font(.footnote).foregroundStyle(.secondary) }
+            }
+        }
+        .tint(Color.hdr.accentFill)
+        .disabled(reason != nil)
+        .padding(.horizontal, Space.s4)
+        .frame(minHeight: 52)
+        Divider().padding(.leading, Space.s4)
+        let depth = format.encoding.losslessBitDepth ?? 16
+        if family == .tiff && hdr {
+            menuRow(Text("ios.export.depth"), value: Text(Self.depthName(depth))) {
+                Picker(selection: Binding(get: { depth }, set: { depth in
+                    model.edit(from: plan) { $0.encoding = $0.encoding.hdrCounterpart(tiffDepth: depth) }
+                })) {
+                    ForEach([16, 32], id: \.self) { Text(Self.depthName($0)).tag($0) }
+                } label: {
+                    Text("ios.export.depth")
+                }
+            }
+        } else {
+            HStack(spacing: Space.s2) {
+                Text("ios.export.depth")
+                Spacer(minLength: Space.s3)
+                Text(Self.depthName(depth)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Space.s4)
+            .frame(minHeight: 52)
+            .accessibilityElement(children: .combine)
+        }
+        Divider().padding(.leading, Space.s4)
+    }
+
+    private static func depthName(_ depth: Int) -> LocalizedStringKey {
+        depth == 32 ? "ios.export.depth.32" : "ios.export.depth.16"
     }
 
     private func encodingRow(_ format: CustomExportFormat, _ family: ExportFamily, _ plan: ExportPlan?) -> some View {

@@ -183,7 +183,7 @@ extension ExportMemoryEstimate {
         let p = input.canvas.pixels
         // Reserve RGB gain even if analysis later produces mono. Full source,
         // CPU owner and package's copy_plane are real overlapping allocations.
-        let needsGain = input.writesGainMap || input.encoding.isBT2100
+        let needsGain = input.writesGainMap || input.encoding.needsGainPlane
         let pairBytes = needsGain ? 24 : 12
         let source = sourcePixels * (input.source.domain == .dual ? 48 : 16)
         // Match the empirical native decoder/ROI allowance used by row input.
@@ -244,8 +244,10 @@ extension ExportMemoryEstimate {
         let resident = decoder + 512 * 1024 * 1024 + auxiliary + input.retainedBytes
         // Single-cell RAW development uses the existing bounded ROI work
         // allowance; it does not retain completed cells between tile reads.
+        // The lossless HDR writers take the pair row by row, once: no codebook
+        // scan, so no replay spool and no rendering/encoding overlap to price.
+        let channels = input.writesGainMap || input.encoding.needsGainPlane ? input.gainChannels : 0
         let gain = input.writesGainMap || input.encoding.isBT2100
-        let channels = gain ? input.gainChannels : 0
         let rows = min(input.writeRows, PreparedExportRows.maximumReadRows, input.canvas.height)
         // The returned Float arrays and native callback destination coexist.
         // Bounded tile packing scratch is covered by the fixed ROI allowance.

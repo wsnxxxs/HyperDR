@@ -4583,6 +4583,74 @@
         }
       }
     },
+    "choice.encoding.sdr-dng" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 DNG"
+          }
+        }
+      }
+    },
+    "choice.encoding.hdr-dng" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        }
+      }
+    },
+    "choice.encoding.hdr-tiff-16" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "choice.encoding.hdr-tiff-32" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位 HDR TIFF"
+          }
+        }
+      }
+    },
     "choice.colorGamut.srgb" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4681,6 +4749,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Display P3"
+          }
+        }
+      }
+    },
+    "choice.outputGamut.rec2020" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec. 2020"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rec. 2020"
           }
         }
       }
@@ -5722,6 +5807,278 @@
         }
       }
     },
+    "enc.sdr-dng.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The SDR version as a lossless 16-bit linear DNG. Raw editors such as Lightroom develop it with your edit as the starting point."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR 版本的 16 位无损线性 DNG。Lightroom 等 RAW 编辑器会以你的调整为起点继续显影。"
+          }
+        }
+      }
+    },
+    "enc.sdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · SDR"
+          }
+        }
+      }
+    },
+    "enc.sdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 DNG"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The HDR version as a lossless 16-bit linear DNG: highlights above SDR white sit under the white level and the file’s baseline exposure brings them back. Lightroom and Apple’s raw engine develop it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 版本的 16 位无损线性 DNG：高于 SDR 白的高光放在白电平以下，再由文件的基准曝光还原。Lightroom 和苹果的 RAW 引擎都能显影。"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR DNG"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The HDR version as a lossless 16-bit floating-point TIFF: linear light with SDR white at 1.0 and highlights above it, for HDR editing in Photoshop and similar apps."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 版本的 16 位浮点无损 TIFF：线性光，SDR 白为 1.0，高光保留在 1.0 以上，适合在 Photoshop 等软件中继续做 HDR 编辑。"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Half float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "半精度浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-16.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The HDR version as a 32-bit floating-point TIFF: exactly the rendered values, linear light with SDR white at 1.0 and highlights above it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 版本的 32 位浮点 TIFF：与渲染结果完全一致，线性光，SDR 白为 1.0，高光保留在 1.0 以上。"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Float · linear HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浮点 · 线性 HDR"
+          }
+        }
+      }
+    },
+    "enc.hdr-tiff-32.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32-bit HDR TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位 HDR TIFF"
+          }
+        }
+      }
+    },
+    "enc.lossless-tiff.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 or 32-bit · for further editing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 或 32 位 · 适合继续编辑"
+          }
+        }
+      }
+    },
+    "enc.lossless-tiff.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TIFF"
+          }
+        }
+      }
+    },
+    "enc.lossless-dng.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linear raw · for raw editors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 RAW · 适合 RAW 编辑器"
+          }
+        }
+      }
+    },
+    "enc.lossless-dng.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DNG"
+          }
+        }
+      }
+    },
     "enc.sdr-tiff.hint" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5786,6 +6143,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "纯 HDR · 10 位"
+          }
+        }
+      }
+    },
+    "export.group.lossless" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lossless · professional"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无损 · 专业格式"
           }
         }
       }
@@ -6092,6 +6466,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "色域"
+          }
+        }
+      }
+    },
+    "export.lossless.hdr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR output"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 输出"
+          }
+        }
+      }
+    },
+    "export.lossless.depth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color depth"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色彩深度"
+          }
+        }
+      }
+    },
+    "export.lossless.depth.16" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 位/通道"
+          }
+        }
+      }
+    },
+    "export.lossless.depth.32" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 bits/channel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "32 位/通道"
           }
         }
       }

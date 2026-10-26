@@ -157,7 +157,8 @@ public struct ExportPlan: Sendable, Hashable {
     public let custom: CustomExportFormat?
     public let handling: DestinationHandling?
     public let encoding: ExportEncoding
-    /// 8 or 10: an adaptive pair with a 10-bit base for an HDR rendition.
+    /// 8 or 10: an adaptive pair with a 10-bit base for an HDR rendition;
+    /// 16 or 32 for the lossless files.
     public let baseBitDepth: Int
     public let writer: ExportWriter
     public let writerReason: ExportWriterReason
@@ -227,11 +228,12 @@ public enum ExportPlanner {
             longEdge = profile.longEdge
             keepLocation = profile.keepLocation
         case .custom(let format):
-            encoding = !request.edit.hdrEnabled && format.encoding == .isoGainMapJPEG ? .sdrJPEG : format.encoding
-            // BT.2100 formats define their own primaries.
+            encoding = resolvedEncoding(format.encoding, hdrEnabled: request.edit.hdrEnabled)
+            // BT.2100 formats define their own primaries; gain maps are P3;
+            // the rest take the page's choice when they offer it.
             gamut = format.encoding.isBT2100 ? .rec2020
                 : format.encoding.writesGainMap ? .p3
-                : format.gamut == .rec2020 ? .p3 : format.gamut
+                : encoding.gamutChoices.contains(format.gamut) ? format.gamut : .p3
             quality = min(max(format.quality, 0), 100)
             longEdge = format.longEdge
             keepLocation = true
@@ -242,18 +244,12 @@ public enum ExportPlanner {
         let photoSize = ExportPlanner.photoSize(for: request.choice, photo: request.source.pixelSize)
         let size = request.frame.canvas ?? photoSize
         let writesGainMap = encoding.writesGainMap && request.edit.hdrEnabled
-        let baseBitDepth: Int
-        if encoding.isBT2100 {
-            baseBitDepth = 10
-        } else if encoding == .adaptive {
-            baseBitDepth = writesGainMap && request.source.isHDRRendition ? 10 : 8
-        } else {
-            baseBitDepth = encoding == .sdrTIFF ? 16 : 8
-        }
+        let baseBitDepth = Self.baseBitDepth(encoding, writesGainMap: writesGainMap, source: request.source)
 
-        // An HDR output is a gain-map pair or a BT.2100 file; with the HDR group
-        // off the content has no highlights left above SDR white, so it has no peak.
-        let outputIsHDR = request.edit.hdrEnabled && (encoding.writesGainMap || encoding.isBT2100)
+        // An HDR output is a gain-map pair, a BT.2100 file or a linear HDR one;
+        // with the HDR group off the content has no highlights left above SDR
+        // white, so it has no peak.
+        let outputIsHDR = request.edit.hdrEnabled && encoding.needsGainPlane
         let ceiling = profile?.ceilingStops ?? encoding.ceilingStops
         // Render accepts range controls from 0.5 stops; an automatic flat
         // source can naturally resolve below that. This floor only limits the
@@ -261,7 +257,7 @@ public enum ExportPlanner {
         let peakStops = outputIsHDR ? max(0.5, min(request.edit.peakStops, ceiling)) : nil
         var notices: [ExportNotice] = []
         let selectedEncoding = request.choice.customFormat?.encoding ?? profile!.encoding
-        if !request.edit.hdrEnabled && selectedEncoding.writesGainMap {
+        if !request.edit.hdrEnabled && (selectedEncoding.writesGainMap || selectedEncoding.isLinearHDR) {
             notices.append(.sdrVersion)
         }
         if peakStops != nil, request.edit.peakStops > ceiling {
@@ -342,6 +338,21 @@ public enum ExportPlanner {
             blockers: blockers)
     }
 
+    /// What a chosen format writes with the HDR group switched off: the HDR
+    /// JPEG, TIFF and DNG become their SDR forms. The BT.2100 formats are
+    /// refused instead (`availability`), and Adaptive writes an SDR HEIC itself.
+    static func resolvedEncoding(_ chosen: ExportEncoding, hdrEnabled: Bool) -> ExportEncoding {
+        hdrEnabled || chosen.isBT2100 || chosen == .adaptive ? chosen : chosen.sdrCounterpart
+    }
+
+    /// Bits per channel of the base: 10 for BT.2100 and an adaptive pair for an
+    /// HDR rendition, 16 or 32 for the lossless files, 8 otherwise.
+    static func baseBitDepth(_ encoding: ExportEncoding, writesGainMap: Bool, source: ExportSource) -> Int {
+        if encoding.isBT2100 { return 10 }
+        if encoding == .adaptive { return writesGainMap && source.isHDRRendition ? 10 : 8 }
+        return encoding.losslessBitDepth ?? 8
+    }
+
     /// The photograph's written size for a choice: a destination's long edge,
     /// never upscaling. A frame is laid out around this size.
     public static func photoSize(for choice: ExportChoice, photo: ExportPixelSize) -> ExportPixelSize {
@@ -371,7 +382,7 @@ public enum ExportPlanner {
             (.inHouse, .peakMemory)
         case .avifPq, .avifHlg:
             (.libavif, .onlyEncoder)
-        case .sdrJPEG, .sdrTIFF:
+        case .sdrJPEG, .sdrTIFF, .sdrDNG, .hdrTIFF16, .hdrTIFF32, .hdrDNG:
             (.inHouse, .noComparison)
         case .adaptive:
             writesGainMap ? (baseBitDepth == 8 ? (.imageIO, .qualityAtEqualSize) : (.inHouse, .peakMemory)) : (.imageIO, .noComparison)
@@ -477,11 +488,10 @@ public enum ExportPlanner {
         case .destination(let destination):
             encoding = request.edit.hdrEnabled ? destination.profile.encoding : destination.profile.sdrEncoding
         case .custom(let format):
-            encoding = !request.edit.hdrEnabled && format.encoding == .isoGainMapJPEG ? .sdrJPEG : format.encoding
+            encoding = resolvedEncoding(format.encoding, hdrEnabled: request.edit.hdrEnabled)
         }
         let gain = encoding.writesGainMap && request.edit.hdrEnabled
-        let depth = encoding.isBT2100 ? 10 : encoding == .adaptive
-            ? (gain && request.source.isHDRRendition ? 10 : 8) : encoding == .sdrTIFF ? 16 : 8
+        let depth = baseBitDepth(encoding, writesGainMap: gain, source: request.source)
         let preferred = memoryPreferredWriter(request, encoding: encoding, writesGainMap: gain, baseBitDepth: depth)
         return maximumLongEdge(request, budget: budget, upper: upper, preferred: preferred,
             encoding: encoding, writesGainMap: gain, baseBitDepth: depth)

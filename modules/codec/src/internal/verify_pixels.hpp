@@ -61,4 +61,5 @@ class VerificationPixels {
 VerificationResult verify_jpeg_pixels(std::span<const std::uint8_t>,bool gain,std::optional<VerificationFrame>);
 VerificationResult verify_heif_pixels(std::span<const std::uint8_t>,HdrEncoding,std::optional<VerificationFrame>);
 VerificationResult verify_tiff_pixels(std::span<const std::uint8_t>);
+VerificationResult verify_lossless_pixels(std::span<const std::uint8_t>,HdrEncoding);
 } // namespace hyperdr::codec

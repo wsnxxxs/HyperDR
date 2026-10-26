@@ -57,13 +57,15 @@ public struct PackageGainMetadata: Sendable {
 
 /// Encoding parameters for one package call. Format ids are the engine's:
 /// `adaptive`, `iso-gainmap-jpeg`, `pq`, `hlg`, `avif-pq`, `avif-hlg`,
-/// `sdr-jpeg`, `sdr-tiff`.
+/// `sdr-jpeg`, `sdr-tiff`, and the lossless `sdr-dng`, `hdr-tiff-16`,
+/// `hdr-tiff-32`, `hdr-dng`.
 public struct PackageOptions: Sendable {
     public var format: String
     public var quality: Int
     /// Base bit depth for `adaptive`; 8 or 10.
     public var depth: Int
-    /// `srgb` or `p3` for the SDR formats; the format default when nil.
+    /// `srgb` or `p3` for the SDR formats, `rec2020` too for the DNG and float
+    /// TIFF ones; the format default when nil.
     public var gamut: String?
     public var verify: Bool
     public var overwrite: Bool
@@ -128,7 +130,7 @@ public struct PackageReport: Codable, Sendable {
     public let width, height, bytes: Int
     public let verified: Bool
     /// The check that ran: `heic-gain-map`, `iso-gainmap-jpeg`, `avif`,
-    /// `heic-bt2100`, `sdr-jpeg`, `sdr-tiff`, or `skipped`.
+    /// `heic-bt2100`, `sdr-jpeg`, `sdr-tiff`, `dng`, `float-tiff`, or `skipped`.
     public let verification: String
     public let metadata: Metadata
     /// Absent for the SDR formats, which store no gain.

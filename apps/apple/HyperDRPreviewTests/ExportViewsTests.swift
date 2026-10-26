@@ -62,13 +62,17 @@ import HyperDRKit
 
     func testFormatGroupsFollowTheProcessingMode() {
         let hdr = ExportPresentation.groups(for: .hdr)
-        XCTAssertEqual(hdr.map(\.ids), [["adaptive", "iso-gainmap-jpeg"], ["pq", "hlg", "avif-pq", "avif-hlg"]])
-        XCTAssertEqual(hdr.map(\.columns), [2, 4])
+        let lossless = ["lossless-tiff", "lossless-dng"]
+        XCTAssertEqual(hdr.map(\.ids), [["adaptive", "iso-gainmap-jpeg"], ["pq", "hlg", "avif-pq", "avif-hlg"], lossless])
+        XCTAssertEqual(hdr.map(\.columns), [2, 4, 2])
         let color = ExportPresentation.groups(for: .colorOnly)
-        XCTAssertEqual(color.map(\.ids), [["sdr-jpeg", "sdr-tiff"]])
-        XCTAssertEqual(color.map(\.columns), [2])
-        // Every format the preferences know has a card in one of the two modes.
-        XCTAssertEqual(Set((hdr + color).flatMap(\.ids)), Set(Preferences.encodings))
+        XCTAssertEqual(color.map(\.ids), [["sdr-jpeg"], lossless])
+        XCTAssertEqual(color.map(\.columns), [2, 2])
+        // Every format the preferences know has a card in one of the two modes:
+        // its own, or its lossless family's.
+        XCTAssertEqual(Set((hdr + color).flatMap(\.ids)), Set(Preferences.encodings.map(ExportPresentation.cardID(encoding:))))
+        XCTAssertEqual(ExportPresentation.cardID(encoding: "hdr-tiff-32"), "lossless-tiff")
+        XCTAssertEqual(ExportPresentation.cardID(encoding: "sdr-dng"), "lossless-dng")
     }
 
     func testTheFourHEVCReasonsAndTheirSentences() {

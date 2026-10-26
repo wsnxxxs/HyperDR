@@ -2,10 +2,12 @@ import HyperDRKit
 import SwiftUI
 
 /// The export sheet's format tiles: a container and the encodings it carries.
-/// The eight encodings fold into four tiles, so the choice reads as "which
-/// file" first; the encoding row then picks how a tile writes HDR.
+/// The encodings fold into five tiles, so the choice reads as "which file"
+/// first; the encoding row then picks how a tile writes HDR. The lossless
+/// tiles (TIFF, DNG) pick it with an HDR output switch and a depth instead,
+/// as Photoshop's export does.
 enum ExportFamily: CaseIterable, Hashable {
-    case jpeg, heic, avif, tiff
+    case jpeg, heic, avif, tiff, dng
 
     /// In the order the encoding menu lists them; the first is the default.
     var encodings: [ExportEncoding] {
@@ -13,16 +15,21 @@ enum ExportFamily: CaseIterable, Hashable {
         case .jpeg: [.isoGainMapJPEG, .sdrJPEG]
         case .heic: [.adaptive, .pq, .hlg]
         case .avif: [.avifPq, .avifHlg]
-        case .tiff: [.sdrTIFF]
+        case .tiff: [.hdrTIFF16, .hdrTIFF32, .sdrTIFF]
+        case .dng: [.hdrDNG, .sdrDNG]
         }
     }
+
+    /// TIFF and DNG: an HDR output switch and a depth, not an encoding menu.
+    var isLossless: Bool { self == .tiff || self == .dng }
 
     init(_ encoding: ExportEncoding) {
         switch encoding {
         case .isoGainMapJPEG, .sdrJPEG: self = .jpeg
         case .adaptive, .pq, .hlg: self = .heic
         case .avifPq, .avifHlg: self = .avif
-        case .sdrTIFF: self = .tiff
+        case .sdrTIFF, .hdrTIFF16, .hdrTIFF32: self = .tiff
+        case .sdrDNG, .hdrDNG: self = .dng
         }
     }
 
@@ -33,6 +40,7 @@ enum ExportFamily: CaseIterable, Hashable {
         case .heic: "HEIC"
         case .avif: "AVIF"
         case .tiff: "TIFF"
+        case .dng: "DNG"
         }
     }
 
@@ -43,6 +51,7 @@ enum ExportFamily: CaseIterable, Hashable {
         case .heic: "ios.export.family.heic"
         case .avif: "ios.export.family.avif"
         case .tiff: "ios.export.family.tiff"
+        case .dng: "ios.export.family.dng"
         }
     }
 }
@@ -55,7 +64,8 @@ extension ExportEncoding {
         case .adaptive: Text(LocalizedStringKey(labelKey))
         case .pq, .avifPq: Text(verbatim: "PQ")
         case .hlg, .avifHlg: Text(verbatim: "HLG")
-        case .sdrJPEG, .sdrTIFF: Text("ios.export.variant.sdr")
+        case .sdrJPEG, .sdrTIFF, .sdrDNG: Text("ios.export.variant.sdr")
+        case .hdrTIFF16, .hdrTIFF32, .hdrDNG: Text(verbatim: "HDR")
         }
     }
 }

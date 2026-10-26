@@ -148,7 +148,8 @@ extension EditorModel {
     }
     func rememberOutputPreferences() {
         guard preferences.value.rememberOutput else { return }
-        let output = ["encoding": exportChoices.encoding, "outputGamut": exportChoices.outputGamut]
+        let output = ["encoding": exportChoices.encoding, "outputGamut": exportChoices.outputGamut,
+                      "tiffDepth": String(exportChoices.tiffDepth)]
         preferences.value.output = output
         preferences.value.save(to: services.preferences)
     }
@@ -157,6 +158,7 @@ extension EditorModel {
         let p = preferences.value
         if p.rememberOutput {
             if let v = p.output["outputGamut"] { exportChoices.outputGamut = v }
+            if let v = p.output["tiffDepth"].flatMap(Int.init) { exportChoices.tiffDepth = v }
         }
         showsHighlightZebra = p.highlightZebra; showsShadowZebra = p.shadowZebra
         viewMode = p.initialView == .original ? .original : .edited

@@ -6,6 +6,9 @@
 // export cannot be published unverified because two call sites drifted.
 
 #include "hyperdr/codec/encoders.hpp"
+#if HYPERDR_WITH_CODECS
+#include "internal/verify_pixels.hpp"
+#endif
 
 // The codec-less build defines this entry point in unavailable.cpp instead,
 // where every other encoder is a "needs codecs" failure.
@@ -16,6 +19,7 @@ namespace hyperdr {
 void verify_encoded_output(std::span<const std::uint8_t> bytes,
                            HdrEncoding encoding) {
   if (encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
+  else if (is_lossless_encoding(encoding)) (void)codec::verify_lossless_pixels(bytes, encoding);
   else if (encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
   else if (encoding == HdrEncoding::IsoGainMapJpeg) verify_gain_map_jpeg(bytes);
   else if (is_avif_encoding(encoding)) verify_avif_decodable(bytes);
@@ -61,6 +65,10 @@ VerificationResult verify_encoded_file(const std::filesystem::path& path,HdrEnco
   if(encoding==HdrEncoding::SdrTiff) {
     if(frame)throw std::invalid_argument("SDR TIFF has no gain-map frame");
     return codec::verify_tiff_pixels(bytes);
+  }
+  if(is_lossless_encoding(encoding)) {
+    if(frame)throw std::invalid_argument("a lossless file has no gain-map frame");
+    return codec::verify_lossless_pixels(bytes,encoding);
   }
   if(encoding==HdrEncoding::SdrJpeg||encoding==HdrEncoding::IsoGainMapJpeg)
     return codec::verify_jpeg_pixels(bytes,encoding==HdrEncoding::IsoGainMapJpeg,frame);

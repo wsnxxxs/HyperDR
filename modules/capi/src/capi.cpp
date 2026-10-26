@@ -215,8 +215,8 @@ hyperdr::PackageRequest package_request(const hyperdr_package_request* configura
           request.depth = static_cast<int>(n);
         } else if (key == "gamut") {
           const auto gamut = hyperdr::color_gamut_from_name(value.string());
-          if (!gamut || *gamut == hyperdr::ColorGamut::kRec2020)
-            throw std::invalid_argument("gamut must be \"srgb\" or \"p3\"");
+          // Rec. 2020 is for the lossless formats; package refuses it elsewhere.
+          if (!gamut) throw std::invalid_argument("gamut must be \"srgb\", \"p3\" or \"rec2020\"");
           request.gamut = *gamut;
         } else if (key == "verify") request.verify = value.boolean();
         else if (key == "overwrite") request.overwrite = value.boolean();

@@ -19,7 +19,8 @@ nonisolated struct ExportPreparationToken: Equatable, Sendable {
 extension EditorModel {
     static func fileExtension(_ encoding: String) -> String {
         switch encoding {
-        case "sdr-tiff": "tif"
+        case "sdr-tiff", "hdr-tiff-16", "hdr-tiff-32": "tif"
+        case "sdr-dng", "hdr-dng": "dng"
         case "sdr-jpeg", "iso-gainmap-jpeg": "jpg"
         case "avif-pq", "avif-hlg": "avif"
         default: "heic"
@@ -36,7 +37,7 @@ extension EditorModel {
     func syncExportState() {
         let choices = exportChoices
         export.encodingID = choices.encoding
-        export.outputGamut = choices.outputGamut == "auto" ? (choices.encoding == "sdr-tiff" ? "p3" : "srgb") : choices.outputGamut
+        export.outputGamut = choices.gamut.rawValue
         export.gamut = choices.gamut
         if export.longEdge != choices.longEdge { export.longEdge = choices.longEdge }
         if let capabilities = exportCapabilities {
@@ -416,9 +417,39 @@ extension EditorModel {
 extension EditorModel {
     /// The export's own choices: not edits, so no undo step (p7-2b §3.1).
     func setOutputGamut(_ id: String) {
-        guard photo != nil, !isEditingLocked, ["srgb", "p3"].contains(id), exportChoices.outputGamut != id else { return }
+        guard photo != nil, !isEditingLocked, exportChoices.outputGamut != id,
+              let gamut = ExportColorGamut(rawValue: id),
+              ExportEncoding(rawValue: exportChoices.encoding)?.gamutChoices.contains(gamut) == true else { return }
         exportChoices.outputGamut = id
         exportChoicesChanged()
+    }
+
+    /// The lossless card the encoding belongs to, if any.
+    var losslessFamily: LosslessFamily? { LosslessFamily(encoding: exportChoices.encoding) }
+
+    /// The encoding a lossless card stands for now: it keeps the HDR output of
+    /// the lossless file already chosen, and starts with HDR on from the HDR
+    /// formats and off from the SDR JPEG.
+    func losslessEncoding(_ family: LosslessFamily) -> ExportEncoding {
+        let hdr = losslessFamily != nil ? exportChoices.writesHDR : exportChoices.workflow == .hdr
+        return family.encoding(hdr: hdr, tiffDepth: exportChoices.tiffDepth)
+    }
+
+    /// The HDR output switch of a lossless card (Photoshop's "HDR Output").
+    func setLosslessHDR(_ on: Bool) {
+        guard let family = losslessFamily else { return }
+        selectEncoding(family.encoding(hdr: on, tiffDepth: exportChoices.tiffDepth).rawValue)
+    }
+
+    /// The HDR TIFF's depth: 16 (half float) or 32 (float) bits per channel.
+    func setTIFFDepth(_ depth: Int) {
+        guard photo != nil, !isEditingLocked, [16, 32].contains(depth), exportChoices.tiffDepth != depth else { return }
+        exportChoices.tiffDepth = depth
+        if losslessFamily == .tiff && exportChoices.writesHDR {
+            selectEncoding(LosslessFamily.tiff.encoding(hdr: true, tiffDepth: depth).rawValue)
+        } else {
+            exportChoicesChanged()
+        }
     }
     /// The photo's long edge before any limit.
     var exportPhotoLongEdge: Int? { document?.pixelSize.map { max($0.width, $0.height) } }

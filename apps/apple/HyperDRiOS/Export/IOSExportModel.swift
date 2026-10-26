@@ -134,6 +134,8 @@ nonisolated struct ExportStack: Sendable {
     var custom = CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90) { didSet { saveChoice() } }
     /// Each format tile's last encoding, so going back to a tile restores it.
     @ObservationIgnored private var familyEncodings: [ExportFamily: ExportEncoding] = [:]
+    /// The HDR TIFF's last depth, kept while the tile writes SDR.
+    private(set) var tiffDepth = 16
     @ObservationIgnored private let defaults: UserDefaults?
     static let choiceKey = "HyperDRExportChoice"
     private(set) var phase = Phase.choosing {
@@ -195,6 +197,7 @@ nonisolated struct ExportStack: Sendable {
             destination = saved.destination
             custom = format
             familyEncodings[ExportFamily(format.encoding)] = format.encoding
+            if format.encoding == .hdrTIFF32 { tiffDepth = 32 }
         }
         Task { [weak self] in
             if let capabilities = try? await stack.value.capabilities { self?.capabilities = capabilities }
@@ -345,7 +348,15 @@ nonisolated struct ExportStack: Sendable {
     func select(_ encoding: ExportEncoding) {
         custom.encoding = encoding
         familyEncodings[ExportFamily(encoding)] = encoding
+        if let depth = encoding.losslessBitDepth, encoding.isLinearHDR, ExportFamily(encoding) == .tiff { tiffDepth = depth }
         normalizeGamut()
+    }
+
+    /// The lossless tiles' HDR output switch: the HDR file, at the TIFF's last
+    /// depth, or the SDR one.
+    func setHDROutput(_ on: Bool, from plan: ExportPlan?) {
+        let depth = tiffDepth
+        edit(from: plan) { $0.encoding = on ? $0.encoding.hdrCounterpart(tiffDepth: depth) : $0.encoding.sdrCounterpart }
     }
 
     /// The format the settings rows show: the custom one, or what the
@@ -378,8 +389,11 @@ nonisolated struct ExportStack: Sendable {
         defaults.set(data, forKey: Self.choiceKey)
     }
 
+    /// A format that offers spaces keeps one of them: the SDR files sRGB or
+    /// Display P3, the HDR TIFF and the DNGs Display P3 or Rec. 2020.
     private func normalizeGamut() {
-        if custom.encoding.isSDR, custom.gamut == .rec2020 { custom.gamut = .p3 }
+        let choices = custom.encoding.gamutChoices
+        if !choices.isEmpty, !choices.contains(custom.gamut) { custom.gamut = .p3 }
     }
 
     // MARK: - The photo's session

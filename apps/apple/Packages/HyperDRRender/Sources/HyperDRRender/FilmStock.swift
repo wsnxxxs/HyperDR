@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 import Synchronization
 import Metal
 
@@ -99,7 +100,22 @@ public struct FilmStock: Sendable {
               resource.filming.grain.layers.count == 3, resource.filming.grain.layers.allSatisfy({ $0.varianceArea.count == Self.curveSamples }),
               resource.filming.grain.layers.allSatisfy({ $0.thirdCumulantArea2.count == Self.curveSamples }), resource.scanning.levels.count == 2
         else { throw RenderError.invalidAdjustment }
-        let floats = bytes.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }.map { Float(Float16(bitPattern: UInt16(littleEndian: $0))) }
+        var words = bytes.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> [UInt16] in
+            buffer.bindMemory(to: UInt16.self).map { UInt16(littleEndian: $0) }
+        }
+        // Xcode also compiles Swift packages for x86_64 in Release, where
+        // Swift's Float16 is unavailable. Use the same vImage path as model gain.
+        var floats = [Float](repeating: 0, count: words.count)
+        let status = words.withUnsafeMutableBytes { input in
+            floats.withUnsafeMutableBytes { output in
+                var source = vImage_Buffer(data: input.baseAddress!, height: 1,
+                    width: vImagePixelCount(input.count / 2), rowBytes: input.count)
+                var destination = vImage_Buffer(data: output.baseAddress!, height: 1,
+                    width: source.width, rowBytes: output.count)
+                return vImageConvert_Planar16FtoPlanarF(&source, &destination, vImage_Flags(kvImageNoFlags))
+            }
+        }
+        guard status == kvImageNoError else { throw RenderError.invalidAdjustment }
         self.id = id
         self.name = resource.name
         self.attribution = resource.attribution

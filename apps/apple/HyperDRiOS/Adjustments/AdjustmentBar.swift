@@ -240,7 +240,12 @@ struct AdjustmentControls: View {
                     .locked(off)
             } else if layout.isLook {
                 // The ruler's place, so switching the look kind never moves the dock.
-                Color.clear.frame(height: large ? 52 : 40)
+                if lookKind == .imported, let lut = layout.lut, !lut.disabledOptions.isEmpty {
+                    LUTCompatibilityNote().padding(.horizontal, Space.s4)
+                        .frame(minHeight: large ? 52 : 40)
+                } else {
+                    Color.clear.frame(height: large ? 52 : 40)
+                }
             }
         }
         .animation(.smooth(duration: 0.2), value: off)

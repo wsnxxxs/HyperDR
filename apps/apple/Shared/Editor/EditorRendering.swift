@@ -98,8 +98,6 @@ nonisolated enum EditorRenderingError: Error, Equatable, Sendable {
     case staleSource
     /// The recipe references a LUT that was never installed.
     case missingLUT(String)
-    /// A `keepsSource` request needs a development the open source does not have.
-    case needsDevelopment
     /// The file changed on disk after it was opened (Render's R23-001): the
     /// photo has to be opened again.
     case sourceChanged
@@ -167,10 +165,9 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     var usesModelGain = false
     /// Part of an interactive drag.
     var isInteractive = false
-    /// A small render (a LUT preview) from the source the preview has open,
-    /// at any size: it never loads or develops the photo again. One whose
-    /// recipe needs another development (a Log look on a RAW) throws
-    /// `EditorRenderingError.needsDevelopment`. No automatic values.
+    /// A small render (a look preview) that leaves the canvas source intact.
+    /// RAW renditions are prepared on demand and reused across looks by the
+    /// bounded preview cache. No automatic values are published to controls.
     var keepsSource = false
     /// The primary edited canvas sets its RAW development/refinement target.
     /// Scopes, original comparisons and thumbnails only sample the current tier.

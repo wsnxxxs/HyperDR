@@ -227,7 +227,7 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         #expect(changes.count == 4 && changes.last?.1 == "p3")
     }
 
-    @Test func selectingALogLookAndFinishingItsCanvasRenderRefreshesPreviews() async throws {
+    @Test func selectingALogLookKeepsAlreadyPreparedPreviews() async throws {
         let (editor, fake) = try await openEditor(.rawEDR)
         let lut = try ColorLUT(cube: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
         await editor.installLUT(lut)
@@ -250,8 +250,8 @@ private let venice = LUTReference(contentHash: "sha256:02", name: "Venice")
         let afterChoice = await fake.completed.filter(\.keepsSource).count
         previews.update(editor, looks: looks)
         try await Task.sleep(for: .milliseconds(600))
-        #expect(await fake.completed.filter(\.keepsSource).count > afterChoice,
-                "A completed development must retry previews that needed it")
+        #expect(await fake.completed.filter(\.keepsSource).count == afterChoice,
+                "Every look already prepared its own rendition before selection")
     }
 
     @Test func startingADragCancelsAPreviewAlreadyWaitingForTheRenderer() async throws {
@@ -316,5 +316,101 @@ extension LookPreviewRegressionTests {
         editor.reconcileLookSpaces(venice.contentHash, attemptedInput: "rec709", attemptedOutput: "p3",
                                    input: "srgb", output: "srgb")
         #expect(editor.recipe.conditionValue("look.output")?.stringValue == "p3")
+    }
+}
+
+
+extension LookPreviewRegressionTests {
+    @Test func aFailedPreviewIsRetriedWhenThePickerReopens() async throws {
+        let (editor, fake) = try await openEditor()
+        await fake.configure {
+            $0.renderErrorForRequest = {
+                $0.keepsSource && $0.recipe.conditionValue(Recipe.filmID)?.stringValue == "portra400"
+                    ? .unsupported("temporary") : nil
+            }
+        }
+        let previews = LookPreviews()
+        previews.update(editor, looks: [])
+        previews.shown(true)
+        try await Task.sleep(for: .milliseconds(500))
+        let original = try #require(previews.images[LookPreviews.none])
+        #expect(previews.images[LookPreviews.filmKey("portra400")] == nil)
+        let rendered = await fake.completed.filter(\.keepsSource).count
+        previews.shown(false)
+        await fake.configure { $0.renderErrorForRequest = nil }
+        previews.shown(true)
+        defer { previews.shown(false) }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(previews.images[LookPreviews.none] === original)
+        #expect(previews.images[LookPreviews.filmKey("portra400")] != nil)
+        #expect(await fake.completed.filter(\.keepsSource).count == rendered + 1,
+                "Only the missing tile needs another render")
+    }
+
+    @Test func aBadImportDoesNotDisableOtherLibraryLUTs() async throws {
+        let (editor, _) = try await openEditor(.rawEDR)
+        let data = Data("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n".utf8)
+        var installed: [String: LUTReference] = [:]
+        let failed = await editor.installLibraryLUTs([
+            LibraryLUT(id: "first", name: "First"),
+            LibraryLUT(id: "broken", name: "Broken"),
+            LibraryLUT(id: "last", name: "Last")
+        ], cube: { $0 == "broken" ? Data("invalid".utf8) : data }, installed: { installed[$0] = $1 })
+        #expect(failed == ["Broken"])
+        #expect(Set(installed.keys) == ["first", "last"])
+        for id in ["first", "last"] {
+            let reference = try #require(installed[id])
+            #expect(editor.hasLUT(reference.contentHash))
+            editor.chooseLook(reference, input: "flog2c-fgamutc", output: "rec709")
+            #expect(editor.recipe.look == reference)
+        }
+    }
+}
+
+@MainActor @Suite struct AutomaticLookPreviewIntegrationTests {
+    @Test func rawPickerRendersEveryLookBeforeAnySelection() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<7 { root.deleteLastPathComponent() }
+        let fixture = root.appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".dng")
+        try FileManager.default.copyItem(at: fixture, to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try RenderSession()
+        let editor = RecipeEditor(renderer: session, frameClock: ImmediateClock())
+        editor.canvasPixelSize = PixelSize(width: 256, height: 256)
+        try await editor.open(url)
+        await editor.settle()
+        #expect(editor.source?.domain == .rawEDR)
+        #expect(!editor.isRefiningPreview && editor.frameIsCurrent)
+
+        let display = try ColorLUT(cube: "# display\nLUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        let supplied = ProcessInfo.processInfo.environment["HYPERDR_TEST_LUT"]
+        let log = try supplied.map { try ColorLUT(contentsOf: URL(fileURLWithPath: $0)) }
+            ?? ColorLUT(cube: "# log\nLUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        await editor.installLUT(display)
+        await editor.installLUT(log)
+        let looks = [
+            LookPreviews.Look(reference: LUTReference(contentHash: display.contentHash, name: "Display"),
+                              input: "srgb", output: "srgb"),
+            LookPreviews.Look(reference: LUTReference(contentHash: log.contentHash, name: "Log"),
+                              input: "slog3-sgamut3cine", output: "rec709")
+        ]
+        let recipe = editor.recipe
+        let canvas = editor.frame?.request
+        let previews = LookPreviews()
+        previews.update(editor, looks: looks)
+        previews.shown(true)
+        defer { previews.shown(false) }
+        let expected = Set([LookPreviews.none, display.contentHash, log.contentHash]
+            + Adjustments.filmStocks.dropFirst().map(LookPreviews.filmKey))
+        let clock = ContinuousClock(), deadline = ContinuousClock.now + .seconds(30)
+        while Set(previews.images.keys) != expected, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(Set(previews.images.keys) == expected,
+                "Opening the picker alone must produce display, Log and all film thumbnails")
+        #expect(editor.recipe == recipe && editor.recipe.look == nil)
+        #expect(editor.frame?.request == canvas, "Preview preparation must not replace the canvas")
+        await editor.close()
     }
 }

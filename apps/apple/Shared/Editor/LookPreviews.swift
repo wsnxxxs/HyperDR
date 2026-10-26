@@ -14,10 +14,8 @@ import Observation
 /// - Hosts call `update` whenever the recipe or the library changes, and
 ///   `shown` as pickers appear and disappear (`lookPickerShown`): renders
 ///   run only while one is shown. Nothing renders during a drag; they start a
-///   moment after the last change, one at a time, each from the source the
-///   preview has open. A LUT whose look needs another development (a Log
-///   look on a RAW developed for display) gets no preview, and the picker
-///   shows its colour mark instead.
+///   moment after the last change, one at a time. RAW's display and scene
+///   renditions are prepared on demand and reused without selecting a look.
 /// - Older previews stay up until their replacements land, so a change
 ///   never blanks the row.
 @MainActor @Observable final class LookPreviews {
@@ -41,6 +39,9 @@ import Observation
 
     @ObservationIgnored private var wanted: LookPreviewInputs?
     @ObservationIgnored private var completed: LookPreviewInputs?
+    /// Successful tiles of an interrupted batch survive closing the picker.
+    @ObservationIgnored private var renderedInputs: LookPreviewInputs?
+    @ObservationIgnored private var renderedIDs: Set<String> = []
     @ObservationIgnored private var imageSource: UUID?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Pickers on screen.
@@ -87,24 +88,37 @@ import Observation
         // completed key cannot describe the possibly mixed set on screen.
         completed = nil
         task?.cancel()
+        if renderedInputs != key {
+            renderedInputs = key
+            renderedIDs = []
+        }
         let base = Self.base(editor.recipe)
         let films = Adjustments.filmStocks.dropFirst().map { (Self.filmKey($0), Self.recipe(base, film: $0)) }
-        let jobs = [(Self.none, base)] + films + looks.filter {
+        let imported = looks.filter {
             Adjustments.allowsLook(input: $0.input, output: $0.output, domain: base.inputDomain)
         }.map { ($0.reference.contentHash, Self.recipe(base, with: $0)) }
+        let jobs = [(Self.none, base)] + imported + films
+        let pendingJobs = jobs.filter { !renderedIDs.contains($0.0) }
         task = Task { [weak self, weak editor] in
             try? await Task.sleep(for: .milliseconds(250))
-            for (id, recipe) in jobs {
+            var failed = false
+            for (id, recipe) in pendingJobs {
                 guard !Task.isCancelled, let editor, !editor.isDragging,
                       editor.frameIsCurrent, !editor.isYieldingToExport else { return }
                 let image = try? await editor.lookPreview(recipe, side: Self.side)
                 guard !Task.isCancelled, let self else { return }
-                images[id] = image
+                if let image {
+                    images[id] = image
+                    renderedIDs.insert(id)
+                }
+                else { failed = true }
             }
             guard let self else { return }
             let kept = Set(jobs.map(\.0))
             images = images.filter { kept.contains($0.key) }
-            completed = key
+            // A transient failure must not permanently cache a blank tile.
+            completed = failed ? nil : key
+            wanted = failed ? nil : key
             task = nil
         }
     }
@@ -156,7 +170,6 @@ struct LookPreviewInputs: Equatable {
     // A completed canvas render signals that its development is available.
     // AI may finish without changing the recipe or request.
     let rendered: EditorRenderRequest?
-    let development: SourceOptions?
     let modelGainPending: Bool
     let aiStatus: RecipeEditor.AIStatus
     let looks: [LookPreviews.Look]
@@ -169,7 +182,8 @@ struct LookPreviewInputs: Equatable {
         isRefining = editor.isRefiningPreview
         isYielding = editor.isYieldingToExport
         var frame = editor.frame?.request
-        development = frame.flatMap { try? SourceOptions(recipe: $0.recipe, options: RenderOptions(bypassedGroups: $0.bypassedGroups)) }
+        // Each thumbnail prepares its own rendition. Selecting a Log look
+        // no longer changes which other looks the completed set can preview.
         if let request = frame { frame?.recipe = LookPreviews.base(request.recipe) }
         frame?.isInteractive = false
         rendered = frame

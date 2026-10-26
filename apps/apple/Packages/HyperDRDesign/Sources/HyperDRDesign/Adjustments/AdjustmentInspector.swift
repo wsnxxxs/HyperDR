@@ -450,6 +450,7 @@ struct LookPicker: View {
                     withAnimation(.smooth(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
                 }
             }
+            if !control.disabledOptions.isEmpty { LUTCompatibilityNote() }
         }
     }
 

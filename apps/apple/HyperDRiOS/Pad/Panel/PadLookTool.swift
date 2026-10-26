@@ -64,6 +64,9 @@ struct PadLookTool: View {
                 }
                 .onAppear { shown(true) }
                 .onDisappear { shown(false) }
+                if kind == .imported, let lut, !lut.disabledOptions.isEmpty {
+                    LUTCompatibilityNote()
+                }
                 let controls = kind == .builtIn ? filmControls : lutControls
                 let rows = controls.filter { !LookSpacesRow.isSpace($0.id) }
                 if !rows.isEmpty {

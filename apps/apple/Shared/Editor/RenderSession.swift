@@ -398,9 +398,25 @@ actor RenderSession: EditorRendering {
         if request.keepsSource {
             var kept = sourceOptions
             kept.resolution = opened.options.resolution
-            // Only RAW is developed: a film's scene-linear development changes nothing else.
-            guard kept == opened.options || opened.editor.domain != .rawEDR else {
-                throw EditorRenderingError.needsDevelopment
+            // A picker may need the other RAW rendition before it is selected.
+            // Keep the canvas's source/options intact; RenderEngine retains at
+            // most the display and scene-linear preview/analysis raster pairs.
+            // Every LUT of the same development reuses that pair.
+            if kept != opened.options, opened.editor.domain == .rawEDR {
+                await beforeReload?()
+                try Task.checkCancellation()
+                try checkCurrent(generation)
+                guard try FileRevision(opened.editor.url) == opened.revision else {
+                    throw EditorRenderingError.sourceChanged
+                }
+                let source = try await engine.load(opened.editor.url, options: kept,
+                    preparingAnalysis: true, retainingPreview: true,
+                    allowsRAWCompatibilityFallback: false)
+                try Task.checkCancellation()
+                try checkCurrent(generation)
+                return Prepared(source: source, lut: lut,
+                    modelGain: request.usesModelGain ? prediction(for: recipe, source: source) : nil,
+                    options: options, generation: generation)
             }
         } else if sourceOptions != opened.options, opened.source?.reusesRAWPreview(options: sourceOptions) == true {
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }

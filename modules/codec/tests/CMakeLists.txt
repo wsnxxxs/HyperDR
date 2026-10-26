@@ -78,6 +78,7 @@ endif()
 
 if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(raw_compat_pattern_test LINK HyperDR::codec libraw::raw_r)
+  hyperdr_add_test(raw_compat_black_test LINK HyperDR::codec TIFF::TIFF)
   hyperdr_add_test(raw_ciraw_test LINK HyperDR::app)
   if(TARGET raw_ciraw_test)
     target_compile_definitions(raw_ciraw_test PRIVATE HYPERDR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

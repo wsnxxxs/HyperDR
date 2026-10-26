@@ -35,9 +35,9 @@ namespace hyperdr {
 namespace {
 
 // The upstream 0.22.2 release does not contain the ILCE-7M5 colour table.
-// This snapshot also includes the current Sony ARW6 decoder. Bump dng-2 when
+// This snapshot also includes the current Sony ARW6 decoder. Bump the DNG revision when
 // the serialization (not merely the LibRaw snapshot) changes.
-constexpr char kConverterId[] = "libraw-0.22.0+2caab57e/dng-2";
+constexpr char kConverterId[] = "libraw-0.22.0+2caab57e/dng-3";
 constexpr std::uint16_t kPhotometricLinearRaw = 34892;
 
 std::string bounded_text(const char* value, std::size_t capacity) {
@@ -98,9 +98,47 @@ class RawFile final : public LibRaw {
   std::optional<double> exposure_bias;
   std::uint32_t exif_width = 0, exif_height = 0;
 
+  std::optional<float> declared_scalar_black() const {
+    // Phocus-denoised Hasselblad RAWs retain their sensor pedestal but clear
+    // the masked pixels. LibRaw estimates zero from those pixels and does not
+    // copy the non-DNG IFD's calibration into imgdata.color.dng_levels.
+    // Read the matching sensor IFD retained by our pinned LibRaw instead. Do
+    // not apply a scalar override to spatial calibration or linearized pixels.
+    if (imgdata.idata.dng_version ||
+        bounded_text(imgdata.idata.make, sizeof(imgdata.idata.make)) != "Hasselblad") return std::nullopt;
+    const auto count = std::min<unsigned>(libraw_internal_data.identify_data.tiff_nifds, LIBRAW_IFD_MAXCOUNT);
+    for (unsigned i = 0; i < count; ++i) {
+      const auto& ifd = tiff_ifd[i];
+      const auto& levels = ifd.dng_levels;
+      if (!scalar_black_tags_[i] || spatial_black_tags_[i] ||
+          ifd.phint != PHOTOMETRIC_CFA || ifd.samples != 1 || ifd.lineartable_len ||
+          ifd.t_width != imgdata.sizes.raw_width || ifd.t_height != imgdata.sizes.raw_height ||
+          ifd.offset != libraw_internal_data.unpacker_data.data_offset ||
+          !(levels.parsedfields & LIBRAW_DNGFM_BLACK) ||
+          std::uint64_t(levels.dng_cblack[4]) * levels.dng_cblack[5] > 1) continue;
+      const float value = levels.dng_fblack;
+      if (std::isfinite(value) && value >= 0 && value < imgdata.color.maximum) return value;
+    }
+    return std::nullopt;
+  }
+
  private:
+  std::array<bool, LIBRAW_IFD_MAXCOUNT> scalar_black_tags_{};
+  std::array<bool, LIBRAW_IFD_MAXCOUNT> spatial_black_tags_{};
+
   static void read_capture_tags(void* context, int tag, int type, int len,
                                 unsigned int order, void* input, INT64) {
+    // TIFF callbacks encode their IFD index in the upper bits. EXIF and maker
+    // note callbacks use other namespaces; never borrow a preview's black tag.
+    const unsigned ifd = static_cast<unsigned>(tag) >> 20U;
+    if (ifd > 0 && ifd <= LIBRAW_IFD_MAXCOUNT) {
+      auto& raw = *static_cast<RawFile*>(context);
+      const unsigned field = static_cast<unsigned>(tag) & 0xffffU;
+      if (field == TIFFTAG_BLACKLEVEL) raw.scalar_black_tags_[ifd - 1] = len == 1;
+      if (field == TIFFTAG_BLACKLEVELDELTAH || field == TIFFTAG_BLACKLEVELDELTAV) {
+        raw.spatial_black_tags_[ifd - 1] = true;
+      }
+    }
     // LibRaw does not expose ExposureBiasValue or the developed dimensions.
     // Its callback is positioned at the value and must be left there on return.
     if (tag != 0x9204 && tag != 0xa002 && tag != 0xa003) return;
@@ -511,7 +549,8 @@ void write_cfa(TIFF* tiff, RawFile& raw, const Crop& crop,
   common_metadata(tiff, raw, crop, matrix, date_time);
 
   const auto& color = raw.imgdata.color;
-  const bool tiled = color.cblack[4] && color.cblack[5];
+  const auto declared_black = raw.declared_scalar_black();
+  const bool tiled = !declared_black && color.cblack[4] && color.cblack[5];
   const unsigned source_rows = tiled ? color.cblack[4] : 1;
   const unsigned source_columns = tiled ? color.cblack[5] : 1;
   const std::uint64_t source_count = std::uint64_t(source_rows) * source_columns;
@@ -523,6 +562,10 @@ void write_cfa(TIFF* tiff, RawFile& raw, const Crop& crop,
   std::vector<float> black(static_cast<std::size_t>(repeat_count));
   for (unsigned y = 0; y < repeat_rows; ++y) {
     for (unsigned x = 0; x < repeat_columns; ++x) {
+      if (declared_black) {
+        black[std::size_t(y) * repeat_columns + x] = *declared_black;
+        continue;
+      }
       const int channel = raw.COLOR(static_cast<int>(y), static_cast<int>(x));
       if (channel < 0 || channel > 3) unsupported(raw);
       std::uint64_t value = color.black + color.cblack[channel];

@@ -29,8 +29,9 @@ nonisolated struct ExportStack: Sendable {
         let render = try RenderEngine()
         let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
                                           target: ExportTarget(configuration: configuration, sessions: sessions))
-        return ExportStack(sessions: sessions, service: service,
-                           luts: LUTLibrary(configuration: configuration, sessions: sessions),
+        let luts = LUTLibrary(configuration: configuration, sessions: sessions)
+        await BundledLUTs.install(into: luts)
+        return ExportStack(sessions: sessions, service: service, luts: luts,
                            capabilities: ExportEncodingCapabilities(try await engine.capabilities()))
     }
 }
